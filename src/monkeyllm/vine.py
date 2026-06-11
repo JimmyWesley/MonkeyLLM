@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from monkeyllm import indexer
+from monkeyllm.canopy import CanopyIndex, rrf_fuse
 from monkeyllm.catalog import Catalog
 from monkeyllm.dialect import MAX_LINKS_PER_NODE
 from monkeyllm.errors import (
@@ -97,12 +98,15 @@ class Vine:
         writable: bool = True,
         session: str | None = None,
         alpha: float = 0.3,
+        embedder=None,
+        beta: float = 1.0,
     ):
         self.forest = Forest(root)
         self.catalog = Catalog(self.forest)
         self.trails = Trails(self.forest.derived_dir)
         self.tracer = Tracer(self.forest.derived_dir, self.trails, session)
         self.alpha = alpha
+        self.beta = beta
         self.writable = writable
         self.git = GitRepo(self.forest.root)
         self._write_mutex = threading.Lock()
@@ -112,6 +116,30 @@ class Vine:
             self._lock.acquire()
         if self.catalog.count() == 0:
             self.catalog.reindex()
+        # Canopy (optional vector layer, Phase 1). BM25-only unless BOTH a
+        # built index and a query embedder are present (locate contract is
+        # unchanged otherwise — arquitetura §3).
+        self.embedder = embedder
+        self.canopy = CanopyIndex.load(self.forest.derived_dir)
+
+    @property
+    def hybrid(self) -> bool:
+        return self.embedder is not None and self.canopy is not None and len(self.canopy) > 0
+
+    def build_canopy(self, embedder=None) -> dict:
+        """Embed every node's summary and persist the vector index. Offline
+        (Gardener territory): generous compute, runs out of the read path."""
+        emb = embedder or self.embedder
+        if emb is None:
+            raise VineError(E_SCHEMA, "build_canopy needs an embedder")
+        rows = self.catalog.conn.execute(
+            "SELECT id, title, summary FROM nodes ORDER BY id"
+        ).fetchall()
+        pairs = [(r["id"], f"{r['title']}. {r['summary']}") for r in rows]
+        idx = CanopyIndex.build(pairs, emb)
+        idx.save(self.forest.derived_dir)
+        self.canopy = idx
+        return {"nodes": len(idx), "model": idx.model, "dim": idx.dim}
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -168,18 +196,42 @@ class Vine:
         scope: str = "all",
         type_filter: str | None = None,
     ) -> dict:
-        rows = self.catalog.fts_search(query, limit=max(k * 5, 25))
-        if scope == "branches":
-            rows = [r for r in rows if r["kind"] == "branch"]
-        elif scope == "bananas":
-            rows = [r for r in rows if r["kind"] == "banana"]
-        if type_filter:
-            rows = [r for r in rows if r["type"] == type_filter]
+        cand = max(k * 5, 25)
+        rows = self.catalog.fts_search(query, limit=cand)
+        by_id = {r["id"]: r for r in rows}
 
-        best = min((r["rank"] for r in rows), default=0.0)  # bm25: lower=better (<=0)
+        # base strength per id, in [0, 1]. BM25-only by default (Phase 0);
+        # RRF(vector, BM25) when the canopy layer is active (Phase 1).
+        if self.hybrid:
+            qvec = self.embedder.embed([query])[0]
+            vec_hits = self.canopy.search(qvec, k=cand)
+            for vid, _cos in vec_hits:
+                if vid not in by_id:
+                    extra = self.catalog.get(vid)
+                    if extra is not None:
+                        by_id[vid] = extra
+            bm25_ids = [r["id"] for r in rows]
+            vec_ids = [vid for vid, _ in vec_hits]
+            fused = rrf_fuse(bm25_ids, vec_ids)
+            top = max(fused.values()) if fused else 1.0
+            strength_of = {i: (s / top if top else 0.0) for i, s in fused.items()}
+        else:
+            best = min((r["rank"] for r in rows), default=0.0)  # bm25: lower=better (<=0)
+            strength_of = {
+                r["id"]: ((r["rank"] / best) if best < 0 else 1.0) for r in rows
+            }
+
+        candidates = list(by_id.values())
+        if scope == "branches":
+            candidates = [r for r in candidates if r["kind"] == "branch"]
+        elif scope == "bananas":
+            candidates = [r for r in candidates if r["kind"] == "banana"]
+        if type_filter:
+            candidates = [r for r in candidates if r["type"] == type_filter]
+
         results = []
-        for r in rows:
-            strength = (r["rank"] / best) if best < 0 else 1.0
+        for r in candidates:
+            strength = strength_of.get(r["id"], 0.0)
             heat = self._heat(r["id"])
             score = strength * (1 + self.alpha * heat)
             item = {

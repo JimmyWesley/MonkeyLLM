@@ -7,3 +7,8 @@ dist/
 .pytest_cache/
 forest-fixture/_derived/
 .env
+
+# Local inference artifacts (downloaded by scripts/setup_models.py)
+models/
+bin/
+*.gguf

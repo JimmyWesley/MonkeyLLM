@@ -14,9 +14,13 @@ Examples:
     python demo/run_demo.py
 
     # Local llama.cpp / vLLM (OpenAI-compatible)
-    set MONKEYLLM_LLM_ENDPOINT=http://localhost:8080/v1
-    set MONKEYLLM_LLM_MODEL=qwen2.5-7b-instruct-q4_k_m
+    set MONKEYLLM_LLM_ENDPOINT=http://localhost:8090/v1
+    set MONKEYLLM_LLM_MODEL=qwen2.5-7b
     python demo/run_demo.py --questions demo/questions.json
+
+Optional Phase 1 vector layer: if MONKEYLLM_EMBED_ENDPOINT is set and the
+canopy is built (`vine canopy build`), locate runs hybrid (RRF vector+BM25)
+instead of BM25-only — the rest of the demo is identical.
 
 Each question runs in its own Vine session; traces land in
 forest-fixture/_derived/traces/<session>.jsonl and the report prints
@@ -85,8 +89,8 @@ def parse_action(text: str) -> dict | None:
     return None
 
 
-def run_question(forest: Path, chat, q: dict, verbose: bool = True) -> dict:
-    vine = Vine(forest, writable=False, session=f"demo-{q['id']}")
+def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=None) -> dict:
+    vine = Vine(forest, writable=False, session=f"demo-{q['id']}", embedder=embedder)
     try:
         master = vine.look("_index")
         messages = [
@@ -160,10 +164,15 @@ def main() -> int:
     chat, model = make_llm()
     print(f"modelo: {model}  endpoint: {os.environ.get('MONKEYLLM_LLM_ENDPOINT', 'huggingface serverless')}")
 
+    from monkeyllm.canopy import embedder_from_env
+
+    embedder = embedder_from_env()
+    print(f"locate: {'híbrido (vetor+BM25)' if embedder else 'BM25-only'}")
+
     results = []
     for q in questions:
         print(f"\n== {q['id']}: {q['question']}")
-        r = run_question(Path(args.forest), chat, q)
+        r = run_question(Path(args.forest), chat, q, embedder=embedder)
         results.append(r)
         m = r["metrics"]
         print(f"    resposta: {str(r['answer'])[:160]}")

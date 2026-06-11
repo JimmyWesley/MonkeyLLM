@@ -1,0 +1,59 @@
+== q04: Que decisão sobre o mixer-lang foi tomada no release de março de 2026?
+    [1] locate({"query": "release do mixer-lang v2", "k": 5})
+    [2] look({"id": "eventos/2026-03-release-mixerllm-v2"})
+    [3] answer({"text": "A decisão tomada no release de março de 2026 foi aprovar a gramática v2 do mixer-lang, que introduzi)
+    resposta: A decisão tomada no release de março de 2026 foi aprovar a gramática v2 do mixer-lang, que introduziu um vocabulário fechado de 64 símbolos, mantendo a retrocom
+    hops-to-banana=None  tokens-to-banana=1103  precision=1.0  texto_correto=True
+
+== q05: Com qual técnica de inferência o block-loop do MixerLLM é contrastado, e qual é a diferença central?
+    [1] locate({"query": "MixerLLM block-loop contrasto inferência", "k": 5})
+    [2] look({"id": "projetos/mixerllm/block-loop"})
+    [3] look({"id": "conceitos/speculative-decoding"})
+    [4] answer({"text": "O block-loop do MixerLLM é contrastado com a técnica de speculative decoding. O block-loop funciona )
+    resposta: O block-loop do MixerLLM é contrastado com a técnica de speculative decoding. O block-loop funciona através de um loop de execução por blocos semânticos com del
+    hops-to-banana=None  tokens-to-banana=1357  precision=1.0  texto_correto=True
+
+== q06: Qual cliente assinou contrato em fevereiro de 2026, quem negociou pela Tropicália Tech e o que foi comprado?
+    [1] locate({"query": "contrato DataCoop fevereiro 2026", "k": 5})
+    [2] look({"id": "eventos/2026-02-contrato-datacoop"})
+    [3] answer({"text": "O cliente que assinou contrato em fevereiro de 2026 foi a DataCoop. A negociação foi feita pela Elen)
+    resposta: O cliente que assinou contrato em fevereiro de 2026 foi a DataCoop. A negociação foi feita pela Elena Souza, CEO e cofundadora da Tropicália Tech. Foram comprad
+    hops-to-banana=None  tokens-to-banana=1147  precision=0.67  texto_correto=True
+
+== q07: Quanta VRAM tem a GPU da workstation de P&D e que modelos ela serve?
+    [1] move({"id": "infra/_index", "rel": null})
+    [2] locate({"query": "workstation 3090 de P&D", "k": 5})
+    [3] look({"id": "infra/workstation-3090"})
+    [4] answer({"text": "A GPU da workstation de P&D é uma RTX 3090 com 24 GB de VRAM.", "answer_nodes": ["infra/workstation-)
+    resposta: A GPU da workstation de P&D é uma RTX 3090 com 24 GB de VRAM.
+    hops-to-banana=None  tokens-to-banana=1090  precision=1.0  texto_correto=True
+
+== q08: Quais são os dois baselines obrigatórios do Monkey Bench?
+    [1] locate({"query": "Monkey Bench baselines", "k": 5})
+    [2] look({"id": "projetos/monkeyllm/monkey-bench"})
+    [3] answer({"text": "Os dois baselines obrigatórios do Monkey Bench são o RAG top-k clássico e o RAG iterativo.", "answer)
+    resposta: Os dois baselines obrigatórios do Monkey Bench são o RAG top-k clássico e o RAG iterativo.
+    hops-to-banana=None  tokens-to-banana=1186  precision=1.0  texto_correto=True
+
+== q09: Quantas unidades de Sensor X foram devolvidas no Q1 2026 e por quê? Esse número está no dataset de vendas?
+    [1] query({"id": "vendas/_index", "sql": "SELECT * FROM Q1_2026 WHERE produto = 'Sensor X A-101' AND acao = 'devolucao'")
+    [2] locate({"query": "dataset Q1 2026", "k": 5})
+    [3] look({"id": "vendas/relatorio-q1-2026"})
+    [4] answer({"text": "O número de unidades de Sensor X A-101 devolvidas no Q1 2026 é 14. Essas devoluções foram devido a u)
+    resposta: O número de unidades de Sensor X A-101 devolvidas no Q1 2026 é 14. Essas devoluções foram devido a uma falha de vedação no lote 22-B. O valor total devolvido fo
+    hops-to-banana=None  tokens-to-banana=1355  precision=0.5  texto_correto=True
+
+== q10: O que é estigmergia, quem é o pesquisador do time que trabalha com isso e de qual laboratório ele veio?
+    [1] locate({"query": "estigmergia", "k": 5})
+    [2] look({"id": "conceitos/estigmergia"})
+    [3] look({"id": "pessoas/bruno-lima"})
+    [4] answer({"text": "Estigmergia é uma coordenação indireta via marcas no ambiente, como as formigas e o feromônio, confo)
+    resposta: Estigmergia é uma coordenação indireta via marcas no ambiente, como as formigas e o feromônio, conforme descrito por Grassé em 1959. O pesquisador do time que t
+    hops-to-banana=None  tokens-to-banana=1325  precision=1.0  texto_correto=True
+
+===== RELATÓRIO =====
+perguntas corretas: 10/10
+hops-to-banana médio: 2.5
+tokens-to-banana médio: 1284
+banana precision média: 0.92
+relatório salvo em forest-fixture\_derived\demo-report.json

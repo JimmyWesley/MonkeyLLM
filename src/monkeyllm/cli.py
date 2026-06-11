@@ -23,6 +23,10 @@ def main(argv: list[str] | None = None) -> int:
     p_validate.add_argument("--forest", default=".")
     p_validate.add_argument("--strict", action="store_true", help="warnings also fail")
 
+    p_canopy = sub.add_parser("canopy", help="build the optional vector layer (Phase 1)")
+    p_canopy.add_argument("action", choices=["build", "status"])
+    p_canopy.add_argument("--forest", default=".")
+
     args = parser.parse_args(argv)
     forest_root = Path(args.forest).resolve()
 
@@ -58,6 +62,34 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{errors} error(s), {warnings} warning(s)")
         if errors or (args.strict and warnings):
             return 1
+        return 0
+
+    if args.command == "canopy":
+        from monkeyllm.canopy import CanopyIndex, embedder_from_env
+        from monkeyllm.forest import Forest
+
+        derived = Forest(forest_root).derived_dir
+        if args.action == "status":
+            idx = CanopyIndex.load(derived)
+            if idx is None:
+                print("canopy: not built (locate is BM25-only)")
+            else:
+                print(f"canopy: {len(idx)} vectors, model={idx.model}, dim={idx.dim}")
+            return 0
+        # build
+        embedder = embedder_from_env()
+        if embedder is None:
+            print("error: set MONKEYLLM_EMBED_ENDPOINT to the embedding server "
+                  "(e.g. http://localhost:8081/v1) before building the canopy.")
+            return 1
+        from monkeyllm.vine import Vine
+
+        vine = Vine(forest_root, writable=False, embedder=embedder)
+        try:
+            info = vine.build_canopy()
+        finally:
+            vine.close()
+        print(f"canopy built: {info['nodes']} vectors, model={info['model']}, dim={info['dim']}")
         return 0
 
     return 2
