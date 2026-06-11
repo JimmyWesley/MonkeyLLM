@@ -47,13 +47,19 @@ class Tracer:
     def metrics(self, answer_nodes: list[str] | None = None) -> dict:
         hops = 0
         hops_to_banana = None
-        for ev in self.events:
+        trail_len = None  # spec v0.6: read calls before the 1st answer harvest
+        answers = set(answer_nodes or [])
+        for i, ev in enumerate(self.events):
             if ev["primitive"] in HOP_PRIMITIVES:
                 hops += 1
             elif ev["primitive"] in HARVEST_PRIMITIVES and hops_to_banana is None:
                 hops_to_banana = hops
+            if (trail_len is None and ev["primitive"] in HARVEST_PRIMITIVES
+                    and ev["id"] in answers):
+                trail_len = i
         return {
             "hops_to_banana": hops_to_banana,
+            "trail_len": trail_len,
             "tokens_to_banana": sum(ev["tokens_out"] for ev in self.events),
             "calls": len(self.events),
             "answer_nodes": answer_nodes or [],
@@ -67,14 +73,15 @@ class Tracer:
         shout_threshold: int = 4,
     ) -> dict:
         """Close the hunt (Part D). On success: whisper (heat on winning
-        trail) and shout-evaluation signal (trail >= 4 hops)."""
+        trail) and shout evaluation (spec v0.6: trail_len >= threshold —
+        pick chains count, not just look/move)."""
         metrics = self.metrics(answer_nodes)
         suggest_shortcuts = []
         if success and answer_nodes:
             for nid in answer_nodes:
                 trail = trail_of(nid) if trail_of else []
                 self.trails.add_heat(trail + [nid], amount=0.1)
-                if metrics["hops_to_banana"] is not None and metrics["hops_to_banana"] >= shout_threshold:
+                if metrics["trail_len"] is not None and metrics["trail_len"] >= shout_threshold:
                     suggest_shortcuts.append(nid)
         outcome = {
             "ts": time.time(),

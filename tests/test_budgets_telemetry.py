@@ -96,3 +96,22 @@ class TestTelemetry:
         outcome = vine_rw.close_session(False, [])
         assert outcome["outcome"]["success"] is False
         assert vine_rw.trails.get_heat("vendas/_index") == 0
+
+    def test_shout_fires_on_long_pick_chain(self, vine_rw):
+        """Spec v0.6: pick chains count toward the shout, not just look/move."""
+        vine_rw.locate("devoluções sensor")
+        vine_rw.pick("vendas/devolucoes-q1")
+        vine_rw.locate("sensor x")
+        vine_rw.pick("produtos/sensor-x")
+        vine_rw.pick("pessoas/jimmy-wesley")
+        outcome = vine_rw.close_session(True, ["pessoas/jimmy-wesley"])
+        assert outcome["metrics"]["trail_len"] == 4
+        assert outcome["metrics"]["hops_to_banana"] == 0  # unchanged metric
+        assert outcome["suggest_shortcuts"] == ["pessoas/jimmy-wesley"]
+
+    def test_short_hunt_does_not_shout(self, vine_rw):
+        vine_rw.locate("metas comerciais")
+        vine_rw.pick("vendas/metas-2026")
+        outcome = vine_rw.close_session(True, ["vendas/metas-2026"])
+        assert outcome["metrics"]["trail_len"] == 1
+        assert outcome["suggest_shortcuts"] == []

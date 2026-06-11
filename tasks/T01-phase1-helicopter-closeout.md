@@ -38,7 +38,16 @@ proving the four exit criteria.
 
 - [x] recall@5 >= 0.85 (hybrid) on bench questions — **1.0** (recall@3 also 1.0, MRR 0.88; bm25-only was 0.611)
 - [x] monkey banana precision >= topk arm — **1.0 vs 0.68** (correct answers: 18/18 vs 12/18)
-- [ ] monkey tokens <= 60% of iter arm on multi-hop questions — **FAILED as written**: monkey/iter token ratio is ~1.23x overall. Root cause: questions-v2 is mostly 1-2 hops, where one vector search is enough for iter (the roadmap's own "questions too trivial" risk). On the genuinely hard questions the picture flips: q13 ratio 0.71, q06 0.74, q01 0.83, and iter wall-clock explodes when it wanders (q11 34.7s vs monkey 4.2s; iter p95 15.9s vs monkey 5.1s). Follow-up: T06.
+- [ ] monkey tokens <= 60% of iter arm on multi-hop questions — **re-measured
+      on questions-v3 (T06, all min_hops >= 3)**: raw median ratio is ~1.04
+      (1433 vs 1384) — still fails AS WRITTEN, but the raw comparison is now
+      structurally misleading: iter "saves" tokens by *failing* (it answers
+      only 7/11; its failures cost as little as 607 tokens because it gives
+      up). **Tokens per CORRECT answer: monkey 1382 vs iter 2385 = 0.58 ✓**
+      (and monkey is 11/11 vs iter 7/11, p95 8.4s vs 17.5s, total 62.5s vs
+      115.9s). DECISION NEEDED (spec/roadmap owner): restate the criterion as
+      tokens-per-correct-answer <= 60%, which v3 meets — or keep the raw form
+      and accept that an arm can pass it by failing cheaply.
 - [x] locate p95 < 100ms with vectors active — **61.5ms** (p50 48ms; p99 2.1s is first-call embedder warmup)
 - [x] lazy re-embed criterion — covered by tests/test_canopy_vector.py (graft -> stale -> next hybrid search re-embeds; in-process, well under 60s)
 - [x] results table committed — below + bench/_artifacts/report-bench-forest.json
@@ -53,11 +62,25 @@ proving the four exit criteria.
 
 locate (18 questions, 40 repeats): bm25 recall@5 0.611 / p95 5.9ms; hybrid recall@5 **1.0** / p95 61.5ms.
 
-Verdict: 3 of 4 exit criteria pass. The token criterion fails because the
-question set is too shallow to exercise multi-hop economics — hardening the
-set is T06, after which this criterion gets re-measured. Accuracy story is
-already decisive: monkey is the only arm that gets everything right, at
-bounded latency (no wandering tail).
+## Re-measurement on questions-v3 (2026-06-11, T06 — 11 questions, 100% min_hops >= 3)
+
+| arm | correct | precision | tokens (med) | s/question (med) | s/question (p95) | total s |
+| --- | --- | --- | --- | --- | --- | --- |
+| monkey | **11/11** | **1.0** | 1433 | 5.2 | 8.4 | 62.5 |
+| topk | **0/11** | 0.64 | 803 | 2.1 | 2.7 | 21.8 |
+| iter | 7/11 | 0.86 | 1384 | 9.2 | 17.5 | 115.9 |
+
+Classic top-k RAG **collapses to zero** on chained questions (finds link 1 of
+the chain, answers "context does not say"). Tokens per correct answer:
+monkey 1382, iter 2385 (ratio **0.58**). Report archived as
+bench/_artifacts/report-bench-forest.json (v2 run preserved as
+report-bench-forest-v2.json).
+
+Verdict: 3 of 4 exit criteria pass cleanly; the 4th passes under the
+tokens-per-correct-answer reading (0.58 <= 0.60) and fails under the raw
+median reading (1.04) — see the criterion note above for the pending decision.
+Accuracy story is decisive: monkey is the only arm that gets everything right,
+at bounded latency (no wandering tail).
 
 ## Out of scope
 

@@ -1,0 +1,150 @@
+[
+  {
+    "id": "v3-01",
+    "question": "O projeto cuja novidade de abril foi encolher as mensagens de rádio em seis vezes é conduzido por quem, e em que município essa pessoa vive?",
+    "expected_nodes": [
+      "eventos/lancamentos/2026-04-versao-plataforma-tambor",
+      "projetos/plataforma-tambor/visao",
+      "pessoas/engenharia/wanda-guimarães"
+    ],
+    "answer_contains": [
+      "Wanda",
+      "Salvador"
+    ],
+    "min_hops": 3
+  },
+  {
+    "id": "v3-02",
+    "question": "O projeto cuja novidade de abril foi a regressão sozinha para a edição anterior quando a atualização dá errado é conduzido por quem, e em que município essa pessoa vive?",
+    "expected_nodes": [
+      "eventos/lancamentos/2026-04-versao-malha-ciranda",
+      "projetos/malha-ciranda/visao",
+      "pessoas/dados/firmino-ximenes"
+    ],
+    "answer_contains": [
+      "Firmino",
+      "Olinda"
+    ],
+    "min_hops": 3
+  },
+  {
+    "id": "v3-03",
+    "question": "O lote L43-A foi recolhido do mercado; quem responde tecnicamente pelo aparelho desse lote, e em que cidade essa pessoa mora?",
+    "expected_nodes": [
+      "eventos/recalls/2026-02-recall-xote",
+      "produtos/logistica/xote",
+      "pessoas/engenharia/tales-barros"
+    ],
+    "answer_contains": [
+      "Tales",
+      "Fortaleza"
+    ],
+    "min_hops": 3
+  },
+  {
+    "id": "v3-04",
+    "question": "O lote L43-B foi recolhido do mercado; quem responde tecnicamente pelo aparelho desse lote, e em que cidade essa pessoa mora?",
+    "expected_nodes": [
+      "eventos/recalls/2026-03-recall-caboclo",
+      "produtos/industria/caboclo",
+      "pessoas/engenharia/estela-sarmento"
+    ],
+    "answer_contains": [
+      "Estela",
+      "Campinas"
+    ],
+    "min_hops": 3
+  },
+  {
+    "id": "v3-05",
+    "question": "O equipamento que a RedeFrevo Varejo adquiriu em abril de 2026 é mantido na engenharia por quem?",
+    "expected_nodes": [
+      "eventos/contratos/2026-04-acordo-redefrevo-varejo",
+      "produtos/campo/quadrilha",
+      "pessoas/engenharia/yasmin-guimarães"
+    ],
+    "answer_contains": [
+      "Yasmin"
+    ],
+    "min_hops": 3
+  },
+  {
+    "id": "v3-06",
+    "question": "O equipamento que a TransSertão Cargas adquiriu em janeiro de 2026 é mantido na engenharia por quem?",
+    "expected_nodes": [
+      "eventos/contratos/2026-01-acordo-transsertao-cargas",
+      "produtos/campo/lampião",
+      "pessoas/dados/eunice-guimarães"
+    ],
+    "answer_contains": [
+      "Eunice"
+    ],
+    "min_hops": 3
+  },
+  {
+    "id": "v3-07",
+    "question": "A venda para a Hospital Beberibe foi conduzida por qual gerente, e em que cidade essa pessoa está baseada?",
+    "expected_nodes": [
+      "eventos/contratos/2026-02-acordo-hospital-beberibe",
+      "pessoas/dados/cecília-espíndola"
+    ],
+    "answer_contains": [
+      "Cecília",
+      "Manaus"
+    ],
+    "min_hops": 3
+  },
+  {
+    "id": "v3-08",
+    "question": "A venda para a EnergiaJangada foi conduzida por qual gerente, e em que cidade essa pessoa está baseada?",
+    "expected_nodes": [
+      "eventos/contratos/2026-04-acordo-energiajangada",
+      "pessoas/dados/firmino-barros"
+    ],
+    "answer_contains": [
+      "Firmino",
+      "Belém"
+    ],
+    "min_hops": 3
+  },
+  {
+    "id": "v3-09",
+    "question": "O código de produto que puxou a maior receita do semestre corresponde a qual aparelho, e quem é o dono técnico dele?",
+    "expected_nodes": [
+      "vendas/pedidos-2026",
+      "produtos/industria/cangaço"
+    ],
+    "answer_contains": [
+      "Cangaço",
+      "Dorival"
+    ],
+    "min_hops": 3
+  },
+  {
+    "id": "v3-10",
+    "question": "O item da linha com mais chamados de suporte em 2026 é responsabilidade técnica de quem, e em qual cidade essa pessoa fica?",
+    "expected_nodes": [
+      "suporte/chamados-2026",
+      "produtos/industria/caboclo",
+      "pessoas/engenharia/estela-sarmento"
+    ],
+    "answer_contains": [
+      "Estela",
+      "Campinas"
+    ],
+    "min_hops": 4
+  },
+  {
+    "id": "v3-11",
+    "question": "O projeto que lançou a versão 4.6 em abril é liderado por alguém vindo de qual instituição?",
+    "expected_nodes": [
+      "eventos/lancamentos/2026-04-versao-piloto-resgate",
+      "projetos/piloto-resgate/visao",
+      "pessoas/dados/zeca-trindade"
+    ],
+    "answer_contains": [
+      "Digital"
+    ],
+    "min_hops": 4
+  }
+]

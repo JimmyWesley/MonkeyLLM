@@ -11,14 +11,14 @@ Conventions:
 - Language policy: **everything in English** — task files, code comments,
   docstrings, docs, CLI output. See `T02-english-normalization.md` for the
   one-time cleanup; new work must already comply.
-- The spec is the truth (`docs/monkeyllm-spec-v0.2.md`): contract changes
+- The spec is the truth (`docs/monkeyllm-spec-v0.6.md`): contract changes
   require a new spec version *before* code, and that rule applies to tasks too.
 
 | Task | Title | Status |
 | --- | --- | --- |
-| T01 | Phase 1 closeout: official Monkey Bench run | in-progress (3/4 criteria pass; token criterion re-measured after T06) |
-| T02 | English normalization (PT -> EN) | todo |
+| T01 | Phase 1 closeout: official Monkey Bench run | in-progress (3/4 pass; 4th re-measured on v3 — passes as tokens-per-correct (0.58), criterion wording decision pending) |
+| T02 | English normalization (PT -> EN) | in-progress (src/ + contract vocabulary done via spec v0.5; docs prose remains) |
 | T03 | Phase 1.5: Troop orchestrator | todo |
 | T04 | Phase 2: Living Bank (Gardener, Ranger, dataset writes) | todo |
 | T05 | Publication readiness (GitHub + paper) | todo |
-| T06 | Monkey Bench: multi-hop question hardening | todo |
+| T06 | Monkey Bench: multi-hop question hardening | done (v3 set 100% min_hops>=3; first shouts fired via spec v0.6 trail_len) |

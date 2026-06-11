@@ -456,6 +456,98 @@ def write_forest(out: Path):
 
 
 # ---------------------------------------------------------------------------
+# Questions v3 — chained tier (T06): the answer lives at the END of a chain of
+# 3+ nodes the question never names directly. Each question carries a
+# `min_hops` ground-truth annotation. Anti-leakage: the anchor vocabulary is
+# paraphrased away from the summary templates, exactly like v2.
+# ---------------------------------------------------------------------------
+
+FEATURE_PARAPHRASE = {
+    "suporte a rollback automático de firmware":
+        "a regressão sozinha para a edição anterior quando a atualização dá errado",
+    "compressão de payload em 6:1":
+        "encolher as mensagens de rádio em seis vezes",
+    "provisionamento por QR code em campo":
+        "cadastrar aparelhos novos direto no campo lendo um código",
+    "modo de baixo consumo com duty cycle adaptativo":
+        "gastar menos bateria ajustando o ritmo de transmissão",
+}
+
+
+def build_questions_v3(people, orgs, products, projects, contracts, incidents,
+                       releases, sales_truth, support_truth) -> list[dict]:
+    qs = []
+
+    def q(question, expected, contains, min_hops):
+        qs.append({"id": f"v3-{len(qs)+1:02d}", "question": question,
+                   "expected_nodes": expected, "answer_contains": contains,
+                   "min_hops": min_hops})
+
+    # release -> project visao -> lead person (city): unique anchors only
+    feat_counts = {}
+    for rel in releases:
+        feat_counts[rel["feature"]] = feat_counts.get(rel["feature"], 0) + 1
+    chain_rels = [r for r in releases if feat_counts[r["feature"]] == 1][:3]
+    for rel in chain_rels:
+        lead = rel["proj"]["lead"]
+        q(f"O projeto cuja novidade de abril foi {FEATURE_PARAPHRASE[rel['feature']]} "
+          f"é conduzido por quem, e em que município essa pessoa vive?",
+          [rel["id"], f"{rel['proj']['id_base']}/visao", lead["id"]],
+          [lead["first"], lead["city"]], 3)
+
+    # recall (lote = rare exact token, sniff tier) -> product -> owner (city)
+    for inc in incidents[:2]:
+        owner = inc["prod"]["owner"]
+        q(f"O lote {inc['lote']} foi recolhido do mercado; quem responde "
+          f"tecnicamente pelo aparelho desse lote, e em que cidade essa pessoa mora?",
+          [inc["id"], inc["prod"]["id"], owner["id"]],
+          [owner["first"], owner["city"]], 3)
+
+    # contract -> product -> technical owner (the contract only names the org)
+    for ct in (contracts[3], contracts[5]):
+        owner = ct["prod"]["owner"]
+        q(f"O equipamento que a {ct['org']['name']} adquiriu em "
+          f"{ct['month_name']} de 2026 é mantido na engenharia por quem?",
+          [ct["id"], ct["prod"]["id"], owner["id"]],
+          [owner["first"]], 3)
+
+    # contract -> seller -> seller's city (city only exists in the person node)
+    for ct in (contracts[6], contracts[8]):
+        s = ct["seller"]
+        q(f"A venda para a {ct['org']['name']} foi conduzida por qual gerente, "
+          f"e em que cidade essa pessoa está baseada?",
+          [ct["id"], s["id"]], [s["first"], s["city"]], 3)
+
+    # dataset join -> product node -> owner: SQL first, then the entity chain
+    top_prod = next(p for p in products if p["sku"] == sales_truth["top_sku"])
+    q("O código de produto que puxou a maior receita do semestre corresponde a "
+      "qual aparelho, e quem é o dono técnico dele?",
+      ["vendas/pedidos-2026", top_prod["id"]],
+      [top_prod["name"], top_prod["owner"]["first"]], 3)
+    champ_prod = next(p for p in products if p["name"] == support_truth["top_product"])
+    q("O item da linha com mais chamados de suporte em 2026 é responsabilidade "
+      "técnica de quem, e em qual cidade essa pessoa fica?",
+      ["suporte/chamados-2026", champ_prod["id"], champ_prod["owner"]["id"]],
+      [champ_prod["owner"]["first"], champ_prod["owner"]["city"]], 4)
+
+    # release -> project -> lead -> origin institute (4 nodes deep)
+    rel = releases[3]
+    lead = rel["proj"]["lead"]
+    if lead["institute"]:
+        q(f"O projeto que lançou a versão {rel['ver']} em abril é liderado por "
+          f"alguém vindo de qual instituição?",
+          [rel["id"], f"{rel['proj']['id_base']}/visao", lead["id"]],
+          [lead["institute"].split()[-1]], 4)
+    else:
+        q(f"Quem lidera o projeto que lançou a versão {rel['ver']} em abril, "
+          f"e em que município essa pessoa vive?",
+          [rel["id"], f"{rel['proj']['id_base']}/visao", lead["id"]],
+          [lead["first"], lead["city"]], 3)
+
+    return qs
+
+
+# ---------------------------------------------------------------------------
 # Questions v2 — paraphrase templates with vocabulary disjoint from summaries
 # ---------------------------------------------------------------------------
 
@@ -540,6 +632,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="bench-forest")
     ap.add_argument("--questions-out", default=str(REPO / "bench" / "questions-v2.json"))
+    ap.add_argument("--questions-v3-out", default=str(REPO / "bench" / "questions-v3.json"))
     args = ap.parse_args()
     out = Path(args.out).resolve()
     if out.exists():
@@ -561,6 +654,10 @@ def main() -> int:
                                 releases, sales_truth, support_truth)
     Path(args.questions_out).write_text(
         json.dumps(questions, ensure_ascii=False, indent=2), encoding="utf-8")
+    questions_v3 = build_questions_v3(people, orgs, products, projects, contracts,
+                                      incidents, releases, sales_truth, support_truth)
+    Path(args.questions_v3_out).write_text(
+        json.dumps(questions_v3, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def git(*a):
         subprocess.run(["git", "-C", str(out), "-c", "user.name=bench", "-c",
@@ -577,6 +674,9 @@ def main() -> int:
     print(f"ground truth vendas: top região={sales_truth['top_region']}, top SKU={sales_truth['top_sku']}")
     print(f"ground truth suporte: campeão de chamados={support_truth['top_product']} ({support_truth['top_count']})")
     print(f"{len(questions)} perguntas em {args.questions_out}")
+    deep = sum(1 for x in questions_v3 if x["min_hops"] >= 3)
+    print(f"{len(questions_v3)} perguntas v3 em {args.questions_v3_out} "
+          f"({deep} com min_hops >= 3)")
     return 0
 
 
