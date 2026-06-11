@@ -12,9 +12,14 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_serve = sub.add_parser("serve", help="run the MCP server")
-    p_serve.add_argument("--forest", default=".", help="forest root (default: cwd)")
+    p_serve.add_argument("--forest", default=None, help="serve a single forest (default: cwd)")
+    p_serve.add_argument("--root", default=None,
+                         help="registry mode: serve every forest under this directory "
+                              "(tools then require forest=<id>)")
     p_serve.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     p_serve.add_argument("--readonly", action="store_true")
+    p_serve.add_argument("--host", default=None, help="bind address for http (default 127.0.0.1)")
+    p_serve.add_argument("--port", type=int, default=None, help="port for http (default 8000)")
 
     p_reindex = sub.add_parser("reindex", help="rebuild _derived/catalog.db from the files")
     p_reindex.add_argument("--forest", default=".")
@@ -28,16 +33,24 @@ def main(argv: list[str] | None = None) -> int:
     p_canopy.add_argument("--forest", default=".")
 
     args = parser.parse_args(argv)
-    forest_root = Path(args.forest).resolve()
+    forest_root = Path(args.forest).resolve() if getattr(args, "forest", None) else None
 
     if args.command == "serve":
         from monkeyllm.server import build_server
 
-        server = build_server(forest_root, writable=not args.readonly)
+        if args.root and args.forest:
+            parser.error("--forest and --root are mutually exclusive")
+        server = build_server(
+            forest_root=forest_root if not args.root else None,
+            root=Path(args.root).resolve() if args.root else None,
+            writable=not args.readonly,
+            host=args.host,
+            port=args.port,
+        )
         try:
             server.run(transport="streamable-http" if args.transport == "http" else "stdio")
         finally:
-            server._vine.close()
+            server._pool.close()
         return 0
 
     if args.command == "reindex":

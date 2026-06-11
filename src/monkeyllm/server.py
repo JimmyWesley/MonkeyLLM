@@ -1,7 +1,13 @@
-"""Vine MCP server — the 9 primitives as MCP tools.
+"""Vine MCP server — the 9 primitives + harvest as MCP tools (spec Part C).
 
-Transport: stdio for dev, streamable-http for Docker (spec Part C).
+Transport: stdio for dev, streamable-http for the network/Docker.
 Errors come back as the spec envelope: {"error": {code, message, hint}}.
+
+Two serving modes (spec C.0):
+  single-forest  build_server(forest_root=...)   `forest` param optional
+  registry       build_server(root=...)          `forest` param required;
+                 every subdirectory of root with an _index.md is servable,
+                 opened lazily on first touch (auto-index included)
 """
 
 from __future__ import annotations
@@ -11,17 +17,97 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from monkeyllm.errors import VineError
+from monkeyllm.errors import E_NOT_FOUND, E_SCHEMA, VineError
 from monkeyllm.vine import Vine
 
 FOREST_ENV = "MONKEYLLM_FOREST"
 
 
-def build_server(forest_root: str | Path | None = None, writable: bool = True) -> FastMCP:
-    root = Path(forest_root or os.environ.get(FOREST_ENV, "."))
-    vine = Vine(root, writable=writable)
+class ForestPool:
+    """Forest registry: lazily opened Vine per forest (spec C.0)."""
+
+    def __init__(self, *, single: Path | None = None, root: Path | None = None,
+                 writable: bool = True):
+        if (single is None) == (root is None):
+            raise ValueError("ForestPool needs exactly one of single= or root=")
+        self.writable = writable
+        self.root = Path(root).resolve() if root else None
+        self._vines: dict[str, Vine] = {}
+        self.default: str | None = None
+        if single is not None:
+            p = Path(single).resolve()
+            self.default = p.name
+            self._vines[self.default] = Vine(p, writable=writable)
+
+    @property
+    def mode(self) -> str:
+        return "registry" if self.root else "single"
+
+    def list(self) -> dict:
+        if self.root:
+            forests = [
+                {"id": child.name, "active": child.name in self._vines}
+                for child in sorted(self.root.iterdir())
+                if child.is_dir() and (child / "_index.md").is_file()
+            ]
+        else:
+            forests = [{"id": fid, "active": True} for fid in self._vines]
+        return {"forests": forests, "mode": self.mode}
+
+    def get(self, forest: str | None) -> Vine:
+        if forest is None:
+            if self.default:
+                return self._vines[self.default]
+            ids = [f["id"] for f in self.list()["forests"]]
+            raise VineError(
+                E_SCHEMA,
+                "this server hosts multiple forests: pass forest=<id>",
+                hint=f"Available forests: {ids}. Use the forests() tool to list them.",
+            )
+        if forest in self._vines:
+            return self._vines[forest]
+        if self.root is None:
+            raise VineError(
+                E_NOT_FOUND,
+                f"unknown forest: {forest}",
+                hint=f"This server serves a single forest: '{self.default}'.",
+            )
+        target = (self.root / forest).resolve()
+        if not target.is_relative_to(self.root) or target == self.root:
+            raise VineError(E_NOT_FOUND, f"forest id escapes the root: {forest}")
+        if not (target / "_index.md").is_file():
+            raise VineError(
+                E_NOT_FOUND,
+                f"not a forest (no _index.md): {forest}",
+                hint="Use the forests() tool to list servable forests.",
+            )
+        # first touch: Vine auto-indexes when the catalog is empty
+        self._vines[forest] = Vine(target, writable=self.writable)
+        return self._vines[forest]
+
+    def close(self) -> None:
+        for vine in self._vines.values():
+            vine.close()
+        self._vines.clear()
+
+
+def build_server(
+    forest_root: str | Path | None = None,
+    writable: bool = True,
+    host: str | None = None,
+    port: int | None = None,
+    root: str | Path | None = None,
+) -> FastMCP:
+    if root is not None:
+        pool = ForestPool(root=Path(root), writable=writable)
+    else:
+        single = Path(forest_root or os.environ.get(FOREST_ENV, "."))
+        pool = ForestPool(single=single, writable=writable)
+
+    settings = {k: v for k, v in (("host", host), ("port", port)) if v is not None}
     mcp = FastMCP(
         "vine",
+        **settings,
         instructions=(
             "MonkeyLLM forest navigation. Two ways in: harvest(query) for "
             "one-shot retrieval (ranked evidence + snippets, you reason over "
@@ -30,85 +116,93 @@ def build_server(forest_root: str | Path | None = None, writable: bool = True) -
             "bodies for exact terms the summaries miss, look(id) for a cheap "
             "digest, move(id) for neighbors, pick(id) only when the summary "
             "says it is the banana, query(id, sql) for datasets. "
-            "plant/graft to write."
+            "plant/graft to write. When this server hosts multiple forests, "
+            "call forests() and pass forest=<id> on every tool."
         ),
     )
 
-    def guarded(fn, *args, **kwargs):
+    def guarded(method: str, forest: str | None, /, *args, **kwargs):
         try:
-            return fn(*args, **kwargs)
+            vine = pool.get(forest)
+            return getattr(vine, method)(*args, **kwargs)
         except VineError as e:
             return e.to_dict()
 
     @mcp.tool()
-    def locate(query: str, k: int = 5, scope: str = "all", type_filter: str | None = None) -> dict:
-        """Find entry points (the helicopter). scope: all|branches|bananas."""
-        return guarded(vine.locate, query, k=k, scope=scope, type_filter=type_filter)
+    def forests() -> dict:
+        """List the forests this server can navigate (spec C.0)."""
+        return pool.list()
 
     @mcp.tool()
-    def harvest(query: str, terms: list[str] | None = None, k: int = 3) -> dict:
+    def harvest(query: str, terms: list[str] | None = None, k: int = 3,
+                forest: str | None = None) -> dict:
         """One-shot retrieval (zero LLM server-side): ranked bananas with body or
         matched sections + exact snippets. Use it when you want evidence in a
         single call and will reason over it yourself; use the primitives below
         when you want to navigate step by step."""
         from monkeyllm.harvest import harvest as _harvest
-        return guarded(_harvest, vine, query, terms=terms, k=k)
+
+        try:
+            return _harvest(pool.get(forest), query, terms=terms, k=k)
+        except VineError as e:
+            return e.to_dict()
 
     @mcp.tool()
-    def sniff(
-        terms: str | list[str],
-        scope: str | None = None,
-        k: int = 5,
-        type_filter: str | None = None,
-    ) -> dict:
+    def locate(query: str, k: int = 5, scope: str = "all",
+               type_filter: str | None = None, forest: str | None = None) -> dict:
+        """Find entry points (the helicopter). scope: all|branches|bananas."""
+        return guarded("locate", forest, query, k=k, scope=scope, type_filter=type_filter)
+
+    @mcp.tool()
+    def sniff(terms: str | list[str], scope: str | None = None, k: int = 5,
+              type_filter: str | None = None, forest: str | None = None) -> dict:
         """Literal grep over node bodies (the tracker): exact terms -> node + section + snippet."""
-        return guarded(vine.sniff, terms, scope=scope, k=k, type_filter=type_filter)
+        return guarded("sniff", forest, terms, scope=scope, k=k, type_filter=type_filter)
 
     @mcp.tool()
-    def look(id: str, fields: list[str] | None = None) -> dict:
+    def look(id: str, fields: list[str] | None = None, forest: str | None = None) -> dict:
         """Digest of a node (<=500 tokens): summary, outline/children, edges, stats."""
-        return guarded(vine.look, id, fields=fields)
+        return guarded("look", forest, id, fields=fields)
 
     @mcp.tool()
-    def move(id: str, rel: str | None = None, direction: str = "out") -> dict:
+    def move(id: str, rel: str | None = None, direction: str = "out",
+             forest: str | None = None) -> dict:
         """Neighbors of a node. rel='children' lists a branch's physical children."""
-        return guarded(vine.move, id, rel=rel, direction=direction)
+        return guarded("move", forest, id, rel=rel, direction=direction)
 
     @mcp.tool()
-    def pick(id: str, section: str | None = None) -> dict:
+    def pick(id: str, section: str | None = None, forest: str | None = None) -> dict:
         """Harvest the body (or one section) of a node."""
-        return guarded(vine.pick, id, section=section)
+        return guarded("pick", forest, id, section=section)
 
     @mcp.tool()
-    def query(id: str, sql: str) -> dict:
+    def query(id: str, sql: str, forest: str | None = None) -> dict:
         """Read-only SELECT over a dataset node's SQLite payload (LIMIT 200 enforced)."""
-        return guarded(vine.query, id, sql)
+        return guarded("query", forest, id, sql)
 
     @mcp.tool()
-    def scan(
-        parent_id: str,
-        filter: dict | None = None,
-        fields: list[str] | None = None,
-        recursive: bool = False,
-        limit: int = 50,
-    ) -> dict:
+    def scan(parent_id: str, filter: dict | None = None, fields: list[str] | None = None,
+             recursive: bool = False, limit: int = 50, forest: str | None = None) -> dict:
         """Metadata query over a branch's children via the Catalog (no file opens)."""
-        return guarded(vine.scan, parent_id, filter=filter, fields=fields, recursive=recursive, limit=limit)
+        return guarded("scan", forest, parent_id, filter=filter, fields=fields,
+                       recursive=recursive, limit=limit)
 
     @mcp.tool()
-    def plant(node: dict) -> dict:
+    def plant(node: dict, forest: str | None = None) -> dict:
         """Create a node: frontmatter + body + parent (atomic: file+index+git commit)."""
-        return guarded(vine.plant, node)
+        return guarded("plant", forest, node)
 
     @mcp.tool()
-    def graft(id: str, patch: dict) -> dict:
+    def graft(id: str, patch: dict, forest: str | None = None) -> dict:
         """Edit a node: set_frontmatter / add_links / remove_links / append_section / replace_section."""
-        return guarded(vine.graft, id, patch)
+        return guarded("graft", forest, id, patch)
 
     @mcp.tool()
-    def close_session(success: bool, answer_nodes: list[str]) -> dict:
+    def close_session(success: bool, answer_nodes: list[str],
+                      forest: str | None = None) -> dict:
         """Close the hunt: reinforces heat on the winning trail and returns metrics."""
-        return guarded(vine.close_session, success, answer_nodes)
+        return guarded("close_session", forest, success, answer_nodes)
 
-    mcp._vine = vine  # for tests / lifecycle
+    mcp._pool = pool  # for tests / lifecycle
+    mcp._vine = pool._vines.get(pool.default) if pool.default else None
     return mcp
