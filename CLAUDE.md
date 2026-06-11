@@ -38,6 +38,7 @@ prompts that drive that PT corpus.
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -q          # suite (must stay green)
+python -m monkeyllm.cli init --forest D:\path --title "..."   # new empty forest
 python -m monkeyllm.cli validate --forest forest-fixture
 python -m monkeyllm.cli reindex  --forest forest-fixture
 python -m monkeyllm.cli canopy build --forest forest-fixture   # vector layer

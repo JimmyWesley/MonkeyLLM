@@ -1,4 +1,5 @@
-"""Forest layer: id <-> path mapping, trails, node IO, writer lock.
+"""Forest layer: id <-> path mapping, trails, node IO, writer lock,
+forest bootstrap (`init_forest`).
 
 Canonical id = path relative to the forest root, forward slashes, no
 extension (spec Part B). Files are the database.
@@ -6,16 +7,113 @@ extension (spec Part B). Files are the database.
 
 from __future__ import annotations
 
+import datetime as _dt
 import os
 from pathlib import Path
 from typing import Iterator
 
 from monkeyllm.dialect import Dialect
-from monkeyllm.errors import E_LOCKED, E_NOT_FOUND, VineError
+from monkeyllm.errors import E_LOCKED, E_NOT_FOUND, E_SCHEMA, VineError
 from monkeyllm.parser import ParsedNode, parse_node
 
 EXCLUDED_DIRS = {"_derived", "_assets", ".git"}
 LOCK_FILE = ".vine.lock"
+
+# spec A.5: master index skeleton (master also carries Landmarks)
+_MASTER_BODY = """# {title}
+
+> {summary}
+
+## Sub-galhos
+
+## Bananas diretas
+
+## Trilhas cruzadas
+
+## Landmarks
+"""
+
+# spec A.1/A.2 default dialect, in the table format Dialect.parse reads
+_SCHEMA_BODY = """# Dialeto da floresta
+
+## Tipos de nó (type)
+
+| `type` | Descrição | Verbo de colheita |
+|---|---|---|
+| `galho` | Arquivo de índice (_index.md) de uma pasta | look |
+| `nota` | Conhecimento em texto livre | pick |
+| `documento` | Documento convertido (origem PDF/DOCX) | pick |
+| `dataset` | Dados tabulares (SQLite irmão) | query |
+| `entidade` | Pessoa, organização, produto, lugar | pick |
+| `conceito` | Definição/termo técnico | pick |
+| `evento` | Fato datado (reunião, decisão, release) | pick |
+| `midia` | Imagem/áudio/vídeo com descrição | pick |
+
+## Tipos de aresta (rel)
+
+| `rel` | Inversa | Semântica |
+|---|---|---|
+| `parte-de` | `contem` | Hierarquia lógica |
+| `relacionado-com` | `relacionado-com` | Associação genérica (simétrica) |
+| `mencionado-em` | `menciona` | Entidade citada em documento |
+| `autor` | `autor-de` | Autoria |
+| `comparado-com` | `comparado-com` | Contraste técnico (simétrica) |
+| `derivado-de` | `origem-de` | Proveniência |
+| `same-as` | `same-as` | Soft merge de entidades duplicadas |
+| `atalho-descoberto` | — | Grito do macaco (criado por graft) |
+| `sucede` | `precede` | Ordem temporal |
+"""
+
+# spec A.3.1: binaries never enter the forest git
+_GITIGNORE = "_derived/\n.vine.lock\n*.db\n*.sqlite\n_assets/\n"
+
+
+def init_forest(root: str | os.PathLike, title: str, summary: str | None = None) -> dict:
+    """Bootstrap an empty, valid forest: A.5 master index, default dialect,
+    A.3.1 .gitignore, embedded git repo with the initial commit.
+
+    The folder becomes immediately servable (`vine serve`) and plantable.
+    """
+    from monkeyllm.gitops import GitRepo
+    from monkeyllm.parser import serialize_node
+
+    root = Path(root).resolve()
+    if (root / "_index.md").exists():
+        raise VineError(E_SCHEMA, f"already a forest: {root}",
+                        hint="Refusing to overwrite an existing _index.md.")
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "_meta").mkdir(exist_ok=True)
+
+    today = _dt.date.today().isoformat()
+    summary = summary or (
+        f"Galho-mestre da floresta {title}. Recém-criada: ainda sem sub-galhos; "
+        f"plante nós com plant() e organize as regiões."
+    )
+    master_fm = {
+        "id": "_index", "type": "galho", "title": title, "summary": summary,
+        "coverage": "0 bananas, 0 sub-galhos", "created": today, "updated": today,
+    }
+    schema_fm = {
+        "id": "_meta/schema", "type": "nota", "title": "Dialeto da floresta",
+        "summary": "Tipos de nó e de aresta válidos nesta floresta. Novos tipos "
+                   "entram aqui antes do primeiro uso; o Vine rejeita o que não "
+                   "estiver declarado.",
+        "created": today, "updated": today,
+    }
+    (root / "_index.md").write_text(
+        serialize_node(master_fm, _MASTER_BODY.format(title=title, summary=summary)),
+        encoding="utf-8", newline="\n")
+    (root / "_meta" / "schema.md").write_text(
+        serialize_node(schema_fm, _SCHEMA_BODY), encoding="utf-8", newline="\n")
+    (root / ".gitignore").write_text(_GITIGNORE, encoding="utf-8", newline="\n")
+
+    repo = GitRepo(root)
+    if not repo.is_repo:
+        repo.init()
+    repo._run("add", "--", ".gitignore", "_index.md", "_meta/schema.md")
+    repo._run("commit", "--quiet", "-m", f"init: forest '{title}' (empty A.5 skeleton)")
+
+    return {"root": str(root), "title": title, "commit": repo.head()}
 
 
 class Forest:

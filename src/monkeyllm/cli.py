@@ -21,6 +21,11 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--host", default=None, help="bind address for http (default 127.0.0.1)")
     p_serve.add_argument("--port", type=int, default=None, help="port for http (default 8000)")
 
+    p_init = sub.add_parser("init", help="create a new empty forest (A.5 skeleton + dialect + git)")
+    p_init.add_argument("--forest", default=".", help="folder to turn into a forest (created if missing)")
+    p_init.add_argument("--title", required=True, help="forest title (master index H1)")
+    p_init.add_argument("--summary", default=None, help="master summary (<= 60 tokens; sensible default)")
+
     p_reindex = sub.add_parser("reindex", help="rebuild _derived/catalog.db from the files")
     p_reindex.add_argument("--forest", default=".")
 
@@ -51,6 +56,14 @@ def main(argv: list[str] | None = None) -> int:
             server.run(transport="streamable-http" if args.transport == "http" else "stdio")
         finally:
             server._pool.close()
+        return 0
+
+    if args.command == "init":
+        from monkeyllm.forest import init_forest
+
+        info = init_forest(forest_root, title=args.title, summary=args.summary)
+        print(f"forest created at {info['root']} (commit {info['commit'][:8]})")
+        print("next: vine validate / vine serve, or plant() your first nodes")
         return 0
 
     if args.command == "reindex":
