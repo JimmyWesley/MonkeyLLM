@@ -70,10 +70,13 @@ def make_llm():
     model = os.environ.get("MONKEYLLM_LLM_MODEL", DEFAULT_MODEL)
     endpoint = os.environ.get("MONKEYLLM_LLM_ENDPOINT")
     token = os.environ.get("HF_TOKEN") or os.environ.get("MONKEYLLM_LLM_API_KEY") or "no-key"
+    # reasoning models (e.g. Gemma 4) spend tokens thinking before the final
+    # content — give them room or the content comes back empty
+    max_tokens = int(os.environ.get("MONKEYLLM_LLM_MAX_TOKENS", "600"))
     client = InferenceClient(base_url=endpoint, token=token) if endpoint else InferenceClient(token=token)
 
     def chat(messages: list[dict]) -> str:
-        resp = client.chat_completion(messages=messages, model=model, max_tokens=600, temperature=0.1)
+        resp = client.chat_completion(messages=messages, model=model, max_tokens=max_tokens, temperature=0.1)
         return resp.choices[0].message.content or ""
 
     return chat, model

@@ -66,9 +66,17 @@ def launch(server: Path, model: Path, *, port: int, alias: str, embedding: bool,
         "--host", "127.0.0.1", "--port", str(port),
         "-ngl", str(ngl), "-c", str(ctx),
         "--alias", alias,
+        # lean & fast: no vision/audio projector, no thinking, flash attention,
+        # quantized KV cache (q8_0 halves KV memory), single slot = full ctx
+        "--no-mmproj",
+        "-fa", "on",
+        "-np", "1",
     ]
     if embedding:
         cmd += ["--embedding", "--pooling", "cls", "-b", str(ctx), "-ub", str(ctx)]
+    else:
+        cmd += ["--reasoning", "off",
+                "-ctk", "q8_0", "-ctv", "q8_0"]
     print(f"  $ {' '.join(cmd)}")
     return subprocess.Popen(cmd)
 
@@ -102,7 +110,8 @@ def main() -> int:
             print("[emb] bge-m3 embedder")
             procs.append(launch(
                 server, find_gguf("bge-m3"), port=args.emb_port,
-                alias="bge-m3", embedding=True, ngl=args.ngl, ctx=min(args.ctx, 8192),
+                alias="bge-m3", embedding=True, ngl=args.ngl,
+                ctx=2048,  # summaries/chunks are short; small ctx = less VRAM
             ))
 
         print("\nservers starting (model load takes a few seconds)...")
