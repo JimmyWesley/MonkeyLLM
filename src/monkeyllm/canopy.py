@@ -2,7 +2,7 @@
 
 Phase 0 `locate` is BM25-only (zero embeddings) by design — that is a spec
 exit criterion. Canopy adds an *optional* dense-retrieval layer on top
-WITHOUT changing the `locate` contract (arquitetura §3):
+WITHOUT changing the `locate` contract (architecture doc §3):
 
     no index               -> BM25-only (Phase 0 behaviour, unchanged)
     index + an embedder     -> hybrid: RRF(vector, BM25), pheromone on top
@@ -12,7 +12,7 @@ locally by llama.cpp), stored as a flat index in the derived layer, and
 fused with BM25 at query time via Reciprocal Rank Fusion.
 
 Pure-Python, stdlib only (no numpy): the forest is small and the SLM hop
-dominates latency (arquitetura §11), so a flat scan over a few thousand
+dominates latency (architecture doc §11), so a flat scan over a few thousand
 1024-d vectors is trivially fast. Everything lives in `_derived/canopy/`
 and is fully rebuildable — never a source of truth.
 """
@@ -193,7 +193,7 @@ class CanopyIndex:
             idx.vectors = [list(flat[i * dim : (i + 1) * dim]) for i in range(count)]
         return idx
 
-    # -- incremental updates (lazy re-embedding, spec Fase 1) ----------------
+    # -- incremental updates (lazy re-embedding, spec Phase 1) ---------------
 
     def upsert(self, node_id: str, vector: Sequence[float]) -> None:
         """Replace (or append) one node's vector — the lazy re-embed path."""
@@ -226,7 +226,7 @@ class CanopyIndex:
 
 
 # ----------------------------------------------------------------------------
-# Reciprocal Rank Fusion (spec Fase 1: "RRF fundindo vetorial + BM25")
+# Reciprocal Rank Fusion (spec Phase 1: RRF fusing vector + BM25)
 # ----------------------------------------------------------------------------
 
 def rrf_fuse(

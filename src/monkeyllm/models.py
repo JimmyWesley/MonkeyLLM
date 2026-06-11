@@ -56,7 +56,7 @@ class Frontmatter(BaseModel):
     payload_hash: str | None = None
     entity_kind: str | None = None
     aliases: list[str] = Field(default_factory=list)
-    coverage: str | None = None  # galho only
+    coverage: str | None = None  # branch only
 
     @field_validator("created", "updated", mode="before")
     @classmethod
@@ -120,7 +120,7 @@ def validate_frontmatter(fm: dict, dialect: dlt.Dialect, *, strict_summary: bool
             f"node has {len(model.links)} links (max {dlt.MAX_LINKS_PER_NODE})",
             hint="A node this connected is a branch candidate (Ranger signal).",
         )
-    if model.type == "entidade":
+    if model.type == "entity":
         if model.entity_kind not in dlt.ENTITY_KINDS:
             raise VineError(
                 E_FRONTMATTER,
@@ -149,7 +149,7 @@ class NodeSpec(BaseModel):
     tags: list[str] = Field(default_factory=list)
     links: list[Link] = Field(default_factory=list)
     confidence: float = 1.0
-    source: str = "agente"
+    source: str = "agent"
     payload: str | None = None
     payload_type: str | None = None
     payload_hash: str | None = None

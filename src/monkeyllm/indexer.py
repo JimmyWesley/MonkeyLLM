@@ -11,8 +11,8 @@ import re
 
 from monkeyllm.parser import ParsedNode, extract_section, serialize_node
 
-SUBBRANCH_SECTION = "Sub-galhos"
-BANANAS_SECTION = "Bananas diretas"
+SUBBRANCH_SECTION = "Sub-branches"
+BANANAS_SECTION = "Direct bananas"
 
 _ENTRY_RE_TPL = r"^- \[\[{id}(?:\|[^\]]*)?\]\].*$"
 
@@ -61,7 +61,7 @@ def sync_summary(body: str, child_id: str, new_summary: str) -> tuple[str, bool]
 def count_coverage(body: str) -> str:
     bananas = len(re.findall(r"^- \[\[", extract_section(body, BANANAS_SECTION) or "", re.MULTILINE))
     subs = len(re.findall(r"^- \[\[", extract_section(body, SUBBRANCH_SECTION) or "", re.MULTILINE))
-    return f"{bananas} bananas, {subs} sub-galhos"
+    return f"{bananas} bananas, {subs} sub-branches"
 
 
 def render_index(index_node: ParsedNode, new_body: str, today: dt.date | None = None) -> str:

@@ -13,7 +13,7 @@ from monkeyllm.parser import (
 
 GOOD = """---
 id: notas/teste
-type: nota
+type: note
 title: Teste
 summary: Nota de teste com cheiro suficiente para navegar.
 created: 2026-06-01
@@ -35,7 +35,7 @@ Conteúdo B.
 def fm(**over):
     base = {
         "id": "notas/teste",
-        "type": "nota",
+        "type": "note",
         "title": "Teste",
         "summary": "Nota de teste com cheiro suficiente.",
         "created": "2026-06-01",
@@ -104,18 +104,18 @@ class TestFrontmatterValidation:
         assert e.value.code == E_SCHEMA
 
     def test_unknown_rel_is_schema_error(self):
-        bad = fm(links=[{"rel": "ama", "target": "pessoas/x"}])
+        bad = fm(links=[{"rel": "loves", "target": "pessoas/x"}])
         with pytest.raises(VineError) as e:
             validate_frontmatter(bad, self.dialect)
         assert e.value.code == E_SCHEMA
 
     def test_entity_requires_entity_kind(self):
         with pytest.raises(VineError):
-            validate_frontmatter(fm(type="entidade"), self.dialect)
-        validate_frontmatter(fm(type="entidade", entity_kind="pessoa"), self.dialect)
+            validate_frontmatter(fm(type="entity"), self.dialect)
+        validate_frontmatter(fm(type="entity", entity_kind="person"), self.dialect)
 
     def test_max_50_links(self):
-        links = [{"rel": "relacionado-com", "target": f"n{i}"} for i in range(51)]
+        links = [{"rel": "related-to", "target": f"n{i}"} for i in range(51)]
         with pytest.raises(VineError) as e:
             validate_frontmatter(fm(links=links), self.dialect)
         assert e.value.code == E_SCHEMA
@@ -132,7 +132,7 @@ class TestSummarySpec:
         assert e.value.code == E_FRONTMATTER
 
     def test_anti_patterns_rejected(self):
-        for bad in ("Este documento descreve coisas.", "Arquivo contendo dados."):
+        for bad in ("This document describes things.", "File containing data."):
             with pytest.raises(VineError):
                 validate_summary(bad)
 
@@ -145,12 +145,12 @@ class TestSummarySpec:
 class TestDialectParsing:
     def test_parse_from_schema_md(self):
         md = (
-            "# Dialeto\n\n## Tipos de nó (type)\n\n"
-            "| `type` | D |\n|---|---|\n| `galho` | x |\n| `nota` | x |\n\n"
-            "## Tipos de aresta (rel)\n\n"
-            "| `rel` | Inversa |\n|---|---|\n| `parte-de` | `contem` |\n| `atalho-descoberto` | — |\n"
+            "# Dialect\n\n## Node types (type)\n\n"
+            "| `type` | D |\n|---|---|\n| `branch` | x |\n| `note` | x |\n\n"
+            "## Edge types (rel)\n\n"
+            "| `rel` | Inverse |\n|---|---|\n| `part-of` | `contains` |\n| `discovered-shortcut` | — |\n"
         )
         d = Dialect.parse(md)
-        assert d.node_types == {"galho", "nota"}
-        assert d.rels == {"parte-de": "contem", "atalho-descoberto": None}
-        assert d.inverse("parte-de") == "contem"
+        assert d.node_types == {"branch", "note"}
+        assert d.rels == {"part-of": "contains", "discovered-shortcut": None}
+        assert d.inverse("part-of") == "contains"

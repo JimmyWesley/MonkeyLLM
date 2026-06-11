@@ -10,7 +10,7 @@ from monkeyllm.vine import BUDGET_LOOK, BUDGET_MOVE, MAX_EDGES_SHOWN, PICK_MAX_B
 def plant_giant_node(vine, forest):
     """Write a pathological node directly (giant body, 30 edges) and reindex."""
     links = [
-        {"rel": "relacionado-com", "target": f"conceitos/{c}"}
+        {"rel": "related-to", "target": f"conceitos/{c}"}
         for c in (
             "rag", "graphrag", "raptor", "speculative-decoding", "quantizacao",
             "estigmergia", "aco", "bm25", "rrf", "embeddings", "mcp", "slm",
@@ -20,9 +20,9 @@ def plant_giant_node(vine, forest):
     ]
     fm = {
         "id": "notas/monstro",
-        "type": "nota",
-        "title": "Nó monstro sintético",
-        "summary": "Nó sintético gigante usado para verificar que todos os orçamentos truncam explicitamente.",
+        "type": "note",
+        "title": "Synthetic monster node",
+        "summary": "Giant synthetic node used to verify that every budget truncates explicitly.",
         "created": "2026-06-01",
         "updated": "2026-06-10",
         "links": links,

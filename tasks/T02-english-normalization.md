@@ -1,6 +1,6 @@
 # T02 — English normalization (PT -> EN)
 
-status: todo
+status: in progress (src/ + contract vocabulary DONE via spec v0.5; docs remain)
 owner: junior dev (translation pass), review by maintainer
 
 ## Goal
@@ -16,19 +16,24 @@ The **test corpus is intentionally Portuguese** and must NOT be translated:
 assertions match PT strings, and a PT corpus is also a feature (multilingual
 navigation with bge-m3).
 
-## Translate (PT -> EN)
+## Already done (2026-06-11, spec v0.5)
 
-- `docs/monkeyllm-spec-v0.2.md` — the normative spec (highest priority; the
-  paper cites it). Keep section numbering (A.3.1, C.6b...) intact.
+- **Contract vocabulary is English now** — types, rels, `entity_kind`/`source`
+  enums, index headings, anti-patterns (see spec v0.5 changelog table). The
+  forests were rebuilt from the updated generators; never edit them in place.
+- `src/monkeyllm/` is fully English (code, comments, docstrings, templates).
+- Tests, `scripts/build_*.py` and demo code updated to the new tokens.
+
+## Translate (PT -> EN) — remaining
+
+- `docs/monkeyllm-spec-v0.5.md` PT prose sections — the normative spec
+  (highest priority; the paper cites it). Keep section numbering (A.3.1,
+  C.6b...) and the v0.5 contract tokens intact. Earlier spec versions are
+  archived: do not touch.
 - `docs/monkeyllm-arquitetura.md`, `docs/monkeyllm-roadmap.md`,
   `docs/local-inference.md`.
-- `CLAUDE.md` (agent guide).
-- All code comments and docstrings under `src/monkeyllm/`, `demo/`, `bench/`,
-  `scripts/`, `tests/`.
-- CLI and print/log strings (e.g. `vine validate` output, bench runner prints,
-  `scripts/junit_to_html.py` UI strings).
-- Error `hint` strings in `src/monkeyllm/` (messages are already mostly EN —
-  unify).
+- Remaining PT comments/strings under `demo/`, `bench/`, `scripts/`, `tests/`
+  (e.g. demo runner prints like "GRITO: atalho ...").
 - Glossary to apply consistently (from the roadmap/paper): shout (grito),
   whisper (sussurro), trail (trilha), branch (galho), banana, forest dialect
   (dialeto), shortcut grafting, pheromone/heat.
@@ -40,8 +45,8 @@ navigation with bge-m3).
 - `demo/questions*.json`, `bench/questions-v*.json` — same reason.
 - The demo/bench **system prompts** stay PT for now (they drive a PT corpus
   with PT questions); add an English variant only as a separate, tested change.
-- Node type/rel vocabulary of the forest dialect (`galho`, `parte-de`...) —
-  it is *data schema*, changing it is a spec/contract change (out of scope).
+- The PT corpus **tags** (`["conceito"]`, `["evento"]`...) — they are free
+  content vocabulary searched by locate over PT questions, not contract.
 
 ## Acceptance criteria
 
@@ -54,5 +59,6 @@ navigation with bge-m3).
 
 ## Out of scope
 
-Renaming identifiers, translating the fixture corpus, changing the forest
-dialect vocabulary, any behavior change whatsoever.
+Renaming identifiers, translating the fixture corpus, any behavior change
+whatsoever. (The dialect vocabulary change already happened — spec v0.5 —
+and is NOT part of this task; do not "fix" tokens you think look off.)

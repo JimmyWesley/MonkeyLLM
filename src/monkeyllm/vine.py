@@ -203,7 +203,7 @@ class Vine:
             self.catalog.reindex()
         # Canopy (optional vector layer, Phase 1). BM25-only unless BOTH a
         # built index and a query embedder are present (locate contract is
-        # unchanged otherwise — arquitetura §3).
+        # unchanged otherwise — architecture doc §3).
         self.embedder = embedder
         self.canopy = CanopyIndex.load(self.forest.derived_dir)
 
@@ -228,7 +228,7 @@ class Vine:
         return {"nodes": len(idx), "model": idx.model, "dim": idx.dim}
 
     def _refresh_canopy(self) -> None:
-        """Lazy re-embedding (spec Fase 1): nodes marked stale by plant/graft
+        """Lazy re-embedding (spec Phase 1): nodes marked stale by plant/graft
         get their vectors refreshed before the next hybrid search, so the
         dense layer reflects writes without an offline rebuild."""
         stale = self.catalog.stale_ids()
@@ -402,7 +402,7 @@ class Vine:
                 for c in self.catalog.children(id)
             ]
             digest["children"] = children
-            cross = extract_section(node.body, "Trilhas cruzadas")
+            cross = extract_section(node.body, "Cross trails")
             if cross:
                 digest["cross_trails"] = [
                     ln.lstrip("- ").strip() for ln in cross.splitlines()[1:] if ln.strip().startswith("-")
@@ -452,7 +452,7 @@ class Vine:
                 tables[name] = cols
         finally:
             conn.close()
-        manual_section = extract_section(node.body, "Manual de consulta") or ""
+        manual_section = extract_section(node.body, "Query manual") or ""
         example_queries = re.findall(r"`(SELECT[^`]+)`", manual_section, re.IGNORECASE)[:3]
         return {"tables": tables, "example_queries": example_queries}
 
@@ -812,7 +812,7 @@ class Vine:
 
         parent_node = self.forest.read(spec.parent)
         new_parent_body = indexer.add_entry(
-            parent_node, spec.id, spec.summary, is_branch=(spec.type == "galho")
+            parent_node, spec.id, spec.summary, is_branch=(spec.type == "branch")
         )
         new_parent_content = indexer.render_index(parent_node, new_parent_body)
 
@@ -889,9 +889,9 @@ class Vine:
                 fortified.append({"rel": link.rel, "target": link.target})
                 continue
             extra = link.model_dump()
-            if link.rel == "atalho-descoberto":
+            if link.rel == "discovered-shortcut":
                 extra.setdefault("confidence", 0.5)
-                extra.setdefault("discovered_by", "agente")
+                extra.setdefault("discovered_by", "agent")
             links.append(Link.model_validate(extra))
             existing.add(link.key())
             file_changed = True

@@ -22,12 +22,12 @@ def git_log(forest, n=1) -> str:
 def good_spec(**over):
     spec = {
         "id": "notas/aprendizado-teste",
-        "type": "nota",
-        "title": "Aprendizado de teste",
-        "summary": "Nota plantada pela suíte de testes para verificar atomicidade de escrita e sincronia de índice.",
+        "type": "note",
+        "title": "Test learning",
+        "summary": "Note planted by the test suite to verify write atomicity and index synchronization.",
         "parent": "notas/_index",
-        "body": "# Aprendizado de teste\n\n## Conteúdo\n\nPlantada pelo teste.",
-        "source": "agente",
+        "body": "# Test learning\n\n## Content\n\nPlanted by the test.",
+        "source": "agent",
     }
     spec.update(over)
     return spec
@@ -43,18 +43,18 @@ class TestPlant:
 
         # parent index got the entry with the VERBATIM summary
         idx = (forest_rw / "notas" / "_index.md").read_text(encoding="utf-8")
-        assert "[[notas/aprendizado-teste]] — Nota plantada pela suíte" in idx
+        assert "[[notas/aprendizado-teste]] — Note planted by the test suite" in idx
 
         # git commit with the standard message
         head = git_log(forest_rw)
         assert head != before
         assert head.startswith("plant(notas/aprendizado-teste):")
-        assert "[source=agente]" in head
+        assert "[source=agent]" in head
         assert r["commit"]
 
         # node is immediately navigable
         d = vine_rw.look("notas/aprendizado-teste")
-        assert d["summary"].startswith("Nota plantada")
+        assert d["summary"].startswith("Note planted")
 
     def test_duplicate_id_rejected(self, vine_rw):
         vine_rw.plant(good_spec())
@@ -69,7 +69,7 @@ class TestPlant:
 
     def test_bad_summary_rejected(self, vine_rw):
         with pytest.raises(VineError):
-            vine_rw.plant(good_spec(summary="Este documento descreve uma nota."))
+            vine_rw.plant(good_spec(summary="This document describes a note."))
 
     def test_parent_must_exist_and_match_id_path(self, vine_rw):
         with pytest.raises(VineError) as e:
@@ -120,18 +120,18 @@ class TestGraft:
     def test_append_and_replace_section(self, vine_rw):
         vine_rw.graft(
             "conceitos/rag",
-            {"append_section": {"header": "Aprendizado do agente", "body": "Observação nova."}},
+            {"append_section": {"header": "Agent learnings", "body": "New observation."}},
         )
-        p = vine_rw.pick("conceitos/rag", section="Aprendizado do agente")
-        assert "Observação nova." in p["body"]
+        p = vine_rw.pick("conceitos/rag", section="Agent learnings")
+        assert "New observation." in p["body"]
 
         vine_rw.graft(
             "conceitos/rag",
-            {"replace_section": {"header": "Aprendizado do agente", "body": "Observação revista."}},
+            {"replace_section": {"header": "Agent learnings", "body": "Revised observation."}},
         )
-        p = vine_rw.pick("conceitos/rag", section="Aprendizado do agente")
-        assert "Observação revista." in p["body"]
-        assert "Observação nova." not in p["body"]
+        p = vine_rw.pick("conceitos/rag", section="Agent learnings")
+        assert "Revised observation." in p["body"]
+        assert "New observation." not in p["body"]
 
     def test_replace_missing_section_not_found(self, vine_rw):
         with pytest.raises(VineError) as e:
@@ -139,13 +139,13 @@ class TestGraft:
         assert e.value.code == E_NOT_FOUND
 
     def test_add_link_then_duplicate_becomes_fortification(self, vine_rw, forest_rw):
-        link = {"rel": "atalho-descoberto", "target": "vendas/relatorio-q1-2026"}
+        link = {"rel": "discovered-shortcut", "target": "vendas/relatorio-q1-2026"}
         r1 = vine_rw.graft("projetos/monkeyllm/monkey-bench", {"add_links": [link]})
         assert r1["commit"] and r1["fortified"] == []
         node = vine_rw.forest.read("projetos/monkeyllm/monkey-bench")
-        planted = [l for l in node.frontmatter["links"] if l.get("rel") == "atalho-descoberto"]
+        planted = [l for l in node.frontmatter["links"] if l.get("rel") == "discovered-shortcut"]
         assert planted[0]["confidence"] == 0.5  # shout default
-        assert planted[0]["discovered_by"] == "agente"
+        assert planted[0]["discovered_by"] == "agent"
 
         heat_before = vine_rw.trails.get_heat("vendas/relatorio-q1-2026")
         head_before = git_log(forest_rw)
@@ -156,20 +156,20 @@ class TestGraft:
         assert git_log(forest_rw) == head_before
         assert vine_rw.trails.get_heat("vendas/relatorio-q1-2026") > heat_before
         node = vine_rw.forest.read("projetos/monkeyllm/monkey-bench")
-        again = [l for l in node.frontmatter["links"] if l.get("rel") == "atalho-descoberto"]
+        again = [l for l in node.frontmatter["links"] if l.get("rel") == "discovered-shortcut"]
         assert len(again) == 1  # never duplicated
 
     def test_remove_link(self, vine_rw):
         vine_rw.graft(
             "conceitos/rag",
-            {"remove_links": [{"rel": "comparado-com", "target": "projetos/monkeyllm/visao"}]},
+            {"remove_links": [{"rel": "compared-with", "target": "projetos/monkeyllm/visao"}]},
         )
         node = vine_rw.forest.read("conceitos/rag")
         assert not node.frontmatter.get("links")
 
     def test_unknown_rel_rejected(self, vine_rw):
         with pytest.raises(VineError) as e:
-            vine_rw.graft("conceitos/rag", {"add_links": [{"rel": "odeia", "target": "conceitos/bm25"}]})
+            vine_rw.graft("conceitos/rag", {"add_links": [{"rel": "hates", "target": "conceitos/bm25"}]})
         assert e.value.code == E_SCHEMA
 
     def test_empty_patch_rejected(self, vine_rw):

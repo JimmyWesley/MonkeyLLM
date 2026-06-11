@@ -53,12 +53,12 @@ class TestLook:
         assert d["stats"]["body_tokens"] > 0
         assert d["stats"]["degree"] >= len(d["edges_out"])
         rels = {e["rel"] for e in d["edges_out"]}
-        assert "autor" in rels and "comparado-com" in rels
+        assert "author" in rels and "compared-with" in rels
 
     def test_edges_in_use_derived_inverse(self, vine_ro):
         d = vine_ro.look("pessoas/jimmy-wesley")
         in_rels = {e["rel"] for e in d["edges_in"]}
-        assert "autor-de" in in_rels  # jimmy declared autor -> doc; doc side derived
+        assert "author-of" in in_rels  # jimmy declared author -> doc; doc side derived
 
     def test_branch_digest_has_children_and_cross_trails(self, vine_ro):
         d = vine_ro.look("vendas/_index")
@@ -101,7 +101,7 @@ class TestMove:
         assert "projetos/mixerllm/arquitetura" in ids
 
     def test_rel_filter_and_directions(self, vine_ro):
-        out = vine_ro.move("projetos/mixerllm/arquitetura", rel="autor")
+        out = vine_ro.move("projetos/mixerllm/arquitetura", rel="author")
         assert [n["id"] for n in out["neighbors"]] == ["pessoas/jimmy-wesley"]
         both = vine_ro.move("projetos/mixerllm/arquitetura", direction="both")
         assert any(n["direction"] == "in" for n in both["neighbors"])

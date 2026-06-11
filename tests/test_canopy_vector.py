@@ -102,12 +102,12 @@ class TestLocateContract:
             n0 = len(v.canopy)
             v.plant({
                 "id": "notas/zumbido-quantico",
-                "type": "nota",
+                "type": "note",
                 "title": "Zumbido quântico",
                 "summary": "Fenômeno fictício de zumbido quântico usado para testar re-embedding lazy da camada vetorial.",
                 "parent": "notas/_index",
                 "body": "# Zumbido quântico\n\n## Conteúdo\n\nTeste.",
-                "source": "agente",
+                "source": "agent",
             })
             assert "notas/zumbido-quantico" in v.catalog.stale_ids()
             out = v.locate("zumbido quântico fenômeno", k=5)

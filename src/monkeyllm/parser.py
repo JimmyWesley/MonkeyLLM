@@ -32,7 +32,7 @@ class ParsedNode:
 
     @property
     def is_branch(self) -> bool:
-        return self.type == "galho"
+        return self.type == "branch"
 
     @property
     def title(self) -> str:

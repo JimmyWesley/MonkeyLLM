@@ -30,18 +30,18 @@ class TestInitForest:
         vine = Vine(tmp_path / "nova", writable=True)
         try:
             r = vine.plant({
-                "id": "primeira-banana",
-                "type": "nota",
-                "title": "Primeira banana",
-                "summary": "Primeira nota plantada logo após o init, para provar que a "
-                           "floresta nasce pronta para escrita e busca.",
+                "id": "first-banana",
+                "type": "note",
+                "title": "First banana",
+                "summary": "First note planted right after init, proving the forest "
+                           "is born ready for writes and search.",
                 "parent": "_index",
-                "body": "# Primeira banana\n\n## Conteúdo\n\nOlá, floresta.",
-                "source": "agente",
+                "body": "# First banana\n\n## Content\n\nHello, forest.",
+                "source": "agent",
             })
             assert r["commit"]
-            hits = vine.locate("primeira banana")
-            assert any(x["id"] == "primeira-banana" for x in hits["results"])
+            hits = vine.locate("first banana")
+            assert any(x["id"] == "first-banana" for x in hits["results"])
         finally:
             vine.close()
 

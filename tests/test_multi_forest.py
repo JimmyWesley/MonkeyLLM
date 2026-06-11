@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 MARKER_NODE = """---
 id: notas/marcador-amazonia
-type: nota
+type: note
 title: Marcador exclusivo da amazonia
 summary: Nó sentinela que só existe na floresta amazonia, usado para provar isolamento entre florestas.
 created: '2026-06-11'

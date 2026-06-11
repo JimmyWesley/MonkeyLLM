@@ -2,7 +2,7 @@
 
 Valid node types and edge rels. The source of truth at runtime is the
 forest's own `_meta/schema.md` (a living file); the constants below are
-the spec v0.1 defaults, used as fallback and by the fixture builder.
+the spec v0.5 defaults, used as fallback and by the fixture builder.
 Unknown `type` or `rel` on write -> E_SCHEMA.
 """
 
@@ -13,36 +13,36 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_NODE_TYPES = {
-    "galho",
-    "nota",
-    "documento",
+    "branch",
+    "note",
+    "document",
     "dataset",
-    "entidade",
-    "conceito",
-    "evento",
-    "midia",
+    "entity",
+    "concept",
+    "event",
+    "media",
 }
 
 # rel -> derived inverse (None = no inverse)
 DEFAULT_RELS: dict[str, str | None] = {
-    "parte-de": "contem",
-    "relacionado-com": "relacionado-com",
-    "mencionado-em": "menciona",
-    "autor": "autor-de",
-    "comparado-com": "comparado-com",
-    "derivado-de": "origem-de",
+    "part-of": "contains",
+    "related-to": "related-to",
+    "mentioned-in": "mentions",
+    "author": "author-of",
+    "compared-with": "compared-with",
+    "derived-from": "origin-of",
     "same-as": "same-as",
-    "atalho-descoberto": None,
-    "sucede": "precede",
+    "discovered-shortcut": None,
+    "succeeds": "precedes",
 }
 
-ENTITY_KINDS = {"pessoa", "organizacao", "produto", "lugar", "outro"}
+ENTITY_KINDS = {"person", "organization", "product", "place", "other"}
 PAYLOAD_TYPES = {"sqlite", "pdf", "docx", "image", "audio"}
-SOURCES = {"manual", "ingest", "agente"}
+SOURCES = {"manual", "ingest", "agent"}
 
 MAX_LINKS_PER_NODE = 50
 SUMMARY_MAX_TOKENS = 60
-SUMMARY_ANTI_PATTERNS = ("este documento descreve", "arquivo contendo")
+SUMMARY_ANTI_PATTERNS = ("this document describes", "file containing")
 
 _ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*([^|]*)\|")
 
@@ -67,7 +67,7 @@ class Dialect:
         """Parse the type and rel tables from _meta/schema.md.
 
         Heuristic: markdown table rows whose first cell is a backticked
-        token. Rows in a section mentioning 'aresta'/'rel' feed the rel
+        token. Rows in a section mentioning 'edge'/'rel' feed the rel
         table (second cell = inverse, '—'/'-' = none); other backticked
         rows feed node types.
         """
@@ -77,7 +77,7 @@ class Dialect:
         for line in schema_md.splitlines():
             low = line.lower()
             if low.startswith("#"):
-                in_rel_section = "aresta" in low or "rel" in low
+                in_rel_section = "edge" in low or "rel" in low
                 continue
             m = _ROW_RE.match(line.strip())
             if not m:

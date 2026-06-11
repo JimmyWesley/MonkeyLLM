@@ -79,13 +79,13 @@ class TestSniffScope:
 
     def test_scope_not_found(self, vine_ro):
         with pytest.raises(VineError) as e:
-            vine_ro.sniff(["x1"], scope="galho-inexistente")
+            vine_ro.sniff(["x1"], scope="nonexistent-branch")
         assert e.value.code == E_NOT_FOUND
 
     def test_type_filter(self, vine_ro):
-        r = vine_ro.sniff(["mixer-lang"], type_filter="evento", k=20)
+        r = vine_ro.sniff(["mixer-lang"], type_filter="event", k=20)
         assert r["results"]
-        assert all(x["type"] == "evento" for x in r["results"])
+        assert all(x["type"] == "event" for x in r["results"])
 
 
 class TestSniffValidation:

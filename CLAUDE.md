@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.4.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.5.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -10,10 +10,18 @@ change requires a new spec version before code.
 **English is the project's native language** — code, comments, docstrings,
 tests, docs, CLI output, task files. When touching a file, translate any
 Portuguese remnants you find in it (boy-scout rule; full sweep is tasks/T02).
-Exceptions that MUST stay Portuguese (they are test data wired to
-assertions): the `forest-fixture/` corpus and its generator literals,
+**Every contract token is English** (spec v0.5): node types
+(`branch`/`note`/`document`/`entity`/`concept`/`event`/`media`), rels
+(`part-of`, `related-to`, `discovered-shortcut`, …), `entity_kind`/`source`
+enums, and the parsed index headings (`## Sub-branches`, `## Direct bananas`,
+`## Cross trails`, `## Query manual`). The Portuguese tokens were removed —
+never reintroduce them.
+Exceptions that MUST stay Portuguese (test-data **content** wired to
+assertions): the `forest-fixture/` and `bench-forest/` corpus prose (titles,
+summaries, bodies, ids, tags) and its generator literals,
 `demo/questions*.json`, `bench/questions-v*.json`, and the demo/bench system
-prompts that drive that PT corpus.
+prompts that drive that PT corpus. Forests are never edited in place —
+change the generator and rebuild.
 
 ## Layout
 

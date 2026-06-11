@@ -249,8 +249,8 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
         outcome = vine.close_session(success, answer_nodes)
 
         # The shout (spec C.8 / Part D): close_session only SUGGESTS shortcuts;
-        # acting on them is the orchestrator's call. With --learn we graft an
-        # atalho-descoberto from the landing zone to each suggested banana —
+        # acting on them is the orchestrator's call. With --learn we graft a
+        # discovered-shortcut from the landing zone to each suggested banana —
         # graft's reinforce-before-create turns repeats into fortification.
         shortcuts = []
         if learn and entry_id:
@@ -258,7 +258,7 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
                 if nid == entry_id or not vine.forest.exists(nid):
                     continue
                 try:
-                    g = vine.graft(entry_id, {"add_links": [{"rel": "atalho-descoberto", "target": nid}]})
+                    g = vine.graft(entry_id, {"add_links": [{"rel": "discovered-shortcut", "target": nid}]})
                     shortcuts.append({"from": entry_id, "to": nid,
                                       "fortified": bool(g["fortified"]), "commit": g["commit"]})
                 except VineError as e:

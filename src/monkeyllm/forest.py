@@ -24,44 +24,44 @@ _MASTER_BODY = """# {title}
 
 > {summary}
 
-## Sub-galhos
+## Sub-branches
 
-## Bananas diretas
+## Direct bananas
 
-## Trilhas cruzadas
+## Cross trails
 
 ## Landmarks
 """
 
 # spec A.1/A.2 default dialect, in the table format Dialect.parse reads
-_SCHEMA_BODY = """# Dialeto da floresta
+_SCHEMA_BODY = """# Forest dialect
 
-## Tipos de nó (type)
+## Node types (type)
 
-| `type` | Descrição | Verbo de colheita |
+| `type` | Description | Harvest verb |
 |---|---|---|
-| `galho` | Arquivo de índice (_index.md) de uma pasta | look |
-| `nota` | Conhecimento em texto livre | pick |
-| `documento` | Documento convertido (origem PDF/DOCX) | pick |
-| `dataset` | Dados tabulares (SQLite irmão) | query |
-| `entidade` | Pessoa, organização, produto, lugar | pick |
-| `conceito` | Definição/termo técnico | pick |
-| `evento` | Fato datado (reunião, decisão, release) | pick |
-| `midia` | Imagem/áudio/vídeo com descrição | pick |
+| `branch` | Index file (_index.md) of a folder | look |
+| `note` | Free-text knowledge | pick |
+| `document` | Converted document (PDF/DOCX origin) | pick |
+| `dataset` | Tabular data (sibling SQLite) | query |
+| `entity` | Person, organization, product, place | pick |
+| `concept` | Definition / technical term | pick |
+| `event` | Dated fact (meeting, decision, release) | pick |
+| `media` | Image/audio/video with description | pick |
 
-## Tipos de aresta (rel)
+## Edge types (rel)
 
-| `rel` | Inversa | Semântica |
+| `rel` | Inverse | Semantics |
 |---|---|---|
-| `parte-de` | `contem` | Hierarquia lógica |
-| `relacionado-com` | `relacionado-com` | Associação genérica (simétrica) |
-| `mencionado-em` | `menciona` | Entidade citada em documento |
-| `autor` | `autor-de` | Autoria |
-| `comparado-com` | `comparado-com` | Contraste técnico (simétrica) |
-| `derivado-de` | `origem-de` | Proveniência |
-| `same-as` | `same-as` | Soft merge de entidades duplicadas |
-| `atalho-descoberto` | — | Grito do macaco (criado por graft) |
-| `sucede` | `precede` | Ordem temporal |
+| `part-of` | `contains` | Logical hierarchy |
+| `related-to` | `related-to` | Generic association (symmetric) |
+| `mentioned-in` | `mentions` | Entity cited in a document |
+| `author` | `author-of` | Authorship |
+| `compared-with` | `compared-with` | Technical contrast (symmetric) |
+| `derived-from` | `origin-of` | Provenance |
+| `same-as` | `same-as` | Soft merge of duplicate entities |
+| `discovered-shortcut` | — | The monkey's shout (created by graft) |
+| `succeeds` | `precedes` | Temporal order |
 """
 
 # spec A.3.1: binaries never enter the forest git
@@ -86,18 +86,18 @@ def init_forest(root: str | os.PathLike, title: str, summary: str | None = None)
 
     today = _dt.date.today().isoformat()
     summary = summary or (
-        f"Galho-mestre da floresta {title}. Recém-criada: ainda sem sub-galhos; "
-        f"plante nós com plant() e organize as regiões."
+        f"Master branch of the {title} forest. Freshly created: no sub-branches "
+        f"yet; plant() nodes and organize the regions."
     )
     master_fm = {
-        "id": "_index", "type": "galho", "title": title, "summary": summary,
-        "coverage": "0 bananas, 0 sub-galhos", "created": today, "updated": today,
+        "id": "_index", "type": "branch", "title": title, "summary": summary,
+        "coverage": "0 bananas, 0 sub-branches", "created": today, "updated": today,
     }
     schema_fm = {
-        "id": "_meta/schema", "type": "nota", "title": "Dialeto da floresta",
-        "summary": "Tipos de nó e de aresta válidos nesta floresta. Novos tipos "
-                   "entram aqui antes do primeiro uso; o Vine rejeita o que não "
-                   "estiver declarado.",
+        "id": "_meta/schema", "type": "note", "title": "Forest dialect",
+        "summary": "Node and edge types valid in this forest. New types are "
+                   "declared here before first use; the Vine rejects anything "
+                   "not declared.",
         "created": today, "updated": today,
     }
     (root / "_index.md").write_text(

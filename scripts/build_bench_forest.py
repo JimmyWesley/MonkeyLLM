@@ -1,4 +1,4 @@
-"""Build the Monkey Bench v1 corpus (bench-forest/) + derived questions.
+﻿"""Build the Monkey Bench v1 corpus (bench-forest/) + derived questions.
 
 A deterministic, programmatically-expanded universe ("Maracatu Sistemas",
 distinct from the Phase-0 fixture): ~210 nodes, 15 branches, 2 SQLite
@@ -274,95 +274,95 @@ def populate(people, orgs, products, projects, contracts, incidents, releases,
 
     for p in people:
         inst = f" Veio do {p['institute']}." if p["institute"] else ""
-        node(p["id"], "entidade", p["name"],
+        node(p["id"], "entity", p["name"],
              f"{p['role'].capitalize()} da Maracatu Sistemas. Mora em {p['city']} ({p['uf']}).{inst}",
-             tags=["equipe"], links=[("relacionado-com", "organizacoes/maracatu-sistemas")],
+             tags=["equipe"], links=[("related-to", "organizacoes/maracatu-sistemas")],
              body=f"## Perfil\n\n{p['name']} é {p['role']} e vive em **{p['city']} ({p['uf']})**.{inst}\n\n## Atuação\n\nParticipa dos projetos da linha de telemetria da [[organizacoes/maracatu-sistemas]].",
-             entity_kind="pessoa")
+             entity_kind="person")
 
-    node("organizacoes/maracatu-sistemas", "entidade", "Maracatu Sistemas",
+    node("organizacoes/maracatu-sistemas", "entity", "Maracatu Sistemas",
          "Fabricante pernambucana de hardware e plataforma de telemetria industrial. Sede no Recife; linha de 18 produtos conectados.",
          tags=["empresa"], links=[],
          body="## Sobre\n\nFundada no Recife. Desenvolve sensores, gateways e a plataforma de telemetria.\n\n## Linha\n\nVer [[produtos/_index]].",
-         entity_kind="organizacao")
+         entity_kind="organization")
     for o in orgs:
-        node(o["id"], "entidade", o["name"],
+        node(o["id"], "entity", o["name"],
              f"Cliente do segmento de {o['segment']}, baseado em {o['city']}. Compra equipamentos de telemetria da Maracatu Sistemas.",
              tags=["cliente", o["segment"].split()[0]],
-             links=[("relacionado-com", "organizacoes/maracatu-sistemas")],
+             links=[("related-to", "organizacoes/maracatu-sistemas")],
              body=f"## Sobre\n\n{o['name']} atua em {o['segment']} a partir de {o['city']}.\n\n## Relacionamento\n\nCliente ativo da [[organizacoes/maracatu-sistemas]].",
-             entity_kind="organizacao")
+             entity_kind="organization")
 
     for pr in products:
         own = pr["owner"]
-        node(pr["id"], "entidade", f"{pr['name']} ({pr['sku']})",
+        node(pr["id"], "entity", f"{pr['name']} ({pr['sku']})",
              f"{pr['desc'].capitalize()}, código de produto {pr['sku']}. Responsável técnico: {own['name']}.",
-             tags=["produto"], links=[("relacionado-com", own["id"])],
+             tags=["produto"], links=[("related-to", own["id"])],
              body=f"## Ficha\n\n**{pr['name']}** é uma {pr['desc']}. Código de catálogo: **{pr['sku']}**.\n\n## Responsável\n\nEngenharia sob cuidado de [[{own['id']}|{own['name']}]].",
-             entity_kind="produto")
+             entity_kind="product")
 
     for proj in projects:
         base, lead = proj["id_base"], proj["lead"]
-        node(f"{base}/visao", "nota", f"Visão — {proj['alias']}",
+        node(f"{base}/visao", "note", f"Visão — {proj['alias']}",
              f"Norte do projeto {proj['alias']}: {proj['goal']}. Liderança de {lead['name']}.",
-             tags=["projeto"], links=[("autor", lead["id"])],
+             tags=["projeto"], links=[("author", lead["id"])],
              body=f"## Objetivo\n\nConstruir {proj['goal']}.\n\n## Liderança\n\nConduzido por [[{lead['id']}|{lead['name']}]].")
-        node(f"{base}/arquitetura", "documento", f"Arquitetura — {proj['alias']}",
+        node(f"{base}/arquitetura", "document", f"Arquitetura — {proj['alias']}",
              f"Desenho técnico do {proj['alias']}: módulos, fluxo de dados e decisões de borda. Assinado por {lead['name']}.",
-             tags=["projeto", "arquitetura"], links=[("autor", lead["id"]), ("parte-de", f"{base}/visao")],
+             tags=["projeto", "arquitetura"], links=[("author", lead["id"]), ("part-of", f"{base}/visao")],
              body=f"## Camadas\n\nIngestão → fila → processamento → API.\n\n## Autoria\n\nDesenho de [[{lead['id']}|{lead['name']}]], revisado pelo time.")
-        node(f"{base}/decisoes", "nota", f"Decisões — {proj['alias']}",
+        node(f"{base}/decisoes", "note", f"Decisões — {proj['alias']}",
              f"Registro de decisões do {proj['alias']}: trade-offs, alternativas descartadas e pendências.",
-             tags=["projeto"], links=[("parte-de", f"{base}/visao")],
+             tags=["projeto"], links=[("part-of", f"{base}/visao")],
              body="## Decisões ativas\n\n- Banco embarcado na borda.\n- Telemetria comprimida.\n\n## Pendências\n\n- Estratégia de retry do backhaul.")
 
     redes = {"lpwan", "lorawan", "mqtt", "mesh", "nb-iot", "opc-ua", "scada",
              "duty-cycle", "backhaul", "payload-binario"}
     for c, t, d in CONCEPT_DEFS:
         sub = "redes" if c in redes else "operacao"
-        node(f"conceitos/{sub}/{c}", "conceito", t, f"{d}.", tags=["conceito"],
+        node(f"conceitos/{sub}/{c}", "concept", t, f"{d}.", tags=["conceito"],
              body=f"## Definição\n\n{d}.\n\n## Uso na Maracatu\n\nAparece nos produtos de telemetria e nos projetos da plataforma.")
 
     for ct in contracts:
         o, s, pr = ct["org"], ct["seller"], ct["prod"]
-        node(ct["id"], "evento", f"Acordo {o['name']} — {ct['month_name']} de 2026",
+        node(ct["id"], "event", f"Acordo {o['name']} — {ct['month_name']} de 2026",
              f"Contrato fechado em {ct['day']} de {ct['month_name']} de 2026 com {o['name']}: {ct['qty']} unidades de {pr['name']} ({pr['sku']}). Valor R$ {ct['value']:,.0f}. Vendedor: {s['name']}.".replace(",", "."),
-             tags=["contrato"], links=[("relacionado-com", o["id"]), ("relacionado-com", pr["id"]), ("mencionado-em", s["id"])],
+             tags=["contrato"], links=[("related-to", o["id"]), ("related-to", pr["id"]), ("mentioned-in", s["id"])],
              body=f"## Termos\n\n{o['name']} adquiriu **{ct['qty']} unidades** do {pr['name']} (código {pr['sku']}) por **R$ {ct['value']:,.0f}**.".replace(",", ".") +
                   f"\n\n## Condução\n\nNegociação conduzida por [[{s['id']}|{s['name']}]] no canal direto.")
 
     for inc in incidents:
         pr = inc["prod"]
-        node(inc["id"], "evento", f"Recall do {pr['name']} — lote {inc['lote']}",
+        node(inc["id"], "event", f"Recall do {pr['name']} — lote {inc['lote']}",
              f"Recall de {inc['count']} unidades do {pr['name']} ({pr['sku']}) por {inc['defect']}, lote {inc['lote']}. Substituição sem custo em 30 dias.",
-             tags=["recall", "qualidade"], links=[("relacionado-com", pr["id"])],
+             tags=["recall", "qualidade"], links=[("related-to", pr["id"])],
              body=f"## O que houve\n\n**{inc['count']} unidades** do {pr['name']} apresentaram **{inc['defect']}** (lote {inc['lote']}).\n\n## Ação\n\nSubstituição integral; causa raiz na linha de montagem.")
 
     for rel in releases:
         proj = rel["proj"]
-        node(rel["id"], "evento", f"Versão {rel['ver']} — {proj['alias']}",
+        node(rel["id"], "event", f"Versão {rel['ver']} — {proj['alias']}",
              f"Lançamento de abril de 2026 do {proj['alias']}: versão {rel['ver']} com {rel['feature']}.",
-             tags=["release"], links=[("relacionado-com", f"{proj['id_base']}/visao")],
+             tags=["release"], links=[("related-to", f"{proj['id_base']}/visao")],
              body=f"## Novidades\n\nA versão **{rel['ver']}** trouxe {rel['feature']}.\n\n## Contexto\n\nMarco do [[{proj['id_base']}/visao|{proj['alias']}]].")
 
     node("vendas/pedidos-2026", "dataset", "Pedidos 2026 (jan-jun)",
          f"Pedidos faturados de janeiro a junho de 2026: {sales_truth['rows']} linhas com sku, produto, região, canal, quantidade e valor em BRL. Export do ERP.",
          tags=["vendas", "dataset"], links=[],
-         body="## Manual de consulta\n\n**Tabela:** `pedidos(data, sku, produto, regiao, canal, qtd, valor)`\n\n**Queries de exemplo:**\n- Faturamento por região: `SELECT regiao, SUM(valor) AS total FROM pedidos GROUP BY regiao ORDER BY total DESC`\n- Receita por produto: `SELECT sku, produto, SUM(valor) AS receita FROM pedidos GROUP BY sku ORDER BY receita DESC`",
+         body="## Query manual\n\n**Tabela:** `pedidos(data, sku, produto, regiao, canal, qtd, valor)`\n\n**Queries de exemplo:**\n- Faturamento por região: `SELECT regiao, SUM(valor) AS total FROM pedidos GROUP BY regiao ORDER BY total DESC`\n- Receita por produto: `SELECT sku, produto, SUM(valor) AS receita FROM pedidos GROUP BY sku ORDER BY receita DESC`",
          payload="pedidos-2026.db", payload_type="sqlite")
     node("suporte/chamados-2026", "dataset", "Chamados de suporte 2026",
          f"Tíquetes de suporte de 2026: {support_truth['rows']} linhas com produto, sku, causa, severidade e status de resolução.",
          tags=["suporte", "dataset"], links=[],
-         body="## Manual de consulta\n\n**Tabela:** `chamados(aberto_em, produto, sku, causa, severidade, resolvido)`\n\n**Queries de exemplo:**\n- Chamados por produto: `SELECT produto, COUNT(*) AS n FROM chamados GROUP BY produto ORDER BY n DESC`\n- Causas mais comuns: `SELECT causa, COUNT(*) FROM chamados GROUP BY causa ORDER BY 2 DESC`",
+         body="## Query manual\n\n**Tabela:** `chamados(aberto_em, produto, sku, causa, severidade, resolvido)`\n\n**Queries de exemplo:**\n- Chamados por produto: `SELECT produto, COUNT(*) AS n FROM chamados GROUP BY produto ORDER BY n DESC`\n- Causas mais comuns: `SELECT causa, COUNT(*) FROM chamados GROUP BY causa ORDER BY 2 DESC`",
          payload="chamados-2026.db", payload_type="sqlite")
 
-    node("notas/politica-garantia", "nota", "Política de garantia",
+    node("notas/politica-garantia", "note", "Política de garantia",
          "Garantia padrão de 24 meses para sensores e 36 para gateways; recall sempre com substituição sem custo. Exceções só com aprovação da diretoria.",
          tags=["politica"], body="## Regra\n\n24 meses (sensores), 36 meses (gateways).\n\n## Recalls\n\nSubstituição sem custo, prazo de 30 dias.")
-    node("notas/onboarding-clientes", "nota", "Onboarding de clientes",
+    node("notas/onboarding-clientes", "note", "Onboarding de clientes",
          "Passo a passo de ativação de um cliente novo: provisionamento dos dispositivos, treinamento e primeira semana assistida.",
          tags=["processo"], body="## Etapas\n\n1. Provisionamento ([[conceitos/operacao/provisionamento]])\n2. Treinamento\n3. Semana assistida")
-    node("infra/bancada-homologacao", "nota", "Bancada de homologação",
+    node("infra/bancada-homologacao", "note", "Bancada de homologação",
          "Bancada de testes de rádio e clima: câmara térmica, atenuadores e gateways de referência das classes A e C.",
          tags=["infra"], body="## Equipamentos\n\nCâmara térmica, atenuadores RF, gateways de referência.\n\n## Uso\n\nHomologação de firmware antes do OTA ([[conceitos/operacao/ota-update]]).")
 
@@ -427,14 +427,14 @@ def write_forest(out: Path):
         subs, bananas = children_of(branch_id)
         lines = [f"# {title}", "", f"> {blurb}", ""]
         if subs:
-            lines.append("## Sub-galhos")
+            lines.append("## Sub-branches")
             lines += [entry_line(s, branches[s][1]) for s in subs]
             lines.append("")
-        lines.append("## Bananas diretas")
+        lines.append("## Direct bananas")
         lines += [entry_line(b, by_id[b]["summary"]) for b in bananas]
         lines.append("")
         body = "\n".join(lines)
-        fm = {"id": branch_id, "type": "galho", "title": title, "summary": blurb,
+        fm = {"id": branch_id, "type": "branch", "title": title, "summary": blurb,
               "coverage": count_coverage(body), "created": CREATED, "updated": TODAY}
         path = out / f"{branch_id}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -444,11 +444,11 @@ def write_forest(out: Path):
     lines = ["# Floresta Maracatu", "",
              "> Base de conhecimento da Maracatu Sistemas: equipe, clientes, linha de produtos, "
              "projetos, conceitos de telemetria, contratos, recalls, vendas e suporte.", "",
-             "## Sub-galhos"]
+             "## Sub-branches"]
     lines += [entry_line(b, branches[b][1]) for b in top]
-    lines += ["", "## Bananas diretas", ""]
+    lines += ["", "## Direct bananas", ""]
     body = "\n".join(lines)
-    fm = {"id": "_index", "type": "galho", "title": "Floresta Maracatu",
+    fm = {"id": "_index", "type": "branch", "title": "Floresta Maracatu",
           "summary": "Galho-mestre da Maracatu Sistemas: pessoas, organizações, produtos, projetos, conceitos, eventos, vendas, suporte, infra e notas.",
           "coverage": count_coverage(body), "created": CREATED, "updated": TODAY}
     (out / "_index.md").write_text(serialize_node(fm, body), encoding="utf-8", newline="\n")
