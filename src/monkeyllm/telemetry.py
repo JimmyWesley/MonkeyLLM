@@ -1,0 +1,89 @@
+"""Telemetry (spec Part D): traces feed the pheromone and the Monkey Bench."""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from pathlib import Path
+
+from monkeyllm.trails import Trails
+
+HARVEST_PRIMITIVES = {"pick", "query"}
+HOP_PRIMITIVES = {"look", "move"}
+
+
+class Tracer:
+    def __init__(self, derived_dir: Path, trails: Trails, session: str | None = None):
+        self.session = session or uuid.uuid4().hex[:12]
+        self.trails = trails
+        self.traces_dir = derived_dir / "traces"
+        self.traces_dir.mkdir(parents=True, exist_ok=True)
+        self.trace_path = self.traces_dir / f"{self.session}.jsonl"
+        self.events: list[dict] = []
+        self.closed = False
+
+    def record(
+        self,
+        primitive: str,
+        node_id: str | None,
+        tokens_in: int,
+        tokens_out: int,
+        elapsed_ms: float,
+    ) -> None:
+        event = {
+            "ts": time.time(),
+            "session": self.session,
+            "primitive": primitive,
+            "id": node_id,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "elapsed_ms": round(elapsed_ms, 3),
+        }
+        self.events.append(event)
+        with self.trace_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+    def metrics(self, answer_nodes: list[str] | None = None) -> dict:
+        hops = 0
+        hops_to_banana = None
+        for ev in self.events:
+            if ev["primitive"] in HOP_PRIMITIVES:
+                hops += 1
+            elif ev["primitive"] in HARVEST_PRIMITIVES and hops_to_banana is None:
+                hops_to_banana = hops
+        return {
+            "hops_to_banana": hops_to_banana,
+            "tokens_to_banana": sum(ev["tokens_out"] for ev in self.events),
+            "calls": len(self.events),
+            "answer_nodes": answer_nodes or [],
+        }
+
+    def close_session(
+        self,
+        success: bool,
+        answer_nodes: list[str],
+        trail_of: callable = None,
+        shout_threshold: int = 4,
+    ) -> dict:
+        """Close the hunt (Part D). On success: whisper (heat on winning
+        trail) and shout-evaluation signal (trail >= 4 hops)."""
+        metrics = self.metrics(answer_nodes)
+        suggest_shortcuts = []
+        if success and answer_nodes:
+            for nid in answer_nodes:
+                trail = trail_of(nid) if trail_of else []
+                self.trails.add_heat(trail + [nid], amount=0.1)
+                if metrics["hops_to_banana"] is not None and metrics["hops_to_banana"] >= shout_threshold:
+                    suggest_shortcuts.append(nid)
+        outcome = {
+            "ts": time.time(),
+            "session": self.session,
+            "outcome": {"success": success, "answer_nodes": answer_nodes},
+            "metrics": metrics,
+            "suggest_shortcuts": suggest_shortcuts,
+        }
+        with self.trace_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(outcome, ensure_ascii=False) + "\n")
+        self.closed = True
+        return outcome
