@@ -1,4 +1,4 @@
-# Inferência local — runbook (Fase 0 demo + Fase 1 vetores)
+# Inferência — runbook (local e online)
 
 Como rodar o MonkeyLLM ponta a ponta com modelos locais via **llama.cpp** na
 RTX 3090, baixando os pesos do Hugging Face. Tudo que cai em `models/` e
@@ -54,12 +54,43 @@ zero embeddings). O benchmark do passo 6 roda sem nenhum servidor para a linha
 `bm25`; com `MONKEYLLM_EMBED_ENDPOINT` + canopy construído ele acrescenta a
 linha `hybrid` lado a lado.
 
+## Modelo online (OpenRouter) — sem GPU local
+
+Quem não quer (ou não pode) rodar modelo local usa o OpenRouter: mesma
+interface OpenAI, modelos pequenos e baratos hospedados, zero VRAM. Basta a
+chave — o cliente detecta sozinho:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+# opcional: escolher o modelo (default: google/gemma-4-26b-a4b-it:free)
+# export MONKEYLLM_LLM_MODEL=google/gemma-4-31b-it
+python demo/run_demo.py --forest forest-fixture
+```
+
+Atenção ao id do modelo: o catálogo do OpenRouter é diferente do Hugging Face
+(ex.: lá não existe o 12B; os Gemma 4 hospedados são `google/gemma-4-26b-a4b-it`
+e `google/gemma-4-31b-it`, com variantes `:free`). Id errado = HTTP 400, e o
+cliente agora mostra a mensagem do provedor no erro.
+
+Notas:
+
+- A resolução de provedor é: `MONKEYLLM_LLM_ENDPOINT` (explícito) >
+  `OPENROUTER_API_KEY` (OpenRouter) > `HF_TOKEN` (HF serverless).
+- O cliente já faz retry com backoff em 429/5xx — importante no tier
+  gratuito do OpenRouter (~20 req/min).
+- O `locate` híbrido continua exigindo o embedder local (OpenRouter não serve
+  embeddings); sem ele, cai graciosamente para BM25-only — a demo funciona
+  100% online mesmo assim.
+- Latência esperada: maior que local (rede + fila), mas sem custo de máquina.
+
 ## Variáveis de ambiente
 
 | Var | Default | Uso |
 |---|---|---|
-| `MONKEYLLM_LLM_ENDPOINT` | HF serverless | base_url OpenAI do chat |
-| `MONKEYLLM_LLM_MODEL` | `Qwen/Qwen2.5-7B-Instruct` | id/alias do modelo de chat |
+| `MONKEYLLM_LLM_ENDPOINT` | (vazio) | base_url OpenAI do chat (llama.cpp local, vLLM...) |
+| `OPENROUTER_API_KEY` | (vazio) | ativa o OpenRouter quando não há endpoint local |
+| `MONKEYLLM_LLM_MODEL` | por provedor | id/alias do modelo de chat |
+| `MONKEYLLM_LLM_MAX_TOKENS` | `600` | orçamento de completion (aumente p/ modelos raciocinadores) |
 | `MONKEYLLM_EMBED_ENDPOINT` | (vazio = BM25-only) | base_url OpenAI do embedder |
 | `MONKEYLLM_EMBED_MODEL` | `bge-m3` | id/alias do embedder |
 | `HF_TOKEN` | — | token HF (download + serverless) |

@@ -1,21 +1,27 @@
 """Phase 0 demo (Part F criterion 5): an LLM navigates the forest with the
 Vine primitives only, answering multi-hop questions with traces + metrics.
 
-The model and endpoint are configurable (Hugging Face by default):
+The model and endpoint are configurable; provider resolution order:
 
-    MONKEYLLM_LLM_MODEL     model id (default: Qwen/Qwen2.5-7B-Instruct)
-    MONKEYLLM_LLM_ENDPOINT  optional OpenAI-compatible base_url
-                            (HF router, vLLM, llama.cpp server, LM Studio...)
-    HF_TOKEN                Hugging Face token (or any API key the endpoint expects)
+  1. MONKEYLLM_LLM_ENDPOINT set        -> that OpenAI-compatible endpoint
+                                          (llama.cpp local, vLLM, LM Studio...)
+  2. OPENROUTER_API_KEY set            -> OpenRouter (online, no local GPU)
+  3. otherwise                         -> Hugging Face serverless (HF_TOKEN)
+
+    MONKEYLLM_LLM_MODEL       model id (defaults per provider)
+    MONKEYLLM_LLM_API_KEY     key for custom endpoints (default: no-key)
+    MONKEYLLM_LLM_MAX_TOKENS  completion budget (default 600; raise for
+                              reasoning models if thinking is enabled)
 
 Examples:
-    # Hugging Face serverless inference
-    set HF_TOKEN=hf_xxx
+    # Local llama.cpp (scripts/serve_llm.py)
+    set MONKEYLLM_LLM_ENDPOINT=http://localhost:8090/v1
+    set MONKEYLLM_LLM_MODEL=gemma-4
     python demo/run_demo.py
 
-    # Local llama.cpp / vLLM (OpenAI-compatible)
-    set MONKEYLLM_LLM_ENDPOINT=http://localhost:8090/v1
-    set MONKEYLLM_LLM_MODEL=qwen2.5-7b
+    # Online via OpenRouter (no local GPU needed)
+    set OPENROUTER_API_KEY=sk-or-...
+    set MONKEYLLM_LLM_MODEL=google/gemma-4-12b-it
     python demo/run_demo.py --questions demo/questions.json
 
 Optional Phase 1 vector layer: if MONKEYLLM_EMBED_ENDPOINT is set and the
@@ -64,19 +70,72 @@ Regras importantes:
 O mapa da floresta (galho-mestre) está na primeira mensagem do usuário."""
 
 
+OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
+# Qwen 3.5 35B-A3B (MoE, ~3B active params: fast and cheap). Append ":free"
+# for the gratis tier (rate-limited ~20 req/min; the client retries on 429).
+OPENROUTER_DEFAULT_MODEL = "qwen/qwen3.5-35b-a3b"
+RETRY_STATUS = {429, 500, 502, 503}  # rate limits / transient upstream errors
+
+
+def resolve_provider() -> tuple[str | None, str, str]:
+    """(endpoint, model, api_key) per the resolution order in the docstring."""
+    model = os.environ.get("MONKEYLLM_LLM_MODEL")
+    endpoint = os.environ.get("MONKEYLLM_LLM_ENDPOINT")
+    api_key = os.environ.get("MONKEYLLM_LLM_API_KEY") or os.environ.get("HF_TOKEN") or "no-key"
+    if not endpoint and os.environ.get("OPENROUTER_API_KEY"):
+        endpoint = OPENROUTER_ENDPOINT
+        api_key = os.environ["OPENROUTER_API_KEY"]
+        model = model or OPENROUTER_DEFAULT_MODEL
+    return endpoint, model or DEFAULT_MODEL, api_key
+
+
 def make_llm():
+    endpoint, model, api_key = resolve_provider()
+    # reasoning models spend tokens thinking before the final content —
+    # give them room (or disable thinking server-side) or content comes empty
+    max_tokens = int(os.environ.get("MONKEYLLM_LLM_MAX_TOKENS", "600"))
+
+    if endpoint:  # any OpenAI-compatible server: llama.cpp, OpenRouter, vLLM...
+        import time as _t
+
+        import httpx
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        if "openrouter" in endpoint:
+            headers["HTTP-Referer"] = "https://monkeyllm.com"
+            headers["X-Title"] = "MonkeyLLM"
+        client = httpx.Client(base_url=endpoint.rstrip("/"), headers=headers, timeout=180.0)
+
+        # lean by default (same policy as the local server): thinking off
+        # unless MONKEYLLM_LLM_REASONING=on. OpenRouter normalizes the
+        # `reasoning` param across providers.
+        reasoning_on = os.environ.get("MONKEYLLM_LLM_REASONING", "off").lower() == "on"
+
+        def chat(messages: list[dict]) -> str:
+            payload = {"model": model, "messages": messages,
+                       "max_tokens": max_tokens, "temperature": 0.1}
+            if "openrouter" in endpoint and not reasoning_on:
+                payload["reasoning"] = {"enabled": False}
+            for attempt in range(4):
+                resp = client.post("/chat/completions", json=payload)
+                if resp.status_code in RETRY_STATUS and attempt < 3:
+                    _t.sleep(2 ** (attempt + 1))  # 2s, 4s, 8s
+                    continue
+                if resp.status_code >= 400:
+                    # surface the provider's own message (model id errado, etc.)
+                    raise RuntimeError(f"LLM endpoint {resp.status_code}: {resp.text[:400]}")
+                return resp.json()["choices"][0]["message"].get("content") or ""
+            raise RuntimeError("unreachable")
+
+        return chat, model
+
+    # no endpoint: Hugging Face serverless
     from huggingface_hub import InferenceClient
 
-    model = os.environ.get("MONKEYLLM_LLM_MODEL", DEFAULT_MODEL)
-    endpoint = os.environ.get("MONKEYLLM_LLM_ENDPOINT")
-    token = os.environ.get("HF_TOKEN") or os.environ.get("MONKEYLLM_LLM_API_KEY") or "no-key"
-    # reasoning models (e.g. Gemma 4) spend tokens thinking before the final
-    # content — give them room or the content comes back empty
-    max_tokens = int(os.environ.get("MONKEYLLM_LLM_MAX_TOKENS", "600"))
-    client = InferenceClient(base_url=endpoint, token=token) if endpoint else InferenceClient(token=token)
+    hf = InferenceClient(token=api_key if api_key != "no-key" else None)
 
     def chat(messages: list[dict]) -> str:
-        resp = client.chat_completion(messages=messages, model=model, max_tokens=max_tokens, temperature=0.1)
+        resp = hf.chat_completion(messages=messages, model=model, max_tokens=max_tokens, temperature=0.1)
         return resp.choices[0].message.content or ""
 
     return chat, model
@@ -180,7 +239,8 @@ def main() -> int:
     if args.only:
         questions = [q for q in questions if q["id"] == args.only]
     chat, model = make_llm()
-    print(f"modelo: {model}  endpoint: {os.environ.get('MONKEYLLM_LLM_ENDPOINT', 'huggingface serverless')}")
+    endpoint, _, _ = resolve_provider()
+    print(f"modelo: {model}  endpoint: {endpoint or 'huggingface serverless'}")
 
     from monkeyllm.canopy import embedder_from_env
 
