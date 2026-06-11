@@ -91,6 +91,46 @@ class TestDatasetBirth:
         assert set(tables) == {"clientes", "contatos"}
 
 
+class TestInitialRows:
+    def test_rows_loaded_at_birth(self, vine_rw, forest_rw):
+        s = copy.deepcopy(SPEC)
+        # a value containing SQL keywords is DATA, not SQL — parameterized
+        # loading must store it literally (C.7.1 rule 7)
+        s["rows"] = {"clientes": [
+            ["Acme", "acme.com", "industria", "2026-06-11"],
+            ["Robert'); DROP TABLE clientes;--", "x.io", "varejo", "2026-06-11"],
+        ]}
+        r = vine_rw.plant(s)
+        q = vine_rw.query(SPEC["id"], "SELECT COUNT(*) FROM clientes")
+        assert q["rows"][0][0] == 2
+        q2 = vine_rw.query(SPEC["id"],
+                           "SELECT nome FROM clientes WHERE site = 'x.io'")
+        assert q2["rows"][0][0] == "Robert'); DROP TABLE clientes;--"
+        db = forest_rw / "vendas" / "prospeccao-2026.db"
+        assert r and hashlib.sha256(db.read_bytes()).hexdigest() == \
+            vine_rw.forest.read(SPEC["id"]).frontmatter["payload_hash"]
+
+    @pytest.mark.parametrize("rows", [
+        {"nao_existe": [["a", "b", "c", "d"]]},     # table not in schema
+        {"clientes": [["only", "three", "values"]]},  # wrong width
+    ])
+    def test_bad_rows_rejected(self, vine_rw, forest_rw, rows):
+        s = copy.deepcopy(SPEC)
+        s["rows"] = rows
+        with pytest.raises(VineError) as e:
+            vine_rw.plant(s)
+        assert e.value.code == E_SCHEMA
+        assert not (forest_rw / "vendas" / "prospeccao-2026.db").exists()
+
+    def test_rows_without_schema_rejected(self, vine_rw):
+        s = copy.deepcopy(SPEC)
+        del s["schema"]
+        s["rows"] = {"clientes": [["a", "b", "c", "d"]]}
+        with pytest.raises(VineError) as e:
+            vine_rw.plant(s)
+        assert e.value.code == E_SCHEMA
+
+
 class TestSchemaValidation:
     @pytest.mark.parametrize("schema", [
         {},                                                       # no tables

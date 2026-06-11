@@ -1,7 +1,9 @@
 # T04 — Phase 2: Living Bank (Gardener, Ranger, dataset writes)
 
 status: in-progress (workstream 3 `tend` DONE 2026-06-11 via spec v0.7;
-Gardener and Ranger remain)
+workstream 5 dataset birth DONE 2026-06-11 via spec v0.8;
+workstream 1 Gardener v1 deterministic core DONE 2026-06-11 via spec v0.9 —
+LLM curation stage (G.4.2) and Ranger remain)
 depends-on: T01 (measurement discipline), T03 (troop data feeds adaptive ideas)
 
 ## Goal
@@ -22,10 +24,26 @@ query datasets but **write** to them, safely.
 
 ## Workstreams
 
-1. **Gardener v1 (ingest):** PDF/DOCX -> markdown (docling/marker); tabular
-   (XLSX/CSV/JSON) -> SQLite payload + passport node with query manual;
-   SLM-generated summaries validated against spec A.4; entity/edge extraction
-   with per-origin confidence; `payload_hash` + passport regeneration on drift.
+1. **Gardener v1 (ingest) — deterministic core DONE (spec v0.9 Part G,
+   2026-06-11):** `src/monkeyllm/gardener.py` + `vine adopt`/`vine sync`.
+   Adopt mirrors an existing tree (folders -> branches, files -> passports
+   with `source_path`+`source_hash`; the forest IS the sync state); sync
+   hash-diffs new/changed/deleted (changed = audited `.md`-only commit,
+   curated frontmatter preserved; deleted = `stale` report, never auto-
+   pruned). Converter contract is the public plugin API v1: config command
+   hooks > `monkeyllm.converters` entry points > built-ins (md/txt, csv,
+   tabular json, xlsx-if-openpyxl -> dataset born with rows via C.7.1 r7).
+   `on_curate` hooks; crashes contained. License rule: built-ins/extras
+   MIT-clean only; copyleft tools (e.g. PyMuPDF AGPL in the user's
+   pdf-replace) plug via command hook, never as dependency. 11 tests in
+   tests/test_gardener.py.
+   **Remaining (Gardener v2):** LLM curation stage (G.4.2: A.4 summaries
+   with retry guided by config `curation.directives`, tags, entity/edge
+   proposals at confidence 0.3) measured against the >= 95% A.4 criterion;
+   in-house DOCX->MD built-in converter derived from the pdf-replace
+   technique (python-docx MIT: w:t traversal incl. text boxes + fragmented
+   run merge); media extras (faster-whisper transcripts, vision
+   descriptions); `docs/ingest-tools.md` + `docs/extending.md` guidance.
 2. **Ranger v1 (maintenance):** heat evaporation (configurable half-life);
    shortcut/proposal promotion and pruning; `needs_split` detection and
    assisted branch split; continuous lint; `same-as` candidate blocking by
@@ -40,6 +58,17 @@ query datasets but **write** to them, safely.
    drop >= 25% after simulated use (the paper's signature chart). Needs a
    bigger/deeper forest than forest-fixture — shouts never fire at 1-2 hops
    (measured 2026-06-11: 0 shortcut grafts across 28 hunts on the fixture).
+5. **Dataset birth ("plant with schema") — DONE (spec v0.8, 2026-06-11):**
+   C.7.1 — `plant` of a `type: dataset` node accepts a declarative `schema`
+   (tables -> columns -> allowlisted types, optional primary_key); the model
+   never writes DDL — Vine generates the CREATE TABLEs, births the `.db`,
+   computes `payload_hash`, auto-generates `## Query manual` (C.2 works from
+   birth), and the commit carries only the `.md` (A.3.1). Rollback removes
+   the newborn payload. Closes the loop with `tend`: an agent can now
+   collect external data, give it a structured home, and fill it — entirely
+   through the primitives (the owner's collector-agent scenario; also the
+   "table buried in a giant document -> queryable twin" move). `ALTER` stays
+   out of agent reach. 16 tests in tests/test_plant_dataset.py.
 
 ## Acceptance criteria
 
@@ -49,6 +78,12 @@ query datasets but **write** to them, safely.
 - [ ] Ranger runs as a service; evaporation/pruning verified with synthetic clock
 - [x] spec published covering `tend` (dataset writes) before its code —
       shipped as spec v0.7 + implementation + injection/audit/drift tests
+- [x] spec published covering dataset birth (declarative schema in `plant`)
+      before its code — shipped as spec v0.8 (C.7.1, F.12) + implementation
+      + schema-injection/atomicity/manual tests
+- [x] spec published covering the Gardener (Part G) before its code —
+      shipped as spec v0.9 (G.1-G.6, C.7.1 rows, F.13) + deterministic
+      adopt/sync + converter/hook plugin surface + tests
 
 ## Out of scope
 

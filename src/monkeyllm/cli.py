@@ -37,6 +37,16 @@ def main(argv: list[str] | None = None) -> int:
     p_canopy.add_argument("action", choices=["build", "status"])
     p_canopy.add_argument("--forest", default=".")
 
+    p_adopt = sub.add_parser("adopt", help="Gardener: mirror a source tree into the forest (spec G.3)")
+    p_adopt.add_argument("source", help="directory full of documents to adopt")
+    p_adopt.add_argument("--forest", default=".")
+    p_adopt.add_argument("--dest", default=None, help="root the mirror under this existing branch")
+
+    p_sync = sub.add_parser("sync", help="Gardener: hash-diff the adopted source and refresh passports")
+    p_sync.add_argument("source", nargs="?", default=None,
+                        help="source directory (default: the adopted root in _meta/gardener.yaml)")
+    p_sync.add_argument("--forest", default=".")
+
     args = parser.parse_args(argv)
     forest_root = Path(args.forest).resolve() if getattr(args, "forest", None) else None
 
@@ -89,6 +99,29 @@ def main(argv: list[str] | None = None) -> int:
         if errors or (args.strict and warnings):
             return 1
         return 0
+
+    if args.command in ("adopt", "sync"):
+        from monkeyllm.gardener import Gardener
+        from monkeyllm.vine import Vine
+
+        vine = Vine(forest_root, writable=True)
+        try:
+            gardener = Gardener(vine)
+            if args.command == "adopt":
+                report = gardener.adopt(args.source, dest=args.dest)
+            else:
+                report = gardener.sync(args.source)
+        finally:
+            vine.close()
+        for key in ("planted", "branches", "updated", "unchanged", "stale",
+                    "unsupported", "errors"):
+            if report.get(key):
+                print(f"{key} ({len(report[key])}):")
+                for item in report[key]:
+                    print(f"  {item}")
+        if not any(report.values()):
+            print("nothing to do")
+        return 1 if report.get("errors") else 0
 
     if args.command == "canopy":
         from monkeyllm.canopy import CanopyIndex, embedder_from_env

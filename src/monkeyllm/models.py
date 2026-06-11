@@ -150,6 +150,24 @@ class TableSchema(BaseModel):
     primary_key: list[str] = Field(default_factory=list)
 
 
+def validate_dataset_rows(schema: dict[str, TableSchema],
+                          rows: dict[str, list[list]]) -> None:
+    """C.7.1 rule 7 (v0.9): initial rows must fit the declared schema."""
+    for tname, table_rows in rows.items():
+        if tname not in schema:
+            raise VineError(
+                E_SCHEMA, f"rows: table '{tname}' is not declared in schema"
+            )
+        width = len(schema[tname].columns)
+        for i, row in enumerate(table_rows):
+            if not isinstance(row, (list, tuple)) or len(row) != width:
+                raise VineError(
+                    E_SCHEMA,
+                    f"rows: {tname}[{i}] has {len(row) if isinstance(row, (list, tuple)) else 'non-list'}"
+                    f" values (table has {width} columns)",
+                )
+
+
 def validate_dataset_schema(schema: dict[str, TableSchema]) -> None:
     """C.7.1: names regex-checked, types allowlisted, limits enforced."""
     if not schema:
@@ -237,6 +255,8 @@ class NodeSpec(BaseModel):
     # C.7.1: declarative dataset schema ("schema" on the wire; aliased because
     # pydantic reserves the bare name). Creation directive, not frontmatter.
     table_schema: dict[str, TableSchema] | None = Field(default=None, alias="schema")
+    # C.7.1 rule 7 (v0.9): initial rows per table, loaded parameterized at birth
+    rows: dict[str, list[list]] | None = None
 
     def frontmatter_dict(self, today: dt.date | None = None) -> dict:
         today = today or dt.date.today()
@@ -261,6 +281,11 @@ class NodeSpec(BaseModel):
                 fm[k] = v
         if self.aliases:
             fm["aliases"] = self.aliases
+        # extra="allow": custom frontmatter fields pass through (e.g. the
+        # Gardener's source_path/source_hash, spec G.1)
+        for k, v in (self.model_extra or {}).items():
+            if k not in fm and v is not None:
+                fm[k] = v
         return fm
 
 

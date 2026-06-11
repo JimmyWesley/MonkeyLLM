@@ -41,6 +41,7 @@ from monkeyllm.models import (
     NodeSpec,
     dataset_ddl,
     dataset_manual,
+    validate_dataset_rows,
     validate_dataset_schema,
     validate_frontmatter,
     validate_summary,
@@ -896,6 +897,8 @@ class Vine:
             )
         assert spec.table_schema is not None
         validate_dataset_schema(spec.table_schema)
+        if spec.rows:
+            validate_dataset_rows(spec.table_schema, spec.rows)
         if spec.payload is None:
             spec.payload = spec.id.rsplit("/", 1)[-1] + ".db"
         if "/" in spec.payload or "\\" in spec.payload or not spec.payload.endswith(".db"):
@@ -908,6 +911,8 @@ class Vine:
             raise VineError(E_SCHEMA, "schema requires payload_type: sqlite")
 
     def _plant(self, spec: NodeSpec) -> dict:
+        if spec.rows and spec.table_schema is None:
+            raise VineError(E_SCHEMA, "rows require a schema (C.7.1 rule 7)")
         if spec.table_schema is not None:
             self._prepare_dataset_spec(spec)
         fm = spec.frontmatter_dict()
@@ -943,10 +948,22 @@ class Vine:
                 try:
                     for stmt in dataset_ddl(spec.table_schema):
                         conn.execute(stmt)
+                    # C.7.1 rule 7: initial rows go in parameterized — values
+                    # are data, never SQL text
+                    for tname, table_rows in (spec.rows or {}).items():
+                        if table_rows:
+                            ph = ", ".join("?" * len(spec.table_schema[tname].columns))
+                            conn.executemany(
+                                f"INSERT INTO {tname} VALUES ({ph})",
+                                [tuple(r) for r in table_rows],
+                            )
                     conn.commit()
                 finally:
                     conn.close()
                 fm["payload_hash"] = hashlib.sha256(payload_db.read_bytes()).hexdigest()
+            except sqlite3.Error as e:
+                payload_db.unlink(missing_ok=True)
+                raise VineError(E_SCHEMA, f"dataset birth failed: {e}") from e
             except Exception:
                 payload_db.unlink(missing_ok=True)
                 raise

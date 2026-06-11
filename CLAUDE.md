@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.7.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.9.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -27,7 +27,8 @@ change the generator and rebuild.
 
 - `src/monkeyllm/` — the `monkeyllm` package, `vine` CLI. `vine.py`
   (10 primitives), `harvest.py` (C.6c composite MCP tool: one-shot zero-LLM
-  retrieval), `catalog.py` (SQLite + FTS5 = locate's BM25 side + scan),
+  retrieval), `gardener.py` (Part G ingest: adopt/sync + pluggable
+  converters), `catalog.py` (SQLite + FTS5 = locate's BM25 side + scan),
   `canopy.py` (optional vector layer, Phase 1), `parser.py`/`models.py`
   (frontmatter), `forest.py`/`gitops.py` (files + commits),
   `telemetry.py`/`trails.py` (traces + pheromone).
@@ -50,6 +51,8 @@ python -m monkeyllm.cli init --forest D:\path --title "..."   # new empty forest
 python -m monkeyllm.cli validate --forest forest-fixture
 python -m monkeyllm.cli reindex  --forest forest-fixture
 python -m monkeyllm.cli canopy build --forest forest-fixture   # vector layer
+python -m monkeyllm.cli adopt D:\dump --forest D:\floresta     # Gardener: mirror a tree
+python -m monkeyllm.cli sync --forest D:\floresta              # Gardener: hash-diff refresh
 python scripts/bench_locate.py --forest forest-fixture          # quality+latency
 ```
 
@@ -70,6 +73,16 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 - `tend` (spec C.10) is the ONLY dataset write path: single INSERT/UPDATE/
   DELETE, WHERE mandatory on UPDATE/DELETE, no DDL; refreshes `payload_hash`
   and commits only the `.md` (it has its own injection suite too).
+- **Datasets are born via `plant` with a declarative `schema`** (spec C.7.1):
+  the model never writes DDL — Vine validates names/types, creates the `.db`,
+  auto-generates `## Query manual`, and commits only the `.md`. No `ALTER`
+  for agents; `tend` stays DML-only forever. Initial `rows` at birth are
+  loaded parameterized (v0.9 rule 7) — never as SQL text.
+- **Gardener (spec Part G) extends edges only**: converters (config command
+  hooks > `monkeyllm.converters` entry points > built-ins) and `on_curate`
+  hooks. Primitives' semantics/budgets/guards are NOT extensible; UIs and
+  bots are MCP/library clients, not plugins. The Gardener never deletes
+  nodes (deleted sources are reported `stale` for the Ranger).
 - `plant`/`graft` are atomic and `git commit` **inside the forest**
   (spec C.7/C.8). That is product behavior and it is correct.
 - **Binaries never enter the forest git** (spec A.3.1): gitops only versions
