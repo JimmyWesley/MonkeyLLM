@@ -32,8 +32,19 @@ class GitRepo:
         self._run("init", "--quiet")
 
     def commit(self, paths: list[Path], message: str) -> str:
-        """Stage paths and commit. Returns the commit sha."""
-        rels = [str(p.resolve().relative_to(self.root.resolve())) for p in paths]
+        """Stage paths and commit. Returns the commit sha.
+
+        Hard guard (spec A.3.1): only .md files are ever staged — binaries
+        (dataset payloads, assets) are referenced by payload_hash, never
+        versioned, so the forest repo cannot balloon with blobs.
+        """
+        rels = [
+            str(p.resolve().relative_to(self.root.resolve()))
+            for p in paths
+            if p.suffix.lower() == ".md"
+        ]
+        if not rels:
+            raise ValueError("nothing to commit: only .md files are versioned (spec A.3.1)")
         self._run("add", "--", *rels)
         self._run("commit", "--quiet", "-m", message)
         return self._run("rev-parse", "HEAD").stdout.strip()

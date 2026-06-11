@@ -43,6 +43,9 @@ Modelos locais (llama.cpp na 3090): ver `docs/local-inference.md`.
   (`;DROP`, `ATTACH`, multi-statement, `PRAGMA`) — há suíte de injeção.
 - `plant`/`graft` são atômicos e fazem `git commit` **dentro da floresta**
   (spec C.7/C.8). Isso é comportamento do produto e é correto.
+- **Binário nunca entra no git da floresta** (spec A.3.1): o gitops só
+  versiona `.md`; payloads (`*.db`, `_assets/`) ficam no filesystem,
+  referenciados por `payload` + `payload_hash`.
 - **NUNCA fazer commit no repo externo do projeto** — o usuário commita à mão.
   (A floresta-fixture e florestas de teste têm git próprio; isso é outra coisa.)
 - Parser de frontmatter rejeita cedo: melhor recusar lixo que aceitar.

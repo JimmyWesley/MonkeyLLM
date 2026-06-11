@@ -613,7 +613,9 @@ def main() -> int:
         subprocess.run(["git", "-C", str(out), "-c", "user.name=fixture", "-c", "user.email=fixture@monkeyllm.local", *a],
                        check=True, capture_output=True, text=True)
     git("init", "--quiet")
-    (out / ".gitignore").write_text("_derived/\n.vine.lock\n", encoding="utf-8")
+    # spec A.3.1: binaries never enter the forest git (referenced by payload_hash)
+    (out / ".gitignore").write_text(
+        "_derived/\n.vine.lock\n*.db\n*.sqlite\n_assets/\n", encoding="utf-8")
     git("add", "-A")
     git("commit", "--quiet", "-m", "fixture: initial forest (~100 nodes, 12 branches, 1 dataset)")
 

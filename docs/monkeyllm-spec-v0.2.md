@@ -8,7 +8,8 @@
 **Changelog v0.1 → v0.2:**
 
 - Nova primitiva de leitura **C.6b `sniff`** (o farejador): busca literal sobre os **corpos** dos nós, devolvendo nó + seção + trecho. Complementa o `locate` (que continua restrito a metadados curados — contrato C.1 intacto) cobrindo o caso "termo exato enterrado no corpo, invisível para summary/tags".
-- Critério de aceitação F.1 atualizado para incluir C.6b; novo critério F.7 (qualidade do sniff).
+- **A.3.1 Política de payloads binários**: binário nunca entra no Git da floresta — Vine versiona somente `.md` (guarda na camada de commit); payloads são referenciados por `payload` + `payload_hash` e excluídos pelo `.gitignore` da floresta.
+- Critério de aceitação F.1 atualizado para incluir C.6b; novos critérios F.7 (qualidade do sniff) e F.8 (payloads fora do Git).
 - Nada mais muda: todos os demais contratos são idênticos à v0.1 (que permanece arquivada para histórico).
 
 ---
@@ -85,6 +86,15 @@ aliases: [string]         # nomes alternativos (usados pelo locate léxico)
 Regras:
 - `id` é imutável. Renomear = criar novo nó + `same-as` + tombstone (fora do escopo Fase 0; na Fase 0, renomear é proibido).
 - Parser DEVE rejeitar frontmatter inválido com `E_FRONTMATTER` e caminho do campo.
+
+#### A.3.1 Política de payloads binários (v0.2)
+
+Binário **nunca entra no Git da floresta**. Normativo:
+
+1. O Vine NÃO DEVE versionar nada além de `.md`: `plant`/`graft` adicionam ao stage somente arquivos markdown (guarda dura na camada de commit, não convenção).
+2. O `.gitignore` da floresta DEVE excluir payloads binários (`*.db`, `*.sqlite`, `_assets/`), além de `_derived/` e `.vine.lock`.
+3. O payload vive no filesystem ao lado do nó (ou em storage externo, em fases futuras) e o **nó** versiona apenas a referência: `payload` (nome) + `payload_hash` (sha256). Drift do binário é detectado por hash, não por diff.
+4. Racional: Git delta-comprime texto, não binário — payloads atualizados com frequência estourariam o repositório. O conhecimento versionado é a camada destilada (markdown); o dado pesado é referenciado, não embarcado.
 
 ### A.4 Especificação do `summary` (o componente mais crítico)
 
@@ -417,5 +427,6 @@ Entregável: Vine (MCP, Python) + floresta de teste manual (~100 nós, 10 galhos
 5. Demo: um SLM local (Qwen 7-14B Q4), recebendo apenas as ferramentas MCP e o galho-mestre, responde 10 perguntas multi-hop sobre a floresta de teste, com traces gravados e métricas calculadas.
 6. Latência: p95 de `look`/`move`/`pick` < 10ms, `query` < 50ms, `locate` < 100ms, `sniff` < 100ms (floresta local, NVMe).
 7. `sniff`: encontra fato presente SOMENTE no corpo (invisível ao `locate`), atribui a seção correta, respeita `scope`, normaliza caixa/diacríticos, e rejeita termos vazios (`E_SCHEMA`) — tudo coberto por teste.
+8. Payloads fora do Git (A.3.1): o commit do Vine ignora não-`.md` mesmo que solicitado, e o `git ls-files` da floresta de teste não contém nenhum binário — ambos verificados por teste.
 
 Fora do escopo da Fase 0 (não implementar): embeddings/vetores, evaporação e promoção de atalhos (Ranger), compaction de `same-as`, ingest automático (Gardener), sync S3/R2, multi-escritor, Tropa (Parte E — Fase 1.5; apenas garantir namespace de sessão no trails.db).
