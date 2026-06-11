@@ -1,6 +1,7 @@
 # T04 — Phase 2: Living Bank (Gardener, Ranger, dataset writes)
 
-status: todo
+status: in-progress (workstream 3 `tend` DONE 2026-06-11 via spec v0.7;
+Gardener and Ranger remain)
 depends-on: T01 (measurement discipline), T03 (troop data feeds adaptive ideas)
 
 ## Goal
@@ -29,11 +30,12 @@ query datasets but **write** to them, safely.
    shortcut/proposal promotion and pruning; `needs_split` detection and
    assisted branch split; continuous lint; `same-as` candidate blocking by
    embedding similarity (physical merge stays human-approved).
-3. **Dataset writes ("tend") — REQUIRES SPEC v0.3 FIRST:** today `query` is
-   read-only by design (injection suite enforces it). Agent writes to dataset
-   payloads need a new primitive contract: allowed statements, audit trail
-   (the node's .md records what/when/who; the binary stays out of git),
-   journaling/rollback, and how indexes refresh. Write the spec before any code.
+3. **Dataset writes ("tend") — DONE (spec v0.7, 2026-06-11):** the 10th
+   primitive, C.10. Single-statement INSERT/UPDATE/DELETE; WHERE mandatory on
+   UPDATE/DELETE (mass-wipe guard); no DDL/ATTACH/PRAGMA (own injection
+   suite); audit = `payload_hash` refresh + `.md`-only git commit (A.3.1
+   intact); failed SQL rolls back; `vine validate` warns on payload drift.
+   Exposed as MCP tool. 8 tests in tests/test_tend.py.
 4. **Convergence curve:** fixed recurring question set; hops-to-banana must
    drop >= 25% after simulated use (the paper's signature chart). Needs a
    bigger/deeper forest than forest-fixture — shouts never fire at 1-2 hops
@@ -45,7 +47,8 @@ query datasets but **write** to them, safely.
       zero broken links post-ingest
 - [ ] Convergence: hops-to-banana mean drops >= 25% on recurring questions
 - [ ] Ranger runs as a service; evaporation/pruning verified with synthetic clock
-- [ ] spec v0.3 published covering `tend` (dataset writes) before its code
+- [x] spec published covering `tend` (dataset writes) before its code —
+      shipped as spec v0.7 + implementation + injection/audit/drift tests
 
 ## Out of scope
 

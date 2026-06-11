@@ -81,6 +81,27 @@ tier whose entry is genuinely ambiguous (multiple candidate regions must be
 checked — scan/filter questions, "which of the N clients...", negations),
 then re-measure the speedup criterion there.
 
+## Scientific finding (record for the paper) + future promotion
+
+**Finding (2026-06-11):** with N=3 on single-chain questions, the troop is an
+*accuracy amplifier* (11/11 + judge arbitration vs 10/11 solo) at 2.3x token
+cost and 3.3x wall-clock — NOT a speed amplifier. Parallelism pays only when
+the frontier genuinely forks; on pinned chains it buys reliability, not
+speed. This is a result, not a failure — it defines WHEN to use the troop.
+
+**Architecture note:** the troop is deliberately an orchestrator-side
+component (spec Part E: client of MCP, not the bank). The bank provides the
+physics (N-reader concurrency C.9, session-namespaced pheromone, per-session
+telemetry); the strategy (N, partition, stop, judge) lives with whoever owns
+the LLM calls. In bring-your-own-LLM mode that is necessarily the client;
+`troop/` is the reference implementation.
+
+**Future promotion (planned, not started):** in concierge mode (server-side
+SLM) the troop can become an official composite MCP tool —
+`troop_hunt(question, n)` as a "high-confidence mode" (pay ~2.3x for judge +
+N opinions) — the same promotion path harvest took. REQUIRES a new spec
+version first (contract change).
+
 ## Out of scope
 
 Adaptive troop sizing (Phase 2, only if 1.5 data justifies it).

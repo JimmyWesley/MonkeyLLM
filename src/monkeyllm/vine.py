@@ -1,8 +1,8 @@
 """Vine — the navigation protocol (spec Part C).
 
-Nine primitives over a markdown forest:
+Ten primitives over a markdown forest:
 read: locate, look, move, pick, query, scan, sniff
-write: plant, graft (atomic, Git-committed, index-synced)
+write: plant, graft, tend (atomic, Git-committed, index-synced)
 
 Every response fits its declared token budget; truncation is always
 explicit (`truncated: true`), never silent.
@@ -11,6 +11,7 @@ explicit (`truncated: true`), never silent.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import re
 import sqlite3
@@ -38,6 +39,9 @@ from monkeyllm.models import (
     GraftPatch,
     Link,
     NodeSpec,
+    dataset_ddl,
+    dataset_manual,
+    validate_dataset_schema,
     validate_frontmatter,
     validate_summary,
 )
@@ -74,6 +78,11 @@ QUERY_TIMEOUT_S = 2.0
 
 _FORBIDDEN_SQL = re.compile(
     r"\b(ATTACH|DETACH|PRAGMA|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|VACUUM|REINDEX)\b",
+    re.IGNORECASE,
+)
+# tend (C.10) allows INSERT/UPDATE/DELETE but nothing structural or sneaky
+_TEND_FORBIDDEN = re.compile(
+    r"\b(ATTACH|DETACH|PRAGMA|DROP|ALTER|CREATE|VACUUM|REINDEX|BEGIN|COMMIT|TRANSACTION)\b",
     re.IGNORECASE,
 )
 _LIMIT_RE = re.compile(r"\bLIMIT\s+\d+", re.IGNORECASE)
@@ -779,6 +788,94 @@ class Vine:
         return shrink_list_to_budget(payload, "results", BUDGET_SNIFF)
 
     # =======================================================================
+    # C.10 tend — dataset writes (spec v0.7, Phase 2: the living bank)
+    # =======================================================================
+
+    @_traced
+    def tend(self, id: str, sql: str) -> dict:
+        self._require_writable()
+        with self._write_mutex:
+            return self._tend(id, sql)
+
+    def _tend(self, id: str, sql: str) -> dict:
+        row = self._row_or_raise(id)
+        if row["type"] != "dataset" or row["payload_type"] != "sqlite":
+            raise VineError(
+                E_QUERY_FORBIDDEN,
+                f"node {id} is not a sqlite dataset (type={row['type']})",
+                hint="tend() only works on type:dataset nodes with payload_type:sqlite.",
+            )
+        sql = sql.strip().rstrip(";").strip()
+        if ";" in sql:
+            raise VineError(E_QUERY_FORBIDDEN, "only a single SQL statement is allowed")
+        first = sql.split(None, 1)[0].upper() if sql else ""
+        if first not in ("INSERT", "UPDATE", "DELETE"):
+            raise VineError(
+                E_QUERY_FORBIDDEN,
+                "tend accepts INSERT, UPDATE or DELETE only",
+                hint="Reads go through query(); schema changes are the Gardener's job.",
+            )
+        m = _TEND_FORBIDDEN.search(sql)
+        if m:
+            raise VineError(E_QUERY_FORBIDDEN, f"forbidden keyword: {m.group(1).upper()}")
+        if first in ("UPDATE", "DELETE") and not re.search(r"\bWHERE\b", sql, re.IGNORECASE):
+            raise VineError(
+                E_QUERY_FORBIDDEN,
+                f"{first} without WHERE is not allowed (mass-wipe guard)",
+                hint="Target rows explicitly; full rewrites are the Gardener's job.",
+            )
+
+        node = self.forest.read(id)
+        db = self._dataset_db(node)
+        conn = sqlite3.connect(db)
+        deadline = time.monotonic() + QUERY_TIMEOUT_S
+        conn.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 1000)
+        t0 = time.perf_counter()
+        try:
+            cur = conn.execute(sql)
+            conn.commit()
+            rows_affected = cur.rowcount
+        except sqlite3.OperationalError as e:
+            conn.rollback()
+            if "interrupted" in str(e).lower():
+                raise VineError(E_TIMEOUT, f"tend exceeded {QUERY_TIMEOUT_S}s") from e
+            raise VineError(E_QUERY_FORBIDDEN, f"SQL error: {e}") from e
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise VineError(E_QUERY_FORBIDDEN, f"SQL error: {e}") from e
+        finally:
+            conn.close()
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+
+        # audit trail (spec C.10): the .md records what/when via payload_hash;
+        # the binary itself never enters git (A.3.1)
+        new_hash = hashlib.sha256(db.read_bytes()).hexdigest()
+        fm = dict(node.frontmatter)
+        fm["payload_hash"] = new_hash
+        fm["updated"] = dt.date.today().isoformat()
+        content = serialize_node(fm, node.body)
+        assert node.path is not None
+        original = node.path.read_text(encoding="utf-8")
+        try:
+            node.path.write_text(content, encoding="utf-8", newline="\n")
+            commit = self.git.commit(
+                [node.path], f"tend({id}): {first} {rows_affected} row(s)"
+            )
+        except Exception:
+            # payload already committed: restore the .md and surface the error;
+            # the hash drift is exactly what `vine validate` warns about
+            node.path.write_text(original, encoding="utf-8", newline="\n")
+            raise
+        self.catalog.upsert_node(self.forest.read(id))
+        return {
+            "id": id,
+            "rows_affected": rows_affected,
+            "payload_hash": new_hash,
+            "commit": commit,
+            "elapsed_ms": round(elapsed_ms, 2),
+        }
+
+    # =======================================================================
     # C.7 plant — atomic create (file + index + git)
     # =======================================================================
 
@@ -789,7 +886,30 @@ class Vine:
         with self._write_mutex:
             return self._plant(spec)
 
+    def _prepare_dataset_spec(self, spec: NodeSpec) -> None:
+        """C.7.1: the schema is data, never DDL — validate it whole and
+        default the payload fields before the frontmatter is built."""
+        if spec.type != "dataset":
+            raise VineError(
+                E_SCHEMA,
+                f"schema is only valid on type:dataset nodes (got type={spec.type})",
+            )
+        assert spec.table_schema is not None
+        validate_dataset_schema(spec.table_schema)
+        if spec.payload is None:
+            spec.payload = spec.id.rsplit("/", 1)[-1] + ".db"
+        if "/" in spec.payload or "\\" in spec.payload or not spec.payload.endswith(".db"):
+            raise VineError(
+                E_SCHEMA,
+                f"payload must be a bare filename ending in .db: {spec.payload}",
+            )
+        spec.payload_type = spec.payload_type or "sqlite"
+        if spec.payload_type != "sqlite":
+            raise VineError(E_SCHEMA, "schema requires payload_type: sqlite")
+
     def _plant(self, spec: NodeSpec) -> dict:
+        if spec.table_schema is not None:
+            self._prepare_dataset_spec(spec)
         fm = spec.frontmatter_dict()
         validate_frontmatter(fm, self.forest.dialect)
         if self.forest.exists(spec.id):
@@ -805,9 +925,37 @@ class Vine:
                 f"(expected parent: {expected_parent})",
             )
 
+        # C.7.1 payload birth: create the SQLite BEFORE the .md so the hash
+        # lands in the frontmatter; the binary itself never enters git (A.3.1)
+        payload_db: Path | None = None
+        if spec.table_schema is not None:
+            assert spec.payload is not None
+            payload_db = self.forest.path_for(spec.id).parent / spec.payload
+            if payload_db.exists():
+                raise VineError(
+                    E_SCHEMA,
+                    f"payload already exists: {spec.payload}",
+                    hint="A newborn dataset never overwrites an existing payload.",
+                )
+            try:
+                payload_db.parent.mkdir(parents=True, exist_ok=True)
+                conn = sqlite3.connect(payload_db)
+                try:
+                    for stmt in dataset_ddl(spec.table_schema):
+                        conn.execute(stmt)
+                    conn.commit()
+                finally:
+                    conn.close()
+                fm["payload_hash"] = hashlib.sha256(payload_db.read_bytes()).hexdigest()
+            except Exception:
+                payload_db.unlink(missing_ok=True)
+                raise
+
         body = spec.body.strip() or f"# {spec.title}"
         if not body.lstrip().startswith("#"):
             body = f"# {spec.title}\n\n{body}"
+        if spec.table_schema is not None and extract_section(body, "Query manual") is None:
+            body = f"{body.rstrip()}\n\n{dataset_manual(spec.table_schema)}"
         content = serialize_node(fm, body)
 
         parent_node = self.forest.read(spec.parent)
@@ -834,6 +982,8 @@ class Vine:
                     path.unlink(missing_ok=True)
                 else:
                     path.write_text(original, encoding="utf-8", newline="\n")
+            if payload_db is not None:
+                payload_db.unlink(missing_ok=True)
             raise
 
         self.catalog.upsert_node(self.forest.read(spec.id))

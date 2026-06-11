@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -13,6 +14,13 @@ from monkeyllm.tokens import estimate_tokens
 
 IMMUTABLE_FIELDS = {"id", "type", "created"}
 MUTABLE_FRONTMATTER_FIELDS = {"title", "summary", "tags", "confidence"}
+
+# C.7.1 dataset planting (spec v0.8): the model never writes DDL — the schema
+# is data, validated whole, and the Vine generates the CREATE TABLEs itself.
+DATASET_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
+DATASET_COLUMN_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB"}
+MAX_DATASET_TABLES = 10
+MAX_DATASET_COLUMNS = 50
 
 
 class Link(BaseModel):
@@ -135,10 +143,81 @@ def validate_frontmatter(fm: dict, dialect: dlt.Dialect, *, strict_summary: bool
     return model
 
 
+class TableSchema(BaseModel):
+    """One table of a C.7.1 declarative dataset schema."""
+
+    columns: dict[str, str]
+    primary_key: list[str] = Field(default_factory=list)
+
+
+def validate_dataset_schema(schema: dict[str, TableSchema]) -> None:
+    """C.7.1: names regex-checked, types allowlisted, limits enforced."""
+    if not schema:
+        raise VineError(E_SCHEMA, "schema: must declare at least one table")
+    if len(schema) > MAX_DATASET_TABLES:
+        raise VineError(E_SCHEMA, f"schema: max {MAX_DATASET_TABLES} tables per dataset")
+    for tname, table in schema.items():
+        if not DATASET_NAME_RE.fullmatch(tname):
+            raise VineError(
+                E_SCHEMA,
+                f"schema: invalid table name '{tname}'",
+                hint="Names must match ^[a-z_][a-z0-9_]*$ (<= 64 chars).",
+            )
+        if not table.columns:
+            raise VineError(E_SCHEMA, f"schema: table '{tname}' has no columns")
+        if len(table.columns) > MAX_DATASET_COLUMNS:
+            raise VineError(
+                E_SCHEMA, f"schema: table '{tname}' exceeds {MAX_DATASET_COLUMNS} columns"
+            )
+        for cname, ctype in table.columns.items():
+            if not DATASET_NAME_RE.fullmatch(cname):
+                raise VineError(
+                    E_SCHEMA,
+                    f"schema: invalid column name '{cname}' in table '{tname}'",
+                    hint="Names must match ^[a-z_][a-z0-9_]*$ (<= 64 chars).",
+                )
+            if ctype.upper() not in DATASET_COLUMN_TYPES:
+                raise VineError(
+                    E_SCHEMA,
+                    f"schema: invalid type '{ctype}' for {tname}.{cname}",
+                    hint=f"Allowed types: {sorted(DATASET_COLUMN_TYPES)}.",
+                )
+        for pk in table.primary_key:
+            if pk not in table.columns:
+                raise VineError(
+                    E_SCHEMA,
+                    f"schema: primary_key '{pk}' is not a column of '{tname}'",
+                )
+
+
+def dataset_ddl(schema: dict[str, TableSchema]) -> list[str]:
+    """Generate the CREATE TABLE statements from a validated schema."""
+    stmts = []
+    for tname, table in schema.items():
+        cols = [f"{c} {t.upper()}" for c, t in table.columns.items()]
+        if table.primary_key:
+            cols.append("PRIMARY KEY (" + ", ".join(table.primary_key) + ")")
+        stmts.append(f"CREATE TABLE {tname} ({', '.join(cols)})")
+    return stmts
+
+
+def dataset_manual(schema: dict[str, TableSchema]) -> str:
+    """Auto `## Query manual` body section (C.7.1) — feeds C.2's query_manual."""
+    lines = ["## Query manual", "", "Tables:"]
+    for tname, table in schema.items():
+        cols = ", ".join(f"{c} {t.upper()}" for c, t in table.columns.items())
+        lines.append(f"- `{tname}({cols})`")
+    lines += ["", "Example queries:"]
+    for tname in schema:
+        lines.append(f"- `SELECT * FROM {tname} LIMIT 5`")
+        lines.append(f"- `SELECT COUNT(*) FROM {tname}`")
+    return "\n".join(lines)
+
+
 class NodeSpec(BaseModel):
     """Input of plant() (C.7): full frontmatter + body + parent branch id."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     id: str
     type: str
@@ -155,6 +234,9 @@ class NodeSpec(BaseModel):
     payload_hash: str | None = None
     entity_kind: str | None = None
     aliases: list[str] = Field(default_factory=list)
+    # C.7.1: declarative dataset schema ("schema" on the wire; aliased because
+    # pydantic reserves the bare name). Creation directive, not frontmatter.
+    table_schema: dict[str, TableSchema] | None = Field(default=None, alias="schema")
 
     def frontmatter_dict(self, today: dt.date | None = None) -> dict:
         today = today or dt.date.today()

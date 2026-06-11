@@ -116,8 +116,10 @@ def build_server(
             "bodies for exact terms the summaries miss, look(id) for a cheap "
             "digest, move(id) for neighbors, pick(id) only when the summary "
             "says it is the banana, query(id, sql) for datasets. "
-            "plant/graft to write. When this server hosts multiple forests, "
-            "call forests() and pass forest=<id> on every tool."
+            "plant/graft to write nodes (plant with schema= births a new "
+            "dataset); tend(id, sql) to write dataset rows. "
+            "When this server hosts multiple forests, call forests() and pass "
+            "forest=<id> on every tool."
         ),
     )
 
@@ -181,6 +183,13 @@ def build_server(
         return guarded("query", forest, id, sql)
 
     @mcp.tool()
+    def tend(id: str, sql: str, forest: str | None = None) -> dict:
+        """Write to a dataset node's SQLite payload (spec C.10): one INSERT/UPDATE/
+        DELETE statement, WHERE required on UPDATE/DELETE; refreshes payload_hash
+        and commits the .md audit reference (the binary never enters git)."""
+        return guarded("tend", forest, id, sql)
+
+    @mcp.tool()
     def scan(parent_id: str, filter: dict | None = None, fields: list[str] | None = None,
              recursive: bool = False, limit: int = 50, forest: str | None = None) -> dict:
         """Metadata query over a branch's children via the Catalog (no file opens)."""
@@ -189,7 +198,10 @@ def build_server(
 
     @mcp.tool()
     def plant(node: dict, forest: str | None = None) -> dict:
-        """Create a node: frontmatter + body + parent (atomic: file+index+git commit)."""
+        """Create a node: frontmatter + body + parent (atomic: file+index+git commit).
+        For type:dataset, pass schema={table: {columns: {name: TEXT|INTEGER|REAL|BLOB},
+        primary_key?: [...]}} and Vine births the SQLite payload + query manual
+        (spec C.7.1); rows then enter via tend()."""
         return guarded("plant", forest, node)
 
     @mcp.tool()

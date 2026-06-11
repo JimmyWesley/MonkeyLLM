@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.6.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.7.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -26,7 +26,7 @@ change the generator and rebuild.
 ## Layout
 
 - `src/monkeyllm/` — the `monkeyllm` package, `vine` CLI. `vine.py`
-  (9 primitives), `harvest.py` (C.6c composite MCP tool: one-shot zero-LLM
+  (10 primitives), `harvest.py` (C.6c composite MCP tool: one-shot zero-LLM
   retrieval), `catalog.py` (SQLite + FTS5 = locate's BM25 side + scan),
   `canopy.py` (optional vector layer, Phase 1), `parser.py`/`models.py`
   (frontmatter), `forest.py`/`gitops.py` (files + commits),
@@ -67,6 +67,9 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   Never mix the two.
 - `query` is read-only SQL over `type:dataset` nodes: reject every write
   (`;DROP`, `ATTACH`, multi-statement, `PRAGMA`) — there is an injection suite.
+- `tend` (spec C.10) is the ONLY dataset write path: single INSERT/UPDATE/
+  DELETE, WHERE mandatory on UPDATE/DELETE, no DDL; refreshes `payload_hash`
+  and commits only the `.md` (it has its own injection suite too).
 - `plant`/`graft` are atomic and `git commit` **inside the forest**
   (spec C.7/C.8). That is product behavior and it is correct.
 - **Binaries never enter the forest git** (spec A.3.1): gitops only versions

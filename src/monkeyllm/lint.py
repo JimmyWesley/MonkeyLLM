@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 from monkeyllm.errors import VineError
@@ -63,8 +64,18 @@ def lint_forest(forest: Forest) -> list[Issue]:
                 issues.append(Issue(node_id, "warning", f"broken wikilink: [[{wl}]]"))
 
         if node.frontmatter.get("payload"):
-            if not forest.payload_path(node).is_file():
+            payload = forest.payload_path(node)
+            if not payload.is_file():
                 issues.append(
                     Issue(node_id, "error", f"payload missing: {node.frontmatter['payload']}")
                 )
+            elif node.frontmatter.get("payload_hash"):
+                # spec A.3/C.10: drift detection — the hash is the audit anchor
+                actual = hashlib.sha256(payload.read_bytes()).hexdigest()
+                if actual != node.frontmatter["payload_hash"]:
+                    issues.append(
+                        Issue(node_id, "warning",
+                              f"payload drift: sha256 mismatch for {node.frontmatter['payload']} "
+                              "(edited outside tend?)")
+                    )
     return issues
