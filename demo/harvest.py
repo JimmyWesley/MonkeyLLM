@@ -1,0 +1,43 @@
+"""CLI wrapper for the harvest tool (spec C.6c) — see monkeyllm.harvest.
+
+Zero-LLM retrieval: one call, ranked bananas + exact snippets back, so the
+caller's LLM decides the next steps.
+
+Usage:
+    python demo/harvest.py --forest forest-fixture "semente 1045"
+    python demo/harvest.py --forest forest-fixture --terms 1045,Experimento --k 3 "..."
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from monkeyllm import Vine  # noqa: E402
+from monkeyllm.harvest import harvest  # noqa: E402
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("query", help="free-text question or search phrase")
+    ap.add_argument("--forest", default="forest-fixture")
+    ap.add_argument("--terms", help="comma-separated exact terms (default: derived from the query)")
+    ap.add_argument("--k", type=int, default=3, help="max bananas returned (cap 5)")
+    args = ap.parse_args()
+
+    vine = Vine(Path(args.forest), writable=False, session="harvest")
+    try:
+        terms = [t.strip() for t in args.terms.split(",") if t.strip()] if args.terms else None
+        out = harvest(vine, args.query, terms=terms, k=args.k)
+    finally:
+        vine.close()
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

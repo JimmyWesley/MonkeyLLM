@@ -23,12 +23,14 @@ def build_server(forest_root: str | Path | None = None, writable: bool = True) -
     mcp = FastMCP(
         "vine",
         instructions=(
-            "MonkeyLLM forest navigation. Start with look('_index') for the map, "
-            "or locate(query) to be dropped near the target; sniff(terms) greps "
-            "bodies for exact terms (codes, names, numbers) the summaries miss. "
-            "Use look(id) for a cheap digest, move(id) for neighbors, pick(id) "
-            "only when the summary says it is the banana, query(id, sql) for "
-            "datasets. plant/graft to write."
+            "MonkeyLLM forest navigation. Two ways in: harvest(query) for "
+            "one-shot retrieval (ranked evidence + snippets, you reason over "
+            "it), or navigate yourself — look('_index') for the map, "
+            "locate(query) to be dropped near the target, sniff(terms) to grep "
+            "bodies for exact terms the summaries miss, look(id) for a cheap "
+            "digest, move(id) for neighbors, pick(id) only when the summary "
+            "says it is the banana, query(id, sql) for datasets. "
+            "plant/graft to write."
         ),
     )
 
@@ -42,6 +44,15 @@ def build_server(forest_root: str | Path | None = None, writable: bool = True) -
     def locate(query: str, k: int = 5, scope: str = "all", type_filter: str | None = None) -> dict:
         """Find entry points (the helicopter). scope: all|branches|bananas."""
         return guarded(vine.locate, query, k=k, scope=scope, type_filter=type_filter)
+
+    @mcp.tool()
+    def harvest(query: str, terms: list[str] | None = None, k: int = 3) -> dict:
+        """One-shot retrieval (zero LLM server-side): ranked bananas with body or
+        matched sections + exact snippets. Use it when you want evidence in a
+        single call and will reason over it yourself; use the primitives below
+        when you want to navigate step by step."""
+        from monkeyllm.harvest import harvest as _harvest
+        return guarded(_harvest, vine, query, terms=terms, k=k)
 
     @mcp.tool()
     def sniff(
