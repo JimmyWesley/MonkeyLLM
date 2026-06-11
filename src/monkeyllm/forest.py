@@ -199,6 +199,24 @@ class Forest:
         assert node.path is not None
         return node.path.parent / payload
 
+    def body_cache_path(self, node_id: str) -> Path:
+        """G.7 `content: cached` — the FLESH lives in _derived, out of git."""
+        return self.derived_dir / "bodies" / f"{node_id}.md"
+
+    def gardener_source_root(self) -> Path | None:
+        """The adopted source root (G.6 config) — backs `content: reference`."""
+        if not hasattr(self, "_gardener_root"):
+            import yaml
+
+            cfg = self.root / "_meta" / "gardener.yaml"
+            root = None
+            if cfg.is_file():
+                data = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+                if data.get("source_root"):
+                    root = Path(str(data["source_root"]))
+            self._gardener_root: Path | None = root
+        return self._gardener_root
+
 
 class WriterLock:
     """One writer per forest (spec C.9). `.vine.lock` at the root."""

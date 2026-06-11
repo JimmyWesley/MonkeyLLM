@@ -4,7 +4,9 @@ status: in-progress (workstream 3 `tend` DONE 2026-06-11 via spec v0.7;
 workstream 5 dataset birth DONE 2026-06-11 via spec v0.8;
 workstream 1 Gardener v1 deterministic core DONE 2026-06-11 via spec v0.9;
 workstream 2 Ranger v1 DONE 2026-06-11 via spec v0.10;
-LLM curation (G.4.2) DONE + measured 2026-06-11 —
+LLM curation (G.4.2) DONE + measured 2026-06-11;
+workstream 6 tiered storage DONE 2026-06-11 via spec v0.11 (G.7/G.8 +
+G.9 fetchers/prefetch + H.6 eviction + Part I snapshots) —
 DOCX converter, edge proposals and convergence curve remain)
 depends-on: T01 (measurement discipline), T03 (troop data feeds adaptive ideas)
 
@@ -94,6 +96,28 @@ query datasets but **write** to them, safely.
    through the primitives (the owner's collector-agent scenario; also the
    "table buried in a giant document -> queryable twin" move). `ALTER` stays
    out of agent reach. 16 tests in tests/test_plant_dataset.py.
+6. **Tiered storage (spec v0.11 G.7/G.8) — DONE (2026-06-11):** the map is
+   not the territory. `content: inline|cached|reference` (cached bodies in
+   `_derived/bodies/` out of git; reference reads the source live; lazy
+   resolution in pick/sniff; explicit degraded mode E_NOT_FOUND while
+   locate/look keep working; curation always sees full text);
+   `archive: never` default (no more `_assets/` copies of durable
+   sources); targeted sync (`sync --path`, the event-trigger building
+   block: watchers/S3 events/Drive webhooks call it — events trigger,
+   the reconciler decides) + mtime/size fast-path (no re-hashing
+   unchanged trees). 12 tests in tests/test_content_policy.py.
+   **G.9/H.6/Part I — DONE (same day):** `fetch.py` fetcher registry
+   (`file://` built-in = test double; `s3://` via optional boto3 with
+   `MONKEYLLM_S3_ENDPOINT` for MinIO/R2) + hash-validated
+   `_derived/payloads/` cache (tampered downloads refused); `tend`
+   rejects remote payloads (local-first, G.9.4); `Vine.prefetch(scope)` +
+   `vine prefetch` — the parachute warms the camp (owner's idea: land,
+   pull the region's payloads, then sniff/query at local speed); Ranger
+   `payload_cache_gb` LRU eviction in run(); `vine snapshot
+   create|restore` via git bundle (full audit history travels; optional
+   payload sidecar zip; `--to` uploads via the fetcher). 9 tests in
+   tests/test_fetch_snapshot.py. Map stays local to the Vine — remote
+   clients come through MCP (spec note in G.9).
 
 ## Acceptance criteria
 

@@ -50,11 +50,29 @@ def main(argv: list[str] | None = None) -> int:
     p_sync.add_argument("--forest", default=".")
     p_sync.add_argument("--curate", action="store_true",
                         help="LLM curation for newly adopted files (G.4.2)")
+    p_sync.add_argument("--path", default=None,
+                        help="targeted sync (G.8): reconcile only this source-relative path")
 
     p_ranger = sub.add_parser("ranger", help="Ranger: evaporate heat, tend links, report health (spec H)")
     p_ranger.add_argument("--forest", default=".")
     p_ranger.add_argument("--every", type=int, default=None,
                           help="service mode: repeat every N seconds until interrupted")
+
+    p_snap = sub.add_parser("snapshot", help="package/restore the forest as a git bundle (spec Part I)")
+    p_snap.add_argument("action", choices=["create", "restore"])
+    p_snap.add_argument("file", nargs="?", default=None,
+                        help="bundle file (restore: required; create: optional output)")
+    p_snap.add_argument("--forest", default=".")
+    p_snap.add_argument("--with-payloads", action="store_true",
+                        help="create: also zip the dataset payloads as a sidecar")
+    p_snap.add_argument("--payloads", default=None,
+                        help="restore: payload sidecar zip to extract")
+    p_snap.add_argument("--to", default=None,
+                        help="create: upload the bundle to this URI (file:// or s3://)")
+
+    p_prefetch = sub.add_parser("prefetch", help="warm remote payloads under a branch (spec G.9.5)")
+    p_prefetch.add_argument("scope", nargs="?", default="_index")
+    p_prefetch.add_argument("--forest", default=".")
 
     args = parser.parse_args(argv)
     forest_root = Path(args.forest).resolve() if getattr(args, "forest", None) else None
@@ -135,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "adopt":
                 report = gardener.adopt(args.source, dest=args.dest)
             else:
-                report = gardener.sync(args.source)
+                report = gardener.sync(args.source, path=args.path)
         finally:
             vine.close()
         for key in ("planted", "branches", "updated", "unchanged", "stale",
@@ -149,6 +167,44 @@ def main(argv: list[str] | None = None) -> int:
         if not any(report.values()):
             print("nothing to do")
         return 1 if report.get("errors") else 0
+
+    if args.command == "snapshot":
+        from monkeyllm.snapshot import create_snapshot, restore_snapshot
+
+        if args.action == "create":
+            info = create_snapshot(forest_root, out=Path(args.file) if args.file else None,
+                                   with_payloads=args.with_payloads)
+            print(f"bundle: {info['bundle']} ({info['bytes']:,} bytes)")
+            if info.get("payload_sidecar"):
+                print(f"payload sidecar: {info['payload_sidecar']} ({info['payloads']} file(s))")
+            if args.to:
+                from monkeyllm.fetch import upload
+
+                upload(Path(info["bundle"]), args.to)
+                print(f"uploaded to {args.to}")
+        else:
+            if not args.file:
+                parser.error("snapshot restore needs the bundle file")
+            info = restore_snapshot(Path(args.file), forest_root,
+                                    payload_sidecar=Path(args.payloads) if args.payloads else None)
+            print(f"restored {info['nodes']} nodes -> {info['forest']}"
+                  + (f" (+{info['restored_payloads']} payload(s))" if info["restored_payloads"] else ""))
+        return 0
+
+    if args.command == "prefetch":
+        from monkeyllm.vine import Vine
+
+        vine = Vine(forest_root, writable=False)
+        try:
+            report = vine.prefetch(args.scope)
+        finally:
+            vine.close()
+        print(f"fetched {len(report['fetched'])}, already local {report['already_local']}")
+        for item in report["fetched"]:
+            print(f"  {item}")
+        for err in report["errors"]:
+            print(f"  ERROR {err}")
+        return 1 if report["errors"] else 0
 
     if args.command == "ranger":
         import json as _json

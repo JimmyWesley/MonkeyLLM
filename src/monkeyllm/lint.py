@@ -64,6 +64,10 @@ def lint_forest(forest: Forest) -> list[Issue]:
                 issues.append(Issue(node_id, "warning", f"broken wikilink: [[{wl}]]"))
 
         if node.frontmatter.get("payload"):
+            from monkeyllm.fetch import is_remote
+
+            if is_remote(node.frontmatter["payload"]):
+                continue  # G.9: validated by hash at fetch time, not by lint
             payload = forest.payload_path(node)
             if not payload.is_file():
                 issues.append(

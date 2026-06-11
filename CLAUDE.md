@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.10.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.11.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -92,6 +92,20 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   confidence-1.0 links are untouchable. Evaporation lives in `_derived/`
   (no commits); promote/prune commit `.md`-only as `ranger(promote|prune)`.
   The Ranger never deletes nodes.
+- **Tiered storage (spec G.7-G.9)**: SCENT (passports) always local/git;
+  FLESH per `content: inline|cached|reference` policy (`cached` bodies live
+  in `_derived/bodies/`, OUT of git; `pick`/`sniff` resolve lazily; an
+  unreachable body is explicit `E_NOT_FOUND` while the map keeps working);
+  BONE (raw binaries) stays at the source — `archive: never` is the
+  default. Curation always sees the FULL text (G.7.4). Events trigger,
+  the hash-diff reconciler decides (`sync --path` + mtime/size fast-path).
+- **Remote payloads (G.9)**: `payload` may be a URI (`file://`, `s3://` via
+  optional boto3; `MONKEYLLM_S3_ENDPOINT` for MinIO/R2). Reads fetch into
+  the hash-validated `_derived/payloads/` cache (Ranger evicts LRU, H.6);
+  `tend` REJECTS remote payloads (datasets are local-first). `vine
+  prefetch <branch>` warms a region after the locate drop. `vine snapshot
+  create|restore` = git bundle with full history (Part I); the map itself
+  always stays local to the Vine — remote clients come through MCP.
 - `plant`/`graft` are atomic and `git commit` **inside the forest**
   (spec C.7/C.8). That is product behavior and it is correct.
 - **Binaries never enter the forest git** (spec A.3.1): gitops only versions

@@ -32,6 +32,7 @@ from monkeyllm.errors import (
     E_TIMEOUT,
     VineError,
 )
+from monkeyllm.fetch import PayloadCache, is_remote
 from monkeyllm.forest import Forest, WriterLock
 from monkeyllm.gitops import GitRepo
 from monkeyllm.models import (
@@ -49,6 +50,7 @@ from monkeyllm.models import (
 from monkeyllm.parser import (
     ParsedNode,
     append_section,
+    extract_outline,
     extract_section,
     replace_section,
     serialize_node,
@@ -106,6 +108,11 @@ def _fold(text: str) -> str:
             cache[ch] = f
         out.append(f)
     return "".join(out)
+
+
+# G.7: cheap detector for non-inline nodes (frontmatter `content:` marker);
+# a body-text false positive only costs one harmless re-read via the parser
+_CONTENT_MARKER_RE = re.compile(r"^content: (cached|reference)\s*$", re.MULTILINE)
 
 
 def _raw_body(text: str) -> str:
@@ -199,6 +206,7 @@ class Vine:
         self.forest = Forest(root)
         self.catalog = Catalog(self.forest)
         self.trails = Trails(self.forest.derived_dir)
+        self.payload_cache = PayloadCache(self.forest.derived_dir)
         self.tracer = Tracer(self.forest.derived_dir, self.trails, session)
         self.alpha = alpha
         self.beta = beta
@@ -444,11 +452,51 @@ class Vine:
             digest["truncated"] = True
         return digest
 
-    def _dataset_db(self, node: ParsedNode) -> Path:
+    def _dataset_db(self, node: ParsedNode, *, for_write: bool = False) -> Path:
+        payload = node.frontmatter.get("payload")
+        if is_remote(payload):
+            if for_write:
+                raise VineError(
+                    E_QUERY_FORBIDDEN,
+                    f"remote payload is read-only: {payload}",
+                    hint="Datasets are local-first (spec G.9.4): bring the .db "
+                         "local to tend it — editing a cached copy would fork it.",
+                )
+            # G.9: download-on-first-use, hash-validated, LRU-touched (H.6)
+            return self.payload_cache.get(
+                str(payload), node.frontmatter.get("payload_hash"))
         db = self.forest.payload_path(node)
         if not db.is_file():
             raise VineError(E_NOT_FOUND, f"payload missing: {db.name}")
         return db
+
+    def prefetch(self, scope: str = "_index") -> dict:
+        """G.9.5 — the parachute warms the camp: after locate drops the monkey
+        on a region, pull every remote payload under it in one sweep so the
+        following sniff/query hops run at local speed."""
+        scope = scope.strip().strip("/")
+        if scope in ("", "_index"):
+            prefix = ""
+        elif scope.endswith("/_index"):
+            prefix = scope[: -len("_index")]
+        else:
+            prefix = scope + "/"
+        fetched, local, errors = [], 0, []
+        for row in self.catalog.conn.execute(
+            "SELECT id, payload, payload_hash FROM nodes WHERE payload IS NOT NULL"
+        ).fetchall():
+            if prefix and not row["id"].startswith(prefix):
+                continue
+            if not is_remote(row["payload"]):
+                local += 1
+                continue
+            try:
+                self.payload_cache.get(row["payload"], row["payload_hash"])
+                fetched.append(row["id"])
+            except VineError as e:
+                errors.append(f"{row['id']}: {e.message}")
+        return {"scope": scope or "_index", "fetched": fetched,
+                "already_local": local, "errors": errors}
 
     def _dataset_manual(self, node: ParsedNode) -> dict:
         db = self._dataset_db(node)
@@ -543,16 +591,48 @@ class Vine:
     # C.4 pick — harvest the banana
     # =======================================================================
 
+    def _resolved_body(self, node: ParsedNode) -> str:
+        """G.7 lazy FLESH resolution: cached -> _derived/bodies, reference ->
+        the source file itself. Inline nodes return their own body."""
+        mode = node.frontmatter.get("content")
+        if mode == "cached":
+            f = self.forest.body_cache_path(node.id)
+            if not f.is_file():
+                raise VineError(
+                    E_NOT_FOUND,
+                    f"cached body missing for {node.id}",
+                    hint="Re-run `vine sync` with the sources reachable to rebuild "
+                         "_derived/bodies. The map (locate/look/scan) keeps working.",
+                )
+            return f.read_text(encoding="utf-8")
+        if mode == "reference":
+            root = self.forest.gardener_source_root()
+            sp = node.frontmatter.get("source_path")
+            f = (root / str(sp)) if root and sp else None
+            if f is None or not f.is_file():
+                raise VineError(
+                    E_NOT_FOUND,
+                    f"reference body unreachable for {node.id}",
+                    hint=f"source file: {f}. The map (locate/look/scan) keeps working.",
+                )
+            return f.read_text(encoding="utf-8", errors="replace")
+        return node.body
+
     @_traced
     def pick(self, id: str, section: str | None = None) -> dict:
         node = self.forest.read(id)
+        body, outline = node.body, node.outline
+        if node.frontmatter.get("content") in ("cached", "reference"):
+            body = self._resolved_body(node)
+            _, _, outline = extract_outline(body)
+        body_tokens = estimate_tokens(body)
         if section:
-            content = extract_section(node.body, section)
+            content = extract_section(body, section)
             if content is None:
                 raise VineError(
                     E_NOT_FOUND,
                     f"section '{section}' not found in {id}",
-                    hint=f"Available sections: {node.outline}",
+                    hint=f"Available sections: {outline}",
                 )
             return {
                 "id": id,
@@ -562,20 +642,20 @@ class Vine:
                 "body_tokens": estimate_tokens(content),
                 "truncated": False,
             }
-        if node.body_tokens > PICK_MAX_BODY_TOKENS:
+        if body_tokens > PICK_MAX_BODY_TOKENS:
             return {
                 "id": id,
                 "title": node.title,
-                "outline": node.outline,
-                "body_tokens": node.body_tokens,
+                "outline": outline,
+                "body_tokens": body_tokens,
                 "truncated": True,
                 "hint": "Body exceeds 4000 tokens. Use section=<header> to harvest one section.",
             }
         return {
             "id": id,
             "title": node.title,
-            "body": node.body,
-            "body_tokens": node.body_tokens,
+            "body": body,
+            "body_tokens": body_tokens,
             "truncated": False,
         }
 
@@ -761,8 +841,16 @@ class Vine:
                 text = self.forest.path_for(nid).read_text(encoding="utf-8")
             except (VineError, OSError):
                 continue  # validate() reports broken nodes; sniff skips them
+            body = _raw_body(text)
+            if _CONTENT_MARKER_RE.search(text):
+                # G.7: non-inline node — grep the resolved FLESH instead of
+                # the stub; an unreachable body degrades to "no match"
+                try:
+                    body = self._resolved_body(self.forest.read(nid))
+                except VineError:
+                    continue
             scanned += 1
-            matches, terms_hit = _sniff_body(_raw_body(text), folded_terms)
+            matches, terms_hit = _sniff_body(body, folded_terms)
             if not matches:
                 continue
             strength = len(terms_hit) / len(folded_terms)
@@ -827,7 +915,7 @@ class Vine:
             )
 
         node = self.forest.read(id)
-        db = self._dataset_db(node)
+        db = self._dataset_db(node, for_write=True)
         conn = sqlite3.connect(db)
         deadline = time.monotonic() + QUERY_TIMEOUT_S
         conn.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 1000)

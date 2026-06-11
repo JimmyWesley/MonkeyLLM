@@ -31,6 +31,7 @@ DEFAULTS = {
     "promote_floor": 0.2,
     "promoted_confidence": 0.8,
     "prune_below": 0.5,
+    "payload_cache_gb": 5.0,  # H.6
 }
 
 NEEDS_SPLIT_ENTRIES = 150   # A.5
@@ -179,6 +180,9 @@ class Ranger:
 
     def run(self) -> dict:
         report = {"evaporation": self.evaporate()}
+        # H.6: evaporation for bytes — cold cached payloads leave the disk
+        report["payload_cache"] = self.vine.payload_cache.evict(
+            float(self.config["payload_cache_gb"]))
         report["links"] = self.tend_links()
         report["health"] = self.health()
         return report

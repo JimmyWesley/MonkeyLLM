@@ -171,4 +171,4 @@ class TestFullCycle:
     def test_run_returns_all_sections(self, ranger):
         r, _ = ranger
         report = r.run()
-        assert set(report) == {"evaporation", "links", "health"}
+        assert set(report) == {"evaporation", "payload_cache", "links", "health"}

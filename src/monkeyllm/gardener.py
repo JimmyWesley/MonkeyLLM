@@ -482,6 +482,7 @@ class Gardener:
         if self.forest.exists(node_id):
             node_id = f"{node_id}-{hashlib.sha256(rel.as_posix().encode()).hexdigest()[:6]}"
 
+        st = f.stat()
         source_hash = hashlib.sha256(f.read_bytes()).hexdigest()
         is_text_source = f.suffix.lower() in MarkdownConverter.extensions
         draft: dict = {
@@ -492,6 +493,9 @@ class Gardener:
             "confidence": INGEST_CONFIDENCE,
             "source_path": rel.as_posix(),
             "source_hash": source_hash,
+            # G.8 fast-path: sync skips hashing when both still match
+            "source_size": st.st_size,
+            "source_mtime": round(st.st_mtime, 3),
         }
         if conversion.kind == "dataset":
             draft.update({
@@ -506,7 +510,8 @@ class Gardener:
                 "body": conversion.markdown,
                 "summary": derive_summary(conversion.markdown, conversion.title),
             })
-        if not is_text_source:
+        # G.7 archive policy: durable sources are referenced, not copied
+        if not is_text_source and self.config.get("archive", "never") == "always":
             payload, ptype, phash = self._archive(f, branch_id)
             # dataset payload is its own .db; unknown payload types are
             # archived but not referenced (the A.3 enum stays honest)
@@ -514,12 +519,36 @@ class Gardener:
                 draft.update({"payload": payload, "payload_type": ptype,
                               "payload_hash": phash})
 
+        # curation sees the FULL converted text (G.7.4)…
         draft = self._curate(draft, report)
+        # …and only then the content policy slims the node (G.7)
+        if conversion.kind != "dataset":
+            draft = self._apply_content_policy(draft, conversion.title,
+                                               is_text_source)
         try:
             self.vine.plant(draft)
             report.planted.append(node_id)
         except VineError as e:
             report.errors.append(f"{rel.as_posix()}: {e.message}")
+
+    def _apply_content_policy(self, draft: dict, title: str,
+                              is_text_source: bool) -> dict:
+        policy = self.config.get("content", "inline")
+        if policy == "reference" and not is_text_source:
+            policy = "cached"  # converted bodies must live SOMEWHERE local
+        if policy == "cached":
+            self._write_body_cache(draft["id"], draft["body"])
+            draft["body"] = f"# {title}"
+            draft["content"] = "cached"
+        elif policy == "reference":
+            draft["body"] = f"# {title}"
+            draft["content"] = "reference"
+        return draft
+
+    def _write_body_cache(self, node_id: str, body: str) -> None:
+        p = self.forest.body_cache_path(node_id)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8", newline="\n")
 
     def _node_id(self, rel: Path, dest: str | None) -> str:
         parts = [slugify(p) for p in rel.parent.parts]
@@ -536,20 +565,27 @@ class Gardener:
 
     # -- sync (G.3) ----------------------------------------------------------
 
-    def _passports(self) -> dict[str, tuple[str, str]]:
-        """source_path -> (node_id, source_hash), read from the forest itself."""
-        out: dict[str, tuple[str, str]] = {}
+    def _passports(self) -> dict[str, dict]:
+        """source_path -> {id, hash, size, mtime}, read from the forest itself
+        (the forest IS the sync state — no side bookkeeping to drift)."""
+        out: dict[str, dict] = {}
         for nid in self.forest.iter_ids():
             try:
                 node = self.forest.read(nid)
             except VineError:
                 continue
-            sp = node.frontmatter.get("source_path")
-            if sp:
-                out[str(sp)] = (nid, str(node.frontmatter.get("source_hash", "")))
+            fm = node.frontmatter
+            if fm.get("source_path"):
+                out[str(fm["source_path"])] = {
+                    "id": nid,
+                    "hash": str(fm.get("source_hash", "")),
+                    "size": fm.get("source_size"),
+                    "mtime": fm.get("source_mtime"),
+                }
         return out
 
-    def sync(self, source: str | Path | None = None) -> dict:
+    def sync(self, source: str | Path | None = None,
+             path: str | None = None) -> dict:
         src = Path(source or self.config.get("source_root", "")).resolve()
         if not src.is_dir():
             raise VineError(
@@ -560,23 +596,45 @@ class Gardener:
         dest = self.config.get("dest")
         report = IngestReport()
         passports = self._passports()
+
+        if path:  # G.8 targeted sync: one file, the event-trigger building block
+            rel = Path(path).as_posix()
+            f = src / rel
+            if f.is_file():
+                self._sync_one(src, f, rel, passports, dest, report)
+            elif rel in passports:
+                report.stale.append(passports[rel]["id"])
+            else:
+                report.unsupported.append(rel)
+            return report.as_dict()
+
         seen: set[str] = set()
         for f in self._walk(src):
             rel = f.relative_to(src).as_posix()
             seen.add(rel)
-            if rel not in passports:
-                self._ingest_file(src, f, dest, report)
-                continue
-            node_id, old_hash = passports[rel]
-            new_hash = hashlib.sha256(f.read_bytes()).hexdigest()
-            if new_hash == old_hash:
-                report.unchanged.append(node_id)
-                continue
-            self._update_passport(node_id, f, new_hash, report)
-        for rel, (node_id, _) in passports.items():
+            self._sync_one(src, f, rel, passports, dest, report)
+        for rel, info in passports.items():
             if rel not in seen:
-                report.stale.append(node_id)
+                report.stale.append(info["id"])
         return report.as_dict()
+
+    def _sync_one(self, src: Path, f: Path, rel: str, passports: dict,
+                  dest: str | None, report: IngestReport) -> None:
+        if rel not in passports:
+            self._ingest_file(src, f, dest, report)
+            return
+        info = passports[rel]
+        st = f.stat()
+        # G.8 fast-path (rsync's trick): same size + mtime -> skip hashing
+        if (info.get("size") == st.st_size
+                and info.get("mtime") == round(st.st_mtime, 3)):
+            report.unchanged.append(info["id"])
+            return
+        new_hash = hashlib.sha256(f.read_bytes()).hexdigest()
+        if new_hash == info["hash"]:
+            report.unchanged.append(info["id"])
+            return
+        self._update_passport(info["id"], f, new_hash, report)
 
     def _update_passport(self, node_id: str, f: Path, new_hash: str,
                          report: IngestReport) -> None:
@@ -598,6 +656,9 @@ class Gardener:
         node = self.forest.read(node_id)
         fm = dict(node.frontmatter)
         fm["source_hash"] = new_hash
+        st = f.stat()
+        fm["source_size"] = st.st_size
+        fm["source_mtime"] = round(st.st_mtime, 3)
         fm["updated"] = dt.date.today().isoformat()
         body = node.body
 
@@ -621,6 +682,10 @@ class Gardener:
             finally:
                 conn.close()
             fm["payload_hash"] = hashlib.sha256(db.read_bytes()).hexdigest()
+        elif fm.get("content") == "cached":
+            self._write_body_cache(node_id, conversion.markdown)  # body stays a stub
+        elif fm.get("content") == "reference":
+            pass  # the body IS the source; hash bookkeeping above is enough
         else:
             body = conversion.markdown
 
