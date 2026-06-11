@@ -69,6 +69,8 @@ def run_arm(arm: str, questions: list[dict], *, forest: Path, chat, store, embed
 
 def summarize(arm: str, results: list[dict]) -> dict:
     toks = [r["metrics"]["tokens_to_banana"] for r in results]
+    walls = sorted(r["wall_s"] for r in results)
+    p95 = walls[min(len(walls) - 1, int(round(0.95 * (len(walls) - 1))))]
     return {
         "arm": arm,
         "correct": sum(1 for r in results if r["correct_text"]),
@@ -76,7 +78,9 @@ def summarize(arm: str, results: list[dict]) -> dict:
         "precision_mean": round(sum(r["banana_precision"] for r in results) / len(results), 2),
         "tokens_median": int(statistics.median(toks)),
         "tokens_mean": int(sum(toks) / len(toks)),
-        "wall_s_median": round(statistics.median(r["wall_s"] for r in results), 1),
+        "wall_s_median": round(statistics.median(walls), 1),
+        "wall_s_p95": round(p95, 1),
+        "wall_s_total": round(sum(walls), 1),
     }
 
 
@@ -118,7 +122,8 @@ def main() -> int:
                        encoding="utf-8")
 
     print("\n===== MONKEY BENCH v1 =====")
-    head = f"{'braço':<8} {'corretas':>9} {'precision':>10} {'tokens (med)':>13} {'wall s (med)':>13}"
+    head = (f"{'braço':<8} {'corretas':>9} {'precision':>10} {'tokens (med)':>13} "
+            f"{'s/perg (med)':>13} {'s/perg (p95)':>13} {'total s':>9}")
     print(head)
     print("-" * len(head))
     summaries = []
@@ -126,7 +131,18 @@ def main() -> int:
         s = summarize(arm, all_results[arm])
         summaries.append(s)
         print(f"{arm:<8} {s['correct']}/{s['n']:<7} {s['precision_mean']:>10} "
-              f"{s['tokens_median']:>13} {s['wall_s_median']:>13}")
+              f"{s['tokens_median']:>13} {s['wall_s_median']:>13} {s['wall_s_p95']:>13} "
+              f"{s['wall_s_total']:>9}")
+
+    # per-question timing: how long each answer took, end to end, per arm
+    print("\n-- tempo por pergunta (s, ponta a ponta)")
+    qids = [r["id"] for r in all_results[arms[0]]]
+    print(f"{'perg':<6}" + "".join(f"{a:>9}" for a in arms))
+    for i, qid in enumerate(qids):
+        row = f"{qid:<6}"
+        for a in arms:
+            row += f"{all_results[a][i]['wall_s']:>9}"
+        print(row)
 
     out.write_text(json.dumps({"summaries": summaries, "results": all_results},
                               ensure_ascii=False, indent=2), encoding="utf-8")

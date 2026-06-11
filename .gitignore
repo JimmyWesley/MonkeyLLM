@@ -13,3 +13,4 @@ models/
 bin/
 *.gguf
 bench/_artifacts/
+bench-forest/

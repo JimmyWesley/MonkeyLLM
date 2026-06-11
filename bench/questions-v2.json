@@ -1,0 +1,198 @@
+[
+  {
+    "id": "q01",
+    "question": "Quem está à frente do plataforma-tambor e em que município essa pessoa reside?",
+    "expected_nodes": [
+      "projetos/plataforma-tambor/visao",
+      "pessoas/engenharia/wanda-guimarães"
+    ],
+    "answer_contains": [
+      "Wanda",
+      "Salvador"
+    ]
+  },
+  {
+    "id": "q02",
+    "question": "Quem está à frente do firmware-zabumba e em que município essa pessoa reside?",
+    "expected_nodes": [
+      "projetos/firmware-zabumba/visao",
+      "pessoas/engenharia/aurora-sarmento"
+    ],
+    "answer_contains": [
+      "Aurora",
+      "Campinas"
+    ]
+  },
+  {
+    "id": "q03",
+    "question": "Quem está à frente do malha-ciranda e em que município essa pessoa reside?",
+    "expected_nodes": [
+      "projetos/malha-ciranda/visao",
+      "pessoas/dados/firmino-ximenes"
+    ],
+    "answer_contains": [
+      "Firmino",
+      "Olinda"
+    ]
+  },
+  {
+    "id": "q04",
+    "question": "Em janeiro de 2026 a AgroVale levou qual equipamento, em que quantidade, e quem cuidou da venda?",
+    "expected_nodes": [
+      "eventos/contratos/2026-01-acordo-agrovale"
+    ],
+    "answer_contains": [
+      "Faro",
+      "340",
+      "Cecília"
+    ]
+  },
+  {
+    "id": "q05",
+    "question": "Em fevereiro de 2026 a PortoNorte Logística levou qual equipamento, em que quantidade, e quem cuidou da venda?",
+    "expected_nodes": [
+      "eventos/contratos/2026-02-acordo-portonorte-logistica"
+    ],
+    "answer_contains": [
+      "Frevo",
+      "340",
+      "Mariana"
+    ]
+  },
+  {
+    "id": "q06",
+    "question": "Em março de 2026 a Usina Catende Digital levou qual equipamento, em que quantidade, e quem cuidou da venda?",
+    "expected_nodes": [
+      "eventos/contratos/2026-03-acordo-usina-catende-digital"
+    ],
+    "answer_contains": [
+      "Maracatu",
+      "50",
+      "Firmino"
+    ]
+  },
+  {
+    "id": "q07",
+    "question": "O Xote teve um problema de fabricação em 2026: quantas peças voltaram e qual era o defeito?",
+    "expected_nodes": [
+      "eventos/recalls/2026-02-recall-xote"
+    ],
+    "answer_contains": [
+      "84",
+      "oxidação"
+    ]
+  },
+  {
+    "id": "q08",
+    "question": "O Caboclo teve um problema de fabricação em 2026: quantas peças voltaram e qual era o defeito?",
+    "expected_nodes": [
+      "eventos/recalls/2026-03-recall-caboclo"
+    ],
+    "answer_contains": [
+      "28",
+      "firmware"
+    ]
+  },
+  {
+    "id": "q09",
+    "question": "O lançamento de abril do plataforma-tambor saiu com qual número de versão e qual novidade principal?",
+    "expected_nodes": [
+      "eventos/lancamentos/2026-04-versao-plataforma-tambor"
+    ],
+    "answer_contains": [
+      "1.8"
+    ]
+  },
+  {
+    "id": "q10",
+    "question": "O lançamento de abril do firmware-zabumba saiu com qual número de versão e qual novidade principal?",
+    "expected_nodes": [
+      "eventos/lancamentos/2026-04-versao-firmware-zabumba"
+    ],
+    "answer_contains": [
+      "2.7"
+    ]
+  },
+  {
+    "id": "q11",
+    "question": "Considerando tudo que foi faturado no primeiro semestre de 2026, qual área do país ficou na liderança?",
+    "expected_nodes": [
+      "vendas/pedidos-2026"
+    ],
+    "answer_contains": [
+      "Nordeste"
+    ]
+  },
+  {
+    "id": "q12",
+    "question": "Qual código de produto puxou a maior receita no semestre, segundo a base de pedidos?",
+    "expected_nodes": [
+      "vendas/pedidos-2026"
+    ],
+    "answer_contains": [
+      "O-338"
+    ]
+  },
+  {
+    "id": "q13",
+    "question": "Qual item da linha gerou o maior volume de tíquetes de atendimento em 2026?",
+    "expected_nodes": [
+      "suporte/chamados-2026"
+    ],
+    "answer_contains": [
+      "Caboclo"
+    ]
+  },
+  {
+    "id": "q14",
+    "question": "Qual é a referência de catálogo do Xote e quem responde tecnicamente por ele?",
+    "expected_nodes": [
+      "produtos/logistica/xote"
+    ],
+    "answer_contains": [
+      "M-324",
+      "Tales"
+    ]
+  },
+  {
+    "id": "q15",
+    "question": "Qual é a referência de catálogo do Quadrilha e quem responde tecnicamente por ele?",
+    "expected_nodes": [
+      "produtos/campo/quadrilha"
+    ],
+    "answer_contains": [
+      "L-373",
+      "Yasmin"
+    ]
+  },
+  {
+    "id": "q16",
+    "question": "De qual instituição Clarice Peixoto veio antes da Maracatu, e qual é a função dela(e) hoje?",
+    "expected_nodes": [
+      "pessoas/engenharia/clarice-peixoto"
+    ],
+    "answer_contains": [
+      "Capibaribe"
+    ]
+  },
+  {
+    "id": "q17",
+    "question": "De qual instituição Quitéria Klein veio antes da Maracatu, e qual é a função dela(e) hoje?",
+    "expected_nodes": [
+      "pessoas/engenharia/quitéria-klein"
+    ],
+    "answer_contains": [
+      "Computação"
+    ]
+  },
+  {
+    "id": "q18",
+    "question": "Quando um lote inteiro dá defeito, o que a política da empresa garante ao cliente e em qual prazo?",
+    "expected_nodes": [
+      "notas/politica-garantia"
+    ],
+    "answer_contains": [
+      "30"
+    ]
+  }
+]

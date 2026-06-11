@@ -56,6 +56,11 @@ Ferramentas (responda SEMPRE com um único objeto JSON, nada além dele):
 - {"tool": "answer", "args": {"text": "...", "answer_nodes": ["id1", "id2"]}} -> resposta final
 
 Estratégia: locate primeiro; look para farejar; pick/query só no alvo. Economize tokens.
+Regras importantes:
+- Se a resposta vier com "truncated": true, a lista foi CORTADA por orçamento: não conclua que algo
+  não existe — refine com locate (termos mais específicos) ou scan(parent_id, filter).
+- Repetir a MESMA chamada com os MESMOS argumentos devolve o mesmo resultado; mude ferramenta ou termos.
+- Nós type:dataset respondem por SQL: leia o manual no look e use query (os agregados não estão no texto).
 O mapa da floresta (galho-mestre) está na primeira mensagem do usuário."""
 
 
@@ -101,6 +106,7 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
             },
         ]
         answer, answer_nodes = None, []
+        visited: set[str] = set()  # visited-cache (spec E.1.3): identical calls are not re-run
         for step in range(MAX_STEPS):
             reply = chat(messages)
             messages.append({"role": "assistant", "content": reply})
@@ -115,6 +121,15 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
                 answer = str(args.get("text", "")).strip()
                 answer_nodes = list(args.get("answer_nodes") or [])
                 break
+            call_key = f"{tool}:{json.dumps(args, ensure_ascii=False, sort_keys=True)}"
+            if call_key in visited:
+                messages.append({"role": "user", "content": json.dumps({
+                    "repeat": True,
+                    "hint": "Chamada idêntica à anterior — o resultado seria o mesmo. "
+                            "Mude os termos, a ferramenta, ou responda com o que já tem.",
+                }, ensure_ascii=False)})
+                continue
+            visited.add(call_key)
             try:
                 fn = {"locate": vine.locate, "look": vine.look, "move": vine.move,
                       "pick": vine.pick, "query": vine.query, "scan": vine.scan}.get(tool)
@@ -169,16 +184,20 @@ def main() -> int:
     embedder = embedder_from_env()
     print(f"locate: {'híbrido (vetor+BM25)' if embedder else 'BM25-only'}")
 
+    import time as _time
+
     results = []
     for q in questions:
         print(f"\n== {q['id']}: {q['question']}")
+        t0 = _time.perf_counter()
         r = run_question(Path(args.forest), chat, q, embedder=embedder)
+        r["wall_s"] = round(_time.perf_counter() - t0, 1)
         results.append(r)
         m = r["metrics"]
         print(f"    resposta: {str(r['answer'])[:160]}")
         print(
             f"    hops-to-banana={m['hops_to_banana']}  tokens-to-banana={m['tokens_to_banana']}  "
-            f"precision={r['banana_precision']}  texto_correto={r['correct_text']}"
+            f"precision={r['banana_precision']}  texto_correto={r['correct_text']}  tempo={r['wall_s']}s"
         )
 
     ok = sum(1 for r in results if r["correct_text"])
@@ -190,6 +209,8 @@ def main() -> int:
         print(f"hops-to-banana médio: {sum(hops)/len(hops):.1f}")
     print(f"tokens-to-banana médio: {sum(toks)/len(toks):.0f}")
     print(f"banana precision média: {sum(r['banana_precision'] for r in results)/len(results):.2f}")
+    walls = [r["wall_s"] for r in results]
+    print(f"tempo por pergunta: médio {sum(walls)/len(walls):.1f}s  max {max(walls):.1f}s  total {sum(walls):.1f}s")
     out = Path(args.forest) / "_derived" / "demo-report.json"
     out.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"relatório salvo em {out}")

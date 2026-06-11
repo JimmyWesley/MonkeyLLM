@@ -49,6 +49,17 @@ def find_gguf(*needles: str) -> Path:
     sys.exit(f"no GGUF matching {needles} in {MODELS}. Run: python scripts/setup_models.py")
 
 
+def find_chat_gguf(substring: str | None) -> Path:
+    """The chat model: explicit substring match, or the newest non-embedding
+    GGUF in models/ (so a freshly downloaded model wins automatically)."""
+    if substring:
+        return find_gguf(substring)
+    cands = [g for g in MODELS.glob("*.gguf") if "bge" not in g.name.lower()]
+    if not cands:
+        sys.exit(f"no chat GGUF in {MODELS}. Run: python scripts/setup_models.py --only llm")
+    return max(cands, key=lambda g: g.stat().st_mtime)
+
+
 def launch(server: Path, model: Path, *, port: int, alias: str, embedding: bool, ngl: int, ctx: int):
     cmd = [
         str(server), "-m", str(model),
@@ -71,6 +82,7 @@ def main() -> int:
     ap.add_argument("--emb-port", type=int, default=8091)
     ap.add_argument("--ngl", type=int, default=99, help="GPU layers to offload (99 = all)")
     ap.add_argument("--ctx", type=int, default=8192)
+    ap.add_argument("--chat-gguf", help="substring to pick the chat GGUF (default: newest in models/)")
     args = ap.parse_args()
 
     server = find_server()
@@ -78,10 +90,13 @@ def main() -> int:
 
     try:
         if args.only in (None, "chat"):
-            print("[chat] navigator SLM")
+            gguf = find_chat_gguf(args.chat_gguf)
+            # alias from the file: "gemma-4-12B-it-Q4_K_M.gguf" -> "gemma-4"
+            alias = "-".join(gguf.stem.lower().split("-")[:2])
+            print(f"[chat] navigator SLM: {gguf.name} (alias {alias})")
             procs.append(launch(
-                server, find_gguf("qwen"), port=args.chat_port,
-                alias="qwen2.5-7b", embedding=False, ngl=args.ngl, ctx=args.ctx,
+                server, gguf, port=args.chat_port,
+                alias=alias, embedding=False, ngl=args.ngl, ctx=args.ctx,
             ))
         if args.only in (None, "emb"):
             print("[emb] bge-m3 embedder")

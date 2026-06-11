@@ -59,7 +59,9 @@ def run_config(forest: Path, questions, *, embedder, repeats: int, label: str) -
         latencies = []
         per_q = []
         for q in questions:
+            t0 = time.perf_counter()
             ids = [r["id"] for r in vine.locate(q["question"], k=max(KS))["results"]]
+            first_ms = (time.perf_counter() - t0) * 1000
             expected = set(q["expected_nodes"])
             rank = first_hit_rank(ids, expected)
             for k in KS:
@@ -67,11 +69,18 @@ def run_config(forest: Path, questions, *, embedder, repeats: int, label: str) -
                     recall[k] += 1
             rr.append(1.0 / rank if rank else 0.0)
             # timing: repeat the same call warm
+            q_lat = [first_ms]
             for _ in range(repeats):
                 t0 = time.perf_counter()
                 vine.locate(q["question"], k=max(KS))
-                latencies.append((time.perf_counter() - t0) * 1000)
-            per_q.append({"id": q["id"], "first_hit_rank": rank, "top": ids[:max(KS)]})
+                q_lat.append((time.perf_counter() - t0) * 1000)
+            latencies.extend(q_lat)
+            per_q.append({
+                "id": q["id"], "first_hit_rank": rank, "top": ids[:max(KS)],
+                "latency_ms": {"first": round(first_ms, 2),
+                               "p50": round(pct(q_lat, 50), 2),
+                               "p95": round(pct(q_lat, 95), 2)},
+            })
         n = len(questions)
         return {
             "label": label,
@@ -105,6 +114,16 @@ def print_report(reports):
     for r in reports:
         if r and r["latency_ms"]["p95"] >= budget:
             print(f"\n⚠ {r['label']}: locate p95 {r['latency_ms']['p95']}ms ≥ {budget}ms budget (spec F.6)")
+
+    # per-question breakdown: where the helicopter landed and how long it took
+    for r in reports:
+        if not r:
+            continue
+        print(f"\n-- por pergunta [{r['label']}]  (rank do 1º acerto; latência ms)")
+        for pq in r["per_question"]:
+            lat = pq["latency_ms"]
+            rank = pq["first_hit_rank"] if pq["first_hit_rank"] is not None else "—"
+            print(f"  {pq['id']}: rank={rank:<3} p50={lat['p50']:>7.2f}  p95={lat['p95']:>7.2f}")
 
 
 def main() -> int:
