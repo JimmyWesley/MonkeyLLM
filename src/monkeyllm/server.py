@@ -1,4 +1,4 @@
-"""Vine MCP server — the 8 primitives as MCP tools.
+"""Vine MCP server — the 9 primitives as MCP tools.
 
 Transport: stdio for dev, streamable-http for Docker (spec Part C).
 Errors come back as the spec envelope: {"error": {code, message, hint}}.
@@ -24,9 +24,11 @@ def build_server(forest_root: str | Path | None = None, writable: bool = True) -
         "vine",
         instructions=(
             "MonkeyLLM forest navigation. Start with look('_index') for the map, "
-            "or locate(query) to be dropped near the target. Use look(id) to sniff "
-            "a node (cheap), move(id) for neighbors, pick(id) only when the summary "
-            "says it is the banana, query(id, sql) for datasets. plant/graft to write."
+            "or locate(query) to be dropped near the target; sniff(terms) greps "
+            "bodies for exact terms (codes, names, numbers) the summaries miss. "
+            "Use look(id) for a cheap digest, move(id) for neighbors, pick(id) "
+            "only when the summary says it is the banana, query(id, sql) for "
+            "datasets. plant/graft to write."
         ),
     )
 
@@ -40,6 +42,16 @@ def build_server(forest_root: str | Path | None = None, writable: bool = True) -
     def locate(query: str, k: int = 5, scope: str = "all", type_filter: str | None = None) -> dict:
         """Find entry points (the helicopter). scope: all|branches|bananas."""
         return guarded(vine.locate, query, k=k, scope=scope, type_filter=type_filter)
+
+    @mcp.tool()
+    def sniff(
+        terms: str | list[str],
+        scope: str | None = None,
+        k: int = 5,
+        type_filter: str | None = None,
+    ) -> dict:
+        """Literal grep over node bodies (the tracker): exact terms -> node + section + snippet."""
+        return guarded(vine.sniff, terms, scope=scope, k=k, type_filter=type_filter)
 
     @mcp.tool()
     def look(id: str, fields: list[str] | None = None) -> dict:

@@ -54,6 +54,8 @@ usando SOMENTE as ferramentas abaixo. Nunca invente fatos: navegue, colha e resp
 
 Ferramentas (responda SEMPRE com um único objeto JSON, nada além dele):
 - {"tool": "locate", "args": {"query": "...", "k": 5}}  -> pontos de entrada (o helicóptero)
+- {"tool": "sniff", "args": {"terms": ["..."], "scope": null}} -> grep literal nos CORPOS: termo exato
+  (código, nome, número) -> nó + seção + trecho. scope opcional restringe a um galho.
 - {"tool": "look", "args": {"id": "..."}}               -> digest barato de um nó (summary, vizinhos, outline)
 - {"tool": "move", "args": {"id": "...", "rel": null}}  -> vizinhos de um nó (rel "children" lista filhos de galho)
 - {"tool": "pick", "args": {"id": "...", "section": null}} -> corpo completo (só quando o summary confirmar o alvo)
@@ -61,7 +63,9 @@ Ferramentas (responda SEMPRE com um único objeto JSON, nada além dele):
 - {"tool": "scan", "args": {"parent_id": "...", "filter": {}}}  -> filtra filhos por metadados
 - {"tool": "answer", "args": {"text": "...", "answer_nodes": ["id1", "id2"]}} -> resposta final
 
-Estratégia: locate primeiro; look para farejar; pick/query só no alvo. Economize tokens.
+Estratégia: a pergunta tem termo EXATO e raro (código, nome próprio, número)? sniff primeiro — ele
+cai direto na seção certa e você colhe com pick(id, section). Pergunta conceitual? locate primeiro;
+look para farejar; pick/query só no alvo. sniff devolveu demais? restrinja com scope. Economize tokens.
 Regras importantes:
 - Se a resposta vier com "truncated": true, a lista foi CORTADA por orçamento: não conclua que algo
   não existe — refine com locate (termos mais específicos) ou scan(parent_id, filter).
@@ -70,7 +74,7 @@ Regras importantes:
 O mapa da floresta (galho-mestre) está na primeira mensagem do usuário."""
 
 
-OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
+OPENROUTER_ENDPOINT = "" #"https://openrouter.ai/api/v1"
 # Qwen 3.5 35B-A3B (MoE, ~3B active params: fast and cheap). Append ":free"
 # for the gratis tier (rate-limited ~20 req/min; the client retries on 429).
 OPENROUTER_DEFAULT_MODEL = "qwen/qwen3.5-35b-a3b"
@@ -193,8 +197,9 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
                 continue
             visited.add(call_key)
             try:
-                fn = {"locate": vine.locate, "look": vine.look, "move": vine.move,
-                      "pick": vine.pick, "query": vine.query, "scan": vine.scan}.get(tool)
+                fn = {"locate": vine.locate, "sniff": vine.sniff, "look": vine.look,
+                      "move": vine.move, "pick": vine.pick, "query": vine.query,
+                      "scan": vine.scan}.get(tool)
                 if fn is None:
                     result = {"error": {"code": "E_SCHEMA", "message": f"ferramenta desconhecida: {tool}"}}
                 else:

@@ -1,0 +1,180 @@
+"""Render test-results/junit.xml as a self-contained HTML report.
+
+Zero dependencies (stdlib only) — used because this machine's TLS
+interception blocks pip/PyPI, so pytest-html is not installable.
+
+    python -m pytest --junitxml=test-results/junit.xml
+    python scripts/junit_to_html.py [--xml test-results/junit.xml] [--out test-results/report.html]
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import html
+import json
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+PAGE = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>MonkeyLLM — Relatório de testes</title>
+<style>
+  :root {{ --bg:#101418; --panel:#1a2027; --text:#dde3ea; --dim:#8a93a0;
+           --pass:#3fb950; --fail:#f85149; --skip:#d29922; --accent:#58a6ff; }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 "Segoe UI", system-ui, sans-serif; }}
+  header {{ padding:24px 32px 12px; }}
+  h1 {{ margin:0 0 4px; font-size:20px; }}
+  .meta {{ color:var(--dim); font-size:13px; }}
+  .cards {{ display:flex; gap:12px; padding:16px 32px; flex-wrap:wrap; }}
+  .card {{ background:var(--panel); border-radius:8px; padding:12px 20px; min-width:110px; }}
+  .card b {{ display:block; font-size:22px; }}
+  .card.pass b {{ color:var(--pass); }} .card.fail b {{ color:var(--fail); }}
+  .card.skip b {{ color:var(--skip); }}
+  .controls {{ padding:0 32px 12px; display:flex; gap:12px; align-items:center; }}
+  input[type=search] {{ background:var(--panel); border:1px solid #2d333b; color:var(--text);
+        border-radius:6px; padding:8px 12px; width:340px; font-size:14px; }}
+  label {{ color:var(--dim); user-select:none; }}
+  .suite {{ margin:0 32px 16px; background:var(--panel); border-radius:8px; overflow:hidden; }}
+  .suite > summary {{ padding:10px 16px; cursor:pointer; font-weight:600;
+        display:flex; justify-content:space-between; }}
+  .suite > summary .counts {{ color:var(--dim); font-weight:400; }}
+  table {{ width:100%; border-collapse:collapse; }}
+  td {{ padding:6px 16px; border-top:1px solid #2d333b; vertical-align:top; }}
+  td.status {{ width:84px; font-weight:600; }}
+  td.time {{ width:90px; text-align:right; color:var(--dim); font-variant-numeric:tabular-nums; }}
+  tr.pass td.status {{ color:var(--pass); }} tr.fail td.status {{ color:var(--fail); }}
+  tr.skip td.status {{ color:var(--skip); }}
+  .name {{ font-family:Consolas, monospace; font-size:13px; }}
+  .bar {{ display:inline-block; height:6px; background:var(--accent); border-radius:3px;
+         vertical-align:middle; margin-left:8px; opacity:.6; }}
+  pre {{ background:#0d1117; color:#ffa198; margin:8px 0 4px; padding:10px;
+        border-radius:6px; overflow-x:auto; font-size:12px; white-space:pre-wrap; }}
+  footer {{ padding:8px 32px 24px; color:var(--dim); font-size:12px; }}
+  .hidden {{ display:none; }}
+</style>
+</head>
+<body>
+<header>
+  <h1>MonkeyLLM — Relatório de testes</h1>
+  <div class="meta">{meta}</div>
+</header>
+<div class="cards">
+  <div class="card"><b>{total}</b>total</div>
+  <div class="card pass"><b>{passed}</b>passaram</div>
+  <div class="card fail"><b>{failed}</b>falharam</div>
+  <div class="card skip"><b>{skipped}</b>pulados</div>
+  <div class="card"><b>{time:.1f}s</b>duração</div>
+</div>
+<div class="controls">
+  <input id="q" type="search" placeholder="filtrar por nome do teste…">
+  <label><input id="only-fail" type="checkbox"> só falhas</label>
+</div>
+{suites}
+<footer>Gerado por scripts/junit_to_html.py a partir de {xml_name} — {generated}.</footer>
+<script>
+const q = document.getElementById('q'), onlyFail = document.getElementById('only-fail');
+function apply() {{
+  const term = q.value.toLowerCase();
+  document.querySelectorAll('tr[data-name]').forEach(tr => {{
+    const okTerm = tr.dataset.name.includes(term);
+    const okFail = !onlyFail.checked || tr.classList.contains('fail');
+    tr.classList.toggle('hidden', !(okTerm && okFail));
+  }});
+  document.querySelectorAll('details.suite').forEach(s => {{
+    const visible = s.querySelectorAll('tr[data-name]:not(.hidden)').length;
+    s.classList.toggle('hidden', visible === 0);
+    if (term || onlyFail.checked) s.open = true;
+  }});
+}}
+q.addEventListener('input', apply); onlyFail.addEventListener('change', apply);
+</script>
+</body>
+</html>
+"""
+
+
+def render(xml_path: Path, out_path: Path) -> dict:
+    root = ET.parse(xml_path).getroot()
+    suites = root.findall("testsuite") if root.tag == "testsuites" else [root]
+
+    totals = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "time": 0.0}
+    groups: dict[str, list[dict]] = {}
+    meta_bits = []
+    for s in suites:
+        totals["time"] += float(s.get("time", 0))
+        if s.get("timestamp"):
+            meta_bits.append(f"executado em {s.get('timestamp')}")
+        if s.get("hostname"):
+            meta_bits.append(f"host {s.get('hostname')}")
+        for case in s.iter("testcase"):
+            # classname = "tests.test_sniff.TestSniffContract" (class-based)
+            # or "tests.test_infra" (function-based); group by module file.
+            parts = case.get("classname", "").split(".")
+            cls = parts[-1] if parts and parts[-1][:1].isupper() else None
+            module = ".".join(parts[:-1] if cls else parts)
+            group = module.removeprefix("tests.") or "(sem grupo)"
+            failure = case.find("failure") if case.find("failure") is not None else case.find("error")
+            status = "fail" if failure is not None else ("skip" if case.find("skipped") is not None else "pass")
+            totals["total"] += 1
+            totals["passed" if status == "pass" else "failed" if status == "fail" else "skipped"] += 1
+            groups.setdefault(group, []).append(
+                {
+                    "name": (f"{cls}." if cls else "") + (case.get("name") or "?"),
+                    "status": status,
+                    "time": float(case.get("time", 0)),
+                    "detail": (failure.text or failure.get("message", "")) if failure is not None else "",
+                }
+            )
+
+    max_time = max((t["time"] for cases in groups.values() for t in cases), default=1.0) or 1.0
+    label = {"pass": "PASSOU", "fail": "FALHOU", "skip": "PULADO"}
+    suites_html = []
+    for group, cases in sorted(groups.items()):
+        n_fail = sum(1 for c in cases if c["status"] == "fail")
+        rows = []
+        for c in sorted(cases, key=lambda c: c["name"]):
+            bar = int(120 * c["time"] / max_time)
+            detail = f"<pre>{html.escape(c['detail'].strip())}</pre>" if c["detail"] else ""
+            rows.append(
+                f'<tr class="{c["status"]}" data-name="{html.escape(c["name"].lower(), quote=True)}">'
+                f'<td class="status">{label[c["status"]]}</td>'
+                f'<td><span class="name">{html.escape(c["name"])}</span>{detail}</td>'
+                f'<td class="time">{c["time"]:.2f}s<span class="bar" style="width:{bar}px"></span></td></tr>'
+            )
+        counts = f'{len(cases)} testes' + (f' · <span style="color:var(--fail)">{n_fail} falhas</span>' if n_fail else "")
+        suites_html.append(
+            f'<details class="suite" {"open" if n_fail else ""}><summary>{html.escape(group)}'
+            f'<span class="counts">{counts}</span></summary><table>{"".join(rows)}</table></details>'
+        )
+
+    out_path.write_text(
+        PAGE.format(
+            meta=html.escape("; ".join(dict.fromkeys(meta_bits)) or str(xml_path)),
+            suites="".join(suites_html),
+            xml_name=html.escape(xml_path.name),
+            generated=dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            **totals,
+        ),
+        encoding="utf-8",
+    )
+    return totals
+
+
+def main() -> int:
+    repo = Path(__file__).resolve().parents[1]
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--xml", default=repo / "test-results" / "junit.xml", type=Path)
+    ap.add_argument("--out", default=repo / "test-results" / "report.html", type=Path)
+    args = ap.parse_args()
+    totals = render(args.xml, args.out)
+    print(json.dumps({"report": str(args.out), **totals}, ensure_ascii=False))
+    return 0 if totals["failed"] == 0 else 1
+
+
+if __name__ == "__main__":
+    main()

@@ -5,6 +5,7 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
+test-results/
 forest-fixture/_derived/
 .env
 

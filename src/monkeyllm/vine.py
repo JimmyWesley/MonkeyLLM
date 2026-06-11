@@ -1,7 +1,7 @@
 """Vine — the navigation protocol (spec Part C).
 
-Eight primitives over a markdown forest:
-read: locate, look, move, pick, query, scan
+Nine primitives over a markdown forest:
+read: locate, look, move, pick, query, scan, sniff
 write: plant, graft (atomic, Git-committed, index-synced)
 
 Every response fits its declared token budget; truncation is always
@@ -16,6 +16,7 @@ import re
 import sqlite3
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 from monkeyllm import indexer
@@ -60,6 +61,11 @@ BUDGET_LOCATE = 800
 BUDGET_LOOK = 500
 BUDGET_MOVE = 600
 BUDGET_SCAN = 800
+BUDGET_SNIFF = 800
+SNIFF_MAX_TERMS = 8
+SNIFF_MAX_K = 20
+SNIFF_MATCHES_PER_NODE = 3
+SNIFF_SNIPPET_CHARS = 100  # ~25 tokens
 PICK_MAX_BODY_TOKENS = 4000
 NEIGHBOR_SUMMARY_TOKENS = 25
 MAX_EDGES_SHOWN = 12
@@ -71,6 +77,85 @@ _FORBIDDEN_SQL = re.compile(
     re.IGNORECASE,
 )
 _LIMIT_RE = re.compile(r"\bLIMIT\s+\d+", re.IGNORECASE)
+_HEADER_LINE_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
+
+
+_FOLD_CACHE: dict[str, str] = {}
+
+
+def _fold(text: str) -> str:
+    """Length-preserving fold: lowercase + strip diacritics by keeping only
+    the base character of each NFD decomposition. Positions found in the
+    folded text map 1:1 back to the original (spec C.6b matching)."""
+    cache = _FOLD_CACHE
+    out = []
+    for ch in text:
+        f = cache.get(ch)
+        if f is None:
+            f = unicodedata.normalize("NFD", ch)[0].lower()
+            cache[ch] = f
+        out.append(f)
+    return "".join(out)
+
+
+def _raw_body(text: str) -> str:
+    """Body of a node file without parsing the YAML frontmatter (same block
+    boundaries as parser.split_frontmatter — sniff only needs the body)."""
+    if not text.startswith("---"):
+        return text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return ""
+    nl = text.find("\n", end + 1)
+    return text[nl + 1:].lstrip("\n") if nl != -1 else ""
+
+
+def _sniff_snippet(line: str, pos: int) -> str:
+    """Window of the line centered near the first occurrence (~25 tokens)."""
+    line = line.rstrip()
+    if len(line) <= SNIFF_SNIPPET_CHARS:
+        return line.strip()
+    start = max(0, pos - SNIFF_SNIPPET_CHARS // 3)
+    end = min(len(line), start + SNIFF_SNIPPET_CHARS)
+    start = max(0, end - SNIFF_SNIPPET_CHARS)
+    out = line[start:end].strip()
+    if start > 0:
+        out = "…" + out
+    if end < len(line):
+        out += "…"
+    return out
+
+
+def _sniff_body(body: str, folded_terms: list[str]) -> tuple[list[dict], set[int]]:
+    """All matching lines of a body, each attributed to its H2/H3 section.
+    Returns (matches, indexes of the terms that hit anywhere in the body)."""
+    folded_body = _fold(body)
+    if not any(t in folded_body for t in folded_terms):
+        return [], set()
+    matches: list[dict] = []
+    terms_hit: set[int] = set()
+    section: str | None = None
+    # _fold preserves length and never produces line breaks, so the folded
+    # lines stay 1:1 with the original lines.
+    for line_no, (line, folded) in enumerate(
+        zip(body.splitlines(), folded_body.splitlines()), start=1
+    ):
+        h = _HEADER_LINE_RE.match(line)
+        if h and len(h.group(1)) in (2, 3):
+            section = h.group(2)
+        first_pos: int | None = None
+        for i, term in enumerate(folded_terms):
+            pos = folded.find(term)
+            if pos != -1:
+                terms_hit.add(i)
+                if first_pos is None or pos < first_pos:
+                    first_pos = pos
+        if first_pos is None:
+            continue
+        matches.append(
+            {"section": section, "line": line_no, "snippet": _sniff_snippet(line, first_pos)}
+        )
+    return matches, terms_hit
 
 
 def _traced(fn):
@@ -603,6 +688,88 @@ class Vine:
             else:
                 raise VineError(E_SCHEMA, f"unknown scan filter: {key}")
         return True
+
+    # =======================================================================
+    # C.6b sniff — the tracker (literal search over bodies)
+    # =======================================================================
+
+    @_traced
+    def sniff(
+        self,
+        terms: str | list[str],
+        scope: str | None = None,
+        k: int = 5,
+        type_filter: str | None = None,
+    ) -> dict:
+        if isinstance(terms, str):
+            terms = [terms]
+        if not isinstance(terms, list) or not terms or len(terms) > SNIFF_MAX_TERMS:
+            raise VineError(
+                E_SCHEMA,
+                f"terms must be 1..{SNIFF_MAX_TERMS} literal strings",
+                hint="Pass exact terms (codes, names, numbers); regex is not supported.",
+            )
+        folded_terms = []
+        for t in terms:
+            ft = _fold(str(t)).strip()
+            if len(ft) < 2:
+                raise VineError(
+                    E_SCHEMA,
+                    f"term too short after normalization: {t!r}",
+                    hint="Literal terms need >= 2 characters; regex is not supported.",
+                )
+            folded_terms.append(ft)
+
+        prefix = None
+        if scope:
+            scope = scope.strip().strip("/")
+            scope_id = scope if scope == "_index" or scope.endswith("/_index") else f"{scope}/_index"
+            row = self._row_or_raise(scope_id)
+            if row["kind"] != "branch":
+                raise VineError(E_SCHEMA, f"scope must be a branch: {scope}")
+            if scope_id != "_index":
+                prefix = scope_id[: -len("_index")]  # "vendas/_index" -> "vendas/"
+
+        k = min(max(1, k), SNIFF_MAX_K)
+        rows = self.catalog.conn.execute("SELECT * FROM nodes ORDER BY id").fetchall()
+        scanned = 0
+        hits = []
+        for r in rows:
+            nid = r["id"]
+            if prefix and not nid.startswith(prefix):
+                continue
+            if type_filter and r["type"] != type_filter:
+                continue
+            try:
+                text = self.forest.path_for(nid).read_text(encoding="utf-8")
+            except (VineError, OSError):
+                continue  # validate() reports broken nodes; sniff skips them
+            scanned += 1
+            matches, terms_hit = _sniff_body(_raw_body(text), folded_terms)
+            if not matches:
+                continue
+            strength = len(terms_hit) / len(folded_terms)
+            heat = self._heat(nid)
+            hits.append(
+                {
+                    "id": nid,
+                    "type": r["type"],
+                    "title": r["title"],
+                    "trail": json.loads(r["trail"]),
+                    "score": round(strength * (1 + self.alpha * heat), 4),
+                    "heat": heat,
+                    "match_count": len(matches),
+                    "truncated_matches": len(matches) > SNIFF_MATCHES_PER_NODE,
+                    "matches": matches[:SNIFF_MATCHES_PER_NODE],
+                }
+            )
+        hits.sort(key=lambda h: (h["score"], h["match_count"]), reverse=True)
+        payload = {
+            "results": hits[:k],
+            "scanned_nodes": scanned,
+            "truncated": len(hits) > k,
+        }
+        return shrink_list_to_budget(payload, "results", BUDGET_SNIFF)
 
     # =======================================================================
     # C.7 plant — atomic create (file + index + git)

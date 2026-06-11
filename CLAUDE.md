@@ -1,12 +1,13 @@
 # MonkeyLLM — guia para o agente
 
 Floresta de conhecimento navegável por um SLM: markdown + índices, percorridos
-pelas primitivas MCP do **Vine**. A `docs/monkeyllm-spec-v0.1.md` é normativa —
-**a spec é a verdade**; mudança de contrato exige nova versão da spec antes do código.
+pelas primitivas MCP do **Vine**. A `docs/monkeyllm-spec-v0.2.md` é normativa
+(v0.1 fica arquivada) — **a spec é a verdade**; mudança de contrato exige nova
+versão da spec antes do código.
 
 ## Layout
 
-- `src/monkeyllm/` — pacote `monkeyllm`, CLI `vine`. `vine.py` (8 primitivas),
+- `src/monkeyllm/` — pacote `monkeyllm`, CLI `vine`. `vine.py` (9 primitivas),
   `catalog.py` (SQLite + FTS5 = lado BM25 do locate + scan), `canopy.py`
   (camada vetorial opcional, Fase 1), `parser.py`/`models.py` (frontmatter),
   `forest.py`/`gitops.py` (arquivos + commits), `telemetry.py`/`trails.py`
@@ -32,10 +33,12 @@ Modelos locais (llama.cpp na 3090): ver `docs/local-inference.md`.
 ## Convenções e armadilhas
 
 - **Orçamentos de token** com truncamento sempre explícito (`truncated: true`):
-  look 500, move 600, locate/scan 800. Nunca cortar em silêncio.
+  look 500, move 600, locate/scan/sniff 800. Nunca cortar em silêncio.
 - **`locate` é BM25-only por padrão** (Fase 0, zero embeddings). Vira híbrido
   (RRF vetor+BM25) só quando há índice Canopy **e** um embedder — qualquer outra
   combinação mantém o contrato BM25-only intacto.
+- **Divisão de contrato locate/sniff** (spec C.6b): `locate` busca só metadados
+  curados; `sniff` busca só corpos (grep literal, sem regex). Nunca misturar.
 - `query` é SQL read-only sobre nós `type:dataset`: rejeitar toda escrita
   (`;DROP`, `ATTACH`, multi-statement, `PRAGMA`) — há suíte de injeção.
 - `plant`/`graft` são atômicos e fazem `git commit` **dentro da floresta**
