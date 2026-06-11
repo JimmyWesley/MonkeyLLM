@@ -720,15 +720,20 @@ class Vine:
                 )
             folded_terms.append(ft)
 
+        # scope: branch -> physical subtree; banana -> that single node
+        # (grep-within-the-node, the natural follow-up to locate/look).
         prefix = None
+        only_id = None
         if scope:
             scope = scope.strip().strip("/")
-            scope_id = scope if scope == "_index" or scope.endswith("/_index") else f"{scope}/_index"
-            row = self._row_or_raise(scope_id)
-            if row["kind"] != "branch":
-                raise VineError(E_SCHEMA, f"scope must be a branch: {scope}")
-            if scope_id != "_index":
-                prefix = scope_id[: -len("_index")]  # "vendas/_index" -> "vendas/"
+            row = self.catalog.get(scope)
+            if row is not None and row["kind"] == "banana":
+                only_id = scope
+            else:
+                scope_id = scope if scope == "_index" or scope.endswith("/_index") else f"{scope}/_index"
+                self._row_or_raise(scope_id)
+                if scope_id != "_index":
+                    prefix = scope_id[: -len("_index")]  # "vendas/_index" -> "vendas/"
 
         k = min(max(1, k), SNIFF_MAX_K)
         rows = self.catalog.conn.execute("SELECT * FROM nodes ORDER BY id").fetchall()
@@ -736,6 +741,8 @@ class Vine:
         hits = []
         for r in rows:
             nid = r["id"]
+            if only_id and nid != only_id:
+                continue
             if prefix and not nid.startswith(prefix):
                 continue
             if type_filter and r["type"] != type_filter:

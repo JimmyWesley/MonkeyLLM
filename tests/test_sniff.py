@@ -70,6 +70,13 @@ class TestSniffScope:
         b = vine_ro.sniff(["aprovação"], scope="vendas/_index")
         assert [x["id"] for x in a["results"]] == [x["id"] for x in b["results"]]
 
+    def test_scope_accepts_banana_id(self, vine_ro):
+        """Banana scope = grep within that single node (spec C.6b)."""
+        r = vine_ro.sniff(["hit-rate de 73"], scope="projetos/mixerllm/log-experimentos")
+        assert [x["id"] for x in r["results"]] == ["projetos/mixerllm/log-experimentos"]
+        assert r["scanned_nodes"] == 1
+        assert any(m["section"] == "Experimento 43" for m in r["results"][0]["matches"])
+
     def test_scope_not_found(self, vine_ro):
         with pytest.raises(VineError) as e:
             vine_ro.sniff(["x1"], scope="galho-inexistente")

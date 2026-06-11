@@ -55,7 +55,7 @@ usando SOMENTE as ferramentas abaixo. Nunca invente fatos: navegue, colha e resp
 Ferramentas (responda SEMPRE com um único objeto JSON, nada além dele):
 - {"tool": "locate", "args": {"query": "...", "k": 5}}  -> pontos de entrada (o helicóptero)
 - {"tool": "sniff", "args": {"terms": ["..."], "scope": null}} -> grep literal nos CORPOS: termo exato
-  (código, nome, número) -> nó + seção + trecho. scope opcional restringe a um galho.
+  (código, nome, número) -> nó + seção + trecho. scope opcional restringe a um galho ou a um nó.
 - {"tool": "look", "args": {"id": "..."}}               -> digest barato de um nó (summary, vizinhos, outline)
 - {"tool": "move", "args": {"id": "...", "rel": null}}  -> vizinhos de um nó (rel "children" lista filhos de galho)
 - {"tool": "pick", "args": {"id": "...", "section": null}} -> corpo completo (só quando o summary confirmar o alvo)
@@ -66,6 +66,28 @@ Ferramentas (responda SEMPRE com um único objeto JSON, nada além dele):
 Estratégia: a pergunta tem termo EXATO e raro (código, nome próprio, número)? sniff primeiro — ele
 cai direto na seção certa e você colhe com pick(id, section). Pergunta conceitual? locate primeiro;
 look para farejar; pick/query só no alvo. sniff devolveu demais? restrinja com scope. Economize tokens.
+Regras importantes:
+- Se a resposta vier com "truncated": true, a lista foi CORTADA por orçamento: não conclua que algo
+  não existe — refine com locate (termos mais específicos) ou scan(parent_id, filter).
+- Repetir a MESMA chamada com os MESMOS argumentos devolve o mesmo resultado; mude ferramenta ou termos.
+- Nós type:dataset respondem por SQL: leia o manual no look e use query (os agregados não estão no texto).
+O mapa da floresta (galho-mestre) está na primeira mensagem do usuário."""
+
+# Prompt pré-sniff (spec v0.1), mantido VERBATIM para o braço baseline do A/B
+# (--no-sniff): mede o ganho do farejador contra o macaco de 6 ferramentas.
+SYSTEM_PROMPT_BASELINE = """Você é um macaco navegador numa floresta de conhecimento. Responda a pergunta \
+usando SOMENTE as ferramentas abaixo. Nunca invente fatos: navegue, colha e responda.
+
+Ferramentas (responda SEMPRE com um único objeto JSON, nada além dele):
+- {"tool": "locate", "args": {"query": "...", "k": 5}}  -> pontos de entrada (o helicóptero)
+- {"tool": "look", "args": {"id": "..."}}               -> digest barato de um nó (summary, vizinhos, outline)
+- {"tool": "move", "args": {"id": "...", "rel": null}}  -> vizinhos de um nó (rel "children" lista filhos de galho)
+- {"tool": "pick", "args": {"id": "...", "section": null}} -> corpo completo (só quando o summary confirmar o alvo)
+- {"tool": "query", "args": {"id": "...", "sql": "SELECT ..."}} -> SQL read-only em nós type:dataset
+- {"tool": "scan", "args": {"parent_id": "...", "filter": {}}}  -> filtra filhos por metadados
+- {"tool": "answer", "args": {"text": "...", "answer_nodes": ["id1", "id2"]}} -> resposta final
+
+Estratégia: locate primeiro; look para farejar; pick/query só no alvo. Economize tokens.
 Regras importantes:
 - Se a resposta vier com "truncated": true, a lista foi CORTADA por orçamento: não conclua que algo
   não existe — refine com locate (termos mais específicos) ou scan(parent_id, filter).
@@ -160,18 +182,20 @@ def parse_action(text: str) -> dict | None:
     return None
 
 
-def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=None) -> dict:
-    vine = Vine(forest, writable=False, session=f"demo-{q['id']}", embedder=embedder)
+def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=None,
+                 use_sniff: bool = True, learn: bool = False) -> dict:
+    vine = Vine(forest, writable=learn, session=f"demo-{q['id']}", embedder=embedder)
     try:
         master = vine.look("_index")
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT if use_sniff else SYSTEM_PROMPT_BASELINE},
             {
                 "role": "user",
                 "content": f"Galho-mestre da floresta:\n{json.dumps(master, ensure_ascii=False)}\n\nPergunta: {q['question']}",
             },
         ]
         answer, answer_nodes = None, []
+        entry_id: str | None = None  # landing zone: first node the monkey touches
         visited: set[str] = set()  # visited-cache (spec E.1.3): identical calls are not re-run
         for step in range(MAX_STEPS):
             reply = chat(messages)
@@ -187,19 +211,25 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
                 answer = str(args.get("text", "")).strip()
                 answer_nodes = list(args.get("answer_nodes") or [])
                 break
+            if entry_id is None and tool in ("look", "move", "pick", "query", "scan"):
+                entry_id = args.get("id") or args.get("parent_id")
             call_key = f"{tool}:{json.dumps(args, ensure_ascii=False, sort_keys=True)}"
             if call_key in visited:
-                messages.append({"role": "user", "content": json.dumps({
-                    "repeat": True,
-                    "hint": "Chamada idêntica à anterior — o resultado seria o mesmo. "
-                            "Mude os termos, a ferramenta, ou responda com o que já tem.",
-                }, ensure_ascii=False)})
+                hint = ("Chamada idêntica à anterior — o resultado seria o mesmo. "
+                        "Mude os termos, a ferramenta, ou responda com o que já tem.")
+                if use_sniff:
+                    hint += (' Dica: sniff({"terms": ["termo exato"]}) procura o termo '
+                             "dentro dos corpos e devolve a seção certa.")
+                messages.append({"role": "user", "content": json.dumps(
+                    {"repeat": True, "hint": hint}, ensure_ascii=False)})
                 continue
             visited.add(call_key)
             try:
-                fn = {"locate": vine.locate, "sniff": vine.sniff, "look": vine.look,
-                      "move": vine.move, "pick": vine.pick, "query": vine.query,
-                      "scan": vine.scan}.get(tool)
+                tools = {"locate": vine.locate, "look": vine.look, "move": vine.move,
+                         "pick": vine.pick, "query": vine.query, "scan": vine.scan}
+                if use_sniff:
+                    tools["sniff"] = vine.sniff
+                fn = tools.get(tool)
                 if fn is None:
                     result = {"error": {"code": "E_SCHEMA", "message": f"ferramenta desconhecida: {tool}"}}
                 else:
@@ -217,6 +247,27 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
         )
         success = bool(answer) and bool(harvested & expected)
         outcome = vine.close_session(success, answer_nodes)
+
+        # The shout (spec C.8 / Part D): close_session only SUGGESTS shortcuts;
+        # acting on them is the orchestrator's call. With --learn we graft an
+        # atalho-descoberto from the landing zone to each suggested banana —
+        # graft's reinforce-before-create turns repeats into fortification.
+        shortcuts = []
+        if learn and entry_id:
+            for nid in outcome.get("suggest_shortcuts", []):
+                if nid == entry_id or not vine.forest.exists(nid):
+                    continue
+                try:
+                    g = vine.graft(entry_id, {"add_links": [{"rel": "atalho-descoberto", "target": nid}]})
+                    shortcuts.append({"from": entry_id, "to": nid,
+                                      "fortified": bool(g["fortified"]), "commit": g["commit"]})
+                except VineError as e:
+                    shortcuts.append({"from": entry_id, "to": nid, "error": e.to_dict()["error"]["code"]})
+        if verbose and shortcuts:
+            for s in shortcuts:
+                print(f"    GRITO: atalho {s['from']} -> {s['to']} "
+                      f"({'fortificado' if s.get('fortified') else s.get('error', 'plantado')})")
+
         precision = (len(harvested & expected) / len(harvested)) if harvested else 0.0
         return {
             "id": q["id"],
@@ -227,6 +278,7 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
             "correct_text": correct_text,
             "banana_precision": round(precision, 2),
             "metrics": outcome["metrics"],
+            "shortcuts": shortcuts,
             "trace": str(vine.tracer.trace_path),
         }
     finally:
@@ -238,6 +290,11 @@ def main() -> int:
     ap.add_argument("--forest", default="forest-fixture")
     ap.add_argument("--questions", default=str(Path(__file__).parent / "questions.json"))
     ap.add_argument("--only", help="run a single question id (ex: q02)")
+    ap.add_argument("--no-sniff", action="store_true",
+                    help="baseline arm: hide the sniff tool (pre-v0.2 monkey) for A/B runs")
+    ap.add_argument("--learn", action="store_true",
+                    help="writable forest: graft suggested shortcuts (the shout) after each hunt")
+    ap.add_argument("--out", help="report path (default: <forest>/_derived/demo-report.json)")
     args = ap.parse_args()
 
     questions = json.loads(Path(args.questions).read_text(encoding="utf-8"))
@@ -251,6 +308,8 @@ def main() -> int:
 
     embedder = embedder_from_env()
     print(f"locate: {'híbrido (vetor+BM25)' if embedder else 'BM25-only'}")
+    print(f"sniff: {'off (baseline)' if args.no_sniff else 'on'}")
+    print(f"learn: {'on (gritos efetivados via graft)' if args.learn else 'off'}")
 
     import time as _time
 
@@ -258,7 +317,8 @@ def main() -> int:
     for q in questions:
         print(f"\n== {q['id']}: {q['question']}")
         t0 = _time.perf_counter()
-        r = run_question(Path(args.forest), chat, q, embedder=embedder)
+        r = run_question(Path(args.forest), chat, q, embedder=embedder,
+                         use_sniff=not args.no_sniff, learn=args.learn)
         r["wall_s"] = round(_time.perf_counter() - t0, 1)
         results.append(r)
         m = r["metrics"]
@@ -279,7 +339,8 @@ def main() -> int:
     print(f"banana precision média: {sum(r['banana_precision'] for r in results)/len(results):.2f}")
     walls = [r["wall_s"] for r in results]
     print(f"tempo por pergunta: médio {sum(walls)/len(walls):.1f}s  max {max(walls):.1f}s  total {sum(walls):.1f}s")
-    out = Path(args.forest) / "_derived" / "demo-report.json"
+    out = Path(args.out) if args.out else Path(args.forest) / "_derived" / "demo-report.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"relatório salvo em {out}")
     return 0 if ok == len(results) else 1

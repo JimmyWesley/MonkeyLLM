@@ -297,7 +297,7 @@ O **farejador** (sniper): busca **literal** sobre os corpos markdown dos nós, d
 Parâmetros:
 
 - `terms`: 1 a 8 termos **literais** (string única é promovida a lista de 1). Casamento por substring, insensível a caixa e a diacríticos (NFD, remoção de combining marks). Termo com espaço = frase exata. Termo normalizado com < 2 caracteres → `E_SCHEMA`. **Regex NÃO é aceita** (Fase 0): SLMs escrevem regex frágil e regex arbitrária abre custo imprevisível; termos literais dão 95% do valor com contrato simples.
-- `scope` (opcional): id de galho (`vendas/_index` ou `vendas`) que restringe a busca à subárvore física correspondente. Sem `scope`, floresta inteira. Galho inexistente → `E_NOT_FOUND`.
+- `scope` (opcional): id de **qualquer nó**. Galho (`vendas/_index` ou `vendas`) restringe a busca à subárvore física correspondente; banana restringe ao corpo daquele único nó (grep-dentro-do-nó — o encadeamento natural depois de um `locate`/`look` que já achou o alvo). Sem `scope`, floresta inteira. Nó inexistente → `E_NOT_FOUND`.
 - `k`: máximo de nós no resultado (default 5, teto 20).
 - `type_filter`: como no `locate`.
 
