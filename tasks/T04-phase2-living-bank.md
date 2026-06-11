@@ -2,8 +2,9 @@
 
 status: in-progress (workstream 3 `tend` DONE 2026-06-11 via spec v0.7;
 workstream 5 dataset birth DONE 2026-06-11 via spec v0.8;
-workstream 1 Gardener v1 deterministic core DONE 2026-06-11 via spec v0.9 —
-LLM curation stage (G.4.2) and Ranger remain)
+workstream 1 Gardener v1 deterministic core DONE 2026-06-11 via spec v0.9;
+workstream 2 Ranger v1 DONE 2026-06-11 via spec v0.10 —
+LLM curation stage (G.4.2), DOCX converter and convergence curve remain)
 depends-on: T01 (measurement discipline), T03 (troop data feeds adaptive ideas)
 
 ## Goal
@@ -44,10 +45,19 @@ query datasets but **write** to them, safely.
    technique (python-docx MIT: w:t traversal incl. text boxes + fragmented
    run merge); media extras (faster-whisper transcripts, vision
    descriptions); `docs/ingest-tools.md` + `docs/extending.md` guidance.
-2. **Ranger v1 (maintenance):** heat evaporation (configurable half-life);
-   shortcut/proposal promotion and pruning; `needs_split` detection and
-   assisted branch split; continuous lint; `same-as` candidate blocking by
-   embedding similarity (physical merge stays human-approved).
+2. **Ranger v1 (maintenance) — DONE (spec v0.10 Part H, 2026-06-11):**
+   `src/monkeyllm/ranger.py` + `vine ranger [--every N]`. Evaporation
+   (configurable half-life, dust removal, stale-session cleanup, derived
+   layer only — no commits, idempotent under synthetic clock); promotion/
+   pruning of links with link-level confidence < 1.0 ONLY (promote to 0.8
+   when both endpoints hot, prune when <= 0.5 and both stone cold; audited
+   `ranger(promote|prune)` commits; structural/1.0 links untouchable);
+   health report (needs_split per A.5, fat nodes per A.2, lint counts,
+   stale passports vs gardener source_root, uncertain-link buckets, heat
+   stats). 12 tests in tests/test_ranger.py.
+   **Deferred to Ranger v2:** assisted branch split (blocked by immutable
+   ids — needs the rename/tombstone policy first), `same-as` candidate
+   blocking by embedding similarity, filesystem watcher.
 3. **Dataset writes ("tend") — DONE (spec v0.7, 2026-06-11):** the 10th
    primitive, C.10. Single-statement INSERT/UPDATE/DELETE; WHERE mandatory on
    UPDATE/DELETE (mass-wipe guard); no DDL/ATTACH/PRAGMA (own injection
@@ -75,7 +85,8 @@ query datasets but **write** to them, safely.
 - [ ] 100 mixed documents ingested end-to-end, >= 95% summaries pass A.4,
       zero broken links post-ingest
 - [ ] Convergence: hops-to-banana mean drops >= 25% on recurring questions
-- [ ] Ranger runs as a service; evaporation/pruning verified with synthetic clock
+- [x] Ranger runs as a service (`vine ranger --every N`); evaporation/
+      pruning verified with synthetic clock (spec v0.10 F.14, 12 tests)
 - [x] spec published covering `tend` (dataset writes) before its code —
       shipped as spec v0.7 + implementation + injection/audit/drift tests
 - [x] spec published covering dataset birth (declarative schema in `plant`)
@@ -84,6 +95,9 @@ query datasets but **write** to them, safely.
 - [x] spec published covering the Gardener (Part G) before its code —
       shipped as spec v0.9 (G.1-G.6, C.7.1 rows, F.13) + deterministic
       adopt/sync + converter/hook plugin surface + tests
+- [x] spec published covering the Ranger (Part H) before its code —
+      shipped as spec v0.10 (H.1-H.5, F.14) + evaporation/tending/health
+      + synthetic-clock tests
 
 ## Out of scope
 

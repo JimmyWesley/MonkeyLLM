@@ -41,11 +41,20 @@ def main(argv: list[str] | None = None) -> int:
     p_adopt.add_argument("source", help="directory full of documents to adopt")
     p_adopt.add_argument("--forest", default=".")
     p_adopt.add_argument("--dest", default=None, help="root the mirror under this existing branch")
+    p_adopt.add_argument("--curate", action="store_true",
+                         help="LLM curation (G.4.2): A.4 summaries + tags via MONKEYLLM_LLM_ENDPOINT")
 
     p_sync = sub.add_parser("sync", help="Gardener: hash-diff the adopted source and refresh passports")
     p_sync.add_argument("source", nargs="?", default=None,
                         help="source directory (default: the adopted root in _meta/gardener.yaml)")
     p_sync.add_argument("--forest", default=".")
+    p_sync.add_argument("--curate", action="store_true",
+                        help="LLM curation for newly adopted files (G.4.2)")
+
+    p_ranger = sub.add_parser("ranger", help="Ranger: evaporate heat, tend links, report health (spec H)")
+    p_ranger.add_argument("--forest", default=".")
+    p_ranger.add_argument("--every", type=int, default=None,
+                          help="service mode: repeat every N seconds until interrupted")
 
     args = parser.parse_args(argv)
     forest_root = Path(args.forest).resolve() if getattr(args, "forest", None) else None
@@ -101,12 +110,28 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command in ("adopt", "sync"):
-        from monkeyllm.gardener import Gardener
+        from monkeyllm.gardener import Gardener, discover_hooks
         from monkeyllm.vine import Vine
+
+        curator = None
+        if args.curate:
+            import yaml
+
+            from monkeyllm.curator import Curator, make_chat
+
+            chat, model = make_chat()
+            print(f"curation model: {model}")
+            directives = ""
+            cfg_path = forest_root / "_meta" / "gardener.yaml"
+            if cfg_path.is_file():
+                cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+                directives = (cfg.get("curation") or {}).get("directives") or ""
+            curator = Curator(chat, directives=directives)
 
         vine = Vine(forest_root, writable=True)
         try:
-            gardener = Gardener(vine)
+            hooks = discover_hooks() + ([curator] if curator else [])
+            gardener = Gardener(vine, hooks=hooks)
             if args.command == "adopt":
                 report = gardener.adopt(args.source, dest=args.dest)
             else:
@@ -119,9 +144,33 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{key} ({len(report[key])}):")
                 for item in report[key]:
                     print(f"  {item}")
+        if curator:
+            print(f"curation: {curator.stats}")
         if not any(report.values()):
             print("nothing to do")
         return 1 if report.get("errors") else 0
+
+    if args.command == "ranger":
+        import json as _json
+        import time as _time
+
+        from monkeyllm.ranger import Ranger
+        from monkeyllm.vine import Vine
+
+        vine = Vine(forest_root, writable=True)
+        try:
+            ranger = Ranger(vine)
+            while True:
+                report = ranger.run()
+                print(_json.dumps(report, ensure_ascii=False, indent=2))
+                if args.every is None:
+                    break
+                _time.sleep(args.every)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            vine.close()
+        return 0
 
     if args.command == "canopy":
         from monkeyllm.canopy import CanopyIndex, embedder_from_env

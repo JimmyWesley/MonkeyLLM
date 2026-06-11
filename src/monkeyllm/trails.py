@@ -1,9 +1,9 @@
 """Pheromone trails (_derived/trails.db).
 
 Persistent heat (the long-term whisper) plus session-scoped namespaces
-(Phase 1.5 Troop readiness — required by spec Part E.2). Evaporation is
-the Ranger's job (out of Phase 0 scope); the schema already carries
-timestamps for it.
+(Phase 1.5 Troop readiness — required by spec Part E.2). Evaporation
+(spec H.1) decays the persistent scope with a configurable half-life and
+clears stale session leftovers.
 """
 
 from __future__ import annotations
@@ -70,4 +70,56 @@ class Trails:
 
     def clear_session(self, session: str) -> None:
         self.conn.execute("DELETE FROM heat WHERE scope = ?", (session,))
+        self.conn.commit()
+
+    # -- spec H.1: evaporation (derived layer only — never commits) --------
+
+    def evaporate(self, half_life_days: float = 30.0, *,
+                  now: float | None = None, floor: float = 0.01) -> dict:
+        """heat' = heat * 0.5^(dt/half_life); dust rows (< floor) vanish.
+        Re-stamps `updated`, so back-to-back runs are no-ops."""
+        now = time.time() if now is None else now
+        half_life_s = half_life_days * 86400.0
+        decayed = removed = 0
+        for nid, heat, updated in self.conn.execute(
+            "SELECT node_id, heat, updated FROM heat WHERE scope = ''"
+        ).fetchall():
+            dt_s = now - updated
+            if dt_s <= 0:
+                continue
+            new = heat * (0.5 ** (dt_s / half_life_s))
+            if new < floor:
+                self.conn.execute(
+                    "DELETE FROM heat WHERE scope = '' AND node_id = ?", (nid,))
+                removed += 1
+            else:
+                self.conn.execute(
+                    "UPDATE heat SET heat = ?, updated = ? WHERE scope = '' AND node_id = ?",
+                    (new, now, nid))
+                decayed += 1
+        self.conn.commit()
+        return {"decayed": decayed, "removed": removed}
+
+    def clear_stale_sessions(self, ttl_hours: float = 24.0, *,
+                             now: float | None = None) -> int:
+        """Crash leftovers from Troop hunts must not survive (H.1)."""
+        now = time.time() if now is None else now
+        cur = self.conn.execute(
+            "DELETE FROM heat WHERE scope != '' AND updated < ?",
+            (now - ttl_hours * 3600.0,))
+        self.conn.commit()
+        return cur.rowcount
+
+    def stats(self) -> dict:
+        row = self.conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(heat), 0), COALESCE(AVG(heat), 0) "
+            "FROM heat WHERE scope = ''").fetchone()
+        return {"rows": row[0], "max": round(row[1], 4), "mean": round(row[2], 4)}
+
+    def set_updated(self, node_id: str, when: float,
+                    scope: str = PERSISTENT_SCOPE) -> None:
+        """Test/maintenance helper: rewind a row's clock (synthetic time)."""
+        self.conn.execute(
+            "UPDATE heat SET updated = ? WHERE scope = ? AND node_id = ?",
+            (when, scope, node_id))
         self.conn.commit()

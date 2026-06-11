@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.9.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.10.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -28,7 +28,9 @@ change the generator and rebuild.
 - `src/monkeyllm/` — the `monkeyllm` package, `vine` CLI. `vine.py`
   (10 primitives), `harvest.py` (C.6c composite MCP tool: one-shot zero-LLM
   retrieval), `gardener.py` (Part G ingest: adopt/sync + pluggable
-  converters), `catalog.py` (SQLite + FTS5 = locate's BM25 side + scan),
+  converters), `ranger.py` (Part H maintenance: evaporation, link
+  promotion/pruning, health), `catalog.py` (SQLite + FTS5 = locate's BM25
+  side + scan),
   `canopy.py` (optional vector layer, Phase 1), `parser.py`/`models.py`
   (frontmatter), `forest.py`/`gitops.py` (files + commits),
   `telemetry.py`/`trails.py` (traces + pheromone).
@@ -53,6 +55,7 @@ python -m monkeyllm.cli reindex  --forest forest-fixture
 python -m monkeyllm.cli canopy build --forest forest-fixture   # vector layer
 python -m monkeyllm.cli adopt D:\dump --forest D:\floresta     # Gardener: mirror a tree
 python -m monkeyllm.cli sync --forest D:\floresta              # Gardener: hash-diff refresh
+python -m monkeyllm.cli ranger --forest D:\floresta            # Ranger: evaporate+tend+health
 python scripts/bench_locate.py --forest forest-fixture          # quality+latency
 ```
 
@@ -83,6 +86,12 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   hooks. Primitives' semantics/budgets/guards are NOT extensible; UIs and
   bots are MCP/library clients, not plugins. The Gardener never deletes
   nodes (deleted sources are reported `stale` for the Ranger).
+- **Ranger (spec Part H) manages ONLY links with link-level
+  `confidence < 1.0`** (proposals/shortcuts): promote when both endpoints
+  are hot, prune when both are stone cold; structural edges and
+  confidence-1.0 links are untouchable. Evaporation lives in `_derived/`
+  (no commits); promote/prune commit `.md`-only as `ranger(promote|prune)`.
+  The Ranger never deletes nodes.
 - `plant`/`graft` are atomic and `git commit` **inside the forest**
   (spec C.7/C.8). That is product behavior and it is correct.
 - **Binaries never enter the forest git** (spec A.3.1): gitops only versions

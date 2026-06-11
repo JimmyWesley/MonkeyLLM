@@ -22,9 +22,17 @@ class GitRepo:
 
     @property
     def is_repo(self) -> bool:
+        """True only when the forest root is ITSELF a repo top-level.
+
+        `--is-inside-work-tree` would also say yes when the forest merely
+        lives inside some OUTER repo — and then forest commits would land
+        in that outer repo (the exact disaster the A.3/gitops design
+        forbids). The forest must own its `.git`.
+        """
         try:
-            out = self._run("rev-parse", "--is-inside-work-tree", check=False)
-            return out.returncode == 0 and out.stdout.strip() == "true"
+            out = self._run("rev-parse", "--show-toplevel", check=False)
+            return (out.returncode == 0
+                    and Path(out.stdout.strip()).resolve() == self.root.resolve())
         except FileNotFoundError:
             return False
 

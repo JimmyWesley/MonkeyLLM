@@ -51,6 +51,18 @@ class TestInitForest:
             init_forest(tmp_path / "nova", title="Outra")
         assert e.value.code == E_SCHEMA
 
+    def test_forest_inside_outer_repo_gets_its_own_git(self, tmp_path):
+        """Regression: `--is-inside-work-tree` made init skip `git init` when
+        the forest lived inside ANY outer repo — forest commits would then
+        land in the OUTER repo (the exact disaster gitops must prevent)."""
+        subprocess.run(["git", "-C", str(tmp_path), "init", "--quiet"], check=True)
+        info = init_forest(tmp_path / "sub" / "nova", title="Nested")
+        root = Path(info["root"])
+        assert (root / ".git").exists()  # its OWN repo, not the outer one
+        out = subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain"],
+                             capture_output=True, text=True, check=True)
+        assert "_index.md" not in out.stdout.replace("\\", "/")  # nothing staged outside
+
     def test_registry_sees_new_forest_without_restart(self, tmp_path):
         pool = ForestPool(root=tmp_path, writable=False)
         try:
