@@ -139,7 +139,24 @@ class Vine:
         idx = CanopyIndex.build(pairs, emb)
         idx.save(self.forest.derived_dir)
         self.canopy = idx
+        self.catalog.clear_stale(self.catalog.stale_ids())
         return {"nodes": len(idx), "model": idx.model, "dim": idx.dim}
+
+    def _refresh_canopy(self) -> None:
+        """Lazy re-embedding (spec Fase 1): nodes marked stale by plant/graft
+        get their vectors refreshed before the next hybrid search, so the
+        dense layer reflects writes without an offline rebuild."""
+        stale = self.catalog.stale_ids()
+        if not stale:
+            return
+        rows = [self.catalog.get(i) for i in stale]
+        pairs = [(r["id"], f"{r['title']}. {r['summary']}") for r in rows if r is not None]
+        if pairs:
+            vecs = self.embedder.embed([t for _, t in pairs])
+            for (node_id, _), vec in zip(pairs, vecs):
+                self.canopy.upsert(node_id, vec)
+            self.canopy.save(self.forest.derived_dir)
+        self.catalog.clear_stale(stale)
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -203,6 +220,7 @@ class Vine:
         # base strength per id, in [0, 1]. BM25-only by default (Phase 0);
         # RRF(vector, BM25) when the canopy layer is active (Phase 1).
         if self.hybrid:
+            self._refresh_canopy()
             qvec = self.embedder.embed([query])[0]
             vec_hits = self.canopy.search(qvec, k=cand)
             for vid, _cos in vec_hits:

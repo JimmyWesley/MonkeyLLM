@@ -12,3 +12,4 @@ forest-fixture/_derived/
 models/
 bin/
 *.gguf
+bench/_artifacts/

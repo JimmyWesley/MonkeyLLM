@@ -193,6 +193,26 @@ class CanopyIndex:
             idx.vectors = [list(flat[i * dim : (i + 1) * dim]) for i in range(count)]
         return idx
 
+    # -- incremental updates (lazy re-embedding, spec Fase 1) ----------------
+
+    def upsert(self, node_id: str, vector: Sequence[float]) -> None:
+        """Replace (or append) one node's vector — the lazy re-embed path."""
+        vec = normalize(vector)
+        try:
+            i = self.ids.index(node_id)
+            self.vectors[i] = vec
+        except ValueError:
+            self.ids.append(node_id)
+            self.vectors.append(vec)
+
+    def remove(self, node_id: str) -> None:
+        try:
+            i = self.ids.index(node_id)
+        except ValueError:
+            return
+        del self.ids[i]
+        del self.vectors[i]
+
     # -- query --------------------------------------------------------------
 
     def search(self, query_vec: Sequence[float], k: int = 50) -> list[tuple[str, float]]:

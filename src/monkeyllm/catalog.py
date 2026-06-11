@@ -156,6 +156,15 @@ class Catalog:
         self.conn.execute("UPDATE nodes SET stale = 1 WHERE id = ?", (node_id,))
         self.conn.commit()
 
+    def stale_ids(self) -> list[str]:
+        return [r[0] for r in self.conn.execute("SELECT id FROM nodes WHERE stale = 1")]
+
+    def clear_stale(self, node_ids: list[str]) -> None:
+        self.conn.executemany(
+            "UPDATE nodes SET stale = 0 WHERE id = ?", [(i,) for i in node_ids]
+        )
+        self.conn.commit()
+
     # -- read ----------------------------------------------------------------
 
     def get(self, node_id: str) -> sqlite3.Row | None:

@@ -92,6 +92,50 @@ class TestLocateContract:
         finally:
             v.close()
 
+    def test_lazy_reembed_after_plant(self, forest_rw):
+        """Spec Fase 1, exit criterion 4: write → stale → next hybrid search
+        reflects the change, without an offline rebuild."""
+        emb = HashEmbedder()
+        v = Vine(forest_rw, writable=True, embedder=emb)
+        try:
+            v.build_canopy()
+            n0 = len(v.canopy)
+            v.plant({
+                "id": "notas/zumbido-quantico",
+                "type": "nota",
+                "title": "Zumbido quântico",
+                "summary": "Fenômeno fictício de zumbido quântico usado para testar re-embedding lazy da camada vetorial.",
+                "parent": "notas/_index",
+                "body": "# Zumbido quântico\n\n## Conteúdo\n\nTeste.",
+                "source": "agente",
+            })
+            assert "notas/zumbido-quantico" in v.catalog.stale_ids()
+            out = v.locate("zumbido quântico fenômeno", k=5)
+            ids = [r["id"] for r in out["results"]]
+            assert "notas/zumbido-quantico" in ids
+            # vector layer grew and stale flags were consumed
+            assert len(v.canopy) > n0
+            assert v.catalog.stale_ids() == []
+        finally:
+            v.close()
+
+    def test_lazy_reembed_after_graft_summary_change(self, forest_rw):
+        emb = HashEmbedder()
+        v = Vine(forest_rw, writable=True, embedder=emb)
+        try:
+            v.build_canopy()
+            target = "notas/faq-interno"
+            old_vec = list(v.canopy.vectors[v.canopy.ids.index(target)])
+            v.graft(target, {"set_frontmatter": {
+                "summary": "Perguntas frequentes agora cobrindo o protocolo xilofone estelar e a rotina de plantio."
+            }})
+            v.locate("xilofone estelar protocolo", k=5)  # triggers the refresh
+            new_vec = v.canopy.vectors[v.canopy.ids.index(target)]
+            assert new_vec != old_vec
+            assert v.catalog.stale_ids() == []
+        finally:
+            v.close()
+
     def test_index_persists_and_reloads_into_new_vine(self, forest_ro):
         emb = HashEmbedder()
         v = Vine(forest_ro, writable=False, embedder=emb)
