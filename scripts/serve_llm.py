@@ -60,17 +60,19 @@ def find_chat_gguf(substring: str | None) -> Path:
     return max(cands, key=lambda g: g.stat().st_mtime)
 
 
-def launch(server: Path, model: Path, *, port: int, alias: str, embedding: bool, ngl: int, ctx: int):
+def launch(server: Path, model: Path, *, port: int, alias: str, embedding: bool, ngl: int, ctx: int,
+           parallel: int = 1):
     cmd = [
         str(server), "-m", str(model),
         "--host", "127.0.0.1", "--port", str(port),
-        "-ngl", str(ngl), "-c", str(ctx),
+        # llama.cpp splits -c across slots: pass total = ctx-per-slot * slots
+        "-ngl", str(ngl), "-c", str(ctx * parallel),
         "--alias", alias,
         # lean & fast: no vision/audio projector, no thinking, flash attention,
-        # quantized KV cache (q8_0 halves KV memory), single slot = full ctx
+        # quantized KV cache (q8_0 halves KV memory)
         "--no-mmproj",
         "-fa", "on",
-        "-np", "1",
+        "-np", str(parallel),
     ]
     if embedding:
         cmd += ["--embedding", "--pooling", "cls", "-b", str(ctx), "-ub", str(ctx)]
@@ -91,6 +93,10 @@ def main() -> int:
     ap.add_argument("--ngl", type=int, default=99, help="GPU layers to offload (99 = all)")
     ap.add_argument("--ctx", type=int, default=8192)
     ap.add_argument("--chat-gguf", help="substring to pick the chat GGUF (default: newest in models/)")
+    ap.add_argument("--parallel", type=int, default=1,
+                    help="chat slots (llama.cpp -np): continuous batching for the "
+                         "Troop (N monkeys share the GPU at ~1x wall-clock). "
+                         "--ctx is per slot; total KV = ctx * parallel.")
     args = ap.parse_args()
 
     server = find_server()
@@ -105,6 +111,7 @@ def main() -> int:
             procs.append(launch(
                 server, gguf, port=args.chat_port,
                 alias=alias, embedding=False, ngl=args.ngl, ctx=args.ctx,
+                parallel=args.parallel,
             ))
         if args.only in (None, "emb"):
             print("[emb] bge-m3 embedder")

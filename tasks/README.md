@@ -1,4 +1,4 @@
-# Tasks
+﻿# Tasks
 
 Backlog of pending work, one file per task: `T<NN>-<slug>.md`.
 
@@ -18,7 +18,7 @@ Conventions:
 | --- | --- | --- |
 | T01 | Phase 1 closeout: official Monkey Bench run | in-progress (3/4 pass; 4th re-measured on v3 — passes as tokens-per-correct (0.58), criterion wording decision pending) |
 | T02 | English normalization (PT -> EN) | in-progress (src/ + contract vocabulary done via spec v0.5; docs prose remains) |
-| T03 | Phase 1.5: Troop orchestrator | todo |
+| T03 | Phase 1.5: Troop orchestrator | in-progress (built + measured; accuracy 11/11 but speedup criterion failed on single-chain qs — fork-tier next) |
 | T04 | Phase 2: Living Bank (Gardener, Ranger, dataset writes) | todo |
 | T05 | Publication readiness (GitHub + paper) | todo |
 | T06 | Monkey Bench: multi-hop question hardening | done (v3 set 100% min_hops>=3; first shouts fired via spec v0.6 trail_len) |
