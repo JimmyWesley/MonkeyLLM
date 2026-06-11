@@ -96,7 +96,18 @@ Regras importantes:
 O mapa da floresta (galho-mestre) está na primeira mensagem do usuário."""
 
 
-OPENROUTER_ENDPOINT = "" #"https://openrouter.ai/api/v1"
+# Deadline synthesis: a hunt that ends without an answer wastes every token
+# it spent. When the step budget runs out, force ONE closing call — the
+# evidence (sniff snippets, picked bodies) is already in the context.
+FORCED_ANSWER_MSG = (
+    "Orçamento de passos esgotado. NÃO chame mais ferramentas. Com base "
+    "SOMENTE no que você já viu acima (trechos do sniff, corpos do pick), "
+    'responda agora com {"tool": "answer", "args": {"text": "...", '
+    '"answer_nodes": ["..."]}}. Se a evidência apareceu em algum trecho, '
+    "use-a literalmente."
+)
+
+OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
 # Qwen 3.5 35B-A3B (MoE, ~3B active params: fast and cheap). Append ":free"
 # for the gratis tier (rate-limited ~20 req/min; the client retries on 429).
 OPENROUTER_DEFAULT_MODEL = "qwen/qwen3.5-35b-a3b"
@@ -131,6 +142,17 @@ def make_llm():
             headers["HTTP-Referer"] = "https://monkeyllm.com"
             headers["X-Title"] = "MonkeyLLM"
         client = httpx.Client(base_url=endpoint.rstrip("/"), headers=headers, timeout=180.0)
+
+        if model == DEFAULT_MODEL and "openrouter" not in endpoint:
+            # Single-model servers (llama.cpp) ignore the request's `model`
+            # field, so the placeholder default would be reported as if it ran.
+            # Ask the endpoint what it actually serves.
+            try:
+                served = client.get("/models").json().get("data") or []
+                if served:
+                    model = served[0]["id"]
+            except Exception:
+                pass  # endpoint without /models: keep the placeholder name
 
         # lean by default (same policy as the local server): thinking off
         # unless MONKEYLLM_LLM_REASONING=on. OpenRouter normalizes the
@@ -239,6 +261,16 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
             except TypeError as e:
                 result = {"error": {"code": "E_SCHEMA", "message": str(e)}}
             messages.append({"role": "user", "content": json.dumps(result, ensure_ascii=False, default=str)})
+
+        if answer is None:
+            messages.append({"role": "user", "content": FORCED_ANSWER_MSG})
+            action = parse_action(chat(messages))
+            if action and action.get("tool") == "answer":
+                fargs = action.get("args") or {}
+                answer = str(fargs.get("text", "")).strip() or None
+                answer_nodes = list(fargs.get("answer_nodes") or [])
+                if verbose and answer:
+                    print("    [força] síntese após esgotar os passos")
 
         expected = set(q["expected_nodes"])
         harvested = set(answer_nodes)

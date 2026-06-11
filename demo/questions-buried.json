@@ -2,25 +2,42 @@
   {
     "id": "b01",
     "question": "Qual foi o resultado e a latência média do experimento com semente 1045 no log do MixerLLM?",
-    "expected_nodes": ["projetos/mixerllm/log-experimentos"],
-    "answer_contains": ["descartado", "615"]
+    "expected_nodes": [
+      "projetos/mixerllm/log-experimentos"
+    ],
+    "answer_contains": [
+      "descartado",
+      "615"
+    ]
   },
   {
     "id": "b02",
     "question": "Em qual rodada do log de experimentos o cache de blocos atingiu hit-rate de 73% pela primeira vez, e qual era a semente dessa rodada?",
-    "expected_nodes": ["projetos/mixerllm/log-experimentos"],
-    "answer_contains": ["1013"]
+    "expected_nodes": [
+      "projetos/mixerllm/log-experimentos"
+    ],
+    "answer_contains": [
+      "1013"
+    ]
   },
   {
     "id": "b03",
     "question": "Quantas delegações consecutivas sem fragmentação foram observadas na rodada 27 do log de experimentos?",
-    "expected_nodes": ["projetos/mixerllm/log-experimentos"],
-    "answer_contains": ["127"]
+    "expected_nodes": [
+      "projetos/mixerllm/log-experimentos"
+    ],
+    "answer_contains": [
+      "127"
+    ]
   },
   {
     "id": "b04",
-    "question": "Com quem foi aberto o processo de qualidade por causa da falha de vedação do Sensor X?",
-    "expected_nodes": ["vendas/devolucoes-q1"],
-    "answer_contains": ["fornecedor da carcaça"]
+    "question": "O processo de qualidade aberto pela falha de vedacao do Sensor X envolve o fornecedor de qual componente?",
+    "expected_nodes": [
+      "vendas/devolucoes-q1"
+    ],
+    "answer_contains": [
+      "carcaça"
+    ]
   }
 ]

@@ -2,61 +2,111 @@
   {
     "id": "q01",
     "question": "Quem é o autor da arquitetura do MixerLLM e em que cidade ele mora?",
-    "expected_nodes": ["projetos/mixerllm/arquitetura", "pessoas/jimmy-wesley"],
-    "answer_contains": ["Jimmy", "Recife"]
+    "expected_nodes": [
+      "projetos/mixerllm/arquitetura",
+      "pessoas/jimmy-wesley"
+    ],
+    "answer_contains": [
+      "Jimmy",
+      "Recife"
+    ]
   },
   {
     "id": "q02",
     "question": "Qual região teve o maior total de vendas no Q1 2026 e qual foi esse total aproximado em reais?",
-    "expected_nodes": ["vendas/relatorio-q1-2026"],
-    "answer_contains": ["Sudeste"]
+    "expected_nodes": [
+      "vendas/relatorio-q1-2026"
+    ],
+    "answer_contains": [
+      "Sudeste"
+    ]
   },
   {
     "id": "q03",
     "question": "Qual é o SKU do produto Sensor X e qual SKU teve a maior receita total no Q1 2026?",
-    "expected_nodes": ["produtos/sensor-x", "vendas/relatorio-q1-2026"],
-    "answer_contains": ["A-101"]
+    "expected_nodes": [
+      "produtos/sensor-x",
+      "vendas/relatorio-q1-2026"
+    ],
+    "answer_contains": [
+      "A-101"
+    ]
   },
   {
     "id": "q04",
     "question": "Que decisão sobre o mixer-lang foi tomada no release de março de 2026?",
-    "expected_nodes": ["eventos/2026-03-release-mixerllm-v2"],
-    "answer_contains": ["64", "v2"]
+    "expected_nodes": [
+      "eventos/2026-03-release-mixerllm-v2"
+    ],
+    "answer_contains": [
+      "64",
+      "5:1"
+    ]
   },
   {
     "id": "q05",
     "question": "Com qual técnica de inferência o block-loop do MixerLLM é contrastado, e qual é a diferença central?",
-    "expected_nodes": ["projetos/mixerllm/block-loop", "conceitos/speculative-decoding"],
-    "answer_contains": ["speculative"]
+    "expected_nodes": [
+      "projetos/mixerllm/block-loop",
+      "conceitos/speculative-decoding"
+    ],
+    "answer_contains": [
+      "speculative"
+    ]
   },
   {
     "id": "q06",
     "question": "Qual cliente assinou contrato em fevereiro de 2026, quem negociou pela Tropicália Tech e o que foi comprado?",
-    "expected_nodes": ["eventos/2026-02-contrato-datacoop", "organizacoes/datacoop"],
-    "answer_contains": ["DataCoop", "Elena"]
+    "expected_nodes": [
+      "eventos/2026-02-contrato-datacoop",
+      "organizacoes/datacoop"
+    ],
+    "answer_contains": [
+      "DataCoop",
+      "Elena"
+    ]
   },
   {
     "id": "q07",
     "question": "Quanta VRAM tem a GPU da workstation de P&D e que modelos ela serve?",
-    "expected_nodes": ["infra/workstation-3090"],
-    "answer_contains": ["24"]
+    "expected_nodes": [
+      "infra/workstation-3090"
+    ],
+    "answer_contains": [
+      "24"
+    ]
   },
   {
     "id": "q08",
     "question": "Quais são os dois baselines obrigatórios do Monkey Bench?",
-    "expected_nodes": ["projetos/monkeyllm/monkey-bench"],
-    "answer_contains": ["RAG"]
+    "expected_nodes": [
+      "projetos/monkeyllm/monkey-bench"
+    ],
+    "answer_contains": [
+      "RAG"
+    ]
   },
   {
     "id": "q09",
     "question": "Quantas unidades de Sensor X foram devolvidas no Q1 2026 e por quê? Esse número está no dataset de vendas?",
-    "expected_nodes": ["vendas/devolucoes-q1"],
-    "answer_contains": ["14", "vedação"]
+    "expected_nodes": [
+      "vendas/devolucoes-q1"
+    ],
+    "answer_contains": [
+      "14",
+      "vedação"
+    ]
   },
   {
     "id": "q10",
     "question": "O que é estigmergia, quem é o pesquisador do time que trabalha com isso e de qual laboratório ele veio?",
-    "expected_nodes": ["conceitos/estigmergia", "pessoas/bruno-lima"],
-    "answer_contains": ["Bruno", "Amaz"]
+    "expected_nodes": [
+      "conceitos/estigmergia",
+      "pessoas/bruno-lima"
+    ],
+    "answer_contains": [
+      "Bruno",
+      "Amaz"
+    ]
   }
 ]

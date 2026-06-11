@@ -32,6 +32,7 @@ import anyio
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_demo import (  # noqa: E402
+    FORCED_ANSWER_MSG,
     MAX_STEPS,
     SYSTEM_PROMPT,
     make_llm,
@@ -124,6 +125,16 @@ async def run_question(session, chat, q: dict, verbose: bool = True) -> dict:
         else:
             result = await call_tool(session, tool, args)
         messages.append({"role": "user", "content": json.dumps(result, ensure_ascii=False, default=str)})
+
+    if answer is None:
+        messages.append({"role": "user", "content": FORCED_ANSWER_MSG})
+        action = parse_action(await anyio.to_thread.run_sync(chat, messages))
+        if action and action.get("tool") == "answer":
+            fargs = action.get("args") or {}
+            answer = str(fargs.get("text", "")).strip() or None
+            answer_nodes = list(fargs.get("answer_nodes") or [])
+            if verbose and answer:
+                print("    [força] síntese após esgotar os passos")
 
     expected = set(q["expected_nodes"])
     harvested = set(answer_nodes)
