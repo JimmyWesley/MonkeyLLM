@@ -3,8 +3,9 @@
 status: in-progress (workstream 3 `tend` DONE 2026-06-11 via spec v0.7;
 workstream 5 dataset birth DONE 2026-06-11 via spec v0.8;
 workstream 1 Gardener v1 deterministic core DONE 2026-06-11 via spec v0.9;
-workstream 2 Ranger v1 DONE 2026-06-11 via spec v0.10 —
-LLM curation stage (G.4.2), DOCX converter and convergence curve remain)
+workstream 2 Ranger v1 DONE 2026-06-11 via spec v0.10;
+LLM curation (G.4.2) DONE + measured 2026-06-11 —
+DOCX converter, edge proposals and convergence curve remain)
 depends-on: T01 (measurement discipline), T03 (troop data feeds adaptive ideas)
 
 ## Goal
@@ -38,9 +39,23 @@ query datasets but **write** to them, safely.
    MIT-clean only; copyleft tools (e.g. PyMuPDF AGPL in the user's
    pdf-replace) plug via command hook, never as dependency. 11 tests in
    tests/test_gardener.py.
-   **Remaining (Gardener v2):** LLM curation stage (G.4.2: A.4 summaries
-   with retry guided by config `curation.directives`, tags, entity/edge
-   proposals at confidence 0.3) measured against the >= 95% A.4 criterion;
+   **LLM curation (G.4.2) — DONE + MEASURED (2026-06-11):**
+   `src/monkeyllm/curator.py` — the Curator is itself an `on_curate` hook:
+   A.4 summary via LLM with validate-and-retry (max 3 attempts, error fed
+   back), tags (cleaned slugs, merged after config default_tags), operator
+   `curation.directives` injected into the system prompt, language follows
+   the content. Any failure falls back to the derived summary — never
+   blocks. CLI: `vine adopt|sync --curate` (MONKEYLLM_LLM_ENDPOINT).
+   **Measured (gemma-4 12B local, 100-doc EN dump via
+   scripts/build_dump.py + scripts/measure_curation.py): 100 planted,
+   85 LLM summaries (15 datasets keep factual templates), acceptance
+   100% (2 retries, 0 fallbacks), 0 lint errors, 1.71 s/doc (171 s
+   total).** Criterion >= 95%: PASSED.
+   Bonus regression fix found by the measurement: `GitRepo.is_repo` used
+   `--is-inside-work-tree`, so a forest created INSIDE any outer repo
+   skipped `git init` and forest commits would land in the outer repo —
+   now requires the forest root to be its own toplevel (test added).
+   **Remaining (Gardener v2):** entity/edge proposals at confidence 0.3;
    in-house DOCX->MD built-in converter derived from the pdf-replace
    technique (python-docx MIT: w:t traversal incl. text boxes + fragmented
    run merge); media extras (faster-whisper transcripts, vision
@@ -82,8 +97,10 @@ query datasets but **write** to them, safely.
 
 ## Acceptance criteria
 
-- [ ] 100 mixed documents ingested end-to-end, >= 95% summaries pass A.4,
-      zero broken links post-ingest
+- [x] 100 mixed documents ingested end-to-end, >= 95% summaries pass A.4,
+      zero broken links post-ingest — measured 2026-06-11 (gemma-4 local):
+      100/100 planted, LLM acceptance 100% (85 summaries, 2 retries,
+      0 fallbacks), lint errors 0, 1.71 s/doc
 - [ ] Convergence: hops-to-banana mean drops >= 25% on recurring questions
 - [x] Ranger runs as a service (`vine ranger --every N`); evaporation/
       pruning verified with synthetic clock (spec v0.10 F.14, 12 tests)
