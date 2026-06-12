@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-BUILD_SCRIPT = REPO / "scripts" / "build_fixture.py"
+BUILD_SCRIPT = REPO / "forests" / "scripts" / "build_fixture.py"
 
 
 def build_forest(dest: Path) -> Path:

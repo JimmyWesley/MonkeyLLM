@@ -13,7 +13,7 @@ hybrid (RRF vector+BM25) configuration and prints both side by side, which
 is the Phase 1 comparison.
 
     python scripts/bench_locate.py
-    python scripts/bench_locate.py --forest forest-fixture --repeats 50
+    python scripts/bench_locate.py --repeats 50
 """
 
 from __future__ import annotations
@@ -25,7 +25,8 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "src"))
 
 from monkeyllm import Vine  # noqa: E402
 from monkeyllm.canopy import embedder_from_env  # noqa: E402
@@ -128,8 +129,8 @@ def print_report(reports):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--forest", default="forest-fixture")
-    ap.add_argument("--questions", default=str(Path(__file__).resolve().parents[1] / "demo" / "questions.json"))
+    ap.add_argument("--forest", default=str(REPO / "forests" / "forest-fixture"))
+    ap.add_argument("--questions", default=str(REPO / "examples" / "demo" / "questions.json"))
     ap.add_argument("--repeats", type=int, default=40, help="timing repeats per question")
     args = ap.parse_args()
 

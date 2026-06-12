@@ -1,4 +1,4 @@
-# T04 — Phase 2: Living Bank (Gardener, Ranger, dataset writes)
+﻿# T04 — Phase 2: Living Bank (Gardener, Ranger, dataset writes)
 
 status: in-progress (workstream 3 `tend` DONE 2026-06-11 via spec v0.7;
 workstream 5 dataset birth DONE 2026-06-11 via spec v0.8;
@@ -51,7 +51,7 @@ query datasets but **write** to them, safely.
    the content. Any failure falls back to the derived summary — never
    blocks. CLI: `vine adopt|sync --curate` (MONKEYLLM_LLM_ENDPOINT).
    **Measured (gemma-4 12B local, 100-doc EN dump via
-   scripts/build_dump.py + scripts/measure_curation.py): 100 planted,
+   forests/scripts/build_dump.py + scripts/measure_curation.py): 100 planted,
    85 LLM summaries (15 datasets keep factual templates), acceptance
    100% (2 retries, 0 fallbacks), 0 lint errors, 1.71 s/doc (171 s
    total).** Criterion >= 95%: PASSED.

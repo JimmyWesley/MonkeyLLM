@@ -6,7 +6,8 @@ the model produced that passed validate-and-retry, vs fallbacks), zero
 broken links post-ingest (lint errors == 0).
 
     set MONKEYLLM_LLM_ENDPOINT=http://127.0.0.1:8090/v1
-    python scripts/measure_curation.py [--source dump-ingest] [--forest _measure-forest]
+    python scripts/measure_curation.py [--source forests/dump-ingest]
+                                       [--forest forests/_measure-forest]
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "src"))
 
 from monkeyllm.curator import Curator, make_chat  # noqa: E402
 from monkeyllm.forest import Forest, init_forest  # noqa: E402
@@ -30,8 +32,8 @@ from monkeyllm.vine import Vine  # noqa: E402
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", default="dump-ingest")
-    parser.add_argument("--forest", default="_measure-forest")
+    parser.add_argument("--source", default=str(REPO / "forests" / "dump-ingest"))
+    parser.add_argument("--forest", default=str(REPO / "forests" / "_measure-forest"))
     args = parser.parse_args()
 
     root = Path(args.forest)

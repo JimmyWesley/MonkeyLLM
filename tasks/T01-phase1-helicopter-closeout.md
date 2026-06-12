@@ -1,4 +1,4 @@
-# T01 — Phase 1 closeout: official Monkey Bench run
+﻿# T01 — Phase 1 closeout: official Monkey Bench run
 
 status: in-progress
 
@@ -24,12 +24,12 @@ proving the four exit criteria.
 
 1. Start both local servers: `python scripts/serve_llm.py` (chat :8090,
    embeddings :8091).
-2. Build the bench forest: `python scripts/build_bench_forest.py`
-   (writes `bench-forest/` + regenerates `bench/questions-v2.json`).
-3. Build its vector layer: `python -m monkeyllm.cli canopy build --forest bench-forest`.
-4. Locate quality + latency: `python scripts/bench_locate.py --forest bench-forest
+2. Build the bench forest: `python forests/scripts/build_bench_forest.py`
+   (writes `forests/bench-forest/` + regenerates `bench/questions-v2.json`).
+3. Build its vector layer: `python -m monkeyllm.cli canopy build --forest forests/bench-forest`.
+4. Locate quality + latency: `python scripts/bench_locate.py --forest forests/bench-forest
    --questions bench/questions-v2.json` -> recall@5 and p95 for bm25 and hybrid.
-5. Full comparison: `python bench/run_bench.py --forest bench-forest
+5. Full comparison: `python bench/run_bench.py --forest forests/bench-forest
    --questions bench/questions-v2.json` (arms: monkey, topk, iter).
 6. Record results against the four criteria in this file; archive the report
    from `bench/_artifacts/`.

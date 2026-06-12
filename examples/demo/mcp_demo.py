@@ -1,6 +1,6 @@
 """MCP-only demo — the hunt runs 100% through the MCP protocol.
 
-Unlike demo/run_demo.py (which imports Vine and calls primitives in-process),
+Unlike run_demo.py (which imports Vine and calls primitives in-process),
 this client never touches the forest directly: every locate/sniff/look/pick
 goes through an MCP session, exactly like an external client would. It
 validates the product path end to end: client LLM <-> MCP <-> Vine server.
@@ -8,13 +8,13 @@ validates the product path end to end: client LLM <-> MCP <-> Vine server.
 Connection modes:
 
     --url http://127.0.0.1:8000/mcp     connect to a running `vine serve --transport http`
-    --stdio --forest forest-fixture     spawn `vine serve` as a stdio subprocess
+    --stdio                             spawn `vine serve` as a stdio subprocess
 
 The LLM is resolved exactly like run_demo.py (MONKEYLLM_LLM_ENDPOINT /
 OpenRouter / HF) — it plays the role of the client's own model.
 
-    python demo/mcp_demo.py --stdio --forest forest-fixture --only q07
-    python demo/mcp_demo.py --url http://127.0.0.1:8000/mcp
+    python examples/demo/mcp_demo.py --stdio --only q07
+    python examples/demo/mcp_demo.py --url http://127.0.0.1:8000/mcp
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from run_demo import (  # noqa: E402
     resolve_provider,
 )
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 MCP_TOOLS = {"locate", "sniff", "look", "move", "pick", "query", "scan"}
 
 
@@ -184,7 +184,8 @@ def main() -> int:
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--url", help="MCP endpoint of a running server (http transport)")
     mode.add_argument("--stdio", action="store_true", help="spawn `vine serve` as a stdio subprocess")
-    ap.add_argument("--forest", default="forest-fixture", help="forest for --stdio mode")
+    ap.add_argument("--forest", default=str(REPO / "forests" / "forest-fixture"),
+                    help="forest for --stdio mode")
     ap.add_argument("--questions", default=str(Path(__file__).parent / "questions.json"))
     ap.add_argument("--only", help="run a single question id (ex: q07)")
     args = ap.parse_args()

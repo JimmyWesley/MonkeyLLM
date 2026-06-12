@@ -1,4 +1,4 @@
-# Inferência — runbook (local e online)
+﻿# Inferência — runbook (local e online)
 
 Como rodar o MonkeyLLM ponta a ponta com modelos locais via **llama.cpp** na
 RTX 3090, baixando os pesos do Hugging Face. Tudo que cai em `models/` e
@@ -37,15 +37,15 @@ $env:MONKEYLLM_EMBED_MODEL    = "bge-m3"
 #    export MONKEYLLM_EMBED_ENDPOINT=http://localhost:8091/v1 MONKEYLLM_EMBED_MODEL=bge-m3
 
 # 4. (opcional, Fase 1) construir a camada vetorial da floresta
-python -m monkeyllm.cli canopy build --forest forest-fixture
+python -m monkeyllm.cli canopy build --forest forests/forest-fixture
 #    -> _derived/canopy/  (vetores normalizados, reconstruível)
 
 # 5. rodar a demo das 10 perguntas multi-hop (critério F.5)
-python demo/run_demo.py --forest forest-fixture
+python examples/demo/run_demo.py
 #    -> _derived/traces/*.jsonl  +  _derived/demo-report.json
 
 # 6. benchmark do locate (qualidade + velocidade, critério F.6)
-python scripts/bench_locate.py --forest forest-fixture
+python scripts/bench_locate.py
 #    -> _derived/bench-locate.json
 ```
 
@@ -64,7 +64,7 @@ chave — o cliente detecta sozinho:
 export OPENROUTER_API_KEY=sk-or-...
 # opcional: escolher o modelo (default: google/gemma-4-26b-a4b-it:free)
 # export MONKEYLLM_LLM_MODEL=google/gemma-4-31b-it
-python demo/run_demo.py --forest forest-fixture
+python examples/demo/run_demo.py
 ```
 
 Atenção ao id do modelo: o catálogo do OpenRouter é diferente do Hugging Face

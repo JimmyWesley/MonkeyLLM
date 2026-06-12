@@ -27,7 +27,8 @@
 
 **Entregáveis:**
 1. Repositório `vine/` com servidor MCP + suíte de testes.
-2. Floresta de teste versionada em Git (`forest-fixture/`).
+2. Floresta de teste com Git próprio (`forests/forest-fixture/`, gerada por
+   `forests/scripts/build_fixture.py`; florestas geradas não entram no repo).
 3. CLI mínima: `vine serve`, `vine reindex`, `vine validate` (lint da floresta contra o schema).
 4. Demo gravada: Qwen 7-14B Q4 respondendo 10 perguntas multi-hop com traces.
 

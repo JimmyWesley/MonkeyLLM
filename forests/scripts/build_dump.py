@@ -1,12 +1,12 @@
 """Deterministic 100-document mixed dump for the T04 curation measurement.
 
-Generates `dump-ingest/` (git-ignored): a realistic brownfield directory —
-markdown articles, plain-text notes, CSV/JSON tables — for a fictional
-company ("Toucan Robotics", English content). The Gardener adopts this tree
-and the curation acceptance criterion (>= 95% LLM summaries passing A.4) is
-measured by scripts/measure_curation.py.
+Generates `forests/dump-ingest/` (git-ignored): a realistic brownfield
+directory — markdown articles, plain-text notes, CSV/JSON tables — for a
+fictional company ("Toucan Robotics", English content). The Gardener adopts
+this tree and the curation acceptance criterion (>= 95% LLM summaries
+passing A.4) is measured by scripts/measure_curation.py.
 
-    python scripts/build_dump.py [--out dump-ingest]
+    python forests/scripts/build_dump.py [--out forests/dump-ingest]
 """
 
 from __future__ import annotations
@@ -88,7 +88,8 @@ def json_table(rng: random.Random, i: int) -> tuple[str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default="dump-ingest")
+    parser.add_argument("--out", default=str(
+        Path(__file__).resolve().parents[2] / "forests" / "dump-ingest"))
     args = parser.parse_args()
 
     out = Path(args.out)

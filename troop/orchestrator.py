@@ -1,4 +1,4 @@
-"""Troop orchestrator (spec Part E, Phase 1.5): N monkeys, one question.
+﻿"""Troop orchestrator (spec Part E, Phase 1.5): N monkeys, one question.
 
 Coordination is intra-session stigmergy only — the monkeys never exchange
 messages, they smell each other's trails:
@@ -37,7 +37,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
-sys.path.insert(0, str(REPO / "demo"))
+sys.path.insert(0, str(REPO / "examples" / "demo"))
 
 from monkeyllm import Vine, VineError  # noqa: E402
 from monkeyllm.canopy import embedder_from_env  # noqa: E402

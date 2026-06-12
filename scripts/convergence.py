@@ -55,7 +55,7 @@ def point_from(report_path: Path, i: int) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--passes", type=int, default=5)
-    ap.add_argument("--forest", default="bench-forest")
+    ap.add_argument("--forest", default=str(REPO / "forests" / "bench-forest"))
     ap.add_argument("--questions", default=str(REPO / "bench" / "questions-v3.json"))
     ap.add_argument("--rebuild", action="store_true",
                     help="regenerate the forest first (clean slate: no grafts, no heat)")
@@ -65,7 +65,7 @@ def main() -> int:
 
     if args.rebuild:
         print("== rebuilding the forest (clean slate) ==")
-        run(["scripts/build_bench_forest.py", "--out", args.forest])
+        run(["forests/scripts/build_bench_forest.py", "--out", args.forest])
         if os.environ.get("MONKEYLLM_EMBED_ENDPOINT"):
             print("== building canopy (hybrid locate, v3 parity) ==")
             run(["-m", "monkeyllm.cli", "canopy", "build", "--forest", args.forest])
@@ -81,7 +81,7 @@ def main() -> int:
         print(f"== pass {i}/{args.passes} ==")
         # run_demo exits 1 when not all answers are correct — that is data,
         # not a failure (the report file is still written)
-        run(["demo/run_demo.py", "--forest", args.forest,
+        run(["examples/demo/run_demo.py", "--forest", args.forest,
              "--questions", args.questions, "--learn", "--out", str(out)],
             ok_codes=(0, 1))
         point = point_from(out, i)

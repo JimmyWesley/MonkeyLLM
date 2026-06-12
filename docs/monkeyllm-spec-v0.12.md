@@ -654,7 +654,7 @@ The three integration modes (informative):
 2. **Harvest (this tool)** — one call, evidence back, zero tokens spent on
    the server side. Best default for capable client models.
 3. **Concierge** — a local SLM hunts and returns a synthesized answer
-   (orchestrator-side, e.g. `demo/run_demo.py`); for thin clients.
+   (orchestrator-side, e.g. `examples/demo/run_demo.py`); for thin clients.
 
 Parameters:
 

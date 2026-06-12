@@ -1,4 +1,4 @@
-# T02 — English normalization (PT -> EN)
+﻿# T02 — English normalization (PT -> EN)
 
 status: in progress (src/ + contract vocabulary DONE via spec v0.5; docs remain)
 owner: junior dev (translation pass), review by maintainer
@@ -32,7 +32,7 @@ navigation with bge-m3).
   archived: do not touch.
 - `docs/monkeyllm-arquitetura.md`, `docs/monkeyllm-roadmap.md`,
   `docs/local-inference.md`.
-- Remaining PT comments/strings under `demo/`, `bench/`, `scripts/`, `tests/`
+- Remaining PT comments/strings under `examples/demo/`, `bench/`, `scripts/`, `tests/`
   (e.g. demo runner prints like "GRITO: atalho ...").
 - Glossary to apply consistently (from the roadmap/paper): shout (grito),
   whisper (sussurro), trail (trilha), branch (galho), banana, forest dialect
@@ -40,9 +40,9 @@ navigation with bge-m3).
 
 ## Do NOT translate
 
-- `forest-fixture/` content and `scripts/build_fixture.py` corpus literals —
+- `forests/forest-fixture/` content and `forests/scripts/build_fixture.py` corpus literals —
   PT test data wired to `answer_contains` assertions.
-- `demo/questions*.json`, `bench/questions-v*.json` — same reason.
+- `examples/demo/questions*.json`, `bench/questions-v*.json` — same reason.
 - The demo/bench **system prompts** stay PT for now (they drive a PT corpus
   with PT questions); add an English variant only as a separate, tested change.
 - The PT corpus **tags** (`["conceito"]`, `["evento"]`...) — they are free

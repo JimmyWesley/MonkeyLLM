@@ -1,4 +1,4 @@
-﻿"""Build the Monkey Bench v1 corpus (bench-forest/) + derived questions.
+﻿"""Build the Monkey Bench v1 corpus (forests/bench-forest/) + derived questions.
 
 A deterministic, programmatically-expanded universe ("Maracatu Sistemas",
 distinct from the Phase-0 fixture): ~210 nodes, 15 branches, 2 SQLite
@@ -7,7 +7,7 @@ datasets. Facts are planted by the generator and the question set
 paraphrase templates whose vocabulary is disjoint from the summary
 templates (anti-leakage by construction, the roadmap's bench risk).
 
-    python scripts/build_bench_forest.py [--out bench-forest]
+    python forests/scripts/build_bench_forest.py [--out forests/bench-forest]
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from monkeyllm.indexer import count_coverage, entry_line  # noqa: E402
 from monkeyllm.parser import serialize_node  # noqa: E402
@@ -29,7 +29,7 @@ from monkeyllm.parser import serialize_node  # noqa: E402
 SEED = 2026
 TODAY = "2026-06-10"
 CREATED = "2026-05-01"
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------
 # Pools (deterministic with SEED)
@@ -630,7 +630,7 @@ def build_questions(people, products, projects, contracts, incidents, releases,
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="bench-forest")
+    ap.add_argument("--out", default=str(REPO / "forests" / "bench-forest"))
     ap.add_argument("--questions-out", default=str(REPO / "bench" / "questions-v2.json"))
     ap.add_argument("--questions-v3-out", default=str(REPO / "bench" / "questions-v3.json"))
     args = ap.parse_args()

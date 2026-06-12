@@ -6,15 +6,16 @@ build/
 dist/
 .pytest_cache/
 test-results/
-forest-fixture/_derived/
 .env
+
+# Generated forests never enter the outer repo — rebuild them via
+# forests/scripts/ (each forest has its OWN embedded git)
+forests/*
+!forests/scripts/
 
 # Local inference artifacts (downloaded by scripts/setup_models.py)
 models/
 bin/
 *.gguf
 bench/_artifacts/
-bench-forest/
-dump-ingest/
-_measure-forest/
 ideias/

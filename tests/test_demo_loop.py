@@ -1,4 +1,4 @@
-"""End-to-end agent-loop test with a scripted model (no network, no GPU).
+﻿"""End-to-end agent-loop test with a scripted model (no network, no GPU).
 
 Proves the demo harness machinery: master-index priming, JSON action
 parsing, primitive dispatch, error envelope feedback, session close and
@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "demo"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples" / "demo"))
 
 from run_demo import parse_action, run_question  # noqa: E402
 

@@ -1,11 +1,11 @@
-"""Provider resolution for the navigator LLM (local / OpenRouter / HF)."""
+﻿"""Provider resolution for the navigator LLM (local / OpenRouter / HF)."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "demo"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples" / "demo"))
 
 from run_demo import OPENROUTER_DEFAULT_MODEL, OPENROUTER_ENDPOINT, resolve_provider  # noqa: E402
 

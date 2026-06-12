@@ -17,19 +17,19 @@ Examples:
     # Local llama.cpp (scripts/serve_llm.py)
     set MONKEYLLM_LLM_ENDPOINT=http://localhost:8090/v1
     set MONKEYLLM_LLM_MODEL=gemma-4
-    python demo/run_demo.py
+    python examples/demo/run_demo.py
 
     # Online via OpenRouter (no local GPU needed)
     set OPENROUTER_API_KEY=sk-or-...
     set MONKEYLLM_LLM_MODEL=google/gemma-4-12b-it
-    python demo/run_demo.py --questions demo/questions.json
+    python examples/demo/run_demo.py --questions examples/demo/questions.json
 
 Optional Phase 1 vector layer: if MONKEYLLM_EMBED_ENDPOINT is set and the
 canopy is built (`vine canopy build`), locate runs hybrid (RRF vector+BM25)
 instead of BM25-only — the rest of the demo is identical.
 
 Each question runs in its own Vine session; traces land in
-forest-fixture/_derived/traces/<session>.jsonl and the report prints
+<forest>/_derived/traces/<session>.jsonl and the report prints
 hops-to-banana, tokens-to-banana and banana precision.
 """
 
@@ -42,7 +42,8 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "src"))
 
 from monkeyllm import Vine, VineError  # noqa: E402
 
@@ -319,7 +320,7 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--forest", default="forest-fixture")
+    ap.add_argument("--forest", default=str(REPO / "forests" / "forest-fixture"))
     ap.add_argument("--questions", default=str(Path(__file__).parent / "questions.json"))
     ap.add_argument("--only", help="run a single question id (ex: q02)")
     ap.add_argument("--no-sniff", action="store_true",

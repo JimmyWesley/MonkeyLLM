@@ -1,4 +1,4 @@
-"""MCP-only demo: a full hunt where the forest is touched ONLY through MCP.
+﻿"""MCP-only demo: a full hunt where the forest is touched ONLY through MCP.
 
 Spawns `vine serve` as a real stdio subprocess and drives it with a scripted
 chat — end-to-end protocol validation without an LLM or network.
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import anyio
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "demo"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples" / "demo"))
 
 from mcp_demo import open_mcp_session, run_question  # noqa: E402
 

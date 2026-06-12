@@ -1,4 +1,4 @@
-"""Provision the local inference stack for the Phase 0 demo + Phase 1 vectors.
+﻿"""Provision the local inference stack for the Phase 0 demo + Phase 1 vectors.
 
 Downloads (all resumable; safe to re-run):
 
@@ -149,7 +149,7 @@ def main() -> int:
 
     print("\n✓ done. Next:")
     print("    python scripts/serve_llm.py            # start both servers")
-    print("    python demo/run_demo.py                # run the 10-question demo")
+    print("    python examples/demo/run_demo.py                # run the 10-question demo")
     return 0
 
 

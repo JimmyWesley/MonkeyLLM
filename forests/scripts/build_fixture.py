@@ -1,9 +1,9 @@
-﻿"""Build the Phase 0 test forest (forest-fixture/).
+﻿"""Build the Phase 0 test forest (forests/forest-fixture/).
 
 Deterministic: ~90+ nodes, 12 branches, 1 SQLite dataset, cross-links
 designed to support the 10 multi-hop demo questions. Run:
 
-    python scripts/build_fixture.py [--out forest-fixture]
+    python forests/scripts/build_fixture.py [--out forests/forest-fixture]
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "src"))
 
 from monkeyllm.indexer import count_coverage, entry_line  # noqa: E402
 from monkeyllm.parser import serialize_node  # noqa: E402
@@ -508,7 +509,7 @@ def build_sales_db(path: Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="forest-fixture")
+    ap.add_argument("--out", default=str(REPO / "forests" / "forest-fixture"))
     args = ap.parse_args()
     out = Path(args.out).resolve()
     if out.exists():

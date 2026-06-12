@@ -14,7 +14,7 @@ Requires the local servers up (scripts/serve_llm.py) and the env:
     export MONKEYLLM_LLM_ENDPOINT=http://localhost:8090/v1 MONKEYLLM_LLM_MODEL=qwen2.5-7b
     export MONKEYLLM_EMBED_ENDPOINT=http://localhost:8091/v1 MONKEYLLM_EMBED_MODEL=bge-m3
 
-    python bench/run_bench.py --forest forest-fixture --questions bench/questions-v1.json
+    python bench/run_bench.py --questions bench/questions-v1.json
     python bench/run_bench.py --arms topk,iter        # subset
 """
 
@@ -29,7 +29,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
-sys.path.insert(0, str(REPO / "demo"))
+sys.path.insert(0, str(REPO / "examples" / "demo"))
 sys.path.insert(0, str(REPO))
 
 from bench.baselines import rag_iter, rag_topk  # noqa: E402
@@ -93,7 +93,7 @@ def summarize(arm: str, results: list[dict]) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--forest", default="forest-fixture")
+    ap.add_argument("--forest", default=str(REPO / "forests" / "forest-fixture"))
     ap.add_argument("--questions", default=str(REPO / "bench" / "questions-v1.json"))
     ap.add_argument("--arms", default="monkey,topk,iter")
     ap.add_argument("--troop-n", type=int, default=3, help="monkeys in the troop arm")
