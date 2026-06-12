@@ -1,8 +1,15 @@
-"""G.4.2: the Curator — LLM summaries with A.4 validate-and-retry."""
+"""G.4.2: the Curator — LLM summaries with A.4 validate-and-retry,
+plus G.4.2.1 edge proposals (spec v0.12)."""
 
 import json
 
-from monkeyllm.curator import Curator
+from monkeyllm.curator import (
+    MAX_PROPOSALS,
+    NOTE_MAX_CHARS,
+    PROPOSAL_CONFIDENCE,
+    Curator,
+    make_candidates,
+)
 from monkeyllm.models import validate_summary
 
 GOOD = json.dumps({
@@ -38,7 +45,8 @@ class TestCurator:
         validate_summary(out["summary"])
         # tags: cleaned (lowercase slug only), deduped, merged after defaults
         assert out["tags"] == ["adopted", "vendas", "descontos"]
-        assert c.stats == {"llm_summaries": 1, "fallbacks": 0, "retries": 0}
+        assert c.stats == {"llm_summaries": 1, "fallbacks": 0, "retries": 0,
+                           "links_proposed": 0, "proposal_fallbacks": 0}
 
     def test_retry_then_accept(self):
         c = Curator(scripted_chat([TOO_LONG, ANTI_PATTERN, GOOD]))
@@ -83,6 +91,111 @@ class TestCurator:
         assert "Prioritize contract numbers." in seen["system"]
 
 
+def static_candidates(cands):
+    def provider(query):
+        return list(cands)
+
+    return provider
+
+
+class TestEdgeProposals:
+    """G.4.2.1: links proposed from a closed catalog-offered list only."""
+
+    CANDS = [
+        {"id": "sales/prices", "title": "Price table",
+         "summary": "Current prices for 2026 contracts."},
+        {"id": "sales/partners", "title": "Partners",
+         "summary": "Partner network and margins."},
+        {"id": "hr/vacation", "title": "Vacation",
+         "summary": "Vacation policy."},
+        {"id": "ops/maintenance", "title": "Maintenance",
+         "summary": "Maintenance plans."},
+    ]
+
+    def curator(self, replies, cands=None):
+        return Curator(scripted_chat(replies),
+                       candidates=static_candidates(
+                           self.CANDS if cands is None else cands))
+
+    def test_valid_pick_becomes_low_confidence_link(self):
+        reply = json.dumps({"related": [
+            {"id": "sales/prices", "note": "both govern discount limits"}]})
+        c = self.curator([GOOD, reply])
+        out = c(dict(DRAFT))
+        assert out["links"] == [{
+            "rel": "related-to", "target": "sales/prices",
+            "confidence": PROPOSAL_CONFIDENCE,
+            "note": "both govern discount limits"}]
+        assert c.stats["links_proposed"] == 1
+
+    def test_hallucinated_target_dropped(self):
+        reply = json.dumps({"related": [{"id": "made/up"}, "also-fake", 42]})
+        c = self.curator([GOOD, reply])
+        out = c(dict(DRAFT))
+        assert "links" not in out
+        assert c.stats["links_proposed"] == 0
+        assert c.stats["proposal_fallbacks"] == 0  # valid reply, zero picks
+
+    def test_cap_and_within_reply_dedup(self):
+        reply = json.dumps({"related": [
+            {"id": "sales/prices"}, {"id": "sales/prices"},
+            {"id": "sales/partners"}, {"id": "hr/vacation"},
+            {"id": "ops/maintenance"}]})
+        c = self.curator([GOOD, reply])
+        out = c(dict(DRAFT))
+        assert [l["target"] for l in out["links"]] == [
+            "sales/prices", "sales/partners", "hr/vacation"]
+        assert len(out["links"]) == MAX_PROPOSALS
+        assert all(l["confidence"] == PROPOSAL_CONFIDENCE for l in out["links"])
+
+    def test_existing_link_not_duplicated(self):
+        draft = dict(DRAFT)
+        draft["links"] = [{"rel": "related-to", "target": "sales/prices"}]
+        c = self.curator([GOOD, json.dumps({"related": [{"id": "sales/prices"}]})])
+        out = c(draft)
+        assert out["links"] == [{"rel": "related-to", "target": "sales/prices"}]
+        assert c.stats["links_proposed"] == 0
+
+    def test_self_and_parent_never_offered(self):
+        # the only candidates are the draft itself and its parent — there is
+        # nothing to offer, so the proposal call never happens (a second
+        # chat call would exhaust the script and count as a fallback)
+        draft = dict(DRAFT, parent="vendas/_index")
+        cands = [{"id": draft["id"], "title": "t", "summary": "s"},
+                 {"id": "vendas/_index", "title": "t", "summary": "s"}]
+        c = self.curator([GOOD], cands=cands)
+        out = c(draft)
+        assert "links" not in out
+        assert c.stats["proposal_fallbacks"] == 0
+
+    def test_empty_pick_is_a_good_answer(self):
+        c = self.curator([GOOD, json.dumps({"related": []})])
+        out = c(dict(DRAFT))
+        assert "links" not in out
+        assert c.stats["proposal_fallbacks"] == 0
+
+    def test_bad_json_never_blocks(self):
+        c = self.curator([GOOD, "I would connect them all!"])
+        out = c(dict(DRAFT))
+        assert "links" not in out
+        assert c.stats["proposal_fallbacks"] == 1
+
+    def test_proposals_run_even_after_summary_fallback(self):
+        reply = json.dumps({"related": [{"id": "hr/vacation"}]})
+        c = self.curator([TOO_LONG, TOO_LONG, TOO_LONG, reply])
+        out = c(dict(DRAFT))
+        assert out["summary"] == "Derived fallback summary."
+        assert out["links"][0]["target"] == "hr/vacation"
+        assert c.stats["fallbacks"] == 1 and c.stats["links_proposed"] == 1
+
+    def test_note_is_clipped(self):
+        reply = json.dumps({"related": [
+            {"id": "sales/prices", "note": "x" * 500}]})
+        c = self.curator([GOOD, reply])
+        out = c(dict(DRAFT))
+        assert len(out["links"][0]["note"]) == NOTE_MAX_CHARS
+
+
 class TestGardenerIntegration:
     def test_curator_as_hook_in_adopt(self, tmp_path):
         from monkeyllm.forest import init_forest
@@ -106,5 +219,45 @@ class TestGardenerIntegration:
             assert node.frontmatter["summary"].startswith("Política de descontos")
             assert "vendas" in node.frontmatter["tags"]
             assert curator.stats["llm_summaries"] == 1
+        finally:
+            vine.close()
+
+    def test_proposed_link_plants_and_ranger_manages_it(self, tmp_path):
+        """F.16 end-to-end: catalog offers a real node, the proposal survives
+        plant with link-level confidence 0.3, and Part H takes it over."""
+        from monkeyllm.forest import init_forest
+        from monkeyllm.gardener import Gardener
+        from monkeyllm.ranger import Ranger
+        from monkeyllm.vine import Vine
+
+        src = tmp_path / "dump"
+        src.mkdir()
+        (src / "politica.md").write_text(
+            "# Política\n\nTexto sobre descontos comerciais vigentes em 2026.",
+            encoding="utf-8")
+        root = tmp_path / "floresta"
+        init_forest(root, title="F")
+        vine = Vine(root, writable=True)
+        try:
+            vine.plant({
+                "id": "precos", "type": "note", "parent": "_index",
+                "title": "Tabela de preços",
+                "summary": "Preços vigentes para contratos de 2026.",
+                "body": "# Tabela de preços\n\nValores por SKU.",
+            })
+            propose = json.dumps({"related": [
+                {"id": "precos", "note": "discounts reference the price table"}]})
+            curator = Curator(scripted_chat([GOOD, propose]),
+                              candidates=make_candidates(vine))
+            report = Gardener(vine, hooks=[curator]).adopt(src)
+            assert report["planted"] == ["politica"]
+            node = vine.forest.read("politica")
+            link = node.frontmatter["links"][0]
+            assert link["target"] == "precos" and link["rel"] == "related-to"
+            assert link["confidence"] == PROPOSAL_CONFIDENCE
+            assert link["note"] == "discounts reference the price table"
+            # Part H: exactly the population the Ranger manages (H.2)
+            managed = Ranger(vine)._managed_links(node.frontmatter)
+            assert [l["target"] for l in managed] == ["precos"]
         finally:
             vine.close()

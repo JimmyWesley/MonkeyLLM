@@ -18,6 +18,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-timeout>=2.3"]
 demo = ["huggingface_hub>=0.30"]
+# G.2 built-in converters that need a (MIT/BSD-clean) third-party reader
+ingest = ["openpyxl>=3.1", "python-docx>=1.1"]
 
 [project.scripts]
 vine = "monkeyllm.cli:main"

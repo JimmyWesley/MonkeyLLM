@@ -271,7 +271,9 @@ class NodeSpec(BaseModel):
         if self.tags:
             fm["tags"] = self.tags
         if self.links:
-            fm["links"] = [{"rel": l.rel, "target": l.target} for l in self.links]
+            # exclude_none keeps link-level extras (confidence, note — the
+            # Gardener's G.4.2.1 proposals, Part H's management population)
+            fm["links"] = [l.model_dump(exclude_none=True) for l in self.links]
         if self.confidence != 1.0:
             fm["confidence"] = self.confidence
         fm["source"] = self.source

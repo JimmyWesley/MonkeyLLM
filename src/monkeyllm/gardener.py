@@ -213,6 +213,72 @@ class XlsxConverter:
                                    _table_name(path), header, data[1:])
 
 
+class DocxConverter:
+    """Built-in when python-docx is importable (G.2.1, MIT/BSD-clean):
+    single-pass w:t traversal in document order — heading-styled paragraphs,
+    pipe tables, and text inside embedded text boxes (wps:txbx/v:textbox);
+    headers/footers excluded (letterhead boilerplate is scent noise).
+    Technique derived from the owner's pdf-replace reader."""
+
+    extensions = {".docx"}
+
+    def convert(self, path: Path) -> Conversion:
+        from docx import Document  # optional dependency (ingest extra)
+        from docx.oxml.ns import qn
+        from docx.text.paragraph import Paragraph
+
+        doc = Document(str(path))
+        tag_p, tag_tbl = qn("w:p"), qn("w:tbl")
+        tag_t, tag_tr, tag_tc = qn("w:t"), qn("w:tr"), qn("w:tc")
+
+        def text_of(el) -> str:
+            # joining EVERY descendant w:t merges runs Word fragmented
+            # mid-word and captures text living inside embedded text boxes
+            joined = "".join(t.text or "" for t in el.iter(tag_t))
+            return re.sub(r"\s+", " ", joined).strip()
+
+        title = ""
+        lines: list[str] = []
+        for block in doc.element.body.iterchildren():
+            if block.tag == tag_p:
+                text = text_of(block)
+                if not text:
+                    continue
+                level = self._heading_level(Paragraph(block, doc))
+                if level == 1 and not title:
+                    title = text
+                # node title owns "#"; document headings start at "##"
+                lines.append(f"{'#' * min(level + 1, 6)} {text}" if level else text)
+                lines.append("")
+            elif block.tag == tag_tbl:
+                # direct children only: nested tables flatten into cell text
+                rows = [
+                    [text_of(tc).replace("|", "\\|") for tc in tr.findall(tag_tc)]
+                    for tr in block.findall(tag_tr)
+                ]
+                rows = [r for r in rows if any(r)]
+                if not rows:
+                    continue
+                width = max(len(r) for r in rows)
+                rows = [r + [""] * (width - len(r)) for r in rows]
+                lines.append("| " + " | ".join(rows[0]) + " |")
+                lines.append("|" + " --- |" * width)
+                lines.extend("| " + " | ".join(r) + " |" for r in rows[1:])
+                lines.append("")
+        title = title or path.stem.replace("_", " ").replace("-", " ")
+        content = "\n".join(lines).strip()
+        body = f"# {title}\n\n{content}\n" if content else f"# {title}\n"
+        return Conversion(kind="markdown", title=title, markdown=body)
+
+    @staticmethod
+    def _heading_level(para) -> int:
+        name = (para.style.name if para.style is not None else "") or ""
+        if name == "Title":
+            return 1
+        m = re.match(r"Heading (\d)$", name)
+        return int(m.group(1)) if m else 0
+
+
 class CommandConverter:
     """G.2 discovery source 1: an external command template from the forest
     config converts the file — any tool, any license, never our dependency."""
@@ -253,6 +319,12 @@ def builtin_converters() -> list:
         import openpyxl  # noqa: F401
 
         convs.append(XlsxConverter())
+    except ImportError:
+        pass
+    try:
+        import docx  # noqa: F401
+
+        convs.append(DocxConverter())
     except ImportError:
         pass
     return convs

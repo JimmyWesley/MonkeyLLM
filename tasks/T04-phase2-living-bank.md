@@ -6,8 +6,10 @@ workstream 1 Gardener v1 deterministic core DONE 2026-06-11 via spec v0.9;
 workstream 2 Ranger v1 DONE 2026-06-11 via spec v0.10;
 LLM curation (G.4.2) DONE + measured 2026-06-11;
 workstream 6 tiered storage DONE 2026-06-11 via spec v0.11 (G.7/G.8 +
-G.9 fetchers/prefetch + H.6 eviction + Part I snapshots) —
-DOCX converter, edge proposals and convergence curve remain)
+G.9 fetchers/prefetch + H.6 eviction + Part I snapshots);
+DOCX built-in + edge proposals DONE 2026-06-11 via spec v0.12;
+convergence curve measured (criterion NOT met — see workstream 4) —
+media extras and guidance docs remain)
 depends-on: T01 (measurement discipline), T03 (troop data feeds adaptive ideas)
 
 ## Goal
@@ -57,10 +59,32 @@ query datasets but **write** to them, safely.
    `--is-inside-work-tree`, so a forest created INSIDE any outer repo
    skipped `git init` and forest commits would land in the outer repo —
    now requires the forest root to be its own toplevel (test added).
-   **Remaining (Gardener v2):** entity/edge proposals at confidence 0.3;
-   in-house DOCX->MD built-in converter derived from the pdf-replace
-   technique (python-docx MIT: w:t traversal incl. text boxes + fragmented
-   run merge); media extras (faster-whisper transcripts, vision
+   **Gardener v2 — DOCX built-in + edge proposals DONE (spec v0.12,
+   2026-06-11):**
+   - **G.2.1 DocxConverter**: `.docx` built-in when `python-docx` is
+     importable (`ingest` extra; MIT + lxml BSD — license rule intact).
+     Single-pass `w:t` traversal in document order, derived from the
+     pdf-replace reading technique: heading-styled paragraphs (`Title`/
+     `Heading N` → `##`+), pipe tables (direct rows; nested tables flatten
+     into cell text), fragmented runs merged by joining each paragraph's
+     `w:t` descendants, embedded text-box content (`wps:txbx`/`v:textbox`)
+     captured, headers/footers excluded (letterhead = scent noise). No
+     python-docx → `unsupported`; command hooks still outrank it. 11 tests
+     in tests/test_docx_converter.py.
+   - **G.4.2.1 edge proposals**: the Curator proposes `related-to` links at
+     link-level `confidence: 0.3` toward EXISTING nodes only — candidates
+     come from a catalog BM25 search (`make_candidates`; branches, self and
+     parent excluded), the model picks from the closed list (hallucinated
+     ids structurally dropped), cap 3, dedup vs existing links, optional
+     `note` (≤120 chars). Plant now serializes link extras
+     (`models.frontmatter_dict` kept only rel/target before — fixed), so
+     proposals land in frontmatter as exactly the population H.2 manages:
+     Gardener proposes → usage heats → Ranger promotes/prunes. Failures
+     never block (counted in stats). 9 tests + end-to-end Ranger handoff
+     test in tests/test_curator.py.
+   **Remaining (Gardener v3):** entity EXTRACTION (minting new `entity`
+   nodes — needs placement policy + `same-as` dedup story, deferred by
+   spec v0.12); media extras (faster-whisper transcripts, vision
    descriptions); `docs/ingest-tools.md` + `docs/extending.md` guidance.
 2. **Ranger v1 (maintenance) — DONE (spec v0.10 Part H, 2026-06-11):**
    `src/monkeyllm/ranger.py` + `vine ranger [--every N]`. Evaporation

@@ -42,14 +42,16 @@ def main(argv: list[str] | None = None) -> int:
     p_adopt.add_argument("--forest", default=".")
     p_adopt.add_argument("--dest", default=None, help="root the mirror under this existing branch")
     p_adopt.add_argument("--curate", action="store_true",
-                         help="LLM curation (G.4.2): A.4 summaries + tags via MONKEYLLM_LLM_ENDPOINT")
+                         help="LLM curation (G.4.2): A.4 summaries + tags + edge "
+                              "proposals via MONKEYLLM_LLM_ENDPOINT")
 
     p_sync = sub.add_parser("sync", help="Gardener: hash-diff the adopted source and refresh passports")
     p_sync.add_argument("source", nargs="?", default=None,
                         help="source directory (default: the adopted root in _meta/gardener.yaml)")
     p_sync.add_argument("--forest", default=".")
     p_sync.add_argument("--curate", action="store_true",
-                        help="LLM curation for newly adopted files (G.4.2)")
+                        help="LLM curation for newly adopted files (G.4.2, "
+                             "incl. edge proposals)")
     p_sync.add_argument("--path", default=None,
                         help="targeted sync (G.8): reconcile only this source-relative path")
 
@@ -131,23 +133,23 @@ def main(argv: list[str] | None = None) -> int:
         from monkeyllm.gardener import Gardener, discover_hooks
         from monkeyllm.vine import Vine
 
-        curator = None
-        if args.curate:
-            import yaml
-
-            from monkeyllm.curator import Curator, make_chat
-
-            chat, model = make_chat()
-            print(f"curation model: {model}")
-            directives = ""
-            cfg_path = forest_root / "_meta" / "gardener.yaml"
-            if cfg_path.is_file():
-                cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-                directives = (cfg.get("curation") or {}).get("directives") or ""
-            curator = Curator(chat, directives=directives)
-
         vine = Vine(forest_root, writable=True)
         try:
+            curator = None
+            if args.curate:
+                import yaml
+
+                from monkeyllm.curator import Curator, make_candidates, make_chat
+
+                chat, model = make_chat()
+                print(f"curation model: {model}")
+                directives = ""
+                cfg_path = forest_root / "_meta" / "gardener.yaml"
+                if cfg_path.is_file():
+                    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+                    directives = (cfg.get("curation") or {}).get("directives") or ""
+                curator = Curator(chat, directives=directives,
+                                  candidates=make_candidates(vine))
             hooks = discover_hooks() + ([curator] if curator else [])
             gardener = Gardener(vine, hooks=hooks)
             if args.command == "adopt":

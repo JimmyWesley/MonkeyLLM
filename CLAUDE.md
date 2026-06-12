@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.11.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.12.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -86,6 +86,13 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   hooks. Primitives' semantics/budgets/guards are NOT extensible; UIs and
   bots are MCP/library clients, not plugins. The Gardener never deletes
   nodes (deleted sources are reported `stale` for the Ranger).
+- **Edge proposals (G.4.2.1) target EXISTING nodes only**: the Curator may
+  add `related-to` links at link-level `confidence: 0.3`, picked from a
+  closed catalog-offered candidate list (hallucinated targets are
+  structurally impossible; branches never candidates; cap 3). That 0.3
+  population is exactly what the Ranger manages (H.2). The `.docx` built-in
+  (G.2.1) needs the `ingest` extra (python-docx, MIT) and excludes
+  headers/footers by design.
 - **Ranger (spec Part H) manages ONLY links with link-level
   `confidence < 1.0`** (proposals/shortcuts): promote when both endpoints
   are hot, prune when both are stone cold; structural edges and
