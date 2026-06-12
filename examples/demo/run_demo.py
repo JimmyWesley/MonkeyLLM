@@ -318,6 +318,46 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
         vine.close()
 
 
+def run_troop(forest: Path, chat, q: dict, troop: int, embedder=None,
+              use_sniff: bool = True, learn: bool = False) -> dict:
+    """Launch `troop` concurrent hunts for a single question; return the best result.
+
+    Selection order: first hunt with correct_text=True (by banana precision desc),
+    then highest precision among the rest. All individual runs are stored in
+    result["troop_runs"] for analysis.
+    """
+    import concurrent.futures as _cf
+
+    def hunt(monkey_idx: int) -> dict:
+        return run_question(forest, chat, q, verbose=False, embedder=embedder,
+                            use_sniff=use_sniff, learn=learn)
+
+    with _cf.ThreadPoolExecutor(max_workers=troop) as pool:
+        futures = [pool.submit(hunt, i) for i in range(troop)]
+        runs = [f.result() for f in _cf.as_completed(futures)]
+
+    correct = [r for r in runs if r["correct_text"]]
+    best = max(correct or runs, key=lambda r: r["banana_precision"])
+
+    # print all runs so the user can see what each monkey did
+    for i, r in enumerate(runs):
+        m = r["metrics"]
+        tag = "WINNER" if r is best else "      "
+        print(f"    monkey-{i+1} [{tag}] precision={r['banana_precision']}  "
+              f"correct={r['correct_text']}  hops={m['hops_to_banana']}  "
+              f"tokens={m['tokens_to_banana']}")
+        print(f"             answer: {str(r['answer'])[:120]}")
+
+    best["troop_runs"] = [
+        {"monkey": i + 1, "answer": r["answer"],
+         "correct_text": r["correct_text"], "banana_precision": r["banana_precision"],
+         "metrics": r["metrics"]}
+        for i, r in enumerate(runs)
+    ]
+    best["troop_size"] = troop
+    return best
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--forest", default=str(REPO / "forests" / "forest-fixture"))
@@ -327,6 +367,9 @@ def main() -> int:
                     help="baseline arm: hide the sniff tool (pre-v0.2 monkey) for A/B runs")
     ap.add_argument("--learn", action="store_true",
                     help="writable forest: graft suggested shortcuts (the shout) after each hunt")
+    ap.add_argument("--troop", type=int, default=1, metavar="N",
+                    help="run N monkeys per question in parallel and keep the best answer "
+                         "(requires the llama-server to have been started with --parallel N)")
     ap.add_argument("--out", help="report path (default: <forest>/_derived/demo-report.json)")
     args = ap.parse_args()
 
@@ -343,6 +386,7 @@ def main() -> int:
     print(f"locate: {'hybrid (vector+BM25)' if embedder else 'BM25-only'}")
     print(f"sniff: {'off (baseline)' if args.no_sniff else 'on'}")
     print(f"learn: {'on (shortcuts grafted via shout)' if args.learn else 'off'}")
+    print(f"troop: {args.troop} monkey{'s' if args.troop > 1 else ''} per question")
 
     import time as _time
 
@@ -350,12 +394,17 @@ def main() -> int:
     for q in questions:
         print(f"\n== {q['id']}: {q['question']}")
         t0 = _time.perf_counter()
-        r = run_question(Path(args.forest), chat, q, embedder=embedder,
-                         use_sniff=not args.no_sniff, learn=args.learn)
+        if args.troop > 1:
+            r = run_troop(Path(args.forest), chat, q, troop=args.troop,
+                          embedder=embedder, use_sniff=not args.no_sniff, learn=args.learn)
+        else:
+            r = run_question(Path(args.forest), chat, q, embedder=embedder,
+                             use_sniff=not args.no_sniff, learn=args.learn)
         r["wall_s"] = round(_time.perf_counter() - t0, 1)
         results.append(r)
         m = r["metrics"]
-        print(f"    answer: {str(r['answer'])[:160]}")
+        if args.troop <= 1:
+            print(f"    answer: {str(r['answer'])[:160]}")
         print(
             f"    hops-to-banana={m['hops_to_banana']}  tokens-to-banana={m['tokens_to_banana']}  "
             f"precision={r['banana_precision']}  correct_text={r['correct_text']}  time={r['wall_s']}s"
