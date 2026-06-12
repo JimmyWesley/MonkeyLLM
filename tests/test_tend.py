@@ -11,21 +11,21 @@ from monkeyllm.errors import E_QUERY_FORBIDDEN, E_READONLY, VineError
 from monkeyllm.forest import Forest
 from monkeyllm.lint import lint_forest
 
-DATASET = "vendas/relatorio-q1-2026"
+DATASET = "sales/report-q1-2026"
 GOOD_INSERT = (
-    "INSERT INTO vendas VALUES "
-    "('2026-03-31','A-101','Sensor X','Sudeste','direto',1,1250.0,250.0)"
+    "INSERT INTO sales VALUES "
+    "('2026-03-31','A-101','Sensor X','Southeast','direct',1,1250.0,250.0)"
 )
 
 
 def db_path(forest):
-    return forest / "vendas" / "relatorio-q1-2026.db"
+    return forest / "sales" / "report-q1-2026.db"
 
 
 def row_count(forest) -> int:
     conn = sqlite3.connect(db_path(forest))
     try:
-        return conn.execute("SELECT COUNT(*) FROM vendas").fetchone()[0]
+        return conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
     finally:
         conn.close()
 
@@ -54,22 +54,22 @@ class TestTendWrites:
         assert not [f for f in out.stdout.split() if f.endswith((".db", ".sqlite"))]
 
         # the new row is immediately queryable
-        q = vine_rw.query(DATASET, "SELECT COUNT(*) FROM vendas WHERE data = '2026-03-31'")
+        q = vine_rw.query(DATASET, "SELECT COUNT(*) FROM sales WHERE date = '2026-03-31'")
         assert q["rows"][0][0] >= 1
 
     def test_update_and_delete_require_where(self, vine_rw):
-        for bad in ("UPDATE vendas SET qtd = 0", "DELETE FROM vendas"):
+        for bad in ("UPDATE sales SET qty = 0", "DELETE FROM sales"):
             with pytest.raises(VineError) as e:
                 vine_rw.tend(DATASET, bad)
             assert e.value.code == E_QUERY_FORBIDDEN
-        r = vine_rw.tend(DATASET, "UPDATE vendas SET qtd = qtd WHERE sku = 'A-101'")
+        r = vine_rw.tend(DATASET, "UPDATE sales SET qty = qty WHERE sku = 'A-101'")
         assert r["rows_affected"] > 0
 
     def test_injection_suite(self, vine_rw):
         for bad in (
-            "SELECT * FROM vendas",
-            "INSERT INTO vendas VALUES (1); DROP TABLE vendas",
-            "DROP TABLE vendas",
+            "SELECT * FROM sales",
+            "INSERT INTO sales VALUES (1); DROP TABLE sales",
+            "DROP TABLE sales",
             "CREATE TABLE hack (x)",
             "ATTACH DATABASE 'x.db' AS x",
             "PRAGMA writable_schema = 1",
@@ -82,13 +82,13 @@ class TestTendWrites:
     def test_failed_sql_leaves_payload_untouched(self, vine_rw, forest_rw):
         before = db_path(forest_rw).read_bytes()
         with pytest.raises(VineError) as e:
-            vine_rw.tend(DATASET, "INSERT INTO nao_existe VALUES (1)")
+            vine_rw.tend(DATASET, "INSERT INTO nonexistent VALUES (1)")
         assert e.value.code == E_QUERY_FORBIDDEN
         assert db_path(forest_rw).read_bytes() == before
 
     def test_non_dataset_rejected(self, vine_rw):
         with pytest.raises(VineError) as e:
-            vine_rw.tend("conceitos/rag", GOOD_INSERT)
+            vine_rw.tend("concepts/rag", GOOD_INSERT)
         assert e.value.code == E_QUERY_FORBIDDEN
 
     def test_readonly_vine_cannot_tend(self, vine_ro):
@@ -101,7 +101,7 @@ class TestDriftDetection:
     def test_validate_warns_on_payload_drift(self, vine_rw, forest_rw):
         vine_rw.tend(DATASET, GOOD_INSERT)  # establishes a fresh hash
         conn = sqlite3.connect(db_path(forest_rw))  # edit OUTSIDE tend
-        conn.execute("DELETE FROM vendas WHERE rowid = 1")
+        conn.execute("DELETE FROM sales WHERE rowid = 1")
         conn.commit()
         conn.close()
         issues = lint_forest(Forest(forest_rw))

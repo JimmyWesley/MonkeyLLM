@@ -23,7 +23,7 @@ def build_forest(dest: Path) -> Path:
 @pytest.fixture(scope="session")
 def forest_ro(tmp_path_factory) -> Path:
     """Session-wide forest for read-only tests."""
-    return build_forest(tmp_path_factory.mktemp("forest") / "floresta")
+    return build_forest(tmp_path_factory.mktemp("forest") / "forest")
 
 
 @pytest.fixture(scope="session")
@@ -38,7 +38,7 @@ def vine_ro(forest_ro):
 @pytest.fixture()
 def forest_rw(tmp_path) -> Path:
     """Fresh forest per test for write tests."""
-    return build_forest(tmp_path / "floresta")
+    return build_forest(tmp_path / "forest")
 
 
 @pytest.fixture()

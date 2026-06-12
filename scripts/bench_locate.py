@@ -120,7 +120,7 @@ def print_report(reports):
     for r in reports:
         if not r:
             continue
-        print(f"\n-- por pergunta [{r['label']}]  (rank do 1º acerto; latência ms)")
+        print(f"\n-- per question [{r['label']}]  (rank of first hit; latency ms)")
         for pq in r["per_question"]:
             lat = pq["latency_ms"]
             rank = pq["first_hit_rank"] if pq["first_hit_rank"] is not None else "—"

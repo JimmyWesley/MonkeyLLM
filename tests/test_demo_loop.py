@@ -15,9 +15,9 @@ from run_demo import parse_action, run_question  # noqa: E402
 
 Q2 = {
     "id": "q02",
-    "question": "Qual região teve o maior total de vendas no Q1 2026?",
-    "expected_nodes": ["vendas/relatorio-q1-2026"],
-    "answer_contains": ["Sudeste"],
+    "question": "Which region had the highest total sales in Q1 2026?",
+    "expected_nodes": ["sales/report-q1-2026"],
+    "answer_contains": ["Southeast"],
 }
 
 
@@ -39,18 +39,18 @@ class TestParseAction:
         assert parse_action(text)["tool"] == "locate"
 
     def test_garbage_returns_none(self):
-        assert parse_action("não sei o que fazer") is None
+        assert parse_action("no idea what to do") is None
 
 
 class TestScriptedHunt:
     def test_multihop_sql_question(self, forest_ro):
         script = [
-            '{"tool": "locate", "args": {"query": "vendas região Q1 2026", "k": 3}}',
-            '{"tool": "look", "args": {"id": "vendas/relatorio-q1-2026"}}',
-            '{"tool": "query", "args": {"id": "vendas/relatorio-q1-2026", '
-            '"sql": "SELECT regiao, SUM(valor) AS total FROM vendas GROUP BY regiao ORDER BY total DESC LIMIT 1"}}',
-            '{"tool": "answer", "args": {"text": "A região com maior venda no Q1 2026 foi o Sudeste.", '
-            '"answer_nodes": ["vendas/relatorio-q1-2026"]}}',
+            '{"tool": "locate", "args": {"query": "sales region Q1 2026", "k": 3}}',
+            '{"tool": "look", "args": {"id": "sales/report-q1-2026"}}',
+            '{"tool": "query", "args": {"id": "sales/report-q1-2026", '
+            '"sql": "SELECT region, SUM(value) AS total FROM sales GROUP BY region ORDER BY total DESC LIMIT 1"}}',
+            '{"tool": "answer", "args": {"text": "The region with the highest sales in Q1 2026 was Southeast.", '
+            '"answer_nodes": ["sales/report-q1-2026"]}}',
         ]
         r = run_question(forest_ro, scripted_chat_factory(script), Q2, verbose=False)
         assert r["correct_text"] is True
@@ -65,13 +65,13 @@ class TestScriptedHunt:
 
     def test_recovers_from_bad_tool_and_format(self, forest_ro):
         script = [
-            "vou pensar primeiro...",  # invalid -> harness asks for JSON
+            "thinking first...",  # invalid -> harness asks for JSON
             '{"tool": "telepatia", "args": {}}',  # unknown tool -> error envelope
             '{"tool": "look", "args": {"id": "nao/existe"}}',  # E_NOT_FOUND envelope
-            '{"tool": "look", "args": {"id": "vendas/relatorio-q1-2026"}}',
-            '{"tool": "answer", "args": {"text": "Sudeste lidera as vendas.", '
-            '"answer_nodes": ["vendas/relatorio-q1-2026"]}}',
+            '{"tool": "look", "args": {"id": "sales/report-q1-2026"}}',
+            '{"tool": "answer", "args": {"text": "Southeast leads in sales.", '
+            '"answer_nodes": ["sales/report-q1-2026"]}}',
         ]
         r = run_question(forest_ro, scripted_chat_factory(script), Q2, verbose=False)
         assert r["correct_text"] is True
-        assert r["answer_nodes"] == ["vendas/relatorio-q1-2026"]
+        assert r["answer_nodes"] == ["sales/report-q1-2026"]

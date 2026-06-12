@@ -10,16 +10,16 @@ import pytest
 from monkeyllm.errors import E_SCHEMA, VineError
 
 SPEC = {
-    "id": "vendas/prospeccao-2026",
+    "id": "sales/prospecting-2026",
     "type": "dataset",
-    "parent": "vendas/_index",
-    "title": "Prospecção de clientes 2026",
-    "summary": "Clientes prospectados em 2026 com site, segmento e data de coleta. Alimentado por agente via tend.",
+    "parent": "sales/_index",
+    "title": "Client Prospecting 2026",
+    "summary": "Clients prospected in 2026 with site, segment and collection date. Fed by agent via tend.",
     "schema": {
-        "clientes": {
-            "columns": {"nome": "TEXT", "site": "TEXT", "segmento": "TEXT",
-                        "coletado_em": "TEXT"},
-            "primary_key": ["nome"],
+        "clients": {
+            "columns": {"name": "TEXT", "site": "TEXT", "segment": "TEXT",
+                        "collected_at": "TEXT"},
+            "primary_key": ["name"],
         }
     },
 }
@@ -37,10 +37,10 @@ class TestDatasetBirth:
         assert r["id"] == SPEC["id"]
 
         # payload born on the filesystem, hash anchored in the frontmatter
-        db = forest_rw / "vendas" / "prospeccao-2026.db"
+        db = forest_rw / "sales" / "prospecting-2026.db"
         assert db.is_file()
         node = vine_rw.forest.read(SPEC["id"])
-        assert node.frontmatter["payload"] == "prospeccao-2026.db"
+        assert node.frontmatter["payload"] == "prospecting-2026.db"
         assert node.frontmatter["payload_type"] == "sqlite"
         assert node.frontmatter["payload_hash"] == hashlib.sha256(db.read_bytes()).hexdigest()
 
@@ -48,19 +48,19 @@ class TestDatasetBirth:
         assert "## Query manual" in node.body
         digest = vine_rw.look(SPEC["id"])
         assert digest["query_manual"]["tables"] == {
-            "clientes": ["nome", "site", "segmento", "coletado_em"]
+            "clients": ["name", "site", "segment", "collected_at"]
         }
-        assert "SELECT * FROM clientes LIMIT 5" in digest["query_manual"]["example_queries"]
+        assert "SELECT * FROM clients LIMIT 5" in digest["query_manual"]["example_queries"]
 
         # query and tend work immediately — the living-bank loop closes
-        assert vine_rw.query(SPEC["id"], "SELECT COUNT(*) FROM clientes")["rows"][0][0] == 0
+        assert vine_rw.query(SPEC["id"], "SELECT COUNT(*) FROM clients")["rows"][0][0] == 0
         w = vine_rw.tend(
             SPEC["id"],
-            "INSERT INTO clientes VALUES ('Acme','acme.com','industria','2026-06-11'),"
-            " ('Beta','beta.io','varejo','2026-06-11')",
+            "INSERT INTO clients VALUES ('Acme','acme.com','industry','2026-06-11'),"
+            " ('Beta','beta.io','retail','2026-06-11')",
         )
         assert w["rows_affected"] == 2
-        assert vine_rw.query(SPEC["id"], "SELECT COUNT(*) FROM clientes")["rows"][0][0] == 2
+        assert vine_rw.query(SPEC["id"], "SELECT COUNT(*) FROM clients")["rows"][0][0] == 2
 
         # A.3.1: the commit carries only markdown
         out = subprocess.run(["git", "-C", str(forest_rw), "ls-files"],
@@ -69,26 +69,26 @@ class TestDatasetBirth:
 
     def test_primary_key_is_enforced(self, vine_rw):
         vine_rw.plant(SPEC)
-        vine_rw.tend(SPEC["id"], "INSERT INTO clientes VALUES ('Acme','a','x','2026-01-01')")
+        vine_rw.tend(SPEC["id"], "INSERT INTO clients VALUES ('Acme','a','x','2026-01-01')")
         with pytest.raises(VineError):  # duplicate pk surfaces as SQL error
-            vine_rw.tend(SPEC["id"], "INSERT INTO clientes VALUES ('Acme','b','y','2026-01-02')")
+            vine_rw.tend(SPEC["id"], "INSERT INTO clients VALUES ('Acme','b','y','2026-01-02')")
 
     def test_caller_manual_kept_verbatim(self, vine_rw):
         s = copy.deepcopy(SPEC)
-        s["body"] = "# Prospecção\n\n## Query manual\n\nManual artesanal. `SELECT nome FROM clientes`"
+        s["body"] = "# Prospecting\n\n## Query manual\n\nManual query. `SELECT name FROM clients`"
         vine_rw.plant(s)
         body = vine_rw.forest.read(SPEC["id"]).body
-        assert "Manual artesanal" in body
+        assert "Manual query" in body
         assert body.count("## Query manual") == 1
 
     def test_multi_table_schema(self, vine_rw):
         s = spec_with_schema({
-            "clientes": {"columns": {"nome": "TEXT"}},
-            "contatos": {"columns": {"cliente": "TEXT", "email": "TEXT"}},
+            "clients": {"columns": {"name": "TEXT"}},
+            "contacts": {"columns": {"client": "TEXT", "email": "TEXT"}},
         })
         vine_rw.plant(s)
         tables = vine_rw.look(SPEC["id"])["query_manual"]["tables"]
-        assert set(tables) == {"clientes", "contatos"}
+        assert set(tables) == {"clients", "contacts"}
 
 
 class TestInitialRows:
@@ -96,23 +96,23 @@ class TestInitialRows:
         s = copy.deepcopy(SPEC)
         # a value containing SQL keywords is DATA, not SQL — parameterized
         # loading must store it literally (C.7.1 rule 7)
-        s["rows"] = {"clientes": [
-            ["Acme", "acme.com", "industria", "2026-06-11"],
-            ["Robert'); DROP TABLE clientes;--", "x.io", "varejo", "2026-06-11"],
+        s["rows"] = {"clients": [
+            ["Acme", "acme.com", "industry", "2026-06-11"],
+            ["Robert'); DROP TABLE clients;--", "x.io", "retail", "2026-06-11"],
         ]}
         r = vine_rw.plant(s)
-        q = vine_rw.query(SPEC["id"], "SELECT COUNT(*) FROM clientes")
+        q = vine_rw.query(SPEC["id"], "SELECT COUNT(*) FROM clients")
         assert q["rows"][0][0] == 2
         q2 = vine_rw.query(SPEC["id"],
-                           "SELECT nome FROM clientes WHERE site = 'x.io'")
-        assert q2["rows"][0][0] == "Robert'); DROP TABLE clientes;--"
-        db = forest_rw / "vendas" / "prospeccao-2026.db"
+                           "SELECT name FROM clients WHERE site = 'x.io'")
+        assert q2["rows"][0][0] == "Robert'); DROP TABLE clients;--"
+        db = forest_rw / "sales" / "prospecting-2026.db"
         assert r and hashlib.sha256(db.read_bytes()).hexdigest() == \
             vine_rw.forest.read(SPEC["id"]).frontmatter["payload_hash"]
 
     @pytest.mark.parametrize("rows", [
-        {"nao_existe": [["a", "b", "c", "d"]]},     # table not in schema
-        {"clientes": [["only", "three", "values"]]},  # wrong width
+        {"nonexistent": [["a", "b", "c", "d"]]},     # table not in schema
+        {"clients": [["only", "three", "values"]]},  # wrong width
     ])
     def test_bad_rows_rejected(self, vine_rw, forest_rw, rows):
         s = copy.deepcopy(SPEC)
@@ -120,12 +120,12 @@ class TestInitialRows:
         with pytest.raises(VineError) as e:
             vine_rw.plant(s)
         assert e.value.code == E_SCHEMA
-        assert not (forest_rw / "vendas" / "prospeccao-2026.db").exists()
+        assert not (forest_rw / "sales" / "prospecting-2026.db").exists()
 
     def test_rows_without_schema_rejected(self, vine_rw):
         s = copy.deepcopy(SPEC)
         del s["schema"]
-        s["rows"] = {"clientes": [["a", "b", "c", "d"]]}
+        s["rows"] = {"clients": [["a", "b", "c", "d"]]}
         with pytest.raises(VineError) as e:
             vine_rw.plant(s)
         assert e.value.code == E_SCHEMA
@@ -133,20 +133,20 @@ class TestInitialRows:
 
 class TestSchemaValidation:
     @pytest.mark.parametrize("schema", [
-        {},                                                       # no tables
-        {"clientes; DROP TABLE x": {"columns": {"a": "TEXT"}}},   # name injection
-        {"clientes": {"columns": {}}},                            # no columns
-        {"clientes": {"columns": {"a b": "TEXT"}}},               # bad column name
-        {"clientes": {"columns": {"a": "TEXT); DROP TABLE x;--"}}},  # type injection
-        {"clientes": {"columns": {"a": "VARCHAR(99)"}}},          # type not allowlisted
-        {"clientes": {"columns": {"a": "TEXT"}, "primary_key": ["zz"]}},  # pk not a column
+        {},                                                        # no tables
+        {"clients; DROP TABLE x": {"columns": {"a": "TEXT"}}},    # name injection
+        {"clients": {"columns": {}}},                             # no columns
+        {"clients": {"columns": {"a b": "TEXT"}}},                # bad column name
+        {"clients": {"columns": {"a": "TEXT); DROP TABLE x;--"}}},  # type injection
+        {"clients": {"columns": {"a": "VARCHAR(99)"}}},           # type not allowlisted
+        {"clients": {"columns": {"a": "TEXT"}, "primary_key": ["zz"]}},  # pk not a column
         {f"t{i}": {"columns": {"a": "TEXT"}} for i in range(11)},  # > 10 tables
     ])
     def test_bad_schema_rejected_and_nothing_born(self, vine_rw, forest_rw, schema):
         with pytest.raises(VineError) as e:
             vine_rw.plant(spec_with_schema(schema))
         assert e.value.code == E_SCHEMA
-        assert not (forest_rw / "vendas" / "prospeccao-2026.db").exists()
+        assert not (forest_rw / "sales" / "prospecting-2026.db").exists()
         assert not vine_rw.forest.exists(SPEC["id"])
 
     def test_schema_on_non_dataset_rejected(self, vine_rw):
@@ -157,7 +157,7 @@ class TestSchemaValidation:
         assert e.value.code == E_SCHEMA
 
     def test_payload_must_be_bare_db_filename(self, vine_rw):
-        for bad in ("../fora.db", "sub/dentro.db", "clientes.csv"):
+        for bad in ("../outside.db", "sub/inside.db", "clients.csv"):
             s = copy.deepcopy(SPEC)
             s["payload"] = bad
             with pytest.raises(VineError) as e:
@@ -165,7 +165,7 @@ class TestSchemaValidation:
             assert e.value.code == E_SCHEMA
 
     def test_existing_payload_never_overwritten(self, vine_rw, forest_rw):
-        target = forest_rw / "vendas" / "prospeccao-2026.db"
+        target = forest_rw / "sales" / "prospecting-2026.db"
         target.write_bytes(b"precious bytes")
         with pytest.raises(VineError) as e:
             vine_rw.plant(SPEC)
@@ -181,5 +181,5 @@ class TestAtomicity:
         monkeypatch.setattr(vine_rw.git, "commit", boom)
         with pytest.raises(RuntimeError):
             vine_rw.plant(SPEC)
-        assert not (forest_rw / "vendas" / "prospeccao-2026.db").exists()
-        assert not (forest_rw / "vendas" / "prospeccao-2026.md").exists()
+        assert not (forest_rw / "sales" / "prospecting-2026.db").exists()
+        assert not (forest_rw / "sales" / "prospecting-2026.md").exists()

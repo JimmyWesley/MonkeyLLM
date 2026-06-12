@@ -12,32 +12,32 @@ from monkeyllm.parser import (
 )
 
 GOOD = """---
-id: notas/teste
+id: notes/test
 type: note
-title: Teste
-summary: Nota de teste com cheiro suficiente para navegar.
+title: Test
+summary: Test note with enough scent to navigate.
 created: 2026-06-01
 updated: 2026-06-10
 ---
 
-# Teste
+# Test
 
-## Primeira seção
+## First section
 
-Conteúdo A.
+Content A.
 
-## Segunda seção
+## Second section
 
-Conteúdo B.
+Content B.
 """
 
 
 def fm(**over):
     base = {
-        "id": "notas/teste",
+        "id": "notes/test",
         "type": "note",
-        "title": "Teste",
-        "summary": "Nota de teste com cheiro suficiente.",
+        "title": "Test",
+        "summary": "Test note with enough scent.",
         "created": "2026-06-01",
         "updated": "2026-06-10",
     }
@@ -48,15 +48,15 @@ def fm(**over):
 class TestParser:
     def test_roundtrip(self):
         front, body = split_frontmatter(GOOD)
-        assert front["id"] == "notas/teste"
-        assert body.startswith("# Teste")
+        assert front["id"] == "notes/test"
+        assert body.startswith("# Test")
         again = serialize_node(front, body)
         front2, body2 = split_frontmatter(again)
         assert front2["id"] == front["id"]
 
     def test_missing_frontmatter_rejected(self):
         with pytest.raises(VineError) as e:
-            split_frontmatter("# sem frontmatter\n")
+            split_frontmatter("# no frontmatter\n")
         assert e.value.code == E_FRONTMATTER
 
     def test_invalid_yaml_rejected(self):
@@ -65,22 +65,22 @@ class TestParser:
         assert e.value.code == E_FRONTMATTER
 
     def test_outline(self):
-        node = parse_node("notas/teste", GOOD)
-        assert node.outline == ["Primeira seção", "Segunda seção"]
-        assert node.title == "Teste"
+        node = parse_node("notes/test", GOOD)
+        assert node.outline == ["First section", "Second section"]
+        assert node.title == "Test"
 
     def test_extract_section_exact_and_prefix(self):
         _, body = split_frontmatter(GOOD)
-        assert "Conteúdo A" in extract_section(body, "primeira seção")
-        assert "Conteúdo B" in extract_section(body, "Segunda")
-        assert extract_section(body, "inexistente") is None
+        assert "Content A" in extract_section(body, "first section")
+        assert "Content B" in extract_section(body, "Second")
+        assert extract_section(body, "nonexistent") is None
 
     def test_replace_section(self):
         _, body = split_frontmatter(GOOD)
-        new = replace_section(body, "Primeira seção", "Novo conteúdo.")
-        assert "Novo conteúdo." in new
-        assert "Conteúdo A" not in new
-        assert "Conteúdo B" in new
+        new = replace_section(body, "First section", "New content.")
+        assert "New content." in new
+        assert "Content A" not in new
+        assert "Content B" in new
 
 
 class TestFrontmatterValidation:
@@ -104,7 +104,7 @@ class TestFrontmatterValidation:
         assert e.value.code == E_SCHEMA
 
     def test_unknown_rel_is_schema_error(self):
-        bad = fm(links=[{"rel": "loves", "target": "pessoas/x"}])
+        bad = fm(links=[{"rel": "loves", "target": "people/x"}])
         with pytest.raises(VineError) as e:
             validate_frontmatter(bad, self.dialect)
         assert e.value.code == E_SCHEMA
@@ -128,7 +128,7 @@ class TestFrontmatterValidation:
 class TestSummarySpec:
     def test_too_long_rejected(self):
         with pytest.raises(VineError) as e:
-            validate_summary("palavra " * 120)
+            validate_summary("word " * 120)
         assert e.value.code == E_FRONTMATTER
 
     def test_anti_patterns_rejected(self):
@@ -138,7 +138,7 @@ class TestSummarySpec:
 
     def test_good_summary_passes(self):
         validate_summary(
-            "Vendas por região e SKU, jan-mar 2026, 14.302 linhas com margem e canal."
+            "Sales by region and SKU, Jan-Mar 2026, 14,302 rows with margin and channel."
         )
 
 

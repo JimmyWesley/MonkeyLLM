@@ -16,12 +16,9 @@ Portuguese remnants you find in it (boy-scout rule; full sweep is tasks/T02).
 enums, and the parsed index headings (`## Sub-branches`, `## Direct bananas`,
 `## Cross trails`, `## Query manual`). The Portuguese tokens were removed —
 never reintroduce them.
-Exceptions that MUST stay Portuguese (test-data **content** wired to
-assertions): the `forests/forest-fixture/` and `forests/bench-forest/` corpus prose (titles,
-summaries, bodies, ids, tags) and its generator literals,
-`examples/demo/questions*.json`, `bench/questions-v*.json`, and the demo/bench system
-prompts that drive that PT corpus. Forests are never edited in place —
-change the generator and rebuild.
+There are no Portuguese exceptions — all content (node IDs, titles, summaries,
+bodies, tags, question sets, system prompts, generator literals) is English.
+Forests are never edited in place — change the generator and rebuild.
 
 ## Layout
 
@@ -59,9 +56,9 @@ python -m monkeyllm.cli init --forest D:\path --title "..."   # new empty forest
 python -m monkeyllm.cli validate --forest forests\forest-fixture
 python -m monkeyllm.cli reindex  --forest forests\forest-fixture
 python -m monkeyllm.cli canopy build --forest forests\forest-fixture  # vector layer
-python -m monkeyllm.cli adopt D:\dump --forest D:\floresta     # Gardener: mirror a tree
-python -m monkeyllm.cli sync --forest D:\floresta              # Gardener: hash-diff refresh
-python -m monkeyllm.cli ranger --forest D:\floresta            # Ranger: evaporate+tend+health
+python -m monkeyllm.cli adopt D:\dump --forest D:\forest     # Gardener: mirror a tree
+python -m monkeyllm.cli sync --forest D:\forest              # Gardener: hash-diff refresh
+python -m monkeyllm.cli ranger --forest D:\forest            # Ranger: evaporate+tend+health
 python forests/scripts/build_fixture.py                         # rebuild the fixture
 python scripts/bench_locate.py                                  # quality+latency
 ```

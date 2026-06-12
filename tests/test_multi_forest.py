@@ -16,17 +16,17 @@ from conftest import build_forest
 REPO = Path(__file__).resolve().parents[1]
 
 MARKER_NODE = """---
-id: notas/marcador-amazonia
+id: notes/amazonia-marker
 type: note
-title: Marcador exclusivo da amazonia
-summary: Nó sentinela que só existe na floresta amazonia, usado para provar isolamento entre florestas.
+title: Amazonia exclusive marker
+summary: Sentinel node that only exists in the amazonia forest, used to prove isolation between forests.
 created: '2026-06-11'
 updated: '2026-06-11'
 ---
 
-# Marcador exclusivo da amazonia
+# Amazonia exclusive marker
 
-Frase única: tucano-sentinela-9931.
+Unique phrase: toucan-sentinel-9931.
 """
 
 
@@ -36,9 +36,9 @@ def registry_root(tmp_path_factory) -> Path:
     build_forest(root / "amazonia")
     build_forest(root / "cerrado")
     # marker exists ONLY in amazonia; first-touch reindex must pick it up
-    (root / "amazonia" / "notas" / "marcador-amazonia.md").write_text(
+    (root / "amazonia" / "notes" / "amazonia-marker.md").write_text(
         MARKER_NODE, encoding="utf-8")
-    (root / "nao-floresta").mkdir()  # directory without _index.md
+    (root / "not-a-forest").mkdir()  # directory without _index.md
     return root
 
 
@@ -53,8 +53,8 @@ class TestForestPool:
         listing = pool.list()
         assert listing["mode"] == "registry"
         ids = {f["id"]: f["active"] for f in listing["forests"]}
-        assert ids == {"amazonia": False, "cerrado": False}  # nao-floresta excluded
-        pool.get("amazonia").locate("vendas")
+        assert ids == {"amazonia": False, "cerrado": False}  # not-a-forest excluded
+        pool.get("amazonia").locate("sales")
         assert {f["id"]: f["active"] for f in pool.list()["forests"]}["amazonia"] is True
 
     def test_missing_forest_param_is_schema_error_with_hint(self, pool):
@@ -64,9 +64,9 @@ class TestForestPool:
         assert "amazonia" in (e.value.hint or "")
 
     def test_isolation_between_forests(self, pool):
-        hit = pool.get("amazonia").sniff(["tucano-sentinela-9931"])
-        assert [r["id"] for r in hit["results"]] == ["notas/marcador-amazonia"]
-        assert pool.get("cerrado").sniff(["tucano-sentinela-9931"])["results"] == []
+        hit = pool.get("amazonia").sniff(["toucan-sentinel-9931"])
+        assert [r["id"] for r in hit["results"]] == ["notes/amazonia-marker"]
+        assert pool.get("cerrado").sniff(["toucan-sentinel-9931"])["results"] == []
 
     def test_path_escape_rejected(self, pool):
         for bad in ("../outside", "amazonia/../../etc"):
@@ -76,14 +76,14 @@ class TestForestPool:
 
     def test_non_forest_directory_rejected(self, pool):
         with pytest.raises(VineError) as e:
-            pool.get("nao-floresta")
+            pool.get("not-a-forest")
         assert e.value.code == E_NOT_FOUND
 
     def test_single_mode_backward_compat(self, registry_root):
         pool = ForestPool(single=registry_root / "amazonia", writable=False)
         try:
             assert pool.list()["mode"] == "single"
-            assert pool.get(None).locate("vendas")["results"]  # no param needed
+            assert pool.get(None).locate("sales")["results"]  # no param needed
             assert pool.get("amazonia") is pool.get(None)  # name match ok
             with pytest.raises(VineError) as e:
                 pool.get("cerrado")
@@ -117,10 +117,10 @@ class TestRegistryOverMcp:
                     assert {f["id"] for f in listing["forests"]} == {"amazonia", "cerrado"}
 
                     r = await session.call_tool(
-                        "sniff", {"terms": ["tucano-sentinela-9931"], "forest": "amazonia"})
+                        "sniff", {"terms": ["toucan-sentinel-9931"], "forest": "amazonia"})
                     assert json.loads(r.content[0].text)["results"]
 
-                    r = await session.call_tool("locate", {"query": "vendas"})  # no forest
+                    r = await session.call_tool("locate", {"query": "sales"})  # no forest
                     out = json.loads(r.content[0].text)
                     assert out["error"]["code"] == E_SCHEMA
 

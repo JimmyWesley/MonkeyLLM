@@ -15,7 +15,7 @@ from tests.test_canopy_vector import HashEmbedder  # noqa: E402
 
 Q = {
     "id": "q07",
-    "question": "A placa de vídeo dos experimentos tem quanta memória?",
+    "question": "How much memory does the experiments GPU have?",
     "expected_nodes": ["infra/workstation-3090"],
     "answer_contains": ["24"],
 }
@@ -33,7 +33,7 @@ class TestChunker:
         assert len(nodes) == 82  # every node is in the corpus
         csv = [c for c in chunks if "#csv" in c["id"]]
         assert csv, "dataset rows must be ingested as text (fairness rule)"
-        assert any("Sudeste" in c["text"] for c in csv)
+        assert any("Southeast" in c["text"] for c in csv)
 
     def test_store_roundtrip_and_search(self, forest_ro, tmp_path):
         emb = HashEmbedder()
@@ -47,7 +47,7 @@ class TestChunker:
         emb = HashEmbedder()
         ChunkStore.build(forest_ro, emb, tmp_path / "store")
         other = HashEmbedder()
-        other.model = "outro-modelo"
+        other.model = "other-model"
         assert ChunkStore.load(tmp_path / "store", other) is None
 
 
@@ -58,7 +58,7 @@ class TestBaselines:
     def test_topk_grades_and_counts_tokens(self, forest_ro, tmp_path):
         store = self._store(forest_ro, tmp_path)
         chat = scripted([json.dumps({
-            "text": "A GPU tem 24 GB de VRAM.",
+            "text": "The GPU has 24 GB of VRAM.",
             "answer_nodes": ["infra/workstation-3090"],
         })])
         r = rag_topk(chat, store, Q, verbose=False)
@@ -73,7 +73,7 @@ class TestBaselines:
             '{"tool": "search", "args": {"query": "workstation gpu vram"}}',
             "resposta solta inválida",  # format recovery
             '{"tool": "search", "args": {"query": "3090 24 GB"}}',
-            '{"tool": "answer", "args": {"text": "São 24 GB.", "answer_nodes": ["infra/workstation-3090"]}}',
+            '{"tool": "answer", "args": {"text": "It has 24 GB.", "answer_nodes": ["infra/workstation-3090"]}}',
         ])
         r = rag_iter(chat, store, Q, verbose=False)
         assert r["correct_text"] is True
@@ -82,5 +82,5 @@ class TestBaselines:
         assert r["metrics"]["tokens_to_banana"] > 0
 
     def test_parse_json_obj_inside_prose(self):
-        assert parse_json_obj('claro!\n{"tool": "search", "args": {}}')["tool"] == "search"
-        assert parse_json_obj("nada aqui") is None
+        assert parse_json_obj('sure!\n{"tool": "search", "args": {}}')["tool"] == "search"
+        assert parse_json_obj("nothing here") is None

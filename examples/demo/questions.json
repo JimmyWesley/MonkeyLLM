@@ -1,10 +1,10 @@
 [
   {
     "id": "q01",
-    "question": "Quem é o autor da arquitetura do MixerLLM e em que cidade ele mora?",
+    "question": "Who is the author of the MixerLLM architecture and in which city does he live?",
     "expected_nodes": [
-      "projetos/mixerllm/arquitetura",
-      "pessoas/jimmy-wesley"
+      "projects/mixerllm/architecture",
+      "people/jimmy-wesley"
     ],
     "answer_contains": [
       "Jimmy",
@@ -13,20 +13,20 @@
   },
   {
     "id": "q02",
-    "question": "Qual região teve o maior total de vendas no Q1 2026 e qual foi esse total aproximado em reais?",
+    "question": "Which region had the highest total sales in Q1 2026 and what was the approximate total in USD?",
     "expected_nodes": [
-      "vendas/relatorio-q1-2026"
+      "sales/report-q1-2026"
     ],
     "answer_contains": [
-      "Sudeste"
+      "Southeast"
     ]
   },
   {
     "id": "q03",
-    "question": "Qual é o SKU do produto Sensor X e qual SKU teve a maior receita total no Q1 2026?",
+    "question": "What is the SKU of Sensor X and which SKU had the highest total revenue in Q1 2026?",
     "expected_nodes": [
-      "produtos/sensor-x",
-      "vendas/relatorio-q1-2026"
+      "products/sensor-x",
+      "sales/report-q1-2026"
     ],
     "answer_contains": [
       "A-101"
@@ -34,9 +34,9 @@
   },
   {
     "id": "q04",
-    "question": "Que decisão sobre o mixer-lang foi tomada no release de março de 2026?",
+    "question": "What decision about mixer-lang was made in the March 2026 release?",
     "expected_nodes": [
-      "eventos/2026-03-release-mixerllm-v2"
+      "events/2026-03-mixerllm-v2-release"
     ],
     "answer_contains": [
       "64",
@@ -45,10 +45,10 @@
   },
   {
     "id": "q05",
-    "question": "Com qual técnica de inferência o block-loop do MixerLLM é contrastado, e qual é a diferença central?",
+    "question": "With which inference technique is MixerLLM's block-loop contrasted, and what is the central difference?",
     "expected_nodes": [
-      "projetos/mixerllm/block-loop",
-      "conceitos/speculative-decoding"
+      "projects/mixerllm/block-loop",
+      "concepts/speculative-decoding"
     ],
     "answer_contains": [
       "speculative"
@@ -56,10 +56,10 @@
   },
   {
     "id": "q06",
-    "question": "Qual cliente assinou contrato em fevereiro de 2026, quem negociou pela Tropicália Tech e o que foi comprado?",
+    "question": "Which client signed a contract in February 2026, who negotiated for Tropicália Tech and what was purchased?",
     "expected_nodes": [
-      "eventos/2026-02-contrato-datacoop",
-      "organizacoes/datacoop"
+      "events/2026-02-datacoop-contract",
+      "organizations/datacoop"
     ],
     "answer_contains": [
       "DataCoop",
@@ -68,7 +68,7 @@
   },
   {
     "id": "q07",
-    "question": "Quanta VRAM tem a GPU da workstation de P&D e que modelos ela serve?",
+    "question": "How much VRAM does the R&D workstation GPU have and which models does it serve?",
     "expected_nodes": [
       "infra/workstation-3090"
     ],
@@ -78,9 +78,9 @@
   },
   {
     "id": "q08",
-    "question": "Quais são os dois baselines obrigatórios do Monkey Bench?",
+    "question": "What are the two mandatory baselines of the Monkey Bench?",
     "expected_nodes": [
-      "projetos/monkeyllm/monkey-bench"
+      "projects/monkeyllm/monkey-bench"
     ],
     "answer_contains": [
       "RAG"
@@ -88,21 +88,21 @@
   },
   {
     "id": "q09",
-    "question": "Quantas unidades de Sensor X foram devolvidas no Q1 2026 e por quê? Esse número está no dataset de vendas?",
+    "question": "How many Sensor X units were returned in Q1 2026 and why? Is that number in the sales dataset?",
     "expected_nodes": [
-      "vendas/devolucoes-q1"
+      "sales/returns-q1"
     ],
     "answer_contains": [
       "14",
-      "vedação"
+      "seal"
     ]
   },
   {
     "id": "q10",
-    "question": "O que é estigmergia, quem é o pesquisador do time que trabalha com isso e de qual laboratório ele veio?",
+    "question": "What is stigmergy, which team researcher works with it and which laboratory did he come from?",
     "expected_nodes": [
-      "conceitos/estigmergia",
-      "pessoas/bruno-lima"
+      "concepts/stigmergy",
+      "people/bruno-lima"
     ],
     "answer_contains": [
       "Bruno",

@@ -1,6 +1,6 @@
-﻿"""Build the Monkey Bench v1 corpus (forests/bench-forest/) + derived questions.
+"""Build the Monkey Bench v1 corpus (forests/bench-forest/) + derived questions.
 
-A deterministic, programmatically-expanded universe ("Maracatu Sistemas",
+A deterministic, programmatically-expanded universe ("Telemetrix Systems",
 distinct from the Phase-0 fixture): ~210 nodes, 15 branches, 2 SQLite
 datasets. Facts are planted by the generator and the question set
 (bench/questions-v2.json) is derived from the SAME fact tables — but with
@@ -35,80 +35,78 @@ REPO = Path(__file__).resolve().parents[2]
 # Pools (deterministic with SEED)
 # ---------------------------------------------------------------------------
 
-FIRST = ["Aurora", "Benício", "Clarice", "Davi", "Estela", "Felipe", "Gilda", "Heitor",
-         "Iara", "João", "Kátia", "Luan", "Mariana", "Nelson", "Otávia", "Paulo",
-         "Quitéria", "Rafael", "Sônia", "Tales", "Úrsula", "Vicente", "Wanda", "Xavier",
-         "Yasmin", "Zeca", "Amélia", "Bento", "Cecília", "Dorival", "Eunice", "Firmino",
-         "Graça", "Hugo", "Ivone", "Jandira"]
-LAST = ["Albuquerque", "Barros", "Cavalcanti", "Drummond", "Espíndola", "Furtado",
-        "Guimarães", "Holanda", "Itaparica", "Junqueira", "Klein", "Lacerda",
-        "Maranhão", "Negreiros", "Onofre", "Peixoto", "Queiroz", "Rabelo",
-        "Sarmento", "Trindade", "Uchoa", "Vasconcelos", "Wanderley", "Ximenes"]
-CITIES = [("Recife", "PE"), ("Olinda", "PE"), ("Fortaleza", "CE"), ("Salvador", "BA"),
-          ("São Paulo", "SP"), ("Campinas", "SP"), ("Curitiba", "PR"), ("Florianópolis", "SC"),
-          ("Belo Horizonte", "MG"), ("Manaus", "AM"), ("Belém", "PA"), ("Natal", "RN")]
-INSTITUTES = ["Instituto Caatinga de Computação", "Laboratório Mangue Digital",
-              "Centro Sertão de IA", "Núcleo Atlântico de Dados",
-              "Faculdade Boa Viagem", "Politécnica do Capibaribe"]
-ROLES = ["engenheira de firmware", "engenheiro de dados", "pesquisadora de IA",
-         "arquiteto de software", "analista de qualidade", "gerente de contas",
-         "cientista de dados", "engenheira de confiabilidade", "desenvolvedor embarcado",
-         "especialista em telemetria"]
-ORG_NAMES = ["AgroVale", "PortoNorte Logística", "Usina Catende Digital", "RedeFrevo Varejo",
-             "Cooperativa Mandacaru", "TransSertão Cargas", "Hospital Beberibe",
-             "Mineradora Gurjaú", "EnergiaJangada", "Frigorífico Asa Branca",
-             "Estaleiro Pina", "Têxtil Caruaru", "Granja Aratu", "Laticínios Garanhuns",
-             "Pesqueira Atlântico Sul", "Vinícola São Francisco"]
-SEGMENTS = ["agronegócio", "logística portuária", "bioenergia", "varejo", "cooperativismo",
-            "transporte rodoviário", "saúde", "mineração", "energia eólica", "frigorífico",
-            "naval", "têxtil", "avicultura", "laticínios", "pesca industrial", "vitivinicultura"]
+FIRST = ["Alice", "Bryan", "Claire", "Daniel", "Emma", "Frank", "Grace", "Henry",
+         "Iris", "James", "Karen", "Liam", "Maria", "Nathan", "Olivia", "Peter",
+         "Quinn", "Rachel", "Samuel", "Tina", "Uma", "Victor", "Wendy", "Xavier",
+         "Yasmine", "Zoe", "Aaron", "Beth", "Carlos", "Diana", "Ethan", "Fiona",
+         "George", "Hannah", "Ivan", "Julia"]
+LAST = ["Anderson", "Brown", "Carter", "Davis", "Evans", "Foster", "Green", "Harris",
+        "Irving", "Jones", "Klein", "Lewis", "Morgan", "Nelson", "Owen", "Parker",
+        "Quinn", "Roberts", "Scott", "Turner", "Underwood", "Vincent", "Walker", "Ximenes"]
+CITIES = [("Austin", "TX"), ("Seattle", "WA"), ("Denver", "CO"), ("Portland", "OR"),
+          ("Boston", "MA"), ("Atlanta", "GA"), ("Chicago", "IL"), ("Phoenix", "AZ"),
+          ("Miami", "FL"), ("Detroit", "MI"), ("Nashville", "TN"), ("Minneapolis", "MN")]
+INSTITUTES = ["MIT Lincoln Laboratory", "Stanford AI Lab", "Carnegie Mellon CENSE",
+              "Georgia Tech IRIM", "UTexas Applied Research", "Johns Hopkins APL"]
+ROLES = ["firmware engineer", "data engineer", "AI researcher",
+         "software architect", "quality analyst", "account manager",
+         "data scientist", "reliability engineer", "embedded developer",
+         "telemetry specialist"]
+ORG_NAMES = ["AgriCore", "HarborNorth Logistics", "SunField Energy", "NetRetail Group",
+             "GrainCo Cooperative", "TransRoute Freight", "Regional Health Network",
+             "PeakMine Corp", "WindGrid Energy", "MeatPack Solutions",
+             "ShipDock Marine", "TextilePro Mills", "PoultryFarm Inc",
+             "DairyPure Industries", "AquaHarvest Corp", "Vineyard South Wines"]
+SEGMENTS = ["agribusiness", "port logistics", "bioenergy", "retail", "cooperative",
+            "road transport", "healthcare", "mining", "wind energy", "meatpacking",
+            "naval", "textile", "poultry", "dairy", "commercial fishing", "viticulture"]
 PRODUCT_DEFS = [
-    ("Faro", "coleira de telemetria para rebanho bovino"),
-    ("Mangue", "boia de monitoramento de qualidade de água"),
-    ("Xote", "rastreador veicular de longa autonomia"),
-    ("Frevo", "gateway LoRa industrial"),
-    ("Cangaço", "sensor de vibração para manutenção preditiva"),
-    ("Jangada", "estação meteorológica compacta"),
-    ("Maracatu", "controlador de irrigação por zona"),
-    ("Caboclo", "leitor RFID de pátio"),
-    ("Arrecife", "sonda de nível para silos"),
-    ("Quadrilha", "painel de chão de fábrica"),
-    ("Forró", "módulo de energia solar para sensores remotos"),
-    ("Baião", "câmera térmica embarcada"),
-    ("Cordel", "etiqueta NFC industrial"),
-    ("Capoeira", "atuador de válvula conectado"),
-    ("Sertão", "kit de borda para fazendas sem internet"),
-    ("Lampião", "iluminação inteligente de galpão"),
-    ("Acerola", "registrador de cadeia fria"),
-    ("Tapioca", "balança conectada de expedição"),
+    ("Collar", "livestock telemetry collar for cattle"),
+    ("Buoy", "water quality monitoring buoy"),
+    ("Rover", "long-range vehicle tracker"),
+    ("Gateway", "industrial LoRa gateway"),
+    ("Vibe", "vibration sensor for predictive maintenance"),
+    ("WeatherBox", "compact weather station"),
+    ("Irrigo", "zone-based irrigation controller"),
+    ("Wand", "yard RFID reader"),
+    ("Probe", "silo level probe"),
+    ("Dashboard", "factory floor panel"),
+    ("SolarPack", "solar energy module for remote sensors"),
+    ("ThermalEye", "embedded thermal camera"),
+    ("NfcTag", "industrial NFC label"),
+    ("Valve", "connected valve actuator"),
+    ("EdgeKit", "edge computing kit for off-grid farms"),
+    ("LightGrid", "smart warehouse lighting"),
+    ("ColdLog", "cold chain logger"),
+    ("WeighIn", "connected shipping scale"),
 ]
 CONCEPT_DEFS = [
-    ("lpwan", "LPWAN", "Família de redes de longo alcance e baixa potência para sensores remotos"),
-    ("lorawan", "LoRaWAN", "Protocolo LPWAN aberto com gateways e classes A/B/C de dispositivo"),
-    ("mqtt", "MQTT", "Protocolo publish/subscribe leve para telemetria sobre TCP"),
-    ("edge-computing", "Edge computing", "Processamento na borda, perto do sensor, para reduzir latência e banda"),
-    ("digital-twin", "Digital twin", "Réplica virtual de um ativo físico alimentada por telemetria"),
-    ("manutencao-preditiva", "Manutenção preditiva", "Intervenção guiada por sinais (vibração, temperatura) antes da falha"),
-    ("cadeia-fria", "Cadeia fria", "Logística com controle contínuo de temperatura do produto"),
-    ("ota-update", "Atualização OTA", "Atualização de firmware remota, por rádio, em frotas de dispositivos"),
-    ("mesh", "Rede mesh", "Topologia onde nós retransmitem mensagens uns dos outros"),
-    ("nb-iot", "NB-IoT", "LPWAN celular licenciada para dispositivos estacionários"),
-    ("opc-ua", "OPC UA", "Padrão de interoperabilidade para dados industriais"),
-    ("scada", "SCADA", "Supervisão e aquisição de dados de plantas industriais"),
-    ("telemetria", "Telemetria", "Medição remota e transmissão automática de grandezas físicas"),
-    ("geofencing", "Geofencing", "Cerca virtual que dispara eventos ao entrar/sair de um perímetro"),
-    ("dead-reckoning", "Dead reckoning", "Estimativa de posição por sensores inerciais quando o GPS falha"),
-    ("fota-rollback", "Rollback de firmware", "Retorno automático à versão anterior quando o OTA falha"),
-    ("payload-binario", "Payload binário", "Codificação compacta de mensagens para economizar rádio"),
-    ("duty-cycle", "Duty cycle", "Fração de tempo em que um rádio pode transmitir por regulação"),
-    ("backhaul", "Backhaul", "Enlace que leva o tráfego agregado dos gateways à nuvem"),
-    ("provisionamento", "Provisionamento", "Registro seguro de um dispositivo novo na plataforma"),
+    ("lpwan", "LPWAN", "Family of long-range, low-power networks for remote sensors"),
+    ("lorawan", "LoRaWAN", "Open LPWAN protocol with gateways and device classes A/B/C"),
+    ("mqtt", "MQTT", "Lightweight publish/subscribe protocol for telemetry over TCP"),
+    ("edge-computing", "Edge computing", "On-device processing near the sensor to reduce latency and bandwidth"),
+    ("digital-twin", "Digital twin", "Virtual replica of a physical asset fed by live telemetry"),
+    ("predictive-maintenance", "Predictive maintenance", "Intervention guided by signals (vibration, temperature) before failure"),
+    ("cold-chain", "Cold chain", "Logistics with continuous product temperature control"),
+    ("ota-update", "OTA update", "Remote over-the-air firmware update for device fleets"),
+    ("mesh", "Mesh network", "Topology where nodes relay messages to one another"),
+    ("nb-iot", "NB-IoT", "Licensed cellular LPWAN for stationary devices"),
+    ("opc-ua", "OPC UA", "Interoperability standard for industrial data"),
+    ("scada", "SCADA", "Supervisory control and data acquisition for industrial plants"),
+    ("telemetry", "Telemetry", "Remote measurement and automatic transmission of physical quantities"),
+    ("geofencing", "Geofencing", "Virtual boundary that triggers events on entry/exit"),
+    ("dead-reckoning", "Dead reckoning", "Position estimation via inertial sensors when GPS fails"),
+    ("fota-rollback", "Firmware rollback", "Automatic revert to the previous version when an OTA update fails"),
+    ("binary-payload", "Binary payload", "Compact message encoding to conserve radio bandwidth"),
+    ("duty-cycle", "Duty cycle", "Fraction of time a radio is allowed to transmit by regulation"),
+    ("backhaul", "Backhaul", "Link that carries aggregated gateway traffic to the cloud"),
+    ("provisioning", "Provisioning", "Secure registration of a new device on the platform"),
 ]
-REGIONS = ["Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul"]
+REGIONS = ["North", "Northeast", "Midwest", "Southeast", "West"]
 QUARTERS = ["2026-Q1", "2026-Q2"]
-DEFECTS = ["oxidação no conector", "firmware travando no boot", "antena rompida",
-           "bateria inchada", "vedação comprometida", "leitura espúria do sensor"]
-CHANNELS = ["direto", "parceiro", "licitação"]
+DEFECTS = ["connector oxidation", "firmware boot loop", "broken antenna",
+           "swollen battery", "failed seal", "spurious sensor reading"]
+CHANNELS = ["direct", "partner", "tender"]
 
 rng = random.Random(SEED)
 
@@ -117,56 +115,55 @@ rng = random.Random(SEED)
 # ---------------------------------------------------------------------------
 
 PEOPLE_AREAS = {  # branch fan-out control: <= 12 children per branch (A.5 navigability)
-    "engenharia": ["engenheira de firmware", "arquiteto de software", "desenvolvedor embarcado",
-                   "engenheira de confiabilidade", "analista de qualidade"],
-    "dados": ["engenheiro de dados", "cientista de dados", "pesquisadora de IA",
-              "especialista em telemetria"],
-    "comercial": ["gerente de contas"],
+    "engineering": ["firmware engineer", "software architect", "embedded developer",
+                    "reliability engineer", "quality analyst"],
+    "data": ["data engineer", "data scientist", "AI researcher", "telemetry specialist"],
+    "sales": ["account manager"],
 }
-PRODUCT_AREAS = ["campo", "industria", "logistica"]
+PRODUCT_AREAS = ["field", "industry", "logistics"]
 
 
 def build_universe():
     people = []
     names = [(f, l) for f in FIRST for l in LAST]
     rng.shuffle(names)
-    areas = ["engenharia"] * 12 + ["dados"] * 12 + ["comercial"] * 10
+    areas = ["engineering"] * 12 + ["data"] * 12 + ["sales"] * 10
     for i in range(34):
         f, l = names[i]
         city, uf = rng.choice(CITIES)
         area = areas[i]
         people.append({
-            "id": f"pessoas/{area}/{f.lower()}-{l.lower()}", "first": f, "name": f"{f} {l}",
+            "id": f"people/{area}/{f.lower()}-{l.lower()}", "first": f, "name": f"{f} {l}",
             "area": area, "role": rng.choice(PEOPLE_AREAS[area]), "city": city, "uf": uf,
             "institute": rng.choice(INSTITUTES) if rng.random() < 0.4 else None,
         })
 
     orgs = []
     for i, name in enumerate(ORG_NAMES):
-        slug = name.lower().replace(" ", "-").replace("ô", "o").replace("í", "i").replace("é", "e").replace("ã", "a").replace("ç", "c").replace("ê", "e")
-        group = "clientes-campo" if i % 2 == 0 else "clientes-industria"
-        orgs.append({"id": f"organizacoes/{group}/{slug}", "name": name,
+        slug = name.lower().replace(" ", "-")
+        group = "field-clients" if i % 2 == 0 else "industry-clients"
+        orgs.append({"id": f"organizations/{group}/{slug}", "name": name,
                      "segment": SEGMENTS[i], "city": rng.choice(CITIES)[0]})
 
     products = []
     for i, (name, desc) in enumerate(PRODUCT_DEFS):
         sku = f"{chr(ord('K') + i % 8)}-{310 + i * 7}"
         area = PRODUCT_AREAS[i % 3]
-        products.append({"id": f"produtos/{area}/{name.lower()}", "name": name, "sku": sku,
+        products.append({"id": f"products/{area}/{name.lower()}", "name": name, "sku": sku,
                          "desc": desc, "owner": people[i % len(people)]})
 
     projects = []
     for pid, (alias, goal) in enumerate([
-        ("plataforma-tambor", "plataforma de ingestão e visualização de telemetria"),
-        ("firmware-zabumba", "firmware comum, OTA e provisionamento de toda a linha"),
-        ("malha-ciranda", "rede mesh proprietária para fazendas sem cobertura"),
-        ("piloto-resgate", "piloto de manutenção preditiva em mineradora"),
+        ("platform-drum", "telemetry ingestion and visualization platform"),
+        ("firmware-beat", "common firmware, OTA, and provisioning for the full product line"),
+        ("mesh-ring", "proprietary mesh network for farms without coverage"),
+        ("pilot-rescue", "predictive maintenance pilot at a mining site"),
     ]):
         lead = people[10 + pid]
-        projects.append({"id_base": f"projetos/{alias}", "alias": alias, "goal": goal, "lead": lead})
+        projects.append({"id_base": f"projects/{alias}", "alias": alias, "goal": goal, "lead": lead})
 
     contracts = []
-    month_names = {1: "janeiro", 2: "fevereiro", 3: "março", 4: "abril", 5: "maio"}
+    month_names = {1: "January", 2: "February", 3: "March", 4: "April", 5: "May"}
     for i in range(10):
         org = orgs[i]
         seller = people[20 + i % 6]
@@ -175,7 +172,7 @@ def build_universe():
         value = qty * rng.randrange(800, 2600, 50)
         month = (i % 5) + 1
         contracts.append({
-            "id": f"eventos/contratos/2026-{month:02d}-acordo-{org['id'].rsplit('/', 1)[1]}",
+            "id": f"events/contracts/2026-{month:02d}-deal-{org['id'].rsplit('/', 1)[1]}",
             "org": org, "seller": seller, "prod": prod, "qty": qty, "value": value,
             "month": month, "month_name": month_names[month], "day": (i * 3) % 27 + 1,
         })
@@ -186,18 +183,18 @@ def build_universe():
         defect = DEFECTS[i % len(DEFECTS)]
         count = rng.randrange(7, 90)
         incidents.append({
-            "id": f"eventos/recalls/2026-0{i % 4 + 2}-recall-{prod['name'].lower()}",
+            "id": f"events/recalls/2026-0{i % 4 + 2}-recall-{prod['name'].lower()}",
             "prod": prod, "defect": defect, "count": count, "lote": f"L{rng.randrange(10, 60)}-{chr(65 + i)}",
         })
 
     releases = []
     for i, proj in enumerate(projects):
         ver = f"{i + 1}.{rng.randrange(0, 9)}"
-        feature = rng.choice(["suporte a rollback automático de firmware",
-                              "compressão de payload em 6:1",
-                              "provisionamento por QR code em campo",
-                              "modo de baixo consumo com duty cycle adaptativo"])
-        releases.append({"id": f"eventos/lancamentos/2026-04-versao-{proj['alias']}",
+        feature = rng.choice(["automatic firmware rollback support",
+                              "6:1 payload compression",
+                              "field QR-code provisioning",
+                              "adaptive duty-cycle low-power mode"])
+        releases.append({"id": f"events/releases/2026-04-version-{proj['alias']}",
                          "proj": proj, "ver": ver, "feature": feature})
 
     return people, orgs, products, projects, contracts, incidents, releases
@@ -208,25 +205,25 @@ def build_universe():
 # ---------------------------------------------------------------------------
 
 def build_sales_db(path: Path, products) -> dict:
-    """vendas/pedidos-2026.db — skewed so aggregates are unambiguous."""
+    """sales/orders-2026.db — skewed so aggregates are unambiguous."""
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE pedidos (data TEXT, sku TEXT, produto TEXT, regiao TEXT, canal TEXT, qtd INTEGER, valor REAL)")
-    weights = {"Norte": 0.6, "Nordeste": 2.6, "Centro-Oeste": 0.9, "Sudeste": 1.7, "Sul": 1.0}
-    hot = products[4]  # Cangaço — boosted so the top-SKU answer is unambiguous
+    conn.execute("CREATE TABLE orders (date TEXT, sku TEXT, product TEXT, region TEXT, channel TEXT, qty INTEGER, amount REAL)")
+    weights = {"North": 0.6, "Northeast": 2.6, "Midwest": 0.9, "Southeast": 1.7, "West": 1.0}
+    hot = products[4]  # Vibe — boosted so the top-SKU answer is unambiguous
     rows, totals, sku_rev = [], {r: 0.0 for r in REGIONS}, {}
     for i in range(900):
         prod = products[i % len(products)]
         region = REGIONS[i % len(REGIONS)]
         month = (i % 6) + 1
-        qtd = rng.randrange(1, 30)
+        qty = rng.randrange(1, 30)
         unit = rng.uniform(900, 2400) * weights[region] * (3.0 if prod is hot else 1.0)
-        valor = round(qtd * unit, 2)
+        amount = round(qty * unit, 2)
         rows.append((f"2026-{month:02d}-{(i % 27) + 1:02d}", prod["sku"], prod["name"], region,
-                     rng.choice(CHANNELS), qtd, valor))
-        totals[region] += valor
-        sku_rev[prod["sku"]] = sku_rev.get(prod["sku"], 0.0) + valor
-    conn.executemany("INSERT INTO pedidos VALUES (?,?,?,?,?,?,?)", rows)
+                     rng.choice(CHANNELS), qty, amount))
+        totals[region] += amount
+        sku_rev[prod["sku"]] = sku_rev.get(prod["sku"], 0.0) + amount
+    conn.executemany("INSERT INTO orders VALUES (?,?,?,?,?,?,?)", rows)
     conn.commit()
     conn.close()
     top_region = max(totals, key=totals.get)
@@ -236,19 +233,19 @@ def build_sales_db(path: Path, products) -> dict:
 
 
 def build_support_db(path: Path, products) -> dict:
-    """suporte/chamados-2026.db — ticket counts per product with causes."""
+    """support/tickets-2026.db — ticket counts per product with causes."""
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE chamados (aberto_em TEXT, produto TEXT, sku TEXT, causa TEXT, severidade TEXT, resolvido INTEGER)")
-    champ = products[7]  # Caboclo — most tickets, unambiguous
+    conn.execute("CREATE TABLE tickets (opened_at TEXT, product TEXT, sku TEXT, cause TEXT, severity TEXT, resolved INTEGER)")
+    champ = products[7]  # Wand — most tickets, unambiguous
     rows, counts = [], {}
     for i in range(420):
         prod = champ if i % 3 == 0 else products[i % len(products)]
         cause = DEFECTS[i % len(DEFECTS)]
         rows.append((f"2026-{(i % 5) + 1:02d}-{(i % 27) + 1:02d}", prod["name"], prod["sku"],
-                     cause, rng.choice(["baixa", "média", "alta"]), rng.random() < 0.8))
+                     cause, rng.choice(["low", "medium", "high"]), rng.random() < 0.8))
         counts[prod["name"]] = counts.get(prod["name"], 0) + 1
-    conn.executemany("INSERT INTO chamados VALUES (?,?,?,?,?,?)", rows)
+    conn.executemany("INSERT INTO tickets VALUES (?,?,?,?,?,?)", rows)
     conn.commit()
     conn.close()
     top = max(counts, key=counts.get)
@@ -273,124 +270,124 @@ def populate(people, orgs, products, projects, contracts, incidents, releases,
     org_by_obj = {o["id"]: o for o in orgs}
 
     for p in people:
-        inst = f" Veio do {p['institute']}." if p["institute"] else ""
+        inst = f" Came from {p['institute']}." if p["institute"] else ""
         node(p["id"], "entity", p["name"],
-             f"{p['role'].capitalize()} da Maracatu Sistemas. Mora em {p['city']} ({p['uf']}).{inst}",
-             tags=["equipe"], links=[("related-to", "organizacoes/maracatu-sistemas")],
-             body=f"## Perfil\n\n{p['name']} é {p['role']} e vive em **{p['city']} ({p['uf']})**.{inst}\n\n## Atuação\n\nParticipa dos projetos da linha de telemetria da [[organizacoes/maracatu-sistemas]].",
+             f"{p['role'].capitalize()} at Telemetrix Systems. Lives in {p['city']} ({p['uf']}).{inst}",
+             tags=["team"], links=[("related-to", "organizations/telemetrix-systems")],
+             body=f"## Profile\n\n{p['name']} is a {p['role']} and lives in **{p['city']} ({p['uf']})**.{inst}\n\n## Involvement\n\nContributes to the telemetry product line at [[organizations/telemetrix-systems]].",
              entity_kind="person")
 
-    node("organizacoes/maracatu-sistemas", "entity", "Maracatu Sistemas",
-         "Fabricante pernambucana de hardware e plataforma de telemetria industrial. Sede no Recife; linha de 18 produtos conectados.",
-         tags=["empresa"], links=[],
-         body="## Sobre\n\nFundada no Recife. Desenvolve sensores, gateways e a plataforma de telemetria.\n\n## Linha\n\nVer [[produtos/_index]].",
+    node("organizations/telemetrix-systems", "entity", "Telemetrix Systems",
+         "Austin-based manufacturer of hardware and industrial telemetry platform. Headquartered in Austin TX; line of 18 connected products.",
+         tags=["company"], links=[],
+         body="## About\n\nFounded in Austin. Develops sensors, gateways, and a telemetry platform.\n\n## Product line\n\nSee [[products/_index]].",
          entity_kind="organization")
     for o in orgs:
         node(o["id"], "entity", o["name"],
-             f"Cliente do segmento de {o['segment']}, baseado em {o['city']}. Compra equipamentos de telemetria da Maracatu Sistemas.",
-             tags=["cliente", o["segment"].split()[0]],
-             links=[("related-to", "organizacoes/maracatu-sistemas")],
-             body=f"## Sobre\n\n{o['name']} atua em {o['segment']} a partir de {o['city']}.\n\n## Relacionamento\n\nCliente ativo da [[organizacoes/maracatu-sistemas]].",
+             f"Client in the {o['segment']} segment, based in {o['city']}. Purchases telemetry equipment from Telemetrix Systems.",
+             tags=["client", o["segment"].split()[0]],
+             links=[("related-to", "organizations/telemetrix-systems")],
+             body=f"## About\n\n{o['name']} operates in {o['segment']} from {o['city']}.\n\n## Relationship\n\nActive client of [[organizations/telemetrix-systems]].",
              entity_kind="organization")
 
     for pr in products:
         own = pr["owner"]
         node(pr["id"], "entity", f"{pr['name']} ({pr['sku']})",
-             f"{pr['desc'].capitalize()}, código de produto {pr['sku']}. Responsável técnico: {own['name']}.",
-             tags=["produto"], links=[("related-to", own["id"])],
-             body=f"## Ficha\n\n**{pr['name']}** é uma {pr['desc']}. Código de catálogo: **{pr['sku']}**.\n\n## Responsável\n\nEngenharia sob cuidado de [[{own['id']}|{own['name']}]].",
+             f"{pr['desc'].capitalize()}, product code {pr['sku']}. Technical owner: {own['name']}.",
+             tags=["product"], links=[("related-to", own["id"])],
+             body=f"## Spec\n\n**{pr['name']}** is a {pr['desc']}. Catalog code: **{pr['sku']}**.\n\n## Owner\n\nEngineering under [[{own['id']}|{own['name']}]].",
              entity_kind="product")
 
     for proj in projects:
         base, lead = proj["id_base"], proj["lead"]
-        node(f"{base}/visao", "note", f"Visão — {proj['alias']}",
-             f"Norte do projeto {proj['alias']}: {proj['goal']}. Liderança de {lead['name']}.",
-             tags=["projeto"], links=[("author", lead["id"])],
-             body=f"## Objetivo\n\nConstruir {proj['goal']}.\n\n## Liderança\n\nConduzido por [[{lead['id']}|{lead['name']}]].")
-        node(f"{base}/arquitetura", "document", f"Arquitetura — {proj['alias']}",
-             f"Desenho técnico do {proj['alias']}: módulos, fluxo de dados e decisões de borda. Assinado por {lead['name']}.",
-             tags=["projeto", "arquitetura"], links=[("author", lead["id"]), ("part-of", f"{base}/visao")],
-             body=f"## Camadas\n\nIngestão → fila → processamento → API.\n\n## Autoria\n\nDesenho de [[{lead['id']}|{lead['name']}]], revisado pelo time.")
-        node(f"{base}/decisoes", "note", f"Decisões — {proj['alias']}",
-             f"Registro de decisões do {proj['alias']}: trade-offs, alternativas descartadas e pendências.",
-             tags=["projeto"], links=[("part-of", f"{base}/visao")],
-             body="## Decisões ativas\n\n- Banco embarcado na borda.\n- Telemetria comprimida.\n\n## Pendências\n\n- Estratégia de retry do backhaul.")
+        node(f"{base}/vision", "note", f"Vision — {proj['alias']}",
+             f"North star of the {proj['alias']} project: {proj['goal']}. Led by {lead['name']}.",
+             tags=["project"], links=[("author", lead["id"])],
+             body=f"## Goal\n\nBuild {proj['goal']}.\n\n## Leadership\n\nLed by [[{lead['id']}|{lead['name']}]].")
+        node(f"{base}/architecture", "document", f"Architecture — {proj['alias']}",
+             f"Technical design of {proj['alias']}: modules, data flow, and edge decisions. Authored by {lead['name']}.",
+             tags=["project", "architecture"], links=[("author", lead["id"]), ("part-of", f"{base}/vision")],
+             body=f"## Layers\n\nIngestion → queue → processing → API.\n\n## Authorship\n\nDesigned by [[{lead['id']}|{lead['name']}]], reviewed by the team.")
+        node(f"{base}/decisions", "note", f"Decisions — {proj['alias']}",
+             f"Decision log for {proj['alias']}: trade-offs, discarded alternatives, and open items.",
+             tags=["project"], links=[("part-of", f"{base}/vision")],
+             body="## Active decisions\n\n- Embedded database at the edge.\n- Compressed telemetry.\n\n## Open items\n\n- Backhaul retry strategy.")
 
-    redes = {"lpwan", "lorawan", "mqtt", "mesh", "nb-iot", "opc-ua", "scada",
-             "duty-cycle", "backhaul", "payload-binario"}
+    networks = {"lpwan", "lorawan", "mqtt", "mesh", "nb-iot", "opc-ua", "scada",
+                "duty-cycle", "backhaul", "binary-payload"}
     for c, t, d in CONCEPT_DEFS:
-        sub = "redes" if c in redes else "operacao"
-        node(f"conceitos/{sub}/{c}", "concept", t, f"{d}.", tags=["conceito"],
-             body=f"## Definição\n\n{d}.\n\n## Uso na Maracatu\n\nAparece nos produtos de telemetria e nos projetos da plataforma.")
+        sub = "networks" if c in networks else "operations"
+        node(f"concepts/{sub}/{c}", "concept", t, f"{d}.", tags=["concept"],
+             body=f"## Definition\n\n{d}.\n\n## Use at Telemetrix\n\nAppears in telemetry products and platform projects.")
 
     for ct in contracts:
         o, s, pr = ct["org"], ct["seller"], ct["prod"]
-        node(ct["id"], "event", f"Acordo {o['name']} — {ct['month_name']} de 2026",
-             f"Contrato fechado em {ct['day']} de {ct['month_name']} de 2026 com {o['name']}: {ct['qty']} unidades de {pr['name']} ({pr['sku']}). Valor R$ {ct['value']:,.0f}. Vendedor: {s['name']}.".replace(",", "."),
-             tags=["contrato"], links=[("related-to", o["id"]), ("related-to", pr["id"]), ("mentioned-in", s["id"])],
-             body=f"## Termos\n\n{o['name']} adquiriu **{ct['qty']} unidades** do {pr['name']} (código {pr['sku']}) por **R$ {ct['value']:,.0f}**.".replace(",", ".") +
-                  f"\n\n## Condução\n\nNegociação conduzida por [[{s['id']}|{s['name']}]] no canal direto.")
+        node(ct["id"], "event", f"Deal {o['name']} — {ct['month_name']} 2026",
+             f"Contract closed on {ct['month_name']} {ct['day']}, 2026 with {o['name']}: {ct['qty']} units of {pr['name']} ({pr['sku']}). Value ${ct['value']:,.0f}. Seller: {s['name']}.",
+             tags=["contract"], links=[("related-to", o["id"]), ("related-to", pr["id"]), ("mentioned-in", s["id"])],
+             body=f"## Terms\n\n{o['name']} acquired **{ct['qty']} units** of {pr['name']} (code {pr['sku']}) for **${ct['value']:,.0f}**." +
+                  f"\n\n## Handling\n\nNegotiation led by [[{s['id']}|{s['name']}]] via the direct channel.")
 
     for inc in incidents:
         pr = inc["prod"]
-        node(inc["id"], "event", f"Recall do {pr['name']} — lote {inc['lote']}",
-             f"Recall de {inc['count']} unidades do {pr['name']} ({pr['sku']}) por {inc['defect']}, lote {inc['lote']}. Substituição sem custo em 30 dias.",
-             tags=["recall", "qualidade"], links=[("related-to", pr["id"])],
-             body=f"## O que houve\n\n**{inc['count']} unidades** do {pr['name']} apresentaram **{inc['defect']}** (lote {inc['lote']}).\n\n## Ação\n\nSubstituição integral; causa raiz na linha de montagem.")
+        node(inc["id"], "event", f"Recall of {pr['name']} — lot {inc['lote']}",
+             f"Recall of {inc['count']} units of {pr['name']} ({pr['sku']}) for {inc['defect']}, lot {inc['lote']}. Free replacement within 30 days.",
+             tags=["recall", "quality"], links=[("related-to", pr["id"])],
+             body=f"## What happened\n\n**{inc['count']} units** of {pr['name']} exhibited **{inc['defect']}** (lot {inc['lote']}).\n\n## Action\n\nFull replacement; root cause in the assembly line.")
 
     for rel in releases:
         proj = rel["proj"]
-        node(rel["id"], "event", f"Versão {rel['ver']} — {proj['alias']}",
-             f"Lançamento de abril de 2026 do {proj['alias']}: versão {rel['ver']} com {rel['feature']}.",
-             tags=["release"], links=[("related-to", f"{proj['id_base']}/visao")],
-             body=f"## Novidades\n\nA versão **{rel['ver']}** trouxe {rel['feature']}.\n\n## Contexto\n\nMarco do [[{proj['id_base']}/visao|{proj['alias']}]].")
+        node(rel["id"], "event", f"Version {rel['ver']} — {proj['alias']}",
+             f"April 2026 release of {proj['alias']}: version {rel['ver']} with {rel['feature']}.",
+             tags=["release"], links=[("related-to", f"{proj['id_base']}/vision")],
+             body=f"## What's new\n\nVersion **{rel['ver']}** delivered {rel['feature']}.\n\n## Context\n\nMilestone of [[{proj['id_base']}/vision|{proj['alias']}]].")
 
-    node("vendas/pedidos-2026", "dataset", "Pedidos 2026 (jan-jun)",
-         f"Pedidos faturados de janeiro a junho de 2026: {sales_truth['rows']} linhas com sku, produto, região, canal, quantidade e valor em BRL. Export do ERP.",
-         tags=["vendas", "dataset"], links=[],
-         body="## Query manual\n\n**Tabela:** `pedidos(data, sku, produto, regiao, canal, qtd, valor)`\n\n**Queries de exemplo:**\n- Faturamento por região: `SELECT regiao, SUM(valor) AS total FROM pedidos GROUP BY regiao ORDER BY total DESC`\n- Receita por produto: `SELECT sku, produto, SUM(valor) AS receita FROM pedidos GROUP BY sku ORDER BY receita DESC`",
-         payload="pedidos-2026.db", payload_type="sqlite")
-    node("suporte/chamados-2026", "dataset", "Chamados de suporte 2026",
-         f"Tíquetes de suporte de 2026: {support_truth['rows']} linhas com produto, sku, causa, severidade e status de resolução.",
-         tags=["suporte", "dataset"], links=[],
-         body="## Query manual\n\n**Tabela:** `chamados(aberto_em, produto, sku, causa, severidade, resolvido)`\n\n**Queries de exemplo:**\n- Chamados por produto: `SELECT produto, COUNT(*) AS n FROM chamados GROUP BY produto ORDER BY n DESC`\n- Causas mais comuns: `SELECT causa, COUNT(*) FROM chamados GROUP BY causa ORDER BY 2 DESC`",
-         payload="chamados-2026.db", payload_type="sqlite")
+    node("sales/orders-2026", "dataset", "Orders 2026 (Jan–Jun)",
+         f"Billed orders from January to June 2026: {sales_truth['rows']} rows with sku, product, region, channel, qty, and amount in USD. ERP export.",
+         tags=["sales", "dataset"], links=[],
+         body="## Query manual\n\n**Table:** `orders(date, sku, product, region, channel, qty, amount)`\n\n**Example queries:**\n- Revenue by region: `SELECT region, SUM(amount) AS total FROM orders GROUP BY region ORDER BY total DESC`\n- Revenue by product: `SELECT sku, product, SUM(amount) AS revenue FROM orders GROUP BY sku ORDER BY revenue DESC`",
+         payload="orders-2026.db", payload_type="sqlite")
+    node("support/tickets-2026", "dataset", "Support Tickets 2026",
+         f"Support tickets for 2026: {support_truth['rows']} rows with product, sku, cause, severity, and resolution status.",
+         tags=["support", "dataset"], links=[],
+         body="## Query manual\n\n**Table:** `tickets(opened_at, product, sku, cause, severity, resolved)`\n\n**Example queries:**\n- Tickets by product: `SELECT product, COUNT(*) AS n FROM tickets GROUP BY product ORDER BY n DESC`\n- Most common causes: `SELECT cause, COUNT(*) FROM tickets GROUP BY cause ORDER BY 2 DESC`",
+         payload="tickets-2026.db", payload_type="sqlite")
 
-    node("notas/politica-garantia", "note", "Política de garantia",
-         "Garantia padrão de 24 meses para sensores e 36 para gateways; recall sempre com substituição sem custo. Exceções só com aprovação da diretoria.",
-         tags=["politica"], body="## Regra\n\n24 meses (sensores), 36 meses (gateways).\n\n## Recalls\n\nSubstituição sem custo, prazo de 30 dias.")
-    node("notas/onboarding-clientes", "note", "Onboarding de clientes",
-         "Passo a passo de ativação de um cliente novo: provisionamento dos dispositivos, treinamento e primeira semana assistida.",
-         tags=["processo"], body="## Etapas\n\n1. Provisionamento ([[conceitos/operacao/provisionamento]])\n2. Treinamento\n3. Semana assistida")
-    node("infra/bancada-homologacao", "note", "Bancada de homologação",
-         "Bancada de testes de rádio e clima: câmara térmica, atenuadores e gateways de referência das classes A e C.",
-         tags=["infra"], body="## Equipamentos\n\nCâmara térmica, atenuadores RF, gateways de referência.\n\n## Uso\n\nHomologação de firmware antes do OTA ([[conceitos/operacao/ota-update]]).")
+    node("notes/warranty-policy", "note", "Warranty Policy",
+         "Standard warranty of 24 months for sensors and 36 months for gateways; recalls always with free replacement. Exceptions require board approval.",
+         tags=["policy"], body="## Rule\n\n24 months (sensors), 36 months (gateways).\n\n## Recalls\n\nFree replacement, 30-day deadline.")
+    node("notes/client-onboarding", "note", "Client Onboarding",
+         "Step-by-step activation of a new client: device provisioning, training, and first assisted week.",
+         tags=["process"], body="## Steps\n\n1. Provisioning ([[concepts/operations/provisioning]])\n2. Training\n3. Assisted week")
+    node("infra/test-bench", "note", "Homologation Test Bench",
+         "Radio and climate test bench: thermal chamber, attenuators, and reference gateways for classes A and C.",
+         tags=["infra"], body="## Equipment\n\nThermal chamber, RF attenuators, reference gateways.\n\n## Use\n\nFirmware homologation before OTA ([[concepts/operations/ota-update]]).")
 
 
 BRANCH_DEFS = {
-    "pessoas/_index": ("Pessoas", "Equipe da Maracatu Sistemas por área: engenharia, dados e comercial."),
-    "pessoas/engenharia/_index": ("Engenharia", "Time de firmware, software embarcado, confiabilidade e qualidade."),
-    "pessoas/dados/_index": ("Dados e IA", "Time de dados, ciência de dados, IA e telemetria."),
-    "pessoas/comercial/_index": ("Comercial", "Gerentes de contas que conduzem vendas e contratos."),
-    "organizacoes/_index": ("Organizações", "A própria Maracatu e os clientes, agrupados por perfil."),
-    "organizacoes/clientes-campo/_index": ("Clientes de campo", "Clientes de agro, cooperativas, energia e pesca."),
-    "organizacoes/clientes-industria/_index": ("Clientes industriais", "Clientes de logística, mineração, saúde e manufatura."),
-    "produtos/_index": ("Produtos", "Linha de hardware conectado, agrupada por ambiente de uso."),
-    "produtos/campo/_index": ("Produtos de campo", "Sensores e kits para fazendas, água e clima."),
-    "produtos/industria/_index": ("Produtos industriais", "Sensores e painéis para planta industrial."),
-    "produtos/logistica/_index": ("Produtos de logística", "Rastreadores, leitores e balanças de expedição."),
-    "projetos/_index": ("Projetos", "Iniciativas internas: visão, arquitetura e decisões de cada projeto."),
-    "conceitos/_index": ("Conceitos", "Vocabulário técnico, dividido em redes e operações."),
-    "conceitos/redes/_index": ("Redes", "Protocolos e rádio: LPWAN, LoRaWAN, MQTT, mesh, backhaul."),
-    "conceitos/operacao/_index": ("Operação", "Operações: OTA, manutenção preditiva, cadeia fria, provisionamento."),
-    "eventos/_index": ("Eventos", "Fatos datados, agrupados em contratos, recalls e lançamentos."),
-    "eventos/contratos/_index": ("Contratos", "Acordos comerciais fechados com clientes: quantidades, valores e vendedores."),
-    "eventos/recalls/_index": ("Recalls", "Recolhimentos por defeito de fabricação: produto, lote e causa."),
-    "eventos/lancamentos/_index": ("Lançamentos", "Versões lançadas dos projetos com as novidades principais."),
-    "vendas/_index": ("Vendas", "Datasets de pedidos faturados com manual de consulta SQL."),
-    "suporte/_index": ("Suporte", "Datasets de chamados com causas e severidade."),
-    "infra/_index": ("Infra", "Bancadas e ambientes de homologação."),
-    "notas/_index": ("Notas", "Políticas e processos internos."),
+    "people/_index": ("People", "Telemetrix Systems team by area: engineering, data, and sales."),
+    "people/engineering/_index": ("Engineering", "Firmware, embedded software, reliability, and quality team."),
+    "people/data/_index": ("Data & AI", "Data, data science, AI, and telemetry team."),
+    "people/sales/_index": ("Sales", "Account managers who handle sales and contracts."),
+    "organizations/_index": ("Organizations", "Telemetrix itself and its clients, grouped by profile."),
+    "organizations/field-clients/_index": ("Field clients", "Clients in agribusiness, cooperatives, energy, and fishing."),
+    "organizations/industry-clients/_index": ("Industry clients", "Clients in logistics, mining, healthcare, and manufacturing."),
+    "products/_index": ("Products", "Connected hardware line, grouped by deployment environment."),
+    "products/field/_index": ("Field products", "Sensors and kits for farms, water, and weather."),
+    "products/industry/_index": ("Industrial products", "Sensors and panels for industrial plants."),
+    "products/logistics/_index": ("Logistics products", "Trackers, readers, and shipping scales."),
+    "projects/_index": ("Projects", "Internal initiatives: vision, architecture, and decisions per project."),
+    "concepts/_index": ("Concepts", "Technical vocabulary, divided into networks and operations."),
+    "concepts/networks/_index": ("Networks", "Protocols and radio: LPWAN, LoRaWAN, MQTT, mesh, backhaul."),
+    "concepts/operations/_index": ("Operations", "Operations: OTA, predictive maintenance, cold chain, provisioning."),
+    "events/_index": ("Events", "Dated facts, grouped into contracts, recalls, and releases."),
+    "events/contracts/_index": ("Contracts", "Commercial deals closed with clients: quantities, values, and sellers."),
+    "events/recalls/_index": ("Recalls", "Product recalls for manufacturing defects: product, lot, and cause."),
+    "events/releases/_index": ("Releases", "Shipped project versions with main highlights."),
+    "sales/_index": ("Sales", "Billed order datasets with SQL query manual."),
+    "support/_index": ("Support", "Ticket datasets with causes and severity."),
+    "infra/_index": ("Infra", "Test benches and homologation environments."),
+    "notes/_index": ("Notes", "Internal policies and processes."),
 }
 
 
@@ -415,7 +412,7 @@ def write_forest(out: Path):
         if f"{nested_dir}/_index" in branches:
             continue  # explicit BRANCH_DEFS win; this catches the project dirs
         alias = nested_dir.split("/")[1]
-        branches[f"{nested_dir}/_index"] = (alias, f"Materiais do projeto {alias}: visão, arquitetura e decisões.")
+        branches[f"{nested_dir}/_index"] = (alias, f"Materials for the {alias} project: vision, architecture, and decisions.")
 
     def children_of(branch_id):
         folder = branch_id[: -len("/_index")]
@@ -441,15 +438,15 @@ def write_forest(out: Path):
         path.write_text(serialize_node(fm, body), encoding="utf-8", newline="\n")
 
     top = sorted(b for b in branches if b.count("/") == 1)
-    lines = ["# Floresta Maracatu", "",
-             "> Base de conhecimento da Maracatu Sistemas: equipe, clientes, linha de produtos, "
-             "projetos, conceitos de telemetria, contratos, recalls, vendas e suporte.", "",
+    lines = ["# Telemetrix Knowledge Base", "",
+             "> Telemetrix Systems knowledge base: team, clients, product line, "
+             "projects, telemetry concepts, contracts, recalls, sales, and support.", "",
              "## Sub-branches"]
     lines += [entry_line(b, branches[b][1]) for b in top]
     lines += ["", "## Direct bananas", ""]
     body = "\n".join(lines)
-    fm = {"id": "_index", "type": "branch", "title": "Floresta Maracatu",
-          "summary": "Galho-mestre da Maracatu Sistemas: pessoas, organizações, produtos, projetos, conceitos, eventos, vendas, suporte, infra e notas.",
+    fm = {"id": "_index", "type": "branch", "title": "Telemetrix Knowledge Base",
+          "summary": "Master branch of Telemetrix Systems: people, organizations, products, projects, concepts, events, sales, support, infra, and notes.",
           "coverage": count_coverage(body), "created": CREATED, "updated": TODAY}
     (out / "_index.md").write_text(serialize_node(fm, body), encoding="utf-8", newline="\n")
     return len(N) + len(branches) + 1
@@ -463,14 +460,14 @@ def write_forest(out: Path):
 # ---------------------------------------------------------------------------
 
 FEATURE_PARAPHRASE = {
-    "suporte a rollback automático de firmware":
-        "a regressão sozinha para a edição anterior quando a atualização dá errado",
-    "compressão de payload em 6:1":
-        "encolher as mensagens de rádio em seis vezes",
-    "provisionamento por QR code em campo":
-        "cadastrar aparelhos novos direto no campo lendo um código",
-    "modo de baixo consumo com duty cycle adaptativo":
-        "gastar menos bateria ajustando o ritmo de transmissão",
+    "automatic firmware rollback support":
+        "the device rolls back to the previous version on its own when an update fails",
+    "6:1 payload compression":
+        "squeezing radio messages to one-sixth their original size",
+    "field QR-code provisioning":
+        "registering new devices on-site by scanning a code",
+    "adaptive duty-cycle low-power mode":
+        "saving battery by dynamically adjusting the transmission schedule",
 }
 
 
@@ -483,65 +480,65 @@ def build_questions_v3(people, orgs, products, projects, contracts, incidents,
                    "expected_nodes": expected, "answer_contains": contains,
                    "min_hops": min_hops})
 
-    # release -> project visao -> lead person (city): unique anchors only
+    # release -> project vision -> lead person (city): unique anchors only
     feat_counts = {}
     for rel in releases:
         feat_counts[rel["feature"]] = feat_counts.get(rel["feature"], 0) + 1
     chain_rels = [r for r in releases if feat_counts[r["feature"]] == 1][:3]
     for rel in chain_rels:
         lead = rel["proj"]["lead"]
-        q(f"O projeto cuja novidade de abril foi {FEATURE_PARAPHRASE[rel['feature']]} "
-          f"é conduzido por quem, e em que município essa pessoa vive?",
-          [rel["id"], f"{rel['proj']['id_base']}/visao", lead["id"]],
+        q(f"The project whose April highlight was {FEATURE_PARAPHRASE[rel['feature']]} "
+          f"is led by whom, and in which city does that person live?",
+          [rel["id"], f"{rel['proj']['id_base']}/vision", lead["id"]],
           [lead["first"], lead["city"]], 3)
 
-    # recall (lote = rare exact token, sniff tier) -> product -> owner (city)
+    # recall (lot = rare exact token, sniff tier) -> product -> owner (city)
     for inc in incidents[:2]:
         owner = inc["prod"]["owner"]
-        q(f"O lote {inc['lote']} foi recolhido do mercado; quem responde "
-          f"tecnicamente pelo aparelho desse lote, e em que cidade essa pessoa mora?",
+        q(f"Lot {inc['lote']} was recalled from the market; who is technically responsible "
+          f"for the device in that lot, and in which city does that person live?",
           [inc["id"], inc["prod"]["id"], owner["id"]],
           [owner["first"], owner["city"]], 3)
 
     # contract -> product -> technical owner (the contract only names the org)
     for ct in (contracts[3], contracts[5]):
         owner = ct["prod"]["owner"]
-        q(f"O equipamento que a {ct['org']['name']} adquiriu em "
-          f"{ct['month_name']} de 2026 é mantido na engenharia por quem?",
+        q(f"The equipment that {ct['org']['name']} acquired in "
+          f"{ct['month_name']} 2026 is maintained in engineering by whom?",
           [ct["id"], ct["prod"]["id"], owner["id"]],
           [owner["first"]], 3)
 
     # contract -> seller -> seller's city (city only exists in the person node)
     for ct in (contracts[6], contracts[8]):
         s = ct["seller"]
-        q(f"A venda para a {ct['org']['name']} foi conduzida por qual gerente, "
-          f"e em que cidade essa pessoa está baseada?",
+        q(f"The sale to {ct['org']['name']} was handled by which account manager, "
+          f"and in which city is that person based?",
           [ct["id"], s["id"]], [s["first"], s["city"]], 3)
 
     # dataset join -> product node -> owner: SQL first, then the entity chain
     top_prod = next(p for p in products if p["sku"] == sales_truth["top_sku"])
-    q("O código de produto que puxou a maior receita do semestre corresponde a "
-      "qual aparelho, e quem é o dono técnico dele?",
-      ["vendas/pedidos-2026", top_prod["id"]],
+    q("The product code that drove the highest revenue in the semester corresponds to "
+      "which device, and who is its technical owner?",
+      ["sales/orders-2026", top_prod["id"]],
       [top_prod["name"], top_prod["owner"]["first"]], 3)
     champ_prod = next(p for p in products if p["name"] == support_truth["top_product"])
-    q("O item da linha com mais chamados de suporte em 2026 é responsabilidade "
-      "técnica de quem, e em qual cidade essa pessoa fica?",
-      ["suporte/chamados-2026", champ_prod["id"], champ_prod["owner"]["id"]],
+    q("The product line item with the most support tickets in 2026 is technically "
+      "the responsibility of whom, and in which city does that person work?",
+      ["support/tickets-2026", champ_prod["id"], champ_prod["owner"]["id"]],
       [champ_prod["owner"]["first"], champ_prod["owner"]["city"]], 4)
 
     # release -> project -> lead -> origin institute (4 nodes deep)
     rel = releases[3]
     lead = rel["proj"]["lead"]
     if lead["institute"]:
-        q(f"O projeto que lançou a versão {rel['ver']} em abril é liderado por "
-          f"alguém vindo de qual instituição?",
-          [rel["id"], f"{rel['proj']['id_base']}/visao", lead["id"]],
+        q(f"The project that released version {rel['ver']} in April is led by "
+          f"someone who came from which institution?",
+          [rel["id"], f"{rel['proj']['id_base']}/vision", lead["id"]],
           [lead["institute"].split()[-1]], 4)
     else:
-        q(f"Quem lidera o projeto que lançou a versão {rel['ver']} em abril, "
-          f"e em que município essa pessoa vive?",
-          [rel["id"], f"{rel['proj']['id_base']}/visao", lead["id"]],
+        q(f"Who leads the project that released version {rel['ver']} in April, "
+          f"and in which city does that person live?",
+          [rel["id"], f"{rel['proj']['id_base']}/vision", lead["id"]],
           [lead["first"], lead["city"]], 3)
 
     return qs
@@ -559,53 +556,53 @@ def build_questions(people, products, projects, contracts, incidents, releases,
         qs.append({"id": qid, "question": question,
                    "expected_nodes": expected, "answer_contains": contains})
 
-    # author-of-project -> city (summaries say "Liderança/Mora em"; questions say "à frente / reside")
+    # author-of-project -> city (summaries say "Led by / Lives in"; questions say "at the helm / resides")
     for i, proj in enumerate(projects[:3]):
         lead = proj["lead"]
         q(f"q{len(qs)+1:02d}",
-          f"Quem está à frente do {proj['alias']} e em que município essa pessoa reside?",
-          [f"{proj['id_base']}/visao", lead["id"]],
+          f"Who is at the helm of {proj['alias']} and in what city does that person reside?",
+          [f"{proj['id_base']}/vision", lead["id"]],
           [lead["first"], lead["city"]])
 
-    # contracts (summaries: "Contrato fechado... Vendedor:"; questions: "negócio/quem cuidou")
+    # contracts (summaries: "Contract closed... Seller:"; questions: "deal/who handled")
     for ct in contracts[:3]:
         q(f"q{len(qs)+1:02d}",
-          f"Em {ct['month_name']} de 2026 a {ct['org']['name']} levou qual equipamento, em que quantidade, e quem cuidou da venda?",
+          f"In {ct['month_name']} 2026 {ct['org']['name']} took which equipment, in what quantity, and who handled the sale?",
           [ct["id"]],
           [ct["prod"]["name"], str(ct["qty"]), ct["seller"]["first"]])
 
-    # recalls (summaries: "Recall de N unidades por <defeito>"; questions: "devolvidas/problema")
+    # recalls (summaries: "Recall of N units for <defect>"; questions: "returned/issue")
     for inc in incidents[:2]:
         q(f"q{len(qs)+1:02d}",
-          f"O {inc['prod']['name']} teve um problema de fabricação em 2026: quantas peças voltaram e qual era o defeito?",
+          f"The {inc['prod']['name']} had a manufacturing issue in 2026: how many units came back and what was the defect?",
           [inc["id"]],
           [str(inc["count"]), inc["defect"].split()[0]])
 
     # releases
     for rel in releases[:2]:
         q(f"q{len(qs)+1:02d}",
-          f"O lançamento de abril do {rel['proj']['alias']} saiu com qual número de versão e qual novidade principal?",
+          f"The April release of {rel['proj']['alias']} shipped with which version number and what main feature?",
           [rel["id"]],
           [rel["ver"]])
 
     # dataset aggregates (need SQL)
     q(f"q{len(qs)+1:02d}",
-      "Considerando tudo que foi faturado no primeiro semestre de 2026, qual área do país ficou na liderança?",
-      ["vendas/pedidos-2026"],
+      "Considering everything billed in the first half of 2026, which region led total revenue?",
+      ["sales/orders-2026"],
       [sales_truth["top_region"]])
     q(f"q{len(qs)+1:02d}",
-      "Qual código de produto puxou a maior receita no semestre, segundo a base de pedidos?",
-      ["vendas/pedidos-2026"],
+      "Which product code drove the highest revenue in the semester, according to the orders database?",
+      ["sales/orders-2026"],
       [sales_truth["top_sku"]])
     q(f"q{len(qs)+1:02d}",
-      "Qual item da linha gerou o maior volume de tíquetes de atendimento em 2026?",
-      ["suporte/chamados-2026"],
+      "Which product line item generated the most support tickets in 2026?",
+      ["support/tickets-2026"],
       [support_truth["top_product"]])
 
-    # product SKU lookups (summaries: "código de produto"; questions: "referência de catálogo")
+    # product SKU lookups (summaries: "product code"; questions: "catalog reference")
     for pr in (products[2], products[9]):
         q(f"q{len(qs)+1:02d}",
-          f"Qual é a referência de catálogo do {pr['name']} e quem responde tecnicamente por ele?",
+          f"What is the catalog reference of {pr['name']} and who is technically responsible for it?",
           [pr["id"]],
           [pr["sku"], pr["owner"]["first"]])
 
@@ -613,14 +610,14 @@ def build_questions(people, products, projects, contracts, incidents, releases,
     cands = [p for p in people if p["institute"]]
     for p in cands[:2]:
         q(f"q{len(qs)+1:02d}",
-          f"De qual instituição {p['name']} veio antes da Maracatu, e qual é a função dela(e) hoje?",
+          f"From which institution did {p['name']} come before joining Telemetrix, and what is their role today?",
           [p["id"]],
           [p["institute"].split()[-1]])
 
     # policy multi-hop (note)
     q(f"q{len(qs)+1:02d}",
-      "Quando um lote inteiro dá defeito, o que a política da empresa garante ao cliente e em qual prazo?",
-      ["notas/politica-garantia"],
+      "When an entire batch has a defect, what does the company policy guarantee to the customer and within what timeframe?",
+      ["notes/warranty-policy"],
       ["30"])
 
     return qs
@@ -644,8 +641,8 @@ def main() -> int:
     out.mkdir(parents=True)
 
     people, orgs, products, projects, contracts, incidents, releases = build_universe()
-    sales_truth = build_sales_db(out / "vendas" / "pedidos-2026.db", products)
-    support_truth = build_support_db(out / "suporte" / "chamados-2026.db", products)
+    sales_truth = build_sales_db(out / "sales" / "orders-2026.db", products)
+    support_truth = build_support_db(out / "support" / "tickets-2026.db", products)
     populate(people, orgs, products, projects, contracts, incidents, releases,
              sales_truth, support_truth)
     total = write_forest(out)
@@ -670,13 +667,13 @@ def main() -> int:
     git("add", "-A")
     git("commit", "--quiet", "-m", f"bench forest: {total} nodes, 2 datasets")
 
-    print(f"bench forest: {total} nodes em {out}")
-    print(f"ground truth vendas: top região={sales_truth['top_region']}, top SKU={sales_truth['top_sku']}")
-    print(f"ground truth suporte: campeão de chamados={support_truth['top_product']} ({support_truth['top_count']})")
-    print(f"{len(questions)} perguntas em {args.questions_out}")
+    print(f"bench forest: {total} nodes at {out}")
+    print(f"sales ground truth: top region={sales_truth['top_region']}, top SKU={sales_truth['top_sku']}")
+    print(f"support ground truth: top product={support_truth['top_product']} ({support_truth['top_count']})")
+    print(f"{len(questions)} questions at {args.questions_out}")
     deep = sum(1 for x in questions_v3 if x["min_hops"] >= 3)
-    print(f"{len(questions_v3)} perguntas v3 em {args.questions_v3_out} "
-          f"({deep} com min_hops >= 3)")
+    print(f"{len(questions_v3)} v3 questions at {args.questions_v3_out} "
+          f"({deep} with min_hops >= 3)")
     return 0
 
 

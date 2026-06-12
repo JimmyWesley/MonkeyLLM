@@ -28,7 +28,7 @@ class TestForestGitHasNoBinaries:
 
     def test_payload_still_on_disk(self, forest_ro):
         # out of git != out of the forest: the dataset payload must exist
-        assert (forest_ro / "vendas" / "relatorio-q1-2026.db").is_file()
+        assert (forest_ro / "sales" / "report-q1-2026.db").is_file()
 
 
 class TestGitopsHardGuard:
@@ -38,15 +38,15 @@ class TestGitopsHardGuard:
         return GitRepo(tmp_path)
 
     def test_commit_stages_only_md(self, repo, tmp_path):
-        md = tmp_path / "nota.md"
-        md.write_text("# oi\n", encoding="utf-8")
-        db = tmp_path / "dados.db"
-        db.write_bytes(b"\x00binario")
-        repo.commit([md, db], "plant(nota): teste")
-        assert git_ls_files(tmp_path) == ["nota.md"]
+        md = tmp_path / "note.md"
+        md.write_text("# hi\n", encoding="utf-8")
+        db = tmp_path / "data.db"
+        db.write_bytes(b"\x00binary")
+        repo.commit([md, db], "plant(note): test")
+        assert git_ls_files(tmp_path) == ["note.md"]
 
     def test_commit_refuses_binary_only(self, repo, tmp_path):
-        db = tmp_path / "dados.db"
-        db.write_bytes(b"\x00binario")
+        db = tmp_path / "data.db"
+        db.write_bytes(b"\x00binary")
         with pytest.raises(ValueError, match="A.3.1"):
-            repo.commit([db], "tentativa de blob")
+            repo.commit([db], "attempted binary commit")

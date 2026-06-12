@@ -84,17 +84,17 @@ class TestLatency:
         return p95(samples)
 
     def test_look_move_pick_p95_under_10ms(self, vine_ro):
-        assert self._measure(lambda: vine_ro.look("projetos/mixerllm/arquitetura")) < 10
-        assert self._measure(lambda: vine_ro.move("projetos/mixerllm/arquitetura")) < 10
-        assert self._measure(lambda: vine_ro.pick("conceitos/rag")) < 10
+        assert self._measure(lambda: vine_ro.look("projects/mixerllm/architecture")) < 10
+        assert self._measure(lambda: vine_ro.move("projects/mixerllm/architecture")) < 10
+        assert self._measure(lambda: vine_ro.pick("concepts/rag")) < 10
 
     def test_query_p95_under_50ms(self, vine_ro):
         assert self._measure(
             lambda: vine_ro.query(
-                "vendas/relatorio-q1-2026",
-                "SELECT regiao, SUM(valor) FROM vendas GROUP BY regiao",
+                "sales/report-q1-2026",
+                "SELECT region, SUM(value) FROM sales GROUP BY region",
             )
         ) < 50
 
     def test_locate_p95_under_100ms(self, vine_ro):
-        assert self._measure(lambda: vine_ro.locate("arquitetura inferência")) < 100
+        assert self._measure(lambda: vine_ro.locate("inference architecture")) < 100

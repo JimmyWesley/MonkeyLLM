@@ -1,62 +1,62 @@
 [
   {
     "id": "q01",
-    "question": "Quem concebeu o desenho técnico do MixerLLM, e em qual capital nordestina essa pessoa vive?",
-    "expected_nodes": ["projetos/mixerllm/arquitetura", "pessoas/jimmy-wesley"],
+    "question": "Who designed the MixerLLM technical architecture and in which northeastern Brazilian capital does that person live?",
+    "expected_nodes": ["projects/mixerllm/architecture", "people/jimmy-wesley"],
     "answer_contains": ["Jimmy", "Recife"]
   },
   {
     "id": "q02",
-    "question": "Olhando os números de janeiro a março de 2026, qual parte do país liderou o faturamento e em torno de quanto foi?",
-    "expected_nodes": ["vendas/relatorio-q1-2026"],
-    "answer_contains": ["Sudeste"]
+    "question": "Looking at the numbers from January to March 2026, which part of the country led total revenue and roughly how much was it?",
+    "expected_nodes": ["sales/report-q1-2026"],
+    "answer_contains": ["Southeast"]
   },
   {
     "id": "q03",
-    "question": "Qual é o código de catálogo do equipamento de telemetria de campo, e qual código puxou mais receita entre janeiro e março?",
-    "expected_nodes": ["produtos/sensor-x", "vendas/relatorio-q1-2026"],
+    "question": "What is the catalog code of the field telemetry device, and which code drove the most revenue between January and March?",
+    "expected_nodes": ["products/sensor-x", "sales/report-q1-2026"],
     "answer_contains": ["A-101"]
   },
   {
     "id": "q04",
-    "question": "No fim de março de 2026 saiu uma versão nova — o que ficou definido sobre o tamanho do vocabulário da linguagem simbólica?",
-    "expected_nodes": ["eventos/2026-03-release-mixerllm-v2"],
+    "question": "At the end of March 2026 a new version shipped — what was decided about the vocabulary size of the symbolic language?",
+    "expected_nodes": ["events/2026-03-mixerllm-v2-release"],
     "answer_contains": ["64"]
   },
   {
     "id": "q05",
-    "question": "Existe uma técnica conhecida de aceleração de inferência que costuma ser posta lado a lado com o mecanismo de blocos do MixerLLM. Qual é, e o que muda entre as duas?",
-    "expected_nodes": ["projetos/mixerllm/block-loop", "conceitos/speculative-decoding"],
+    "question": "There is a well-known inference acceleration technique often compared side-by-side with MixerLLM's block mechanism. What is it, and what differs between the two?",
+    "expected_nodes": ["projects/mixerllm/block-loop", "concepts/speculative-decoding"],
     "answer_contains": ["speculative"]
   },
   {
     "id": "q06",
-    "question": "Em fevereiro de 2026 a empresa fechou um negócio importante. Quem foi o comprador, quem conduziu a venda do nosso lado e o que estava no pacote?",
-    "expected_nodes": ["eventos/2026-02-contrato-datacoop", "organizacoes/datacoop"],
+    "question": "In February 2026 the company closed an important deal. Who was the buyer, who handled the sale on our side, and what was in the package?",
+    "expected_nodes": ["events/2026-02-datacoop-contract", "organizations/datacoop"],
     "answer_contains": ["DataCoop", "Elena"]
   },
   {
     "id": "q07",
-    "question": "A placa de vídeo usada nos experimentos do time tem quanta memória dedicada, e o que costuma rodar nela?",
+    "question": "How much dedicated memory does the GPU used in the team's experiments have, and what typically runs on it?",
     "expected_nodes": ["infra/workstation-3090"],
     "answer_contains": ["24"]
   },
   {
     "id": "q08",
-    "question": "Contra quais duas abordagens de recuperação de contexto o harness de avaliação do projeto precisa se comparar?",
-    "expected_nodes": ["projetos/monkeyllm/monkey-bench"],
+    "question": "Which two context-retrieval approaches must the project's evaluation harness be compared against?",
+    "expected_nodes": ["projects/monkeyllm/monkey-bench"],
     "answer_contains": ["RAG"]
   },
   {
     "id": "q09",
-    "question": "Houve retornos de mercadoria no primeiro trimestre: quantas peças do sensor voltaram, por qual defeito, e esse registro aparece na base principal de faturamento?",
-    "expected_nodes": ["vendas/devolucoes-q1"],
-    "answer_contains": ["14", "vedação"]
+    "question": "There were merchandise returns in the first quarter: how many sensor units came back, what was the defect, and does that figure appear in the main billing database?",
+    "expected_nodes": ["sales/returns-q1"],
+    "answer_contains": ["14", "seal"]
   },
   {
     "id": "q10",
-    "question": "Como se chama o mecanismo de coordenação em que os agentes se comunicam deixando marcas no próprio ambiente (sem troca direta de mensagens), qual integrante do time pesquisa esse tema, e de qual instituição essa pessoa veio?",
-    "expected_nodes": ["conceitos/estigmergia", "pessoas/bruno-lima"],
+    "question": "What is the coordination mechanism where agents communicate by leaving marks in the environment (without direct message exchange), which team member researches this topic, and from which institution did that person come?",
+    "expected_nodes": ["concepts/stigmergy", "people/bruno-lima"],
     "answer_contains": ["Bruno", "Amaz"]
   }
 ]

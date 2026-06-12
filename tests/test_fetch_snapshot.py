@@ -10,7 +10,7 @@ from monkeyllm.errors import E_QUERY_FORBIDDEN, E_SCHEMA, VineError
 from monkeyllm.fetch import PayloadCache
 from monkeyllm.parser import serialize_node
 
-DATASET = "vendas/relatorio-q1-2026"
+DATASET = "sales/report-q1-2026"
 
 
 @pytest.fixture()
@@ -18,10 +18,10 @@ def remote_dataset(vine_rw, forest_rw, tmp_path):
     """Move the fixture dataset's .db to a fake bucket (file:// = the test
     double for object storage) and point the passport at the URI."""
     node = vine_rw.forest.read(DATASET)
-    db = forest_rw / "vendas" / "relatorio-q1-2026.db"
+    db = forest_rw / "sales" / "report-q1-2026.db"
     bucket = tmp_path / "bucket"
     bucket.mkdir()
-    remote = bucket / "relatorio-q1-2026.db"
+    remote = bucket / "report-q1-2026.db"
     remote.write_bytes(db.read_bytes())
     digest = hashlib.sha256(remote.read_bytes()).hexdigest()
 
@@ -39,34 +39,34 @@ class TestRemotePayloads:
     def test_query_downloads_once_then_serves_from_cache(self, vine_rw, forest_rw,
                                                          remote_dataset):
         remote, _ = remote_dataset
-        q = vine_rw.query(DATASET, "SELECT COUNT(*) FROM vendas")
+        q = vine_rw.query(DATASET, "SELECT COUNT(*) FROM sales")
         assert q["rows"][0][0] > 0
         cached = list((forest_rw / "_derived" / "payloads").iterdir())
         assert len(cached) == 1
         remote.unlink()  # bucket goes away: the cache keeps serving
-        q2 = vine_rw.query(DATASET, "SELECT COUNT(*) FROM vendas")
+        q2 = vine_rw.query(DATASET, "SELECT COUNT(*) FROM sales")
         assert q2["rows"][0][0] == q["rows"][0][0]
 
     def test_hash_mismatch_is_refused(self, vine_rw, remote_dataset):
         remote, _ = remote_dataset
         remote.write_bytes(b"tampered bytes")
         with pytest.raises(VineError) as e:
-            vine_rw.query(DATASET, "SELECT COUNT(*) FROM vendas")
+            vine_rw.query(DATASET, "SELECT COUNT(*) FROM sales")
         assert e.value.code == E_SCHEMA and "mismatch" in e.value.message
 
     def test_tend_rejects_remote_payloads(self, vine_rw, remote_dataset):
         with pytest.raises(VineError) as e:
-            vine_rw.tend(DATASET, "INSERT INTO vendas VALUES "
-                                  "('2026-03-31','A-1','X','Sul','direto',1,1.0,0.5)")
+            vine_rw.tend(DATASET, "INSERT INTO sales VALUES "
+                                  "('2026-03-31','A-1','X','South','direct',1,1.0,0.5)")
         assert e.value.code == E_QUERY_FORBIDDEN
         assert "read-only" in e.value.message
 
     def test_prefetch_warms_the_region(self, vine_rw, forest_rw, remote_dataset):
         remote, _ = remote_dataset
-        report = vine_rw.prefetch("vendas")
+        report = vine_rw.prefetch("sales")
         assert report["fetched"] == [DATASET] and not report["errors"]
         remote.unlink()  # parachute landed, camp is warm: bucket not needed
-        assert vine_rw.query(DATASET, "SELECT COUNT(*) FROM vendas")["rows"][0][0] > 0
+        assert vine_rw.query(DATASET, "SELECT COUNT(*) FROM sales")["rows"][0][0] > 0
 
     def test_unsupported_scheme(self, tmp_path):
         cache = PayloadCache(tmp_path)
@@ -119,8 +119,8 @@ class TestSnapshots:
 
         vine = Vine(dest, writable=False)
         try:
-            assert vine.look("conceitos/rag")["summary"]
-            assert vine.query(DATASET, "SELECT COUNT(*) FROM vendas")["rows"][0][0] > 0
+            assert vine.look("concepts/rag")["summary"]
+            assert vine.query(DATASET, "SELECT COUNT(*) FROM sales")["rows"][0][0] > 0
         finally:
             vine.close()
 

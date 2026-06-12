@@ -13,17 +13,17 @@ from monkeyllm.curator import (
 from monkeyllm.models import validate_summary
 
 GOOD = json.dumps({
-    "summary": "Política de descontos 2026: até 8% direto e 15% via parceiro "
-               "com aprovação. Não cobre bundles.",
-    "tags": ["vendas", "descontos", "Política!!", "vendas"],
+    "summary": "Discount policy 2026: up to 8% direct and 15% via partner "
+               "with approval. Does not cover bundles.",
+    "tags": ["sales", "discounts", "Policy!!", "sales"],
 })
-TOO_LONG = json.dumps({"summary": "palavra " * 120, "tags": []})
+TOO_LONG = json.dumps({"summary": "word " * 120, "tags": []})
 ANTI_PATTERN = json.dumps({"summary": "This document describes the discount "
                                       "policy in detail.", "tags": []})
 
 DRAFT = {
-    "id": "vendas/politica", "type": "note", "title": "Política",
-    "body": "# Política\n\nTexto longo sobre descontos e regras comerciais.",
+    "id": "sales/policy", "type": "note", "title": "Policy",
+    "body": "# Policy\n\nLong text about discounts and commercial rules.",
     "summary": "Derived fallback summary.", "tags": ["adopted"],
 }
 
@@ -41,17 +41,17 @@ class TestCurator:
     def test_good_first_reply(self):
         c = Curator(scripted_chat([GOOD]))
         out = c(dict(DRAFT))
-        assert out["summary"].startswith("Política de descontos 2026")
+        assert out["summary"].startswith("Discount policy 2026")
         validate_summary(out["summary"])
         # tags: cleaned (lowercase slug only), deduped, merged after defaults
-        assert out["tags"] == ["adopted", "vendas", "descontos"]
+        assert out["tags"] == ["adopted", "sales", "discounts"]
         assert c.stats == {"llm_summaries": 1, "fallbacks": 0, "retries": 0,
                            "links_proposed": 0, "proposal_fallbacks": 0}
 
     def test_retry_then_accept(self):
         c = Curator(scripted_chat([TOO_LONG, ANTI_PATTERN, GOOD]))
         out = c(dict(DRAFT))
-        assert out["summary"].startswith("Política de descontos 2026")
+        assert out["summary"].startswith("Discount policy 2026")
         assert c.stats["retries"] == 2 and c.stats["llm_summaries"] == 1
 
     def test_exhausted_retries_fall_back(self):
@@ -70,7 +70,7 @@ class TestCurator:
     def test_non_json_reply_retries(self):
         c = Curator(scripted_chat(["I think the summary should be...", GOOD]))
         out = c(dict(DRAFT))
-        assert out["summary"].startswith("Política de descontos 2026")
+        assert out["summary"].startswith("Discount policy 2026")
         assert c.stats["retries"] == 1
 
     def test_datasets_are_not_curated(self):
@@ -160,9 +160,9 @@ class TestEdgeProposals:
         # the only candidates are the draft itself and its parent — there is
         # nothing to offer, so the proposal call never happens (a second
         # chat call would exhaust the script and count as a fallback)
-        draft = dict(DRAFT, parent="vendas/_index")
+        draft = dict(DRAFT, parent="sales/_index")
         cands = [{"id": draft["id"], "title": "t", "summary": "s"},
-                 {"id": "vendas/_index", "title": "t", "summary": "s"}]
+                 {"id": "sales/_index", "title": "t", "summary": "s"}]
         c = self.curator([GOOD], cands=cands)
         out = c(draft)
         assert "links" not in out
@@ -204,20 +204,20 @@ class TestGardenerIntegration:
 
         src = tmp_path / "dump"
         src.mkdir()
-        (src / "politica.md").write_text(
-            "# Política\n\nTexto sobre descontos comerciais vigentes em 2026.",
+        (src / "policy.md").write_text(
+            "# Policy\n\nText about commercial discounts in effect in 2026.",
             encoding="utf-8")
-        root = tmp_path / "floresta"
+        root = tmp_path / "forest"
         init_forest(root, title="F")
         vine = Vine(root, writable=True)
         try:
             curator = Curator(scripted_chat([GOOD]))
             g = Gardener(vine, hooks=[curator])
             report = g.adopt(src)
-            assert report["planted"] == ["politica"]
-            node = vine.forest.read("politica")
-            assert node.frontmatter["summary"].startswith("Política de descontos")
-            assert "vendas" in node.frontmatter["tags"]
+            assert report["planted"] == ["policy"]
+            node = vine.forest.read("policy")
+            assert node.frontmatter["summary"].startswith("Discount policy 2026")
+            assert "sales" in node.frontmatter["tags"]
             assert curator.stats["llm_summaries"] == 1
         finally:
             vine.close()
@@ -232,32 +232,32 @@ class TestGardenerIntegration:
 
         src = tmp_path / "dump"
         src.mkdir()
-        (src / "politica.md").write_text(
-            "# Política\n\nTexto sobre descontos comerciais vigentes em 2026.",
+        (src / "policy.md").write_text(
+            "# Policy\n\nText about commercial discounts in effect in 2026.",
             encoding="utf-8")
-        root = tmp_path / "floresta"
+        root = tmp_path / "forest"
         init_forest(root, title="F")
         vine = Vine(root, writable=True)
         try:
             vine.plant({
-                "id": "precos", "type": "note", "parent": "_index",
-                "title": "Tabela de preços",
-                "summary": "Preços vigentes para contratos de 2026.",
-                "body": "# Tabela de preços\n\nValores por SKU.",
+                "id": "prices", "type": "note", "parent": "_index",
+                "title": "Price table",
+                "summary": "Current prices for 2026 contracts.",
+                "body": "# Price table\n\nValues per SKU.",
             })
             propose = json.dumps({"related": [
-                {"id": "precos", "note": "discounts reference the price table"}]})
+                {"id": "prices", "note": "discounts reference the price table"}]})
             curator = Curator(scripted_chat([GOOD, propose]),
                               candidates=make_candidates(vine))
             report = Gardener(vine, hooks=[curator]).adopt(src)
-            assert report["planted"] == ["politica"]
-            node = vine.forest.read("politica")
+            assert report["planted"] == ["policy"]
+            node = vine.forest.read("policy")
             link = node.frontmatter["links"][0]
-            assert link["target"] == "precos" and link["rel"] == "related-to"
+            assert link["target"] == "prices" and link["rel"] == "related-to"
             assert link["confidence"] == PROPOSAL_CONFIDENCE
             assert link["note"] == "discounts reference the price table"
             # Part H: exactly the population the Ranger manages (H.2)
             managed = Ranger(vine)._managed_links(node.frontmatter)
-            assert [l["target"] for l in managed] == ["precos"]
+            assert [l["target"] for l in managed] == ["prices"]
         finally:
             vine.close()

@@ -50,7 +50,7 @@ class TestRRF:
 
 class TestIndex:
     def test_build_save_load_roundtrip(self, tmp_path):
-        rows = [("n1", "vendas no sudeste"), ("n2", "arquitetura de inferência")]
+        rows = [("n1", "sales in the southeast"), ("n2", "inference architecture")]
         idx = CanopyIndex.build(rows, HashEmbedder())
         assert len(idx) == 2 and idx.dim == 64
         idx.save(tmp_path)
@@ -66,17 +66,17 @@ class TestIndex:
         assert CanopyIndex.load(tmp_path) is None
 
     def test_search_ranks_by_similarity(self):
-        rows = [("sales", "total de vendas por região"), ("infra", "gpu vram 3090")]
+        rows = [("sales", "total sales by region"), ("infra", "gpu vram 3090")]
         idx = CanopyIndex.build(rows, HashEmbedder())
         emb = HashEmbedder()
-        hits = idx.search(emb.embed(["vendas região"])[0], k=2)
+        hits = idx.search(emb.embed(["sales region"])[0], k=2)
         assert hits[0][0] == "sales"
 
 
 class TestLocateContract:
     def test_bm25_only_when_no_embedder(self, vine_ro):
         assert vine_ro.hybrid is False
-        out = vine_ro.locate("arquitetura inferência")
+        out = vine_ro.locate("inference architecture")
         assert out["results"]  # still works, Phase 0 path
 
     def test_hybrid_activates_with_index_and_embedder(self, forest_ro):
@@ -101,18 +101,18 @@ class TestLocateContract:
             v.build_canopy()
             n0 = len(v.canopy)
             v.plant({
-                "id": "notas/zumbido-quantico",
+                "id": "notes/quantum-buzz",
                 "type": "note",
-                "title": "Zumbido quântico",
-                "summary": "Fenômeno fictício de zumbido quântico usado para testar re-embedding lazy da camada vetorial.",
-                "parent": "notas/_index",
-                "body": "# Zumbido quântico\n\n## Conteúdo\n\nTeste.",
+                "title": "Quantum buzz",
+                "summary": "Fictional quantum buzz phenomenon used to test lazy re-embedding of the vector layer.",
+                "parent": "notes/_index",
+                "body": "# Quantum buzz\n\n## Content\n\nTest.",
                 "source": "agent",
             })
-            assert "notas/zumbido-quantico" in v.catalog.stale_ids()
-            out = v.locate("zumbido quântico fenômeno", k=5)
+            assert "notes/quantum-buzz" in v.catalog.stale_ids()
+            out = v.locate("quantum buzz phenomenon", k=5)
             ids = [r["id"] for r in out["results"]]
-            assert "notas/zumbido-quantico" in ids
+            assert "notes/quantum-buzz" in ids
             # vector layer grew and stale flags were consumed
             assert len(v.canopy) > n0
             assert v.catalog.stale_ids() == []
@@ -124,12 +124,12 @@ class TestLocateContract:
         v = Vine(forest_rw, writable=True, embedder=emb)
         try:
             v.build_canopy()
-            target = "notas/faq-interno"
+            target = "notes/internal-faq"
             old_vec = list(v.canopy.vectors[v.canopy.ids.index(target)])
             v.graft(target, {"set_frontmatter": {
-                "summary": "Perguntas frequentes agora cobrindo o protocolo xilofone estelar e a rotina de plantio."
+                "summary": "FAQ now covering the stellar xylophone protocol and the planting routine."
             }})
-            v.locate("xilofone estelar protocolo", k=5)  # triggers the refresh
+            v.locate("stellar xylophone protocol", k=5)  # triggers the refresh
             new_vec = v.canopy.vectors[v.canopy.ids.index(target)]
             assert new_vec != old_vec
             assert v.catalog.stale_ids() == []
