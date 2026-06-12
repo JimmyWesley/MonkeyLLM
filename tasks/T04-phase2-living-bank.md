@@ -81,10 +81,38 @@ query datasets but **write** to them, safely.
    suite); audit = `payload_hash` refresh + `.md`-only git commit (A.3.1
    intact); failed SQL rolls back; `vine validate` warns on payload drift.
    Exposed as MCP tool. 8 tests in tests/test_tend.py.
-4. **Convergence curve:** fixed recurring question set; hops-to-banana must
-   drop >= 25% after simulated use (the paper's signature chart). Needs a
-   bigger/deeper forest than forest-fixture — shouts never fire at 1-2 hops
-   (measured 2026-06-11: 0 shortcut grafts across 28 hunts on the fixture).
+4. **Convergence curve — MEASURED 2026-06-11, criterion NOT met; two
+   findings for the paper.** Driver: `scripts/convergence.py` (rebuild →
+   5 learning passes of bench v3, heat/shortcuts accumulating, artifacts
+   in `bench/_artifacts/convergence/`). Gemma-4 local, hybrid locate:
+
+   | pass | correct | hops | trail_len | tokens | shortcuts |
+   | --- | --- | --- | --- | --- | --- |
+   | 1 | 11/11 | 1.45 | 2.70 | 1364 | +6 grafted |
+   | 2 | 10/11 | 1.27 | 2.55 | 1447 | +2 fortified |
+   | 3 | 10/11 | 1.38 | 2.43 | 1478 | +2 fortified |
+   | 4 | 10/11 | 1.33 | 2.62 | 1355 | +2 fortified |
+   | 5 | 10/11 | 1.33 | 2.62 | 1354 | +2 fortified |
+
+   Drops vs pass 1: hops -12.4%, trail_len -10%, tokens -0.8% — **>= 25%
+   NOT met.**
+   **Finding 1 (floor effect):** gemma-4 + sniff + hybrid locate already
+   navigate v3 cold at ~1.4 hops — near the floor of 1; there is no 25%
+   of headroom to reclaim. The convergence hypothesis presumes a
+   suboptimal cold baseline (weaker model, deeper forest, or 4+-hop
+   cold paths). The MECHANISM works (6 shouts grafted on pass 1,
+   reinforce-before-create fortifying on every later pass, zero
+   duplicates); the metric has no room on this setup.
+   **Finding 2 (pheromone cross-talk / interference):** v3-01 was correct
+   on pass 1 and WRONG on passes 2-5: the winning trail of v3-11
+   (piloto-resgate) deposited heat that boosted the wrong "novidade de
+   abril" release event in locate's ranking (score x (1+0.3*heat)) for
+   the semantically similar v3-01 (right answer: plataforma-tambor). The
+   pheromone helps REPEATED hunts but can mislead similar-but-different
+   questions — first documented interference case. Mitigation ideas
+   (future work, spec change required): lower alpha, query-conditioned
+   heat, shortcut context metadata. Note Ranger promote/prune does not
+   address this: the misleading signal is node heat, not links.
 5. **Dataset birth ("plant with schema") — DONE (spec v0.8, 2026-06-11):**
    C.7.1 — `plant` of a `type: dataset` node accepts a declarative `schema`
    (tables -> columns -> allowlisted types, optional primary_key); the model
