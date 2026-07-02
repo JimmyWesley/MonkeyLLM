@@ -328,10 +328,14 @@ def populate(people, orgs, products, projects, contracts, incidents, releases,
              body=f"## Terms\n\n{o['name']} acquired **{ct['qty']} units** of {pr['name']} (code {pr['sku']}) for **${ct['value']:,.0f}**." +
                   f"\n\n## Handling\n\nNegotiation led by [[{s['id']}|{s['name']}]] via the direct channel.")
 
+    month_names = {2: "February", 3: "March", 4: "April", 5: "May"}
     for inc in incidents:
         pr = inc["prod"]
+        month = month_names[int(inc["id"].split("/")[-1].split("-")[1])]
+        # A.4 curation: dated events carry their date in the summary (the
+        # contract/release templates already do; recalls were the odd one out)
         node(inc["id"], "event", f"Recall of {pr['name']} — lot {inc['lote']}",
-             f"Recall of {inc['count']} units of {pr['name']} ({pr['sku']}) for {inc['defect']}, lot {inc['lote']}. Free replacement within 30 days.",
+             f"Recall in {month} 2026 of {inc['count']} units of {pr['name']} ({pr['sku']}) for {inc['defect']}, lot {inc['lote']}. Free replacement within 30 days.",
              tags=["recall", "quality"], links=[("related-to", pr["id"])],
              body=f"## What happened\n\n**{inc['count']} units** of {pr['name']} exhibited **{inc['defect']}** (lot {inc['lote']}).\n\n## Action\n\nFull replacement; root cause in the assembly line.")
 
@@ -545,6 +549,114 @@ def build_questions_v3(people, orgs, products, projects, contracts, incidents,
 
 
 # ---------------------------------------------------------------------------
+# Questions v4 — the fork tier (T03): the entry is genuinely ambiguous, a
+# correct answer requires walking `fork_width` INDEPENDENT sub-chains. v3
+# questions all pin one chain (fork_width 1); these are built from the facts
+# v3 rejects (shared features) plus unions/filters/negations over sets.
+# ---------------------------------------------------------------------------
+
+def build_questions_v4(people, orgs, products, projects, contracts, incidents,
+                       releases, sales_truth, support_truth) -> list[dict]:
+    qs = []
+
+    def q(question, expected, contains, min_hops, fork_width):
+        qs.append({"id": f"v4-{len(qs)+1:02d}", "question": question,
+                   "expected_nodes": expected, "answer_contains": contains,
+                   "min_hops": min_hops, "fork_width": fork_width})
+
+    # 1. shared-feature fork: exactly the releases v3 excludes (feature in 2+
+    #    projects) — each project is an independent release -> vision -> lead chain
+    feat_counts = {}
+    for rel in releases:
+        feat_counts[rel["feature"]] = feat_counts.get(rel["feature"], 0) + 1
+    for feature in sorted(f for f, c in feat_counts.items() if c > 1):
+        twins = [r for r in releases if r["feature"] == feature]
+        expected = []
+        contains = []
+        for r in twins:
+            expected += [r["id"], f"{r['proj']['id_base']}/vision"]
+            contains += [r["proj"]["alias"], r["proj"]["lead"]["first"]]
+        q(f"More than one project shipped {FEATURE_PARAPHRASE[feature]} in its "
+          f"April release. Which projects were they, and who leads each one?",
+          expected, contains, 3, len(twins))
+
+    # 2. union over early recalls: one recall -> product -> owner chain each
+    early = [i for i in incidents if int(i["id"].split("/")[-1].split("-")[1]) <= 3]
+    q("Some products were recalled in February and March 2026. In which cities "
+      "do the technical owners of those products live?",
+      [i["id"] for i in early] + [i["prod"]["owner"]["id"] for i in early],
+      sorted({i["prod"]["owner"]["city"] for i in early}), 3, len(early))
+
+    # 3. filter over contracts: a product bought by 2+ different clients
+    by_prod: dict[str, list] = {}
+    for ct in contracts:
+        by_prod.setdefault(ct["prod"]["name"], []).append(ct)
+    repeat_prod = next(name for name, cts in sorted(by_prod.items())
+                       if len({c["org"]["id"] for c in cts}) >= 2)
+    cts = by_prod[repeat_prod]
+    q(f"Which clients acquired the {repeat_prod} during 2026, and in which "
+      f"month did each deal close?",
+      [c["id"] for c in cts],
+      sorted({c["org"]["name"] for c in cts}) + sorted({c["month_name"] for c in cts}),
+      2, len(cts))
+
+    # 4. intersection: one seller, two clients, same device
+    seller_pair = next(
+        (cts for cts in by_prod.values()
+         if len(cts) >= 2 and len({c["seller"]["id"] for c in cts}) == 1
+         and len({c["org"]["id"] for c in cts}) >= 2),
+        None)
+    if seller_pair:
+        a, b = seller_pair[0], seller_pair[1]
+        q(f"The deals with {a['org']['name']} and {b['org']['name']} were closed "
+          f"by the same account manager. Who is it, and which device did both "
+          f"clients buy?",
+          [a["id"], b["id"], a["seller"]["id"]],
+          [a["seller"]["first"], a["prod"]["name"]], 2, 2)
+
+    # 5. attribute scan over the project leads (institute lives ONLY in the
+    #    person node — every lead must be visited)
+    with_inst = [p for p in projects if p["lead"]["institute"]]
+    if with_inst:
+        q("Which of the project leads joined Telemetrix from research "
+          "institutions, and from which institution did each one come?",
+          [f"{p['id_base']}/vision" for p in projects] +
+          [p["lead"]["id"] for p in with_inst],
+          sorted(p["lead"]["first"] for p in with_inst), 3, len(projects))
+
+    # 6. negation over the same set: proving "none" requires the full scan
+    without_inst = [p for p in projects if not p["lead"]["institute"]]
+    if without_inst:
+        q("Which project is led by someone who did NOT come from a research "
+          "institution?",
+          [f"{p['id_base']}/vision" for p in without_inst] +
+          [p["lead"]["id"] for p in without_inst],
+          [without_inst[0]["alias"]], 3, len(projects))
+
+    # 7. cross-dataset fork: two independent SQL chains (sales + support)
+    champ_prod = next(p for p in products if p["name"] == support_truth["top_product"])
+    q("Which sales region billed the most in the semester, and which product "
+      "line generated the most support tickets?",
+      ["sales/orders-2026", "support/tickets-2026"],
+      [sales_truth["top_region"], champ_prod["name"]], 2, 2)
+
+    # 8. union over one seller's portfolio: each contract is its own chain
+    # (skip the seller already starring in question 4 — no duplicate chains)
+    by_seller: dict[str, list] = {}
+    for ct in contracts:
+        by_seller.setdefault(ct["seller"]["id"], []).append(ct)
+    used_seller = seller_pair[0]["seller"]["id"] if seller_pair else None
+    busy = max((cts for sid, cts in sorted(by_seller.items()) if sid != used_seller),
+               key=len)
+    q(f"{busy[0]['seller']['name']} closed several deals in 2026 — with which "
+      f"clients?",
+      [c["id"] for c in busy] + [busy[0]["seller"]["id"]],
+      sorted({c["org"]["name"] for c in busy}), 2, len(busy))
+
+    return qs
+
+
+# ---------------------------------------------------------------------------
 # Questions v2 — paraphrase templates with vocabulary disjoint from summaries
 # ---------------------------------------------------------------------------
 
@@ -630,6 +742,7 @@ def main() -> int:
     ap.add_argument("--out", default=str(REPO / "forests" / "bench-forest"))
     ap.add_argument("--questions-out", default=str(REPO / "bench" / "questions-v2.json"))
     ap.add_argument("--questions-v3-out", default=str(REPO / "bench" / "questions-v3.json"))
+    ap.add_argument("--questions-v4-out", default=str(REPO / "bench" / "questions-v4.json"))
     args = ap.parse_args()
     out = Path(args.out).resolve()
     if out.exists():
@@ -655,6 +768,10 @@ def main() -> int:
                                       incidents, releases, sales_truth, support_truth)
     Path(args.questions_v3_out).write_text(
         json.dumps(questions_v3, ensure_ascii=False, indent=2), encoding="utf-8")
+    questions_v4 = build_questions_v4(people, orgs, products, projects, contracts,
+                                      incidents, releases, sales_truth, support_truth)
+    Path(args.questions_v4_out).write_text(
+        json.dumps(questions_v4, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def git(*a):
         subprocess.run(["git", "-C", str(out), "-c", "user.name=bench", "-c",
@@ -674,6 +791,9 @@ def main() -> int:
     deep = sum(1 for x in questions_v3 if x["min_hops"] >= 3)
     print(f"{len(questions_v3)} v3 questions at {args.questions_v3_out} "
           f"({deep} with min_hops >= 3)")
+    forked = sum(1 for x in questions_v4 if x["fork_width"] >= 2)
+    print(f"{len(questions_v4)} v4 questions at {args.questions_v4_out} "
+          f"({forked} with fork_width >= 2)")
     return 0
 
 

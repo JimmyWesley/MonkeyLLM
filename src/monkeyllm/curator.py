@@ -44,6 +44,10 @@ is the SCENT. Rules (normative, spec A.4):
 - 1 to 3 sentences, at most 60 tokens total. Shorter is better.
 - Sentence 1: WHAT it is (category + subject).
 - Sentence 2: the key content — concrete numbers, names, time scope.
+- Dated content (events, reports, meetings, releases, deadlines): the date
+  (at least month + year) MUST appear in the summary. Search over the
+  forest matches summaries only — a date left in the body is invisible to
+  time-scoped searches.
 - Optional sentence 3: what is NOT here / where the complement lives.
 - NEVER start with boilerplate like "This document describes" or
   "File containing" — go straight to the substance.

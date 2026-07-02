@@ -49,7 +49,7 @@ def get_store(forest: Path, embedder) -> ChunkStore:
 
 
 def run_arm(arm: str, questions: list[dict], *, forest: Path, chat, store, embedder,
-            troop_n: int = 3) -> list[dict]:
+            troop_n: int = 3, stop_policy: str = "first") -> list[dict]:
     results = []
     for q in questions:
         print(f"\n== [{arm}] {q['id']}: {q['question'][:90]}")
@@ -59,7 +59,7 @@ def run_arm(arm: str, questions: list[dict], *, forest: Path, chat, store, embed
         elif arm == "troop":
             from troop import hunt_troop
 
-            r = hunt_troop(forest, chat, q, n=troop_n)
+            r = hunt_troop(forest, chat, q, n=troop_n, stop_policy=stop_policy)
         elif arm == "topk":
             r = rag_topk(chat, store, q)
         elif arm == "iter":
@@ -97,6 +97,11 @@ def main() -> int:
     ap.add_argument("--questions", default=str(REPO / "bench" / "questions-v1.json"))
     ap.add_argument("--arms", default="monkey,topk,iter")
     ap.add_argument("--troop-n", type=int, default=3, help="monkeys in the troop arm")
+    ap.add_argument("--stop-policy", default="first",
+                    choices=["first", "quorum", "coverage", "patience", "none"],
+                    help="troop stop discipline (E.1.4); coverage = oracle upper "
+                         "bound (uses fork_width metadata); patience = deployable "
+                         "equivalent (stop when harvests dry up)")
     ap.add_argument("--only", help="run a single question id")
     args = ap.parse_args()
 
@@ -124,7 +129,8 @@ def main() -> int:
     all_results: dict[str, list[dict]] = {}
     for arm in arms:
         all_results[arm] = run_arm(arm, questions, forest=forest, chat=chat,
-                                   store=store, embedder=embedder, troop_n=args.troop_n)
+                                   store=store, embedder=embedder, troop_n=args.troop_n,
+                                   stop_policy=args.stop_policy)
         # incremental save: a crash in a later arm never loses finished arms
         out.write_text(json.dumps({"results": all_results}, ensure_ascii=False, indent=2),
                        encoding="utf-8")
@@ -141,6 +147,25 @@ def main() -> int:
         print(f"{arm:<8} {s['correct']}/{s['n']:<7} {s['precision_mean']:>10} "
               f"{s['tokens_median']:>13} {s['wall_s_median']:>13} {s['wall_s_p95']:>13} "
               f"{s['wall_s_total']:>9}")
+
+    # per-question-class breakdown (T03 criterion 4): single-chain vs fork.
+    # Questions without fork_width (v1-v3) are all single-chain.
+    classes = {"single-chain": [i for i, q in enumerate(questions)
+                                if q.get("fork_width", 1) < 2],
+               "fork": [i for i, q in enumerate(questions)
+                        if q.get("fork_width", 1) >= 2]}
+    if classes["fork"]:
+        print("\n-- por classe de pergunta (fork_width >= 2 vs single-chain)")
+        for cls, idxs in classes.items():
+            if not idxs:
+                continue
+            for arm in arms:
+                sub = [all_results[arm][i] for i in idxs]
+                s = summarize(f"{arm}/{cls}", sub)
+                summaries.append(s)
+                print(f"{arm + '/' + cls:<22} {s['correct']}/{s['n']:<4} "
+                      f"precision={s['precision_mean']} tokens_med={s['tokens_median']} "
+                      f"s/q_med={s['wall_s_median']} total={s['wall_s_total']}s")
 
     # per-question timing: how long each answer took, end to end, per arm
     print("\n-- tempo por pergunta (s, ponta a ponta)")

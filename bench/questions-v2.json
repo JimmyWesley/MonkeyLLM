@@ -1,92 +1,92 @@
 [
   {
     "id": "q01",
-    "question": "Quem está à frente do plataforma-tambor e em que município essa pessoa reside?",
+    "question": "Who is at the helm of platform-drum and in what city does that person reside?",
     "expected_nodes": [
-      "projetos/plataforma-tambor/visao",
-      "pessoas/engenharia/wanda-guimarães"
+      "projects/platform-drum/vision",
+      "people/engineering/wendy-green"
     ],
     "answer_contains": [
-      "Wanda",
-      "Salvador"
+      "Wendy",
+      "Portland"
     ]
   },
   {
     "id": "q02",
-    "question": "Quem está à frente do firmware-zabumba e em que município essa pessoa reside?",
+    "question": "Who is at the helm of firmware-beat and in what city does that person reside?",
     "expected_nodes": [
-      "projetos/firmware-zabumba/visao",
-      "pessoas/engenharia/aurora-sarmento"
+      "projects/firmware-beat/vision",
+      "people/engineering/alice-scott"
     ],
     "answer_contains": [
-      "Aurora",
-      "Campinas"
+      "Alice",
+      "Atlanta"
     ]
   },
   {
     "id": "q03",
-    "question": "Quem está à frente do malha-ciranda e em que município essa pessoa reside?",
+    "question": "Who is at the helm of mesh-ring and in what city does that person reside?",
     "expected_nodes": [
-      "projetos/malha-ciranda/visao",
-      "pessoas/dados/firmino-ximenes"
+      "projects/mesh-ring/vision",
+      "people/data/fiona-ximenes"
     ],
     "answer_contains": [
-      "Firmino",
-      "Olinda"
+      "Fiona",
+      "Seattle"
     ]
   },
   {
     "id": "q04",
-    "question": "Em janeiro de 2026 a AgroVale levou qual equipamento, em que quantidade, e quem cuidou da venda?",
+    "question": "In January 2026 AgriCore took which equipment, in what quantity, and who handled the sale?",
     "expected_nodes": [
-      "eventos/contratos/2026-01-acordo-agrovale"
+      "events/contracts/2026-01-deal-agricore"
     ],
     "answer_contains": [
-      "Faro",
+      "Collar",
       "340",
-      "Cecília"
+      "Carlos"
     ]
   },
   {
     "id": "q05",
-    "question": "Em fevereiro de 2026 a PortoNorte Logística levou qual equipamento, em que quantidade, e quem cuidou da venda?",
+    "question": "In February 2026 HarborNorth Logistics took which equipment, in what quantity, and who handled the sale?",
     "expected_nodes": [
-      "eventos/contratos/2026-02-acordo-portonorte-logistica"
+      "events/contracts/2026-02-deal-harbornorth-logistics"
     ],
     "answer_contains": [
-      "Frevo",
+      "Gateway",
       "340",
-      "Mariana"
+      "Maria"
     ]
   },
   {
     "id": "q06",
-    "question": "Em março de 2026 a Usina Catende Digital levou qual equipamento, em que quantidade, e quem cuidou da venda?",
+    "question": "In March 2026 SunField Energy took which equipment, in what quantity, and who handled the sale?",
     "expected_nodes": [
-      "eventos/contratos/2026-03-acordo-usina-catende-digital"
+      "events/contracts/2026-03-deal-sunfield-energy"
     ],
     "answer_contains": [
-      "Maracatu",
+      "Irrigo",
       "50",
-      "Firmino"
+      "Fiona"
     ]
   },
   {
     "id": "q07",
-    "question": "O Xote teve um problema de fabricação em 2026: quantas peças voltaram e qual era o defeito?",
+    "question": "The Rover had a manufacturing issue in 2026: how many units came back and what was the defect?",
     "expected_nodes": [
-      "eventos/recalls/2026-02-recall-xote"
+      "events/recalls/2026-02-recall-rover"
     ],
     "answer_contains": [
       "84",
-      "oxidação"
+      "connector"
     ]
   },
   {
     "id": "q08",
-    "question": "O Caboclo teve um problema de fabricação em 2026: quantas peças voltaram e qual era o defeito?",
+    "question": "The Wand had a manufacturing issue in 2026: how many units came back and what was the defect?",
     "expected_nodes": [
-      "eventos/recalls/2026-03-recall-caboclo"
+      "events/recalls/2026-03-recall-wand"
     ],
     "answer_contains": [
       "28",
@@ -95,9 +95,9 @@
   },
   {
     "id": "q09",
-    "question": "O lançamento de abril do plataforma-tambor saiu com qual número de versão e qual novidade principal?",
+    "question": "The April release of platform-drum shipped with which version number and what main feature?",
     "expected_nodes": [
-      "eventos/lancamentos/2026-04-versao-plataforma-tambor"
+      "events/releases/2026-04-version-platform-drum"
     ],
     "answer_contains": [
       "1.8"
@@ -105,9 +105,9 @@
   },
   {
     "id": "q10",
-    "question": "O lançamento de abril do firmware-zabumba saiu com qual número de versão e qual novidade principal?",
+    "question": "The April release of firmware-beat shipped with which version number and what main feature?",
     "expected_nodes": [
-      "eventos/lancamentos/2026-04-versao-firmware-zabumba"
+      "events/releases/2026-04-version-firmware-beat"
     ],
     "answer_contains": [
       "2.7"
@@ -115,19 +115,19 @@
   },
   {
     "id": "q11",
-    "question": "Considerando tudo que foi faturado no primeiro semestre de 2026, qual área do país ficou na liderança?",
+    "question": "Considering everything billed in the first half of 2026, which region led total revenue?",
     "expected_nodes": [
-      "vendas/pedidos-2026"
+      "sales/orders-2026"
     ],
     "answer_contains": [
-      "Nordeste"
+      "Northeast"
     ]
   },
   {
     "id": "q12",
-    "question": "Qual código de produto puxou a maior receita no semestre, segundo a base de pedidos?",
+    "question": "Which product code drove the highest revenue in the semester, according to the orders database?",
     "expected_nodes": [
-      "vendas/pedidos-2026"
+      "sales/orders-2026"
     ],
     "answer_contains": [
       "O-338"
@@ -135,61 +135,61 @@
   },
   {
     "id": "q13",
-    "question": "Qual item da linha gerou o maior volume de tíquetes de atendimento em 2026?",
+    "question": "Which product line item generated the most support tickets in 2026?",
     "expected_nodes": [
-      "suporte/chamados-2026"
+      "support/tickets-2026"
     ],
     "answer_contains": [
-      "Caboclo"
+      "Wand"
     ]
   },
   {
     "id": "q14",
-    "question": "Qual é a referência de catálogo do Xote e quem responde tecnicamente por ele?",
+    "question": "What is the catalog reference of Rover and who is technically responsible for it?",
     "expected_nodes": [
-      "produtos/logistica/xote"
+      "products/logistics/rover"
     ],
     "answer_contains": [
       "M-324",
-      "Tales"
+      "Tina"
     ]
   },
   {
     "id": "q15",
-    "question": "Qual é a referência de catálogo do Quadrilha e quem responde tecnicamente por ele?",
+    "question": "What is the catalog reference of Dashboard and who is technically responsible for it?",
     "expected_nodes": [
-      "produtos/campo/quadrilha"
+      "products/field/dashboard"
     ],
     "answer_contains": [
       "L-373",
-      "Yasmin"
+      "Yasmine"
     ]
   },
   {
     "id": "q16",
-    "question": "De qual instituição Clarice Peixoto veio antes da Maracatu, e qual é a função dela(e) hoje?",
+    "question": "From which institution did Claire Parker come before joining Telemetrix, and what is their role today?",
     "expected_nodes": [
-      "pessoas/engenharia/clarice-peixoto"
+      "people/engineering/claire-parker"
     ],
     "answer_contains": [
-      "Capibaribe"
+      "APL"
     ]
   },
   {
     "id": "q17",
-    "question": "De qual instituição Quitéria Klein veio antes da Maracatu, e qual é a função dela(e) hoje?",
+    "question": "From which institution did Quinn Klein come before joining Telemetrix, and what is their role today?",
     "expected_nodes": [
-      "pessoas/engenharia/quitéria-klein"
+      "people/engineering/quinn-klein"
     ],
     "answer_contains": [
-      "Computação"
+      "Laboratory"
     ]
   },
   {
     "id": "q18",
-    "question": "Quando um lote inteiro dá defeito, o que a política da empresa garante ao cliente e em qual prazo?",
+    "question": "When an entire batch has a defect, what does the company policy guarantee to the customer and within what timeframe?",
     "expected_nodes": [
-      "notas/politica-garantia"
+      "notes/warranty-policy"
     ],
     "answer_contains": [
       "30"

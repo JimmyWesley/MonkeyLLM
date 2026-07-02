@@ -1,149 +1,149 @@
 [
   {
     "id": "v3-01",
-    "question": "O projeto cuja novidade de abril foi encolher as mensagens de rádio em seis vezes é conduzido por quem, e em que município essa pessoa vive?",
+    "question": "The project whose April highlight was squeezing radio messages to one-sixth their original size is led by whom, and in which city does that person live?",
     "expected_nodes": [
-      "eventos/lancamentos/2026-04-versao-plataforma-tambor",
-      "projetos/plataforma-tambor/visao",
-      "pessoas/engenharia/wanda-guimarães"
+      "events/releases/2026-04-version-platform-drum",
+      "projects/platform-drum/vision",
+      "people/engineering/wendy-green"
     ],
     "answer_contains": [
-      "Wanda",
-      "Salvador"
+      "Wendy",
+      "Portland"
     ],
     "min_hops": 3
   },
   {
     "id": "v3-02",
-    "question": "O projeto cuja novidade de abril foi a regressão sozinha para a edição anterior quando a atualização dá errado é conduzido por quem, e em que município essa pessoa vive?",
+    "question": "The project whose April highlight was the device rolls back to the previous version on its own when an update fails is led by whom, and in which city does that person live?",
     "expected_nodes": [
-      "eventos/lancamentos/2026-04-versao-malha-ciranda",
-      "projetos/malha-ciranda/visao",
-      "pessoas/dados/firmino-ximenes"
+      "events/releases/2026-04-version-mesh-ring",
+      "projects/mesh-ring/vision",
+      "people/data/fiona-ximenes"
     ],
     "answer_contains": [
-      "Firmino",
-      "Olinda"
+      "Fiona",
+      "Seattle"
     ],
     "min_hops": 3
   },
   {
     "id": "v3-03",
-    "question": "O lote L43-A foi recolhido do mercado; quem responde tecnicamente pelo aparelho desse lote, e em que cidade essa pessoa mora?",
+    "question": "Lot L43-A was recalled from the market; who is technically responsible for the device in that lot, and in which city does that person live?",
     "expected_nodes": [
-      "eventos/recalls/2026-02-recall-xote",
-      "produtos/logistica/xote",
-      "pessoas/engenharia/tales-barros"
+      "events/recalls/2026-02-recall-rover",
+      "products/logistics/rover",
+      "people/engineering/tina-brown"
     ],
     "answer_contains": [
-      "Tales",
-      "Fortaleza"
+      "Tina",
+      "Denver"
     ],
     "min_hops": 3
   },
   {
     "id": "v3-04",
-    "question": "O lote L43-B foi recolhido do mercado; quem responde tecnicamente pelo aparelho desse lote, e em que cidade essa pessoa mora?",
+    "question": "Lot L43-B was recalled from the market; who is technically responsible for the device in that lot, and in which city does that person live?",
     "expected_nodes": [
-      "eventos/recalls/2026-03-recall-caboclo",
-      "produtos/industria/caboclo",
-      "pessoas/engenharia/estela-sarmento"
+      "events/recalls/2026-03-recall-wand",
+      "products/industry/wand",
+      "people/engineering/emma-scott"
     ],
     "answer_contains": [
-      "Estela",
-      "Campinas"
+      "Emma",
+      "Atlanta"
     ],
     "min_hops": 3
   },
   {
     "id": "v3-05",
-    "question": "O equipamento que a RedeFrevo Varejo adquiriu em abril de 2026 é mantido na engenharia por quem?",
+    "question": "The equipment that NetRetail Group acquired in April 2026 is maintained in engineering by whom?",
     "expected_nodes": [
-      "eventos/contratos/2026-04-acordo-redefrevo-varejo",
-      "produtos/campo/quadrilha",
-      "pessoas/engenharia/yasmin-guimarães"
+      "events/contracts/2026-04-deal-netretail-group",
+      "products/field/dashboard",
+      "people/engineering/yasmine-green"
     ],
     "answer_contains": [
-      "Yasmin"
+      "Yasmine"
     ],
     "min_hops": 3
   },
   {
     "id": "v3-06",
-    "question": "O equipamento que a TransSertão Cargas adquiriu em janeiro de 2026 é mantido na engenharia por quem?",
+    "question": "The equipment that TransRoute Freight acquired in January 2026 is maintained in engineering by whom?",
     "expected_nodes": [
-      "eventos/contratos/2026-01-acordo-transsertao-cargas",
-      "produtos/campo/lampião",
-      "pessoas/dados/eunice-guimarães"
+      "events/contracts/2026-01-deal-transroute-freight",
+      "products/field/lightgrid",
+      "people/data/ethan-green"
     ],
     "answer_contains": [
-      "Eunice"
+      "Ethan"
     ],
     "min_hops": 3
   },
   {
     "id": "v3-07",
-    "question": "A venda para a Hospital Beberibe foi conduzida por qual gerente, e em que cidade essa pessoa está baseada?",
+    "question": "The sale to Regional Health Network was handled by which account manager, and in which city is that person based?",
     "expected_nodes": [
-      "eventos/contratos/2026-02-acordo-hospital-beberibe",
-      "pessoas/dados/cecília-espíndola"
+      "events/contracts/2026-02-deal-regional-health-network",
+      "people/data/carlos-evans"
     ],
     "answer_contains": [
-      "Cecília",
-      "Manaus"
+      "Carlos",
+      "Detroit"
     ],
     "min_hops": 3
   },
   {
     "id": "v3-08",
-    "question": "A venda para a EnergiaJangada foi conduzida por qual gerente, e em que cidade essa pessoa está baseada?",
+    "question": "The sale to WindGrid Energy was handled by which account manager, and in which city is that person based?",
     "expected_nodes": [
-      "eventos/contratos/2026-04-acordo-energiajangada",
-      "pessoas/dados/firmino-barros"
+      "events/contracts/2026-04-deal-windgrid-energy",
+      "people/data/fiona-brown"
     ],
     "answer_contains": [
-      "Firmino",
-      "Belém"
+      "Fiona",
+      "Nashville"
     ],
     "min_hops": 3
   },
   {
     "id": "v3-09",
-    "question": "O código de produto que puxou a maior receita do semestre corresponde a qual aparelho, e quem é o dono técnico dele?",
+    "question": "The product code that drove the highest revenue in the semester corresponds to which device, and who is its technical owner?",
     "expected_nodes": [
-      "vendas/pedidos-2026",
-      "produtos/industria/cangaço"
+      "sales/orders-2026",
+      "products/industry/vibe"
     ],
     "answer_contains": [
-      "Cangaço",
-      "Dorival"
+      "Vibe",
+      "Diana"
     ],
     "min_hops": 3
   },
   {
     "id": "v3-10",
-    "question": "O item da linha com mais chamados de suporte em 2026 é responsabilidade técnica de quem, e em qual cidade essa pessoa fica?",
+    "question": "The product line item with the most support tickets in 2026 is technically the responsibility of whom, and in which city does that person work?",
     "expected_nodes": [
-      "suporte/chamados-2026",
-      "produtos/industria/caboclo",
-      "pessoas/engenharia/estela-sarmento"
+      "support/tickets-2026",
+      "products/industry/wand",
+      "people/engineering/emma-scott"
     ],
     "answer_contains": [
-      "Estela",
-      "Campinas"
+      "Emma",
+      "Atlanta"
     ],
     "min_hops": 4
   },
   {
     "id": "v3-11",
-    "question": "O projeto que lançou a versão 4.6 em abril é liderado por alguém vindo de qual instituição?",
+    "question": "The project that released version 4.6 in April is led by someone who came from which institution?",
     "expected_nodes": [
-      "eventos/lancamentos/2026-04-versao-piloto-resgate",
-      "projetos/piloto-resgate/visao",
-      "pessoas/dados/zeca-trindade"
+      "events/releases/2026-04-version-pilot-rescue",
+      "projects/pilot-rescue/vision",
+      "people/data/zoe-turner"
     ],
     "answer_contains": [
-      "Digital"
+      "Lab"
     ],
     "min_hops": 4
   }

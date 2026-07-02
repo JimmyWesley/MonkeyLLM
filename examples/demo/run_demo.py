@@ -50,6 +50,17 @@ from monkeyllm import Vine, VineError  # noqa: E402
 DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 MAX_STEPS = 14
 
+
+def step_budget(q: dict) -> int:
+    """Width-aware step budget. MAX_STEPS was calibrated on single-chain
+    questions (v1-v3); a fork question does `fork_width` x the navigation
+    work BY DEFINITION, so a fixed budget conflates "cannot navigate" with
+    "ran out of steps". +3 steps per extra declared sub-chain keeps the
+    per-chain budget constant. (The troop needs no scaling: each sub-hunt
+    already gets a full MAX_STEPS for its one chain — this restores the
+    same per-chain parity for the solo monkey.)"""
+    return MAX_STEPS + 3 * (int(q.get("fork_width", 1)) - 1)
+
 SYSTEM_PROMPT = """You are a navigator monkey in a knowledge forest. Answer the question \
 using ONLY the tools below. Never invent facts: navigate, harvest and answer.
 
@@ -67,7 +78,9 @@ Tools (always respond with a SINGLE JSON object, nothing else):
 Strategy: does the question have an EXACT rare term (code, proper name, number)? sniff first — it
 lands directly in the right section and you harvest with pick(id, section). Conceptual question? locate
 first; look to sniff around; pick/query only on the target. sniff returned too many? restrict with scope.
-Save tokens.
+Question about ALL members of a set ("which of the...", "who among...", "which ... did NOT...")?
+ENUMERATE, never sample: move(branch, rel "children") to list every member, then look each one —
+a negative or a complete list is only provable after visiting the whole set. Save tokens.
 Important rules:
 - If a response has "truncated": true, the list was CUT by budget: do not conclude something does
   not exist — refine with locate (more specific terms) or scan(parent_id, filter).
@@ -222,7 +235,7 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
         answer, answer_nodes = None, []
         entry_id: str | None = None  # landing zone: first node the monkey touches
         visited: set[str] = set()  # visited-cache (spec E.1.3): identical calls are not re-run
-        for step in range(MAX_STEPS):
+        for step in range(step_budget(q)):
             reply = chat(messages)
             messages.append({"role": "assistant", "content": reply})
             action = parse_action(reply)

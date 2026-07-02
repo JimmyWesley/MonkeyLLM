@@ -1,0 +1,132 @@
+[
+  {
+    "id": "v4-01",
+    "question": "More than one project shipped saving battery by dynamically adjusting the transmission schedule in its April release. Which projects were they, and who leads each one?",
+    "expected_nodes": [
+      "events/releases/2026-04-version-firmware-beat",
+      "projects/firmware-beat/vision",
+      "events/releases/2026-04-version-pilot-rescue",
+      "projects/pilot-rescue/vision"
+    ],
+    "answer_contains": [
+      "firmware-beat",
+      "Alice",
+      "pilot-rescue",
+      "Zoe"
+    ],
+    "min_hops": 3,
+    "fork_width": 2
+  },
+  {
+    "id": "v4-02",
+    "question": "Some products were recalled in February and March 2026. In which cities do the technical owners of those products live?",
+    "expected_nodes": [
+      "events/recalls/2026-02-recall-rover",
+      "events/recalls/2026-03-recall-wand",
+      "events/recalls/2026-02-recall-vibe",
+      "people/engineering/tina-brown",
+      "people/engineering/emma-scott",
+      "people/engineering/diana-parker"
+    ],
+    "answer_contains": [
+      "Atlanta",
+      "Denver",
+      "Portland"
+    ],
+    "min_hops": 3,
+    "fork_width": 3
+  },
+  {
+    "id": "v4-03",
+    "question": "Which clients acquired the Collar during 2026, and in which month did each deal close?",
+    "expected_nodes": [
+      "events/contracts/2026-01-deal-agricore",
+      "events/contracts/2026-02-deal-regional-health-network"
+    ],
+    "answer_contains": [
+      "AgriCore",
+      "Regional Health Network",
+      "February",
+      "January"
+    ],
+    "min_hops": 2,
+    "fork_width": 2
+  },
+  {
+    "id": "v4-04",
+    "question": "The deals with AgriCore and Regional Health Network were closed by the same account manager. Who is it, and which device did both clients buy?",
+    "expected_nodes": [
+      "events/contracts/2026-01-deal-agricore",
+      "events/contracts/2026-02-deal-regional-health-network",
+      "people/data/carlos-evans"
+    ],
+    "answer_contains": [
+      "Carlos",
+      "Collar"
+    ],
+    "min_hops": 2,
+    "fork_width": 2
+  },
+  {
+    "id": "v4-05",
+    "question": "Which of the project leads joined Telemetrix from research institutions, and from which institution did each one come?",
+    "expected_nodes": [
+      "projects/platform-drum/vision",
+      "projects/firmware-beat/vision",
+      "projects/mesh-ring/vision",
+      "projects/pilot-rescue/vision",
+      "people/engineering/wendy-green",
+      "people/data/fiona-ximenes",
+      "people/data/zoe-turner"
+    ],
+    "answer_contains": [
+      "Fiona",
+      "Wendy",
+      "Zoe"
+    ],
+    "min_hops": 3,
+    "fork_width": 4
+  },
+  {
+    "id": "v4-06",
+    "question": "Which project is led by someone who did NOT come from a research institution?",
+    "expected_nodes": [
+      "projects/firmware-beat/vision",
+      "people/engineering/alice-scott"
+    ],
+    "answer_contains": [
+      "firmware-beat"
+    ],
+    "min_hops": 3,
+    "fork_width": 4
+  },
+  {
+    "id": "v4-07",
+    "question": "Which sales region billed the most in the semester, and which product line generated the most support tickets?",
+    "expected_nodes": [
+      "sales/orders-2026",
+      "support/tickets-2026"
+    ],
+    "answer_contains": [
+      "Northeast",
+      "Wand"
+    ],
+    "min_hops": 2,
+    "fork_width": 2
+  },
+  {
+    "id": "v4-08",
+    "question": "Fiona Brown closed several deals in 2026 — with which clients?",
+    "expected_nodes": [
+      "events/contracts/2026-03-deal-sunfield-energy",
+      "events/contracts/2026-04-deal-windgrid-energy",
+      "people/data/fiona-brown"
+    ],
+    "answer_contains": [
+      "SunField Energy",
+      "WindGrid Energy"
+    ],
+    "min_hops": 2,
+    "fork_width": 2
+  }
+]

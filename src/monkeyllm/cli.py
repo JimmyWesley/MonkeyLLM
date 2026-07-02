@@ -79,6 +79,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     forest_root = Path(args.forest).resolve() if getattr(args, "forest", None) else None
 
+    # Every subcommand but `init` and `snapshot restore` operates on an
+    # EXISTING forest. Without this check, the ubiquitous `--forest`
+    # default of "." makes it dangerously easy to run a forest command
+    # from an arbitrary directory (e.g. the project's own outer repo) and
+    # have it silently treated as a forest, writing `_derived/`/`.vine.lock`
+    # there. A real forest always carries `_meta/schema.md` (spec A.5),
+    # written by `init` — its absence means "not a forest", not "empty one".
+    _needs_existing_forest = args.command not in ("init",) and not (
+        args.command == "snapshot" and args.action == "restore"
+    ) and not (args.command == "serve" and args.root)
+    if _needs_existing_forest:
+        _check_root = forest_root if forest_root is not None else Path(".").resolve()
+        if not (_check_root / "_meta" / "schema.md").is_file():
+            parser.error(
+                f"{_check_root} is not a forest (no _meta/schema.md) — "
+                f"run 'vine init --forest {_check_root} --title \"...\"' first, "
+                "or pass --forest to point at an existing one"
+            )
+
     if args.command == "serve":
         from monkeyllm.server import build_server
 
