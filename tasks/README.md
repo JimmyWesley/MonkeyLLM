@@ -17,8 +17,8 @@ Conventions:
 | Task | Title | Status |
 | --- | --- | --- |
 | T01 | Phase 1 closeout: official Monkey Bench run | in-progress (3/4 pass; 4th re-measured on v3 — passes as tokens-per-correct (0.58), criterion wording decision pending) |
-| T02 | English normalization (PT -> EN) | in-progress (src/ + contract vocabulary done via spec v0.5; docs prose remains) |
-| T03 | Phase 1.5: Troop orchestrator | in-progress (built + measured; accuracy 11/11 but speedup criterion failed on single-chain qs — fork-tier next) |
-| T04 | Phase 2: Living Bank (Gardener, Ranger, dataset writes) | in-progress (tend v0.7; dataset birth v0.8; Gardener core v0.9; Ranger v0.10; curation measured 100%; tiered storage v0.11; DOCX built-in + edge proposals v0.12; convergence measured — criterion NOT met, floor-effect + cross-talk findings; media extras + guidance docs remain) |
+| T02 | English normalization (PT -> EN) | done (spec v0.12 + roadmap + local-inference + remaining code strings translated 2026-07-02; protected PT test corpus/prompts intentionally untouched) |
+| T03 | Phase 1.5: Troop orchestrator | in-progress (fork-tier built + measured 2026-07-02: 8/8 both arms after curator/prompt/budget hardening; speedup criterion still NOT met — sharpened precondition needs a deeper corpus) |
+| T04 | Phase 2: Living Bank (Gardener, Ranger, dataset writes) | in-progress (tend v0.7; dataset birth v0.8; Gardener core v0.9; Ranger v0.10; curation measured 100%; tiered storage v0.11; DOCX built-in + edge proposals v0.12; convergence measured — criterion NOT met, floor-effect + cross-talk findings; ingest-tools.md + extending.md guidance done 2026-07-02; media extras + entity extraction remain, both need a spec bump) |
 | T05 | Publication readiness (GitHub + paper) | todo |
 | T06 | Monkey Bench: multi-hop question hardening | done (v3 set 100% min_hops>=3; first shouts fired via spec v0.6 trail_len) |

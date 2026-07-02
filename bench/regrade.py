@@ -55,7 +55,7 @@ def main() -> int:
     report = regrade(report, questions)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    head = f"{'braço':<8} {'corretas':>9} {'precision':>10} {'tokens (med)':>13} {'wall s (med)':>13}"
+    head = f"{'arm':<8} {'correct':>9} {'precision':>10} {'tokens (med)':>13} {'wall s (med)':>13}"
     print(head)
     print("-" * len(head))
     for s in report["summaries"]:

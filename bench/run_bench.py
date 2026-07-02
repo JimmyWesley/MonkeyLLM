@@ -65,11 +65,11 @@ def run_arm(arm: str, questions: list[dict], *, forest: Path, chat, store, embed
         elif arm == "iter":
             r = rag_iter(chat, store, q)
         else:
-            raise SystemExit(f"braço desconhecido: {arm}")
+            raise SystemExit(f"unknown arm: {arm}")
         r["wall_s"] = round(time.perf_counter() - t0, 1)
         results.append(r)
-        print(f"    resposta: {str(r['answer'])[:140]}")
-        print(f"    correto={r['correct_text']}  precision={r['banana_precision']}  "
+        print(f"    answer: {str(r['answer'])[:140]}")
+        print(f"    correct={r['correct_text']}  precision={r['banana_precision']}  "
               f"tokens={r['metrics']['tokens_to_banana']}  {r['wall_s']}s")
     return results
 
@@ -115,7 +115,7 @@ def main() -> int:
     if embedder is None and ({"topk", "iter"} & set(arms)):
         raise SystemExit("os baselines precisam de MONKEYLLM_EMBED_ENDPOINT (mesmo embedder do MonkeyLLM).")
     chat, model = make_llm()
-    print(f"modelo: {model}  |  braços: {arms}  |  {len(questions)} perguntas")
+    print(f"model: {model}  |  arms: {arms}  |  {len(questions)} questions")
 
     store = get_store(forest, embedder) if {"topk", "iter"} & set(arms) else None
 
@@ -136,7 +136,7 @@ def main() -> int:
                        encoding="utf-8")
 
     print("\n===== MONKEY BENCH v1 =====")
-    head = (f"{'braço':<8} {'corretas':>9} {'precision':>10} {'tokens (med)':>13} "
+    head = (f"{'arm':<8} {'correct':>9} {'precision':>10} {'tokens (med)':>13} "
             f"{'s/perg (med)':>13} {'s/perg (p95)':>13} {'total s':>9}")
     print(head)
     print("-" * len(head))
@@ -179,7 +179,7 @@ def main() -> int:
 
     out.write_text(json.dumps({"summaries": summaries, "results": all_results},
                               ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\nrelatório salvo em {out}")
+    print(f"\nreport saved to {out}")
     return 0
 
 

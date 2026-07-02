@@ -70,8 +70,8 @@ amplifier, on single-chain questions**:
   Frontier partition hands monkeys 2-3 the *wrong* releases; they walk full
   wrong chains and answer confidently wrong. The **judge** then arbitrates 3
   harvests and picks the right one — that is how the troop got 11/11 while
-  the solo monkey flaked once. Exactly spec E.2's warning: "o trade-off
-  velocidade × custo deve ser medido, não assumido".
+  the solo monkey flaked once. Exactly spec E.2's warning: "the speed x
+  cost trade-off MUST be measured, not assumed".
 - Wall-clock worsens for two stacked reasons: 3 streams share GPU decode
   throughput (continuous batching helps prefill much more than generation),
   and the troop does ~3x the navigation work because there is nothing to

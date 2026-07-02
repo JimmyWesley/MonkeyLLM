@@ -1,14 +1,13 @@
 # MonkeyLLM — Technical Specification v0.12 (Phase 0/1/2)
 
-**Audiência:** time de desenvolvimento.
-**Escopo:** especificação normativa do dialeto da floresta (`schema.md`), dos contratos de I/O das primitivas do protocolo Vine (MCP), e dos critérios de aceitação da Fase 0.
-**Documento companheiro:** `monkeyllm-arquitetura.md` (visão arquitetural).
-**Convenção:** as palavras DEVE, NÃO DEVE, PODE seguem o espírito do RFC 2119.
+**Audience:** development team.
+**Scope:** normative specification of the forest dialect (`schema.md`), the I/O contracts of the Vine protocol's primitives (MCP), and the Phase 0 acceptance criteria.
+**Companion document:** `monkeyllm-arquitetura.md` (architectural view).
+**Convention:** the words MUST, MUST NOT, MAY follow the spirit of RFC 2119.
 
-> Language note: new sections are written in English (project language
-> policy); pre-v0.3 sections remain Portuguese until the T02 translation pass.
-> As of v0.5 every **contract token** (type/rel/enum values, parsed section
-> headings) is English regardless of the surrounding prose language.
+> Language note: as of the T02 translation pass (2026-07-02) the entire
+> document is English. As of v0.5 every **contract token** (type/rel/enum
+> values, parsed section headings) is English regardless of prose language.
 
 **Changelog v0.11 → v0.12 — Gardener v2: native DOCX + edge proposals (the
 forest starts weaving itself):**
@@ -260,18 +259,18 @@ structural tokens above change there.
 
 **Changelog v0.1 → v0.2:**
 
-- Nova primitiva de leitura **C.6b `sniff`** (o farejador): busca literal sobre os **corpos** dos nós, devolvendo nó + seção + trecho. Complementa o `locate` (que continua restrito a metadados curados — contrato C.1 intacto) cobrindo o caso "termo exato enterrado no corpo, invisível para summary/tags".
-- **A.3.1 Política de payloads binários**: binário nunca entra no Git da floresta — Vine versiona somente `.md` (guarda na camada de commit); payloads são referenciados por `payload` + `payload_hash` e excluídos pelo `.gitignore` da floresta.
-- Critério de aceitação F.1 atualizado para incluir C.6b; novos critérios F.7 (qualidade do sniff) e F.8 (payloads fora do Git).
-- Nada mais muda: todos os demais contratos são idênticos à v0.1 (que permanece arquivada para histórico).
+- New read primitive **C.6b `sniff`** (the sniffer): literal search over node **bodies**, returning node + section + snippet. Complements `locate` (which stays restricted to curated metadata — C.1 contract intact) covering the case "exact term buried in the body, invisible to summary/tags".
+- **A.3.1 Binary payload policy**: binaries never enter the forest's Git — Vine versions `.md` only (enforced at the commit layer); payloads are referenced by `payload` + `payload_hash` and excluded by the forest's `.gitignore`.
+- Acceptance criterion F.1 updated to include C.6b; new criteria F.7 (sniff quality) and F.8 (payloads outside Git).
+- Nothing else changes: every other contract is identical to v0.1 (which stays archived for history).
 
 ---
 
-## Parte A — O Dialeto da Floresta (`_meta/schema.md`)
+## Part A — The Forest Dialect (`_meta/schema.md`)
 
-O `schema.md` é um arquivo vivo dentro da floresta que declara os tipos válidos. O Vine DEVE validar toda escrita (`plant`/`graft`) contra ele. O agente PODE lê-lo via `look("_meta/schema")` para aprender o dialeto em 1 hop.
+`schema.md` is a living file inside the forest that declares the valid types. The Vine MUST validate every write (`plant`/`graft`) against it. The agent MAY read it via `look("_meta/schema")` to learn the dialect in 1 hop.
 
-### A.1 Tipos de nó (`type`)
+### A.1 Node types (`type`)
 
 | `type` | Description | Payload | Harvest verb |
 |---|---|---|---|
@@ -284,13 +283,13 @@ O `schema.md` é um arquivo vivo dentro da floresta que declara os tipos válido
 | `event` | Dated fact (meeting, decision, release) | — | `pick` |
 | `media` | Image/audio/video with description or transcript | original in `_assets/` | `pick` |
 
-Regras:
-- Novos tipos DEVEM ser adicionados ao `schema.md` antes do primeiro uso; o Vine rejeita `type` desconhecido (erro `E_SCHEMA`).
-- `entity` DEVE ter `entity_kind` ∈ {`person`, `organization`, `product`, `place`, `other`}.
+Rules:
+- New types MUST be added to `schema.md` before first use; the Vine rejects an unknown `type` (`E_SCHEMA` error).
+- `entity` MUST have `entity_kind` ∈ {`person`, `organization`, `product`, `place`, `other`}.
 
-### A.2 Tipos de aresta (`rel`)
+### A.2 Edge types (`rel`)
 
-Arestas são direcionadas, tipadas, e declaradas no frontmatter (`links:`) do nó de origem. A camada derivada materializa as inversas automaticamente.
+Edges are directed, typed, and declared in the source node's frontmatter (`links:`). The derived layer materializes the inverses automatically.
 
 | `rel` | Inverse (derived) | Semantics |
 |---|---|---|
@@ -304,66 +303,66 @@ Arestas são direcionadas, tipadas, e declaradas no frontmatter (`links:`) do n�
 | `discovered-shortcut` | — | The monkey's shout (created by `graft`, see Part C.8) |
 | `succeeds` | `precedes` | Temporal order between events/versions |
 
-Regras:
-- `rel` fora desta tabela → erro `E_SCHEMA` (a tabela cresce via edição do `schema.md`, nunca ad-hoc).
-- `same-as` NÃO DEVE apagar nós; a fusão física é responsabilidade exclusiva da compaction do Ranger (fora do escopo da Fase 0).
-- Máximo de 50 `links` por nó; acima disso o nó é candidato a virar galho (sinal para o Ranger).
+Rules:
+- A `rel` outside this table → `E_SCHEMA` error (the table grows by editing `schema.md`, never ad-hoc).
+- `same-as` MUST NOT delete nodes; physical merging is the Ranger's compaction alone (out of Phase 0 scope).
+- Maximum of 50 `links` per node; above that the node is a candidate to become a branch (signal for the Ranger).
 
-### A.3 Frontmatter normativo
+### A.3 Normative frontmatter
 
-Campos obrigatórios em **todo** nó:
+Fields required on **every** node:
 
 ```yaml
-id: string            # slug estável, único na floresta, = caminho relativo sem .md
-type: string          # um dos tipos da A.1
-title: string         # título humano (mutável; id nunca muda)
-summary: string       # 1-3 frases, ≤ 60 tokens. O CHEIRO. Ver A.4.
+id: string            # stable slug, unique in the forest, = relative path without .md
+type: string          # one of the A.1 types
+title: string         # human title (mutable; id never changes)
+summary: string       # 1-3 sentences, <= 60 tokens. THE SCENT. See A.4.
 created: date         # ISO 8601
-updated: date         # ISO 8601, atualizado em todo graft
+updated: date         # ISO 8601, refreshed on every graft
 ```
 
-Campos opcionais:
+Optional fields:
 
 ```yaml
-tags: [string]            # vocabulário livre, minúsculas, sem acento
-links: [{rel, target}]    # arestas tipadas (A.2)
-confidence: float         # 0.0-1.0; default 1.0; <1.0 = conhecimento não confirmado
+tags: [string]            # free vocabulary, lowercase, no accents
+links: [{rel, target}]    # typed edges (A.2)
+confidence: float         # 0.0-1.0; default 1.0; <1.0 = unconfirmed knowledge
 source: enum              # manual | ingest | agent
-payload: string           # nome do arquivo irmão (datasets/midia)
+payload: string           # sibling file name (datasets/media)
 payload_type: enum        # sqlite | pdf | docx | image | audio
-payload_hash: string      # sha256 do payload (detecção de drift)
-entity_kind: enum         # somente para type: entidade
-aliases: [string]         # nomes alternativos (usados pelo locate léxico)
+payload_hash: string      # sha256 of the payload (drift detection)
+entity_kind: enum         # only for type: entity
+aliases: [string]         # alternate names (used by lexical locate)
 ```
 
-Regras:
-- `id` é imutável. Renomear = criar novo nó + `same-as` + tombstone (fora do escopo Fase 0; na Fase 0, renomear é proibido).
-- Parser DEVE rejeitar frontmatter inválido com `E_FRONTMATTER` e caminho do campo.
+Rules:
+- `id` is immutable. Renaming = creating a new node + `same-as` + tombstone (out of Phase 0 scope; renaming is forbidden in Phase 0).
+- The parser MUST reject invalid frontmatter with `E_FRONTMATTER` and the field's path.
 
-#### A.3.1 Política de payloads binários (v0.2)
+#### A.3.1 Binary payload policy (v0.2)
 
-Binário **nunca entra no Git da floresta**. Normativo:
+Binaries **never enter the forest's Git**. Normative:
 
-1. O Vine NÃO DEVE versionar nada além de `.md`: `plant`/`graft` adicionam ao stage somente arquivos markdown (guarda dura na camada de commit, não convenção).
-2. O `.gitignore` da floresta DEVE excluir payloads binários (`*.db`, `*.sqlite`, `_assets/`), além de `_derived/` e `.vine.lock`.
-3. O payload vive no filesystem ao lado do nó (ou em storage externo, em fases futuras) e o **nó** versiona apenas a referência: `payload` (nome) + `payload_hash` (sha256). Drift do binário é detectado por hash, não por diff.
-4. Racional: Git delta-comprime texto, não binário — payloads atualizados com frequência estourariam o repositório. O conhecimento versionado é a camada destilada (markdown); o dado pesado é referenciado, não embarcado.
+1. The Vine MUST NOT version anything beyond `.md`: `plant`/`graft` stage only markdown files (hard guard at the commit layer, not convention).
+2. The forest's `.gitignore` MUST exclude binary payloads (`*.db`, `*.sqlite`, `_assets/`), plus `_derived/` and `.vine.lock`.
+3. The payload lives on the filesystem next to the node (or in external storage, in future phases) and the **node** versions only the reference: `payload` (name) + `payload_hash` (sha256). Binary drift is detected by hash, not diff.
+4. Rationale: Git delta-compresses text, not binaries — frequently updated payloads would blow up the repository. The versioned knowledge is the distilled layer (markdown); heavy data is referenced, not embedded.
 
-### A.4 Especificação do `summary` (o componente mais crítico)
+### A.4 The `summary` specification (the most critical component)
 
-O `summary` DEVE permitir que um SLM decida "este nó me interessa?" sem abrir o corpo. Formato normativo:
+The `summary` MUST let an SLM decide "does this node matter to me?" without opening the body. Normative format:
 
-1. **Frase 1:** o que é (categoria + assunto). 
-2. **Frase 2:** diferencial/conteúdo-chave (números, nomes, escopo temporal).
-3. **Frase 3 (opcional):** o que NÃO está aqui / onde está o complemento.
+1. **Sentence 1:** what it is (category + subject).
+2. **Sentence 2:** the key content (concrete numbers, names, time scope).
+3. **Sentence 3 (optional):** what is NOT here / where the complement lives.
 
-- Limite: 60 tokens (validado pelo Vine no `plant`).
-- PROIBIDO: "This document describes...", "File containing..." (anti-padrões que gastam tokens sem cheiro).
-- Bom: `"Vendas por região e SKU, jan-mar 2026, 14.302 linhas com margem e canal. Não inclui devoluções (ver vendas/devolucoes-q1)."`
+- Limit: 60 tokens (validated by the Vine at `plant`).
+- FORBIDDEN: "This document describes...", "File containing..." (anti-patterns that spend tokens without scent).
+- Good: `"Sales by region and SKU, Jan-Mar 2026, 14,302 rows with margin and channel. Does not include returns (see sales/returns-q1)."`
 
-### A.5 Especificação do `_index.md` (galho)
+### A.5 The `_index.md` specification (branch)
 
-Estrutura obrigatória, nesta ordem:
+Required structure, in this order:
 
 ```markdown
 ---
@@ -375,36 +374,36 @@ updated: <date>
 
 # <Region title>
 
-> <1-2 frases: o que vive aqui + para onde ir se não for aqui>
+> <1-2 sentences: what lives here + where to go if not here>
 
 ## Sub-branches
-- [[<id>]] — <summary do sub-galho>. <coverage>.
+- [[<id>]] — <sub-branch summary>. <coverage>.
 
 ## Direct bananas
-- [[<id>]] — <summary copiado do frontmatter da banana>
+- [[<id>]] — <summary copied from the banana's frontmatter>
 
 ## Cross trails
-- <motivo> → [[<id>]]
+- <reason> → [[<id>]]
 ```
 
-Regras:
-- As entradas replicam o `summary` dos nós filhos VERBATIM (o Gardener/Vine mantém a sincronia; humanos não editam essas linhas à mão).
-- Galho com > 150 entradas ou > 3.000 tokens → flag `needs_split` para o Ranger.
-- O galho-mestre (`/_index.md`) DEVE conter adicionalmente a seção `## Landmarks` (10-20 nós de maior grau, com summary).
+Rules:
+- Entries replicate the child nodes' `summary` VERBATIM (the Gardener/Vine keeps sync; humans do not hand-edit these lines).
+- A branch with > 150 entries or > 3,000 tokens → `needs_split` flag for the Ranger.
+- The master branch (`/_index.md`) MUST additionally contain a `## Landmarks` section (10-20 highest-degree nodes, with summary).
 
 ---
 
-## Parte B — Identidade, Trilha e Endereçamento
+## Part B — Identity, Trail and Addressing
 
-- **ID canônico:** caminho relativo à raiz, sem extensão. Ex: `projetos/mixerllm/arquitetura`.
-- **Trilha:** lista de IDs da raiz até o nó. Ex: `["_index", "projetos/_index", "projetos/mixerllm/_index", "projetos/mixerllm/arquitetura"]`.
-- Wikilinks no corpo usam `[[id]]` ou `[[id|texto]]`. O parser resolve `[[...]]` apenas contra IDs canônicos (sem fuzzy match — ambiguidade é erro de lint do Ranger, não adivinhação do runtime).
+- **Canonical ID:** path relative to the root, without extension. E.g.: `projects/mixerllm/architecture`.
+- **Trail:** list of IDs from the root to the node. E.g.: `["_index", "projects/_index", "projects/mixerllm/_index", "projects/mixerllm/architecture"]`.
+- Wikilinks in the body use `[[id]]` or `[[id|text]]`. The parser resolves `[[...]]` only against canonical IDs (no fuzzy match — ambiguity is a Ranger lint error, not runtime guessing).
 
 ---
 
-## Parte C — Contratos das Primitivas (servidor Vine, MCP)
+## Part C — Primitive Contracts (Vine server, MCP)
 
-Transporte: MCP (stdio para dev; HTTP/SSE no Docker). Todas as respostas em JSON. Erros seguem `{error: {code, message, hint}}` com códigos `E_NOT_FOUND`, `E_SCHEMA`, `E_FRONTMATTER`, `E_READONLY`, `E_QUERY_FORBIDDEN`, `E_TIMEOUT`, `E_LOCKED`.
+Transport: MCP (stdio for dev; HTTP/SSE on Docker). All responses in JSON. Errors follow `{error: {code, message, hint}}` with codes `E_NOT_FOUND`, `E_SCHEMA`, `E_FRONTMATTER`, `E_READONLY`, `E_QUERY_FORBIDDEN`, `E_TIMEOUT`, `E_LOCKED`.
 
 ### C.0 Forest registry — multi-forest serving (v0.4)
 
@@ -440,22 +439,22 @@ Rules (normative):
 {"tool": "locate", "args": {"query": "...", "forest": "clients/acme"}}
 ```
 
-Princípio transversal: **toda resposta DEVE caber no orçamento de tokens declarado**. O Vine trunca com marcador explícito `"truncated": true` — nunca silenciosamente.
+Cross-cutting principle: **every response MUST fit the declared token budget**. The Vine truncates with an explicit `"truncated": true` marker — never silently.
 
 ### C.1 `locate(query: string, k: int = 5, scope: "all"|"branches"|"bananas" = "all", type_filter?: string) → LocateResult`
 
-O **helicóptero**: motor de localização que larga o macaco na região mais próxima do alvo — ele nunca parte do tronco. Fusão RRF de busca vetorial (sobre summaries) + BM25 (sobre title, aliases, tags, summary). Na Fase 0, PODE ser somente BM25 (SQLite FTS5); a interface não muda quando vetores entrarem.
+The **helicopter**: a location engine that drops the monkey in the region closest to the target — it never starts from the trunk. RRF fusion of vector search (over summaries) + BM25 (over title, aliases, tags, summary). In Phase 0, MAY be BM25-only (SQLite FTS5); the interface does not change once vectors land.
 
-O índice cobre **dois níveis**: bananas (folhas) e galhos (regiões — todo galho tem summary próprio, logo é indexável). Resultado de galho = **zona de pouso**: o macaco aterrissa na região certa e navega 1-2 hops com contexto local, em vez de cair numa folha possivelmente errada. `scope: "branches"` é útil para perguntas amplas ("o que sabemos sobre vendas?"); `scope: "bananas"` para perguntas pontuais.
+The index covers **two levels**: bananas (leaves) and branches (regions — every branch has its own summary, hence indexable). A branch result = **landing zone**: the monkey lands in the right region and navigates 1-2 hops with local context, instead of dropping onto a possibly wrong leaf. `scope: "branches"` is useful for broad questions ("what do we know about sales?"); `scope: "bananas"` for pointed ones.
 
 ```json
 {
   "results": [
     {
-      "id": "vendas/_index",
+      "id": "sales/_index",
       "kind": "branch",
       "type": "branch",
-      "title": "Vendas",
+      "title": "Sales",
       "summary": "...",
       "trail": ["_index"],
       "coverage": "23 bananas, 4 sub-branches",
@@ -463,12 +462,12 @@ O índice cobre **dois níveis**: bananas (folhas) e galhos (regiões — todo g
       "heat": 0.40
     },
     {
-      "id": "projetos/mixerllm/arquitetura",
+      "id": "projects/mixerllm/architecture",
       "kind": "banana",
       "type": "document",
-      "title": "Arquitetura do MixerLLM",
+      "title": "MixerLLM Architecture",
       "summary": "...",
-      "trail": ["_index", "projetos/_index", "projetos/mixerllm/_index"],
+      "trail": ["_index", "projects/_index", "projects/mixerllm/_index"],
       "score": 0.82,
       "heat": 0.31
     }
@@ -477,45 +476,45 @@ O índice cobre **dois níveis**: bananas (folhas) e galhos (regiões — todo g
 }
 ```
 
-Orçamento: ≤ 800 tokens. Ordenação: `score_final = rrf_score × (1 + α·heat)`, α default 0.3 (configurável; α=0 desliga feromônio).
+Budget: <= 800 tokens. Ordering: `score_final = rrf_score x (1 + alpha*heat)`, alpha default 0.3 (configurable; alpha=0 turns pheromone off).
 
 ### C.2 `look(id: string, fields?: [string]) → Digest`
 
-A operação central. Orçamento rígido: **≤ 500 tokens**.
+The central operation. Hard budget: **<= 500 tokens**.
 
-`fields` (opcional): lista de campos desejados (ex: `["summary", "edges_out"]`). Quando presente, a resposta contém SOMENTE esses campos (+ `id`, sempre). Uso típico: macaco em modo varredura pedindo só `summary` de vários nós — custo cai de ~400 para ~70 tokens por look.
+`fields` (optional): list of desired fields (e.g. `["summary", "edges_out"]`). When present, the response contains ONLY those fields (+ `id`, always). Typical use: a monkey in scan mode asking only for `summary` of several nodes — cost drops from ~400 to ~70 tokens per look.
 
-Resposta para **banana** (`note`/`document`/`concept`/`entity`/`event`):
+Response for a **banana** (`note`/`document`/`concept`/`entity`/`event`):
 
 ```json
 {
-  "id": "projetos/mixerllm/arquitetura",
+  "id": "projects/mixerllm/architecture",
   "type": "document",
-  "title": "Arquitetura do MixerLLM",
+  "title": "MixerLLM Architecture",
   "summary": "...",
-  "tags": ["inferencia", "slm"],
+  "tags": ["inference", "slm"],
   "confidence": 1.0,
   "updated": "2026-06-10",
-  "outline": ["Visão geral", "Mixer-lang", "Block-loop", "Benchmarks"],
+  "outline": ["Overview", "Mixer-lang", "Block-loop", "Benchmarks"],
   "edges_out": [
-    {"rel": "part-of", "target": "projetos/mixerllm/_index", "target_summary": "..."},
-    {"rel": "compared-with", "target": "conceitos/speculative-decoding", "target_summary": "..."}
+    {"rel": "part-of", "target": "projects/mixerllm/_index", "target_summary": "..."},
+    {"rel": "compared-with", "target": "concepts/speculative-decoding", "target_summary": "..."}
   ],
   "edges_in": [
-    {"rel": "mentions", "source": "pessoas/jimmy-wesley"}
+    {"rel": "mentions", "source": "people/jimmy-wesley"}
   ],
   "stats": {"body_tokens": 2840, "degree": 7, "heat": 0.45}
 }
 ```
 
-Resposta para **galho**: substitui `outline` por `children` (sub-galhos e bananas diretas, cada um com `id` + `summary`) e `cross_trails`.
+Response for a **branch**: replaces `outline` with `children` (sub-branches and direct bananas, each with `id` + `summary`) and `cross_trails`.
 
-Resposta para **dataset**: inclui `query_manual` (tabelas, colunas-chave, 2-3 example_queries) e `sample_rows` (≤ 3 linhas). 
+Response for a **dataset**: includes `query_manual` (tables, key columns, 2-3 example_queries) and `sample_rows` (<= 3 rows).
 
-Regras:
-- `edges_out`/`edges_in` limitados a 12 cada, ordenados por heat desc; excedente indicado em `stats.degree`.
-- `target_summary` DEVE vir truncado a 25 tokens (é cheiro de vizinho, não digest completo).
-- `body_tokens` permite ao agente estimar o custo de um `pick` antes de fazê-lo.
+Rules:
+- `edges_out`/`edges_in` capped at 12 each, ordered by heat desc; surplus indicated in `stats.degree`.
+- `target_summary` MUST come truncated to 25 tokens (it's a neighbor's scent, not a full digest).
+- `body_tokens` lets the agent estimate a `pick`'s cost before making it.
 
 ### C.3 `move(id: string, rel?: string, direction: "out"|"in"|"both" = "out") → [Neighbor]`
 
@@ -528,7 +527,7 @@ Regras:
 }
 ```
 
-Sem `rel`: todos os vizinhos. Orçamento: ≤ 600 tokens. `move(id, "children")` é açúcar para filhos físicos de um galho.
+Without `rel`: all neighbors. Budget: <= 600 tokens. `move(id, "children")` is sugar for a branch's physical children.
 
 ### C.4 `pick(id: string, section?: string) → Content`
 
@@ -537,90 +536,90 @@ Sem `rel`: todos os vizinhos. Orçamento: ≤ 600 tokens. `move(id, "children")`
   "id": "...",
   "title": "...",
   "section": "Mixer-lang",
-  "body": "<markdown da seção ou do corpo inteiro>",
+  "body": "<markdown of the section or the whole body>",
   "body_tokens": 612,
   "truncated": false
 }
 ```
 
-- `section` casa contra os headers do `outline` (case-insensitive, match exato primeiro, depois prefixo).
-- Corpo > 4.000 tokens sem `section` → retorna somente o outline expandido + `truncated: true` + hint `"use section="`. (Força o agente a colher a seção, não a árvore inteira.)
+- `section` matches against the `outline`'s headers (case-insensitive, exact match first, then prefix).
+- Body > 4,000 tokens without `section` → returns only the expanded outline + `truncated: true` + hint `"use section="`. (Forces the agent to harvest the section, not the whole tree.)
 
 ### C.5 `query(id: string, sql: string) → Rows`
 
-- Pré-condições: nó `type: dataset`, `payload_type: sqlite`.
-- Validação: somente um statement; DEVE começar com `SELECT` ou `WITH`; proibidos `ATTACH`, `PRAGMA` de escrita, `INSERT/UPDATE/DELETE/DROP/ALTER` → `E_QUERY_FORBIDDEN`. Conexão aberta em modo read-only (`mode=ro`).
-- `LIMIT` forçado: se ausente, injeta `LIMIT 200`. Timeout 2s → `E_TIMEOUT`.
+- Preconditions: node `type: dataset`, `payload_type: sqlite`.
+- Validation: a single statement only; MUST start with `SELECT` or `WITH`; forbidden: `ATTACH`, write `PRAGMA`, `INSERT/UPDATE/DELETE/DROP/ALTER` → `E_QUERY_FORBIDDEN`. Connection opened read-only (`mode=ro`).
+- Forced `LIMIT`: if absent, injects `LIMIT 200`. 2s timeout → `E_TIMEOUT`.
 
 ```json
 {
-  "columns": ["regiao", "total"],
-  "rows": [["Sudeste", 1250000.0], ["Sul", 740000.0]],
+  "columns": ["region", "total"],
+  "rows": [["Southeast", 1250000.0], ["South", 740000.0]],
   "row_count": 5,
   "limited": false,
   "elapsed_ms": 3
 }
 ```
 
-Formato colunar (`columns` + `rows` como arrays) — não objetos repetindo as chaves; economiza ~40% dos tokens.
+Columnar format (`columns` + `rows` as arrays) — not objects repeating the keys; saves ~40% of the tokens.
 
 ### C.6 `scan(parent_id: string, filter?: Filter, fields?: [string], recursive: bool = false, limit: int = 50) → [PartialNode]`
 
-Consulta por **metadados** sobre os filhos de um galho, sem abrir arquivo nenhum. Servida pelo **Catálogo** (ver C.6.1).
+**Metadata** query over a branch's children, without opening any file. Served by the **Catalog** (see C.6.1).
 
-`Filter` suporta igualdade e comparação sobre campos do frontmatter:
+`Filter` supports equality and comparison over frontmatter fields:
 
 ```json
 {
-  "parent_id": "projetos/_index",
-  "filter": {"type": "dataset", "updated_after": "2026-03-01", "tags_any": ["vendas"]},
+  "parent_id": "projects/_index",
+  "filter": {"type": "dataset", "updated_after": "2026-03-01", "tags_any": ["sales"]},
   "fields": ["id", "summary", "payload_type"],
   "recursive": true
 }
 ```
 
-Resposta: lista de nós parciais (somente os `fields` pedidos), ordenada por `heat` desc. Orçamento: ≤ 800 tokens, com `truncated` explícito.
+Response: list of partial nodes (only the requested `fields`), ordered by `heat` desc. Budget: <= 800 tokens, with explicit `truncated`.
 
-Caso de uso canônico: "quero só os datasets sobre vendas atualizados este trimestre" → 1 chamada, ~3ms, ~200 tokens — em vez de descer a hierarquia abrindo índices.
+Canonical use case: "I only want the sales datasets updated this quarter" → 1 call, ~3ms, ~200 tokens — instead of descending the hierarchy opening indexes.
 
-#### C.6.1 O Catálogo (`_derived/catalog.db`)
+#### C.6.1 The Catalog (`_derived/catalog.db`)
 
-SQLite na camada derivada com uma linha por nó da floresta: todos os campos do frontmatter + trilha + degree + heat. Reconstruível do zero por varredura completa (`vine reindex`); atualizado incrementalmente a cada `plant`/`graft`. É o que serve `scan()` e o lado léxico do `locate` (FTS5 sobre title/aliases/tags/summary na mesma base). **Não é fonte de verdade** — se divergir dos arquivos, os arquivos mandam e o catálogo se reconstrói.
+SQLite in the derived layer with one row per forest node: every frontmatter field + trail + degree + heat. Rebuildable from scratch by a full scan (`vine reindex`); updated incrementally on every `plant`/`graft`. It's what serves `scan()` and `locate`'s lexical side (FTS5 over title/aliases/tags/summary in the same base). **Not the source of truth** — if it diverges from the files, the files win and the catalog rebuilds.
 
 ### C.6b `sniff(terms: string | [string], scope?: string, k: int = 5, type_filter?: string) → SniffResult`
 
-O **farejador** (sniper): busca **literal** sobre os corpos markdown dos nós, devolvendo nó + seção + trecho da ocorrência. É o complemento do `locate`: o helicóptero voa sobre metadados curados (summary/tags/title); o farejador desce ao chão e segue o rastro de um termo exato — código de erro, nome próprio, número de NF, identificador — que ninguém teve o cuidado (nem a obrigação) de subir para o summary. A divisão de contrato é normativa: **`locate` NÃO DEVE indexar corpos; `sniff` NÃO DEVE consultar metadados curados** (exceto para exibição do resultado).
+The **sniffer**: **literal** search over nodes' markdown bodies, returning node + section + occurrence snippet. It complements `locate`: the helicopter flies over curated metadata (summary/tags/title); the sniffer goes down to ground level and follows the trail of an exact term — error code, proper name, invoice number, identifier — that nobody bothered (or was obligated) to lift into the summary. The contract split is normative: **`locate` MUST NOT index bodies; `sniff` MUST NOT query curated metadata** (except to display the result).
 
-Parâmetros:
+Parameters:
 
-- `terms`: 1 a 8 termos **literais** (string única é promovida a lista de 1). Casamento por substring, insensível a caixa e a diacríticos (NFD, remoção de combining marks). Termo com espaço = frase exata. Termo normalizado com < 2 caracteres → `E_SCHEMA`. **Regex NÃO é aceita** (Fase 0): SLMs escrevem regex frágil e regex arbitrária abre custo imprevisível; termos literais dão 95% do valor com contrato simples.
-- `scope` (opcional): id de **qualquer nó**. Galho (`vendas/_index` ou `vendas`) restringe a busca à subárvore física correspondente; banana restringe ao corpo daquele único nó (grep-dentro-do-nó — o encadeamento natural depois de um `locate`/`look` que já achou o alvo). Sem `scope`, floresta inteira. Nó inexistente → `E_NOT_FOUND`.
-- `k`: máximo de nós no resultado (default 5, teto 20).
-- `type_filter`: como no `locate`.
+- `terms`: 1 to 8 **literal** terms (a single string is promoted to a 1-item list). Substring matching, case- and diacritic-insensitive (NFD, combining marks stripped). A term with a space = exact phrase. A normalized term with < 2 characters → `E_SCHEMA`. **Regex is NOT accepted** (Phase 0): SLMs write fragile regex, and arbitrary regex opens unpredictable cost; literal terms give 95% of the value with a simple contract.
+- `scope` (optional): id of **any node**. A branch (`sales/_index` or `sales`) restricts the search to the matching physical subtree; a banana restricts it to that single node's body (grep-within-node — the natural chaining after a `locate`/`look` that already found the target). Without `scope`, the whole forest. Nonexistent node → `E_NOT_FOUND`.
+- `k`: max nodes in the result (default 5, cap 20).
+- `type_filter`: as in `locate`.
 
-Semântica de busca:
+Search semantics:
 
-- Varre **somente o corpo** dos arquivos `.md` (frontmatter excluído; `_derived`, `_assets` e payloads binários ignorados).
-- Um nó casa quando **pelo menos um** termo ocorre no corpo; nós que casam **mais termos distintos** vêm primeiro (AND-preferido, OR-tolerante).
-- `match` = linha da ocorrência, atribuída à seção (header H2/H3) que a contém. Máximo de **3 matches por nó** na resposta (`match_count` informa o total; excedente sinalizado por `truncated_matches: true`).
-- `snippet` = janela da linha centrada na primeira ocorrência, truncada a ~25 tokens.
+- Scans **only the body** of `.md` files (frontmatter excluded; `_derived`, `_assets` and binary payloads ignored).
+- A node matches when **at least one** term occurs in the body; nodes matching **more distinct terms** rank first (AND-preferred, OR-tolerant).
+- `match` = the occurrence's line, attributed to the section (H2/H3 header) containing it. Max of **3 matches per node** in the response (`match_count` reports the total; surplus flagged by `truncated_matches: true`).
+- `snippet` = a window of the line centered on the first occurrence, truncated to ~25 tokens.
 
-Ordenação (mesma fórmula de feromônio do C.1): `score = strength × (1 + α·heat)`, onde `strength = termos_casados/termos_pedidos`, desempate por `match_count`.
+Ordering (same pheromone formula as C.1): `score = strength x (1 + alpha*heat)`, where `strength = matched_terms/requested_terms`, tie-broken by `match_count`.
 
 ```json
 {
   "results": [
     {
-      "id": "vendas/politica-trocas",
+      "id": "sales/exchange-policy",
       "type": "note",
-      "title": "Política de trocas",
-      "trail": ["_index", "vendas/_index"],
+      "title": "Exchange policy",
+      "trail": ["_index", "sales/_index"],
       "score": 0.95,
       "heat": 0.31,
       "match_count": 4,
       "truncated_matches": true,
       "matches": [
-        {"section": "Prazos", "line": 23, "snippet": "…devolução com NF-4412 em até 30 dias…"}
+        {"section": "Deadlines", "line": 23, "snippet": "…return with invoice NF-4412 within 30 days…"}
       ]
     }
   ],
@@ -629,15 +628,15 @@ Ordenação (mesma fórmula de feromônio do C.1): `score = strength × (1 + α�
 }
 ```
 
-Orçamento: ≤ 800 tokens, truncamento explícito (`truncated: true`) cortando nós do fim da lista.
+Budget: <= 800 tokens, explicit truncation (`truncated: true`) dropping nodes off the end of the list.
 
-Uso canônico (decisão do macaco, ensinada no system prompt do orquestrador):
+Canonical use (the monkey's decision, taught in the orchestrator's system prompt):
 
-1. Pergunta contém termo exato/raro → `sniff` direto: cai na seção certa e colhe com `pick(id, section)` — derruba hops-to-banana.
-2. Pergunta conceitual → `locate` (inalterado).
-3. Encadeado: `locate` acha a região, `sniff(terms, scope=galho)` caça o trecho dentro dela.
+1. Question contains an exact/rare term → `sniff` directly: lands in the right section and harvests with `pick(id, section)` — cuts hops-to-banana.
+2. Conceptual question → `locate` (unchanged).
+3. Chained: `locate` finds the region, `sniff(terms, scope=branch)` hunts the snippet within it.
 
-Implementação Fase 0: varredura direta dos arquivos a cada chamada (grep-like, sem índice novo) — sempre fresco por construção, sem estado derivado adicional. PODE ganhar índice (FTS5 de corpo em tabela separada) em fase futura **sem mudança de interface**, desde que a separação de contrato com o `locate` se mantenha.
+Phase 0 implementation: direct file scan on every call (grep-like, no new index) — always fresh by construction, no extra derived state. MAY gain an index (body FTS5 in a separate table) in a future phase **with no interface change**, as long as the contract split with `locate` holds.
 
 ### C.6c `harvest(query: string, terms?: [string], k: int = 3) → HarvestResult`
 
@@ -698,17 +697,17 @@ results first (never silently slicing a body).
 
 ### C.7 `plant(node: NodeSpec) → PlantResult`
 
-`NodeSpec` = frontmatter completo + `body` + `parent` (id do galho destino).
+`NodeSpec` = full frontmatter + `body` + `parent` (destination branch id).
 
-Operação atômica (nesta ordem; falha em qualquer passo = rollback total):
-1. Valida frontmatter contra schema (A.3) e `summary` (A.4);
-2. Verifica unicidade do `id`;
-3. Escreve o arquivo;
-4. Insere a entrada no `## Direct bananas` (ou `## Sub-branches`) do `_index.md` pai;
-5. `git commit` com mensagem padronizada `plant(<id>): <title> [source=<source>]`;
-6. Marca o nó como stale na camada derivada (re-embedding lazy).
+Atomic operation (in this order; failure at any step = full rollback):
+1. Validates frontmatter against the schema (A.3) and `summary` (A.4);
+2. Checks `id` uniqueness;
+3. Writes the file;
+4. Inserts the entry into the parent `_index.md`'s `## Direct bananas` (or `## Sub-branches`);
+5. `git commit` with the standardized message `plant(<id>): <title> [source=<source>]`;
+6. Marks the node stale in the derived layer (lazy re-embedding).
 
-Retorno: `{id, commit, trail}`.
+Returns: `{id, commit, trail}`.
 
 #### C.7.1 Dataset planting — declarative schema (v0.8)
 
@@ -718,15 +717,15 @@ payload to be **born** with the node:
 ```json
 {
   "type": "dataset",
-  "id": "clientes/prospeccao-2026",
-  "parent": "clientes/_index",
-  "title": "Prospecção de clientes 2026",
+  "id": "clients/prospecting-2026",
+  "parent": "clients/_index",
+  "title": "Client prospecting 2026",
   "summary": "...",
   "schema": {
-    "clientes": {
-      "columns": {"nome": "TEXT", "site": "TEXT", "segmento": "TEXT",
-                  "coletado_em": "TEXT"},
-      "primary_key": ["nome"]
+    "clients": {
+      "columns": {"name": "TEXT", "site": "TEXT", "segment": "TEXT",
+                  "collected_at": "TEXT"},
+      "primary_key": ["name"]
     }
   }
 }
@@ -783,15 +782,15 @@ stays as source, the data becomes filterable SQL.
 
 ### C.8 `graft(id: string, patch: GraftPatch) → GraftResult`
 
-`GraftPatch` suporta três operações (combináveis):
-- `set_frontmatter: {campo: valor}` — campos mutáveis apenas (`title`, `summary`, `tags`, `confidence`); `id`, `type`, `created` são imutáveis (`E_READONLY`);
+`GraftPatch` supports three operations (combinable):
+- `set_frontmatter: {field: value}` — mutable fields only (`title`, `summary`, `tags`, `confidence`); `id`, `type`, `created` are immutable (`E_READONLY`);
 - `add_links: [{rel, target}]` / `remove_links: [...]`;
-- `append_section: {header, body}` ou `replace_section: {header, body}`.
+- `append_section: {header, body}` or `replace_section: {header, body}`.
 
-Regras especiais:
-- Mudança de `summary` propaga para todos os `_index.md` que o replicam (mesma transação).
-- **Política reforçar-antes-de-criar (atalhos):** ao fim de uma caçada bem-sucedida, a cascata de decisão é: (1) se já existe atalho cobrindo a conexão entrada→banana na trilha, NÃO criar — apenas incrementar `heat` e `confidence` do existente (fortificação, sem commit); (2) se não existe e a trilha foi ≥ 4 hops, `graft` de `discovered-shortcut` novo com `confidence: 0.5` e `discovered_by: agent`; (3) ligações laterais novas que o agente perceber (`related-to` entre a banana e vizinhos semânticos) entram como **proposta** com `confidence: 0.3`, sujeitas a confirmação ou poda pelo Ranger. O Vine DEVE implementar a verificação do passo 1 dentro do próprio `graft` (idempotência de atalho): `graft` de link duplicado vira fortificação automaticamente, nunca erro nem duplicata.
-- Commit: `graft(<id>): <resumo do patch>`.
+Special rules:
+- A `summary` change propagates to every `_index.md` that replicates it (same transaction).
+- **Reinforce-before-create policy (shortcuts):** at the end of a successful hunt, the decision cascade is: (1) if a shortcut already covers the entry→banana connection on the trail, do NOT create one — just increment the existing one's `heat` and `confidence` (fortification, no commit); (2) if none exists and the trail was >= 4 hops, `graft` a new `discovered-shortcut` with `confidence: 0.5` and `discovered_by: agent`; (3) new lateral connections the agent notices (`related-to` between the banana and semantic neighbors) enter as a **proposal** with `confidence: 0.3`, subject to confirmation or pruning by the Ranger. The Vine MUST implement step 1's check inside `graft` itself (shortcut idempotence): grafting a duplicate link automatically becomes fortification, never an error or a duplicate.
+- Commit: `graft(<id>): <patch summary>`.
 
 ### C.10 `tend(id: string, sql: string) → TendResult` (v0.7 — Phase 2)
 
@@ -838,59 +837,59 @@ Response:
  "payload_hash": "<sha256>", "commit": "<hash>", "elapsed_ms": 4.2}
 ```
 
-### C.9 Concorrência e consistência (Fase 0)
+### C.9 Concurrency and consistency (Phase 0)
 
-- **Um escritor, N leitores:** `plant`/`graft` passam por fila única (mutex global no Vine). Leitura nunca bloqueia.
-- Leitores PODEM ver estado de até 1 escrita atrás (consistência eventual de segundos) — aceitável por design.
-- Lock file `.vine.lock` na raiz impede dois Vines escritores na mesma floresta (`E_LOCKED`).
+- **One writer, N readers:** `plant`/`graft` go through a single queue (global mutex in the Vine). Reads never block.
+- Readers MAY see state up to 1 write behind (eventual consistency of seconds) — acceptable by design.
+- The `.vine.lock` file at the root prevents two writer Vines on the same forest (`E_LOCKED`).
 
 ---
 
-## Parte D — Telemetria (alimenta o feromônio e o Monkey Bench)
+## Part D — Telemetry (feeds the pheromone and the Monkey Bench)
 
-Toda sessão de navegação gera um trace em `_derived/traces/<session>.jsonl`, um evento por chamada de primitiva: `{ts, session, primitive, id, tokens_in, tokens_out, elapsed_ms}`.
+Every navigation session generates a trace in `_derived/traces/<session>.jsonl`, one event per primitive call: `{ts, session, primitive, id, tokens_in, tokens_out, elapsed_ms}`.
 
-Ao final, o orquestrador DEVE fechar a sessão com `outcome: {success: bool, answer_nodes: [ids]}`. É esse fechamento que:
-1. Incrementa `heat` em toda a trilha vencedora (sussurro);
+At the end, the orchestrator MUST close the session with `outcome: {success: bool, answer_nodes: [ids]}`. This closing is what:
+1. Increments `heat` along the whole winning trail (whisper);
 2. Evaluates the shout (v0.6): when the session metric `trail_len` — read
    calls made before the first harvest of an answer node — is `>= 4`, the
    answer nodes come back in `suggest_shortcuts`, and the orchestrator MAY
    `graft` a `discovered-shortcut` from the hunt's entry node (C.8 applies);
-3. Alimenta as métricas do Monkey Bench: **hops-to-banana** = nº de chamadas `look`+`move` até o primeiro `pick`/`query` da resposta; **tokens-to-banana** = Σ tokens_out da sessão; **banana precision** = answer_nodes corretos / answer_nodes colhidos; **trail_len** (v0.6) = chamadas de leitura antes da primeira colheita de um answer_node.
+3. Feeds the Monkey Bench metrics: **hops-to-banana** = number of `look`+`move` calls before the answer's first `pick`/`query`; **tokens-to-banana** = sum of session tokens_out; **banana precision** = correct answer_nodes / harvested answer_nodes; **trail_len** (v0.6) = read calls before the first harvest of an answer_node.
 
 ---
 
-## Parte E — A Tropa (Navegação Paralela por Enxame)
+## Part E — The Troop (Parallel Swarm Navigation)
 
-N macacos (instâncias do SLM navegador) caçam a mesma banana em paralelo, coordenados por **estigmergia intra-sessão**: eles não trocam mensagens — eles sentem o cheiro das trilhas uns dos outros. O Vine já é N-leitores por design (C.9); a Tropa é um componente do **orquestrador** (lado cliente do MCP), não do banco.
+N monkeys (navigator SLM instances) hunt the same banana in parallel, coordinated by **intra-session stigmergy**: they never exchange messages — they smell each other's trails. The Vine is already N-readers by design (C.9); the Troop is an **orchestrator**-side component (the MCP client side), not the bank.
 
-### E.1 Protocolo da caçada
+### E.1 Hunt protocol
 
-1. **Partição de fronteira:** `locate(query, k=N)` → cada macaco recebe um ponto de entrada distinto (top-N resultados). Sem partição, todos exploram a mesma trilha e o paralelismo é desperdiçado.
-2. **Feromônio de sessão:** cada macaco, ao avaliar um nó como promissor (decisão do próprio SLM: "relevante para a pergunta? sim/não"), deposita `session_heat` no escopo da caçada (`_derived/trails.db`, namespace da sessão). `locate`/`look`/`scan` dentro da sessão aplicam `score × (1 + β·session_heat)` — macacos gravitam para regiões onde outros acharam sinal.
-3. **Conjunto de visitados compartilhado:** digests de `look`/`scan` já feitos na sessão ficam num cache compartilhado; macaco que tocaria nó já visitado recebe o digest do cache (custo zero) e o orquestrador o redireciona para fronteira inexplorada.
-4. **Parada:** a caçada encerra quando (a) um macaco colhe banana com confiança alta (auto-avaliação acima de limiar), (b) orçamento de hops da tropa esgota, ou (c) fronteira esvazia. Um **juiz** (pode ser o próprio modelo principal) agrega as colheitas e sintetiza a resposta.
-5. **Pós-sessão:** somente a(s) trilha(s) vencedora(s) convertem `session_heat` em `heat` persistente (Parte D). Trilhas perdedoras evaporam com a sessão — o enxame não polui o feromônio de longo prazo.
+1. **Frontier partition:** `locate(query, k=N)` → each monkey gets a distinct entry point (top-N results). Without partitioning, everyone explores the same trail and the parallelism is wasted.
+2. **Session pheromone:** each monkey, upon judging a node promising (the SLM's own call: "relevant to the question? yes/no"), deposits `session_heat` in the hunt's scope (`_derived/trails.db`, session namespace). `locate`/`look`/`scan` inside the session apply `score x (1 + beta*session_heat)` — monkeys gravitate toward regions where others found signal.
+3. **Shared visited set:** `look`/`scan` digests already made in the session land in a shared cache; a monkey that would touch an already-visited node gets the cached digest instead (zero cost), and the orchestrator redirects it to unexplored frontier.
+4. **Stop:** the hunt ends when (a) a monkey harvests a banana with high confidence (self-assessment above threshold), (b) the troop's hop budget runs out, or (c) the frontier empties. A **judge** (may be the main model itself) aggregates the harvests and synthesizes the answer.
+5. **Post-session:** only the winning trail(s) convert `session_heat` into persistent `heat` (Part D). Losing trails evaporate with the session — the swarm does not pollute long-term pheromone.
 
-### E.2 Notas de implementação
+### E.2 Implementation notes
 
-- **Concorrência:** asyncio no orquestrador; os macacos passam ~95% do tempo aguardando inferência. Na 3090, servir os N macacos pelo mesmo servidor de inferência com *continuous batching* (vLLM/llama.cpp parallel slots) faz N=3-5 custar quase o mesmo wall-clock que N=1.
-- **Dimensionamento:** N=3 é o default; acima de N≈5 o retorno cai (fronteiras se sobrepõem em florestas pequenas). N é parâmetro do Monkey Bench, não constante.
-- **Métrica nova:** *speedup da tropa* = hops-de-relógio (rodadas paralelas) vs hops totais do macaco solitário, e custo total de tokens (a tropa gasta mais tokens somados — o trade-off velocidade × custo deve ser medido, não assumido).
-- **Fase:** Tropa é Fase 1.5 — exige Vine completo + telemetria (Parte D) funcionando. Nada na Fase 0 muda, exceto garantir que `trails.db` suporte namespace de sessão (já previsto no schema de traces).
+- **Concurrency:** asyncio in the orchestrator; the monkeys spend ~95% of their time waiting on inference. On the 3090, serving the N monkeys through the same inference server with *continuous batching* (vLLM/llama.cpp parallel slots) makes N=3-5 cost nearly the same wall-clock as N=1.
+- **Sizing:** N=3 is the default; above N~5 returns diminish (frontiers overlap in small forests). N is a Monkey Bench parameter, not a constant.
+- **New metric:** *troop speedup* = wall-clock hops (parallel rounds) vs the solo monkey's total hops, and total token cost (the troop spends more tokens in aggregate — the speed x cost trade-off MUST be measured, not assumed).
+- **Phase:** Troop is Phase 1.5 — requires the full Vine + telemetry (Part D) working. Nothing in Phase 0 changes, except ensuring `trails.db` supports session namespacing (already anticipated in the trace schema).
 
-## Parte F — Critérios de Aceitação da Fase 0
+## Part F — Phase 0 Acceptance Criteria
 
-Entregável: Vine (MCP, Python) + floresta de teste manual (~100 nós, 10 galhos, ≥1 dataset SQLite) + suíte de testes.
+Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches, >=1 SQLite dataset) + test suite.
 
-1. Todas as primitivas C.1–C.6b funcionais com os contratos exatos acima (locate pode ser BM25-only), incluindo `fields` no `look` e o Catálogo servindo `scan`.
-2. `plant`/`graft` atômicos com commit Git e atualização de índice verificada por teste.
-3. Orçamentos de tokens respeitados (testes com nós sintéticos gigantes verificando truncamento explícito).
-4. `query` rejeita todo SQL de escrita (suíte de injeção: `;DROP`, `ATTACH`, multi-statement, PRAGMA).
-5. Demo: um SLM local (Qwen 7-14B Q4), recebendo apenas as ferramentas MCP e o galho-mestre, responde 10 perguntas multi-hop sobre a floresta de teste, com traces gravados e métricas calculadas.
-6. Latência: p95 de `look`/`move`/`pick` < 10ms, `query` < 50ms, `locate` < 100ms, `sniff` < 100ms (floresta local, NVMe).
-7. `sniff`: encontra fato presente SOMENTE no corpo (invisível ao `locate`), atribui a seção correta, respeita `scope`, normaliza caixa/diacríticos, e rejeita termos vazios (`E_SCHEMA`) — tudo coberto por teste.
-8. Payloads fora do Git (A.3.1): o commit do Vine ignora não-`.md` mesmo que solicitado, e o `git ls-files` da floresta de teste não contém nenhum binário — ambos verificados por teste.
+1. All C.1-C.6b primitives functional with the exact contracts above (locate may be BM25-only), including `fields` in `look` and the Catalog serving `scan`.
+2. `plant`/`graft` atomic with a Git commit and index update, verified by test.
+3. Token budgets respected (tests with giant synthetic nodes verifying explicit truncation).
+4. `query` rejects all write SQL (injection suite: `;DROP`, `ATTACH`, multi-statement, PRAGMA).
+5. Demo: a local SLM (Qwen 7-14B Q4), given only the MCP tools and the master branch, answers 10 multi-hop questions about the test forest, with recorded traces and computed metrics.
+6. Latency: p95 of `look`/`move`/`pick` < 10ms, `query` < 50ms, `locate` < 100ms, `sniff` < 100ms (local forest, NVMe).
+7. `sniff`: finds a fact present ONLY in the body (invisible to `locate`), attributes the correct section, respects `scope`, normalizes case/diacritics, and rejects empty terms (`E_SCHEMA`) — all covered by test.
+8. Payloads outside Git (A.3.1): the Vine's commit ignores non-`.md` files even if requested, and the test forest's `git ls-files` contains no binary — both verified by test.
 9. `harvest` (C.6c): buried fact returns the right matched section under term-scarcity refinement; small bodies come whole; `k` and the 4000-token budget are honored with explicit truncation — all covered by tests.
 10. Forest registry (C.0): per-request forest selection works across two forests with isolated results; lazy first-touch open auto-indexes; path escape and non-forest directories are rejected; single-forest mode serves v0.3 clients unchanged — all covered by tests.
 11. `tend` (C.10): accepts only single-statement INSERT/UPDATE/DELETE (its own
@@ -942,7 +941,7 @@ Entregável: Vine (MCP, Python) + floresta de teste manual (~100 nós, 10 galhos
     carries the proposed links, and the Ranger's H.2 machinery manages
     them (promotable, prunable) — all covered by tests.
 
-Fora do escopo da Fase 0 (não implementar): embeddings/vetores, compaction de `same-as`, sync S3/R2, multi-escritor, Tropa (Parte E — Fase 1.5; apenas garantir namespace de sessão no trails.db). O ingest automático saiu desta lista na v0.9 (Parte G); evaporação e promoção/poda saíram na v0.10 (Parte H).
+Out of scope for Phase 0 (do not implement): embeddings/vectors, `same-as` compaction, S3/R2 sync, multi-writer, Troop (Part E — Phase 1.5; only ensure session namespacing in trails.db). Automatic ingest left this list in v0.9 (Part G); evaporation and promotion/pruning left it in v0.10 (Part H).
 
 ---
 

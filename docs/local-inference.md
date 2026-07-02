@@ -1,106 +1,109 @@
-﻿# Inferência — runbook (local e online)
+# Inference — runbook (local and online)
 
-Como rodar o MonkeyLLM ponta a ponta com modelos locais via **llama.cpp** na
-RTX 3090, baixando os pesos do Hugging Face. Tudo que cai em `models/` e
-`bin/` é git-ignored e reconstruível.
+How to run MonkeyLLM end to end with local models via **llama.cpp** on the
+RTX 3090, downloading weights from Hugging Face. Everything under `models/`
+and `bin/` is git-ignored and rebuildable.
 
 ## Stack
 
-| Papel | Modelo | Servidor | Porta |
+| Role | Model | Server | Port |
 |---|---|---|---|
-| Macaco navegador (SLM) | Qwen2.5-7B-Instruct Q4_K_M | `llama-server` | 8090 |
-| Embedder (camada Canopy) | bge-m3 Q8_0 | `llama-server --embedding` | 8091 |
+| Navigator monkey (SLM) | Qwen2.5-7B-Instruct Q4_K_M | `llama-server` | 8090 |
+| Embedder (Canopy layer) | bge-m3 Q8_0 | `llama-server --embedding` | 8091 |
 
-(8080/8081 foram evitadas: no Windows a 8080 costuma estar reservada pelo
-HTTP.sys — `netstat` mostra LISTENING do PID 4 "System".)
+(8080/8081 were avoided: on Windows, 8080 is often reserved by HTTP.sys —
+`netstat` shows PID 4 "System" LISTENING.)
 
-Os dois são OpenAI-compatible. A Fase 0 (demo das 10 perguntas) precisa só do
-chat; o embedder é opcional e ativa o `locate` híbrido (Fase 1).
+Both are OpenAI-compatible. Phase 0 (the 10-question demo) needs only the
+chat one; the embedder is optional and activates hybrid `locate` (Phase 1).
 
-## Passo a passo
+## Step by step
 
 ```powershell
-# 1. baixar binário llama.cpp (CUDA) + os dois GGUFs  (único passo com rede)
+# 1. download the llama.cpp binary (CUDA) + both GGUFs (only step needing network)
 python scripts/setup_models.py
 
-# 2. subir os dois servidores na GPU (deixe este terminal aberto)
+# 2. start both servers on the GPU (leave this terminal open)
 python scripts/serve_llm.py
 
-# 3. em OUTRO terminal, apontar o cliente para os servidores locais
+# 3. in ANOTHER terminal, point the client at the local servers
 #    PowerShell:
 $env:MONKEYLLM_LLM_ENDPOINT   = "http://localhost:8090/v1"
 $env:MONKEYLLM_LLM_MODEL      = "qwen2.5-7b"
-$env:MONKEYLLM_EMBED_ENDPOINT = "http://localhost:8091/v1"   # opcional (Fase 1)
+$env:MONKEYLLM_EMBED_ENDPOINT = "http://localhost:8091/v1"   # optional (Phase 1)
 $env:MONKEYLLM_EMBED_MODEL    = "bge-m3"
 #    Git Bash / MINGW64:
 #    export MONKEYLLM_LLM_ENDPOINT=http://localhost:8090/v1 MONKEYLLM_LLM_MODEL=qwen2.5-7b
 #    export MONKEYLLM_EMBED_ENDPOINT=http://localhost:8091/v1 MONKEYLLM_EMBED_MODEL=bge-m3
 
-# 4. (opcional, Fase 1) construir a camada vetorial da floresta
+# 4. (optional, Phase 1) build the forest's vector layer
 python -m monkeyllm.cli canopy build --forest forests/forest-fixture
-#    -> _derived/canopy/  (vetores normalizados, reconstruível)
+#    -> _derived/canopy/  (normalized vectors, rebuildable)
 
-# 5. rodar a demo das 10 perguntas multi-hop (critério F.5)
+# 5. run the 10 multi-hop question demo (criterion F.5)
 python examples/demo/run_demo.py
 #    -> _derived/traces/*.jsonl  +  _derived/demo-report.json
 
-# 6. benchmark do locate (qualidade + velocidade, critério F.6)
+# 6. locate benchmark (quality + speed, criterion F.6)
 python scripts/bench_locate.py
 #    -> _derived/bench-locate.json
 ```
 
-Sem o passo 3/4, tudo funciona em **BM25-only** (a Fase 0 é assim por design —
-zero embeddings). O benchmark do passo 6 roda sem nenhum servidor para a linha
-`bm25`; com `MONKEYLLM_EMBED_ENDPOINT` + canopy construído ele acrescenta a
-linha `hybrid` lado a lado.
+Without step 3/4, everything works in **BM25-only** mode (Phase 0 is
+designed this way — zero embeddings). Step 6's benchmark runs with no
+server at all for the `bm25` row; with `MONKEYLLM_EMBED_ENDPOINT` + a built
+canopy it adds the `hybrid` row alongside.
 
-## Modelo online (OpenRouter) — sem GPU local
+## Online model (OpenRouter) — no local GPU
 
-Quem não quer (ou não pode) rodar modelo local usa o OpenRouter: mesma
-interface OpenAI, modelos pequenos e baratos hospedados, zero VRAM. Basta a
-chave — o cliente detecta sozinho:
+If you don't want (or can't) run a local model, use OpenRouter: the same
+OpenAI interface, small and cheap hosted models, zero VRAM. Just the key —
+the client detects it on its own:
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
-# opcional: escolher o modelo (default: google/gemma-4-26b-a4b-it:free)
+# optional: pick the model (default: google/gemma-4-26b-a4b-it:free)
 # export MONKEYLLM_LLM_MODEL=google/gemma-4-31b-it
 python examples/demo/run_demo.py
 ```
 
-Atenção ao id do modelo: o catálogo do OpenRouter é diferente do Hugging Face
-(ex.: lá não existe o 12B; os Gemma 4 hospedados são `google/gemma-4-26b-a4b-it`
-e `google/gemma-4-31b-it`, com variantes `:free`). Id errado = HTTP 400, e o
-cliente agora mostra a mensagem do provedor no erro.
+Watch the model id: OpenRouter's catalog differs from Hugging Face's (e.g.
+there is no 12B there; the hosted Gemma 4 models are
+`google/gemma-4-26b-a4b-it` and `google/gemma-4-31b-it`, with `:free`
+variants). A wrong id means HTTP 400, and the client now surfaces the
+provider's own message in the error.
 
-Notas:
+Notes:
 
-- A resolução de provedor é: `MONKEYLLM_LLM_ENDPOINT` (explícito) >
+- Provider resolution order: `MONKEYLLM_LLM_ENDPOINT` (explicit) >
   `OPENROUTER_API_KEY` (OpenRouter) > `HF_TOKEN` (HF serverless).
-- O cliente já faz retry com backoff em 429/5xx — importante no tier
-  gratuito do OpenRouter (~20 req/min).
-- O `locate` híbrido continua exigindo o embedder local (OpenRouter não serve
-  embeddings); sem ele, cai graciosamente para BM25-only — a demo funciona
-  100% online mesmo assim.
-- Latência esperada: maior que local (rede + fila), mas sem custo de máquina.
+- The client already retries with backoff on 429/5xx — important on
+  OpenRouter's free tier (~20 req/min).
+- Hybrid `locate` still requires the local embedder (OpenRouter does not
+  serve embeddings); without one it gracefully falls back to BM25-only —
+  the demo still works 100% online either way.
+- Expected latency: higher than local (network + queue), but zero machine
+  cost.
 
-## Variáveis de ambiente
+## Environment variables
 
-| Var | Default | Uso |
+| Var | Default | Use |
 |---|---|---|
-| `MONKEYLLM_LLM_ENDPOINT` | (vazio) | base_url OpenAI do chat (llama.cpp local, vLLM...) |
-| `OPENROUTER_API_KEY` | (vazio) | ativa o OpenRouter quando não há endpoint local |
-| `MONKEYLLM_LLM_MODEL` | por provedor | id/alias do modelo de chat |
-| `MONKEYLLM_LLM_MAX_TOKENS` | `600` | orçamento de completion (aumente p/ modelos raciocinadores) |
-| `MONKEYLLM_EMBED_ENDPOINT` | (vazio = BM25-only) | base_url OpenAI do embedder |
-| `MONKEYLLM_EMBED_MODEL` | `bge-m3` | id/alias do embedder |
-| `HF_TOKEN` | — | token HF (download + serverless) |
+| `MONKEYLLM_LLM_ENDPOINT` | (empty) | chat's OpenAI base_url (local llama.cpp, vLLM...) |
+| `OPENROUTER_API_KEY` | (empty) | activates OpenRouter when there's no local endpoint |
+| `MONKEYLLM_LLM_MODEL` | per provider | chat model id/alias |
+| `MONKEYLLM_LLM_MAX_TOKENS` | `600` | completion budget (raise for reasoning models) |
+| `MONKEYLLM_EMBED_ENDPOINT` | (empty = BM25-only) | embedder's OpenAI base_url |
+| `MONKEYLLM_EMBED_MODEL` | `bge-m3` | embedder id/alias |
+| `HF_TOKEN` | — | HF token (download + serverless) |
 
-## Notas
+## Notes
 
-- **VRAM:** Qwen 7B Q4 (~5 GB) + bge-m3 Q8 (~0,7 GB) cabem folgados nos 24 GB da
-  3090. Para mais qualidade no multi-hop: `setup_models.py --llm-file
+- **VRAM:** Qwen 7B Q4 (~5 GB) + bge-m3 Q8 (~0.7 GB) fit comfortably in the
+  3090's 24 GB. For better multi-hop quality: `setup_models.py --llm-file
   Qwen2.5-14B-Instruct-Q4_K_M.gguf --llm-repo bartowski/Qwen2.5-14B-Instruct-GGUF`.
-- **Trocar de embedder** invalida o índice: rode `canopy build` de novo (o modelo
-  fica gravado em `_derived/canopy/index.json`).
-- O `locate` só vira híbrido quando **há índice E um embedder** — qualquer outra
-  combinação permanece BM25-only, sem mudança de contrato (arquitetura §3).
+- **Switching embedders** invalidates the index: re-run `canopy build` (the
+  model is recorded in `_derived/canopy/index.json`).
+- `locate` only turns hybrid when **there is an index AND an embedder** —
+  any other combination stays BM25-only, with no contract change
+  (architecture doc, §3).

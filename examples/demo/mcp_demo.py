@@ -92,7 +92,7 @@ async def run_question(session, chat, q: dict, verbose: bool = True) -> dict:
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": f"Galho-mestre da floresta:\n{json.dumps(master, ensure_ascii=False)}\n\nPergunta: {q['question']}",
+            "content": f"Forest master index:\n{json.dumps(master, ensure_ascii=False)}\n\nQuestion: {q['question']}",
         },
     ]
     answer, answer_nodes = None, []
@@ -102,7 +102,7 @@ async def run_question(session, chat, q: dict, verbose: bool = True) -> dict:
         messages.append({"role": "assistant", "content": reply})
         action = parse_action(reply)
         if action is None:
-            messages.append({"role": "user", "content": 'Formato inválido. Responda apenas com o JSON {"tool": ..., "args": ...}.'})
+            messages.append({"role": "user", "content": 'Invalid format. Respond only with the JSON {"tool": ..., "args": ...}.'})
             continue
         tool, args = action.get("tool"), action.get("args") or {}
         if verbose:
@@ -115,13 +115,13 @@ async def run_question(session, chat, q: dict, verbose: bool = True) -> dict:
         if call_key in visited:
             messages.append({"role": "user", "content": json.dumps({
                 "repeat": True,
-                "hint": "Chamada idêntica à anterior — o resultado seria o mesmo. "
-                        "Mude os termos, a ferramenta, ou responda com o que já tem.",
+                "hint": "Identical call to the previous one — the result would be the same. "
+                        "Change the terms, the tool, or answer with what you already have.",
             }, ensure_ascii=False)})
             continue
         visited.add(call_key)
         if tool not in MCP_TOOLS:
-            result = {"error": {"code": "E_SCHEMA", "message": f"ferramenta desconhecida: {tool}"}}
+            result = {"error": {"code": "E_SCHEMA", "message": f"unknown tool: {tool}"}}
         else:
             result = await call_tool(session, tool, args)
         messages.append({"role": "user", "content": json.dumps(result, ensure_ascii=False, default=str)})
@@ -134,7 +134,7 @@ async def run_question(session, chat, q: dict, verbose: bool = True) -> dict:
             answer = str(fargs.get("text", "")).strip() or None
             answer_nodes = list(fargs.get("answer_nodes") or [])
             if verbose and answer:
-                print("    [força] síntese após esgotar os passos")
+                print("    [force] synthesis after exhausting steps")
 
     expected = set(q["expected_nodes"])
     harvested = set(answer_nodes)
@@ -161,8 +161,8 @@ async def amain(args, chat) -> int:
     results = []
     async with open_mcp_session(args.url, args.forest) as session:
         tools = await session.list_tools()
-        print(f"transporte: {'http ' + args.url if args.url else 'stdio (servidor próprio)'}")
-        print(f"tools no servidor: {sorted(t.name for t in tools.tools)}")
+        print(f"transport: {'http ' + args.url if args.url else 'stdio (own server)'}")
+        print(f"server tools: {sorted(t.name for t in tools.tools)}")
         for q in questions:
             print(f"\n== {q['id']}: {q['question']}")
             t0 = time.perf_counter()
