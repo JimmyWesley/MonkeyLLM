@@ -159,6 +159,8 @@ def make_llm():
         # unless MONKEYLLM_LLM_REASONING=on. OpenRouter normalizes the
         # `reasoning` param across providers.
         reasoning_on = os.environ.get("MONKEYLLM_LLM_REASONING", "off").lower() == "on"
+        if reasoning_on:  # give the thinking tokens room beyond the content budget
+            max_tokens += 1000
 
         def chat(messages: list[dict]) -> str:
             payload = {"model": model, "messages": messages,

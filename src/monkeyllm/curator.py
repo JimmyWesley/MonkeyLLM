@@ -257,6 +257,12 @@ def make_chat() -> tuple[Callable[[list[dict]], str], str]:
     model = os.environ.get("MONKEYLLM_LLM_MODEL", "local")
     api_key = os.environ.get("MONKEYLLM_LLM_API_KEY", "no-key")
     max_tokens = int(os.environ.get("MONKEYLLM_LLM_MAX_TOKENS", "300"))
+    # thinking off unless MONKEYLLM_LLM_REASONING=on (OpenRouter normalizes
+    # the `reasoning` param across providers); when on, add room for the
+    # thinking tokens or the final content comes back empty/truncated
+    reasoning_on = os.environ.get("MONKEYLLM_LLM_REASONING", "off").lower() == "on"
+    if reasoning_on:
+        max_tokens += 1000
     client = httpx.Client(base_url=endpoint.rstrip("/"),
                           headers={"Authorization": f"Bearer {api_key}"},
                           timeout=180.0)
@@ -269,10 +275,11 @@ def make_chat() -> tuple[Callable[[list[dict]], str], str]:
             pass
 
     def chat(messages: list[dict]) -> str:
-        resp = client.post("/chat/completions", json={
-            "model": model, "messages": messages,
-            "max_tokens": max_tokens, "temperature": 0.1,
-        })
+        payload = {"model": model, "messages": messages,
+                   "max_tokens": max_tokens, "temperature": 0.1}
+        if "openrouter" in endpoint and not reasoning_on:
+            payload["reasoning"] = {"enabled": False}
+        resp = client.post("/chat/completions", json=payload)
         if resp.status_code >= 400:
             raise RuntimeError(f"LLM endpoint {resp.status_code}: {resp.text[:300]}")
         return resp.json()["choices"][0]["message"].get("content") or ""
