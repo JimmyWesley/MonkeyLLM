@@ -50,6 +50,15 @@ from monkeyllm import Vine, VineError  # noqa: E402
 DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 MAX_STEPS = 14
 
+# Confidence gate (v0.12 demo policy): the answer action carries a self-reported
+# confidence, the harness audits grounding from session state, and the effective
+# confidence is min(reported, audited) — the model cannot talk its way up, only
+# harvesting can. Low-confidence answers are rejected while budget remains; from
+# RELOCATE_AFTER rejections on, the monkey is relocated to unexplored branches.
+CONF_ACCEPT = 0.7      # effective confidence needed to accept an answer mid-run
+MAX_REJECTIONS = 3     # bounced answers per session (each refunds its step)
+RELOCATE_AFTER = 2     # from this rejection on, suggest unexplored branches
+
 
 def step_budget(q: dict) -> int:
     """Width-aware step budget. MAX_STEPS was calibrated on single-chain
@@ -73,7 +82,7 @@ Tools (always respond with a SINGLE JSON object, nothing else):
 - {"tool": "pick", "args": {"id": "...", "section": null}} -> full body (only when summary confirms the target)
 - {"tool": "query", "args": {"id": "...", "sql": "SELECT ..."}} -> read-only SQL on type:dataset nodes
 - {"tool": "scan", "args": {"parent_id": "...", "filter": {}}}  -> filter children by metadata
-- {"tool": "answer", "args": {"text": "...", "answer_nodes": ["id1", "id2"]}} -> final answer
+- {"tool": "answer", "args": {"text": "...", "answer_nodes": ["full/id"], "confidence": 0.9, "proof": "sentence copied EXACTLY from a tool result"}} -> final answer
 
 Strategy: does the question have an EXACT rare term (code, proper name, number)? sniff first — it
 lands directly in the right section and you harvest with pick(id, section). Conceptual question? locate
@@ -86,6 +95,11 @@ Important rules:
   not exist — refine with locate (more specific terms) or scan(parent_id, filter).
 - Repeating the SAME call with the SAME arguments returns the same result; change tool or terms.
 - type:dataset nodes respond via SQL: read the manual in look and use query (aggregates are not in text).
+- answer rules: answer_nodes = exact full ids from tool results, only nodes you opened (look/pick/query)
+  or sniff hit. proof = ONE sentence copied verbatim from a tool result that states the answer; text
+  must repeat EVERY number in proof. confidence: 0.9 proof states the answer, 0.5 partial, 0.2 guess.
+  A low-confidence answer is rejected with a fix — do the fix, then answer again.
+- totals/highest/sums exist ONLY via query on the dataset node (the SQL is in its Query manual).
 The forest map (master index) is in the first user message."""
 
 # Pre-sniff prompt (spec v0.1), kept VERBATIM for the A/B baseline arm
@@ -115,10 +129,11 @@ The forest map (master index) is in the first user message."""
 # it spent. When the step budget runs out, force ONE closing call — the
 # evidence (sniff snippets, picked bodies) is already in the context.
 FORCED_ANSWER_MSG = (
-    "Step budget exhausted. Do NOT call more tools. Based ONLY on what you "
-    "have already seen above (sniff snippets, picked bodies), answer now with "
-    '{"tool": "answer", "args": {"text": "...", "answer_nodes": ["..."]}}. '
-    "If evidence appeared in a snippet, use it literally."
+    "Step budget exhausted. Do NOT call more tools. Based ONLY on what you have "
+    "already seen above (sniff snippets, picked bodies, query rows, locate summaries), "
+    'answer now with {"tool": "answer", "args": {"text": "...", "answer_nodes": ["..."], '
+    '"confidence": 0.5, "proof": "sentence copied from a result above"}}. '
+    "If evidence appeared in a snippet, copy it literally. Keep text under 2 sentences."
 )
 
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
@@ -226,6 +241,142 @@ def parse_action(text: str) -> dict | None:
     return None
 
 
+SEARCH_TOOLS = {"locate", "sniff"}
+OPEN_TOOLS = {"look", "pick", "query"}
+_STOPWORDS = {"the", "a", "an", "of", "in", "on", "for", "and", "or", "to", "with",
+              "was", "is", "are", "what", "which", "who", "how", "many", "much",
+              "did", "does", "do", "by", "from"}
+_NUM_RE = re.compile(r"\d[\d.,:/]*")
+_NEG_CLAIM_RE = re.compile(
+    r"\b(?:not|no|never|cannot|can't|doesn't|don't|unable)\b"
+    r".{0,60}?\b(?:available|provided?|included?|present|specified|contains?|"
+    r"exists?|found|determine|in the (?:data|dataset))", re.I | re.S)
+
+
+def _norm_text(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def _number_tokens(s: str) -> list[str]:
+    return [t for t in _NUM_RE.findall(s or "") if sum(c.isdigit() for c in t) >= 2]
+
+
+def _digits(s: str) -> str:
+    return re.sub(r"\D", "", s)
+
+
+def _call_key(tool: str, args: dict) -> str:
+    """Visited-cache key. Search calls are normalized (lowercase, sorted terms,
+    stopword-free) so re-phrased near-duplicates collide with the repeat hint
+    instead of silently burning budget (the locate spiral of q02/q04/q06)."""
+    if tool == "locate":
+        terms = sorted(set(re.findall(r"[a-z0-9]+", str(args.get("query", "")).lower())) - _STOPWORDS)
+        return "locate:" + " ".join(terms)
+    if tool == "sniff":
+        terms = sorted(str(t).lower() for t in (args.get("terms") or []))
+        return f"sniff:{' '.join(terms)}:{args.get('scope')}"
+    return f"{tool}:{json.dumps(args, ensure_ascii=False, sort_keys=True)}"
+
+
+def _collect_ids(obj, out: dict) -> None:
+    """Every node id (+type when adjacent) present in a tool result."""
+    if isinstance(obj, dict):
+        if isinstance(obj.get("id"), str):
+            out.setdefault(obj["id"], obj.get("type"))
+        for v in obj.values():
+            _collect_ids(v, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            _collect_ids(v, out)
+
+
+def _top_hit(result) -> str | None:
+    hits = _hit_ids(result)
+    return hits[0] if hits else None
+
+
+def _hit_ids(result) -> list[str]:
+    """Ordered ids of the actual hits (never edge targets or trail entries)."""
+    ids: list[str] = []
+    if isinstance(result, dict):
+        for key in ("results", "hits", "matches"):
+            for h in result.get(key) or []:
+                if isinstance(h, dict) and isinstance(h.get("id"), str):
+                    ids.append(h["id"])
+    return ids
+
+
+_ID_SHAPE_RE = re.compile(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_.-]+)+")
+
+
+def _clean_node_id(s: str) -> str:
+    """Rescue an id from a garbled answer_nodes entry ("{id: 'a/b', ..." -> "a/b")."""
+    s = str(s).strip()
+    m = _ID_SHAPE_RE.search(s)
+    return m.group(0) if m and not re.fullmatch(r"[A-Za-z0-9_./-]+", s) else s
+
+
+def _extract_answer_fields(raw: str) -> tuple[str | None, list[str]]:
+    """Salvage text/answer_nodes from a malformed or truncated answer JSON."""
+    text = None
+    m = re.search(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)', raw)
+    if m:
+        try:
+            text = json.loads('"' + m.group(1).rstrip("\\") + '"')
+        except json.JSONDecodeError:
+            text = m.group(1)
+    nodes: list[str] = []
+    mn = re.search(r'"answer_nodes"\s*:\s*\[([^\]]*)', raw)
+    if mn:
+        nodes = re.findall(r'"([^"]+)"', mn.group(1))
+    return (text.strip() or None) if text else None, nodes
+
+
+def _audit_answer(nodes: list, text: str, proof: str, ground: dict,
+                  skip: set) -> tuple[float, str, str]:
+    """Harness-side grounding score for an answer: (score, code, fix-hint).
+    Checked most-severe first; `skip` holds soft codes already bounced once
+    (paraphrase/derived-figure false positives get one bounce, never a loop)."""
+    if not nodes:
+        return 0.0, "no_nodes", ("answer_nodes is empty. Cite the exact full ids of "
+                                 "the nodes that contain your facts (open them first).")
+    unknown = [n for n in nodes if n not in ground["seen_ids"] and not ground["exists"](n)]
+    if unknown:
+        return 0.0, "bad_ids", (f'unknown node id "{unknown[0]}" — use the exact full '
+                                "id as returned by the tools (never shorten it).")
+    unqueried = [n for n in nodes
+                 if ground["seen_ids"].get(n) == "dataset" and n not in ground["queried"]]
+    if unqueried:
+        return 0.2, "dataset", (f"you cite the dataset {unqueried[0]} but never ran query on it. "
+                                "Aggregates are not in text: look shows its Query manual, then "
+                                f'{{"tool": "query", "args": {{"id": "{unqueried[0]}", "sql": "..."}}}}.')
+    if _NEG_CLAIM_RE.search(text):
+        ds = [i for i, t in ground["seen_ids"].items()
+              if t == "dataset" and i not in ground["queried"]]
+        if ds:
+            return 0.2, "negative", (f"you claim data is unavailable but never ran query on {ds[0]} "
+                                     "— run the SQL from its Query manual first.")
+    unharvested = [n for n in nodes if n not in ground["harvested"]]
+    if unharvested and "unharvested" not in skip:
+        return 0.3, "unharvested", (f"you cite {unharvested[0]} without having opened it: "
+                                    f'{{"tool": "pick", "args": {{"id": "{unharvested[0]}"}}}} '
+                                    "to confirm the fact, then answer again.")
+    if "numbers" not in skip:
+        missing = [t for t in _number_tokens(text)
+                   if not any(b == _digits(t) or b.startswith(_digits(t))
+                              for b in ground["nums"])]
+        if missing:
+            return 0.3, "numbers", (f'the number "{missing[0]}" never appeared in any tool result '
+                                    "you saw. Open the node that states it, or correct the number.")
+    if proof and "proof" not in skip and _norm_text(proof) not in ground["blob"]:
+        return 0.5, "proof", ("proof must be ONE sentence copied EXACTLY from a tool "
+                              "result you received — copy it verbatim.")
+    if not proof and "no_proof" not in skip:
+        return 0.6, "no_proof", ('add "proof": copy the exact sentence from a tool '
+                                 "result that states your answer.")
+    return 0.9, "ok", ""
+
+
 def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=None,
                  use_sniff: bool = True, learn: bool = False) -> dict:
     vine = Vine(forest, writable=learn, session=f"demo-{q['id']}", embedder=embedder)
@@ -241,24 +392,160 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
         answer, answer_nodes = None, []
         entry_id: str | None = None  # landing zone: first node the monkey touches
         visited: set[str] = set()  # visited-cache (spec E.1.3): identical calls are not re-run
-        for step in range(step_budget(q)):
+        # grounding state for the confidence audit: everything the model saw
+        seen_ids: dict[str, str | None] = {}
+        _collect_ids(master, seen_ids)
+        ground = {
+            "seen_ids": seen_ids,
+            "harvested": set(),  # ids opened via look/pick/query, or hit by sniff
+            "queried": set(),    # dataset ids that answered a query
+            "nums": {_digits(t) for t in _number_tokens(json.dumps(master, default=str))},
+            "blob": _norm_text(json.dumps(master, ensure_ascii=False, default=str)),
+            "exists": vine.forest.exists,
+        }
+        branches = sorted(i for i, t in seen_ids.items()
+                          if (t == "branch" or "/" not in i) and i != "_index")
+        rejections, bounced, confidence = 0, set(), None
+        last_top: str | None = None
+        consec_search = 0
+        # stall ladder: a 1B ignores textual hints, so on repeated stalls the
+        # harness ACTS — it opens the next unopened hit itself (auto-look)
+        stall, auto_opens = 0, 0
+        pending_hits: list[str] = []  # unopened hit ids, accumulated across searches
+        node_text: dict[str, str] = {}  # nid -> normalized evidence the model saw from it
+        node_nums: dict[str, set] = {}  # nid -> digit tokens seen in its evidence
+        max_steps = step_budget(q)
+        turn, deadline_sent = 0, False
+
+        def absorb(nid: str | None, payload, global_too: bool = True) -> None:
+            """Register a tool result as seen evidence (global + per-node)."""
+            _collect_ids(payload, seen_ids)
+            blob = json.dumps(payload, ensure_ascii=False, default=str)
+            norm = _norm_text(blob)
+            nums = {_digits(t) for t in _number_tokens(blob)}
+            if global_too:
+                ground["blob"] += " " + norm
+                ground["nums"].update(nums)
+            if nid:
+                node_text[nid] = node_text.get(nid, "") + " " + norm
+                node_nums.setdefault(nid, set()).update(nums)
+
+        def open_digest(nid: str):
+            """look(nid) + full evidence bookkeeping; None when not openable."""
+            if nid in ground["harvested"] or nid == "_index":
+                return None
+            try:
+                d = vine.look(nid)
+            except VineError:
+                return None
+            ground["harvested"].add(nid)
+            absorb(nid, d)
+            return d
+
+        def auto_open_next():
+            while pending_hits:
+                d = open_digest(pending_hits.pop(0))
+                if d is not None:
+                    return d
+            return None
+
+        def attribute_nodes(text: str, proof: str) -> list[str]:
+            """When the model forgets answer_nodes, find which harvested nodes
+            actually back its proof/numbers instead of bouncing it (q04 died
+            re-sending the same uncited answer three times)."""
+            p = _norm_text(proof)
+            cands = [i for i, t in node_text.items() if p and p in t]
+            if not cands:
+                nums = {_digits(t) for t in _number_tokens(text)}
+                scored = sorted(((len(nums & ns), i) for i, ns in node_nums.items()
+                                 if nums & ns), reverse=True)
+                cands = [i for _, i in scored[:2]]
+            return cands[:2]
+        while (turn - rejections) < max_steps:  # a rejected answer refunds its step
+            remaining = max_steps - (turn - rejections)
+            if remaining == 2 and not deadline_sent:
+                deadline_sent = True
+                messages.append({"role": "user", "content": json.dumps(
+                    {"deadline": "2 steps left — harvest the last missing fact or answer NOW"})})
+            turn += 1
             reply = chat(messages)
             messages.append({"role": "assistant", "content": reply})
             action = parse_action(reply)
             if action is None:
+                stall += 1
                 messages.append({"role": "user", "content": 'Invalid format. Respond only with the JSON {"tool": ..., "args": ...}.'})
                 continue
             tool, args = action.get("tool"), action.get("args") or {}
             if verbose:
-                print(f"    [{step+1}] {tool}({json.dumps(args, ensure_ascii=False)[:110]})")
+                print(f"    [{turn}] {tool}({json.dumps(args, ensure_ascii=False)[:110]})")
             if tool == "answer":
-                answer = str(args.get("text", "")).strip()
-                answer_nodes = list(args.get("answer_nodes") or [])
-                break
+                text = str(args.get("text", "")).strip()
+                proof = str(args.get("proof") or "").strip()
+                nodes = [_clean_node_id(n) for n in (args.get("answer_nodes") or [])]
+                # auto-repair shortened ids (basename only, e.g. "leaf" -> "branch/leaf")
+                for i, n in enumerate(nodes):
+                    if n not in seen_ids and not vine.forest.exists(n):
+                        cand = [s for s in seen_ids if s.split("/")[-1] == n]
+                        if len(cand) == 1:
+                            nodes[i] = cand[0]
+                if not nodes:  # cite for it instead of bouncing (q04 never self-fixed)
+                    nodes = attribute_nodes(text, proof)
+                try:
+                    reported = max(0.0, min(1.0, float(args.get("confidence"))))
+                except (TypeError, ValueError):
+                    reported = None
+                audit, code, hint = _audit_answer(nodes, text, proof, ground, bounced)
+                eff = audit if reported is None else min(reported, audit)
+                if eff >= CONF_ACCEPT or rejections >= MAX_REJECTIONS or remaining <= 1:
+                    if proof and _norm_text(proof) in ground["blob"] \
+                            and _norm_text(proof) not in _norm_text(text):
+                        # append the verified quote: the deliverable carries the
+                        # forest's own words, immune to 1B paraphrase token loss
+                        text += f' [evidence: "{proof}"]'
+                    answer, answer_nodes, confidence = text, nodes, round(eff, 2)
+                    break
+                rejections += 1
+                if code in ("unharvested", "numbers", "proof", "no_proof"):
+                    bounced.add(code)  # soft checks bounce once, never loop
+                rej = {"answer_rejected": True, "confidence": round(eff, 2),
+                       "fix": hint or ("your own confidence is low: verify the fact "
+                                       "(pick the node) or hunt in another area.")}
+                explored = {h.split("/")[0] for h in ground["harvested"]}
+                unexplored = [b for b in branches if b not in explored][:3]
+                if rejections >= RELOCATE_AFTER and unexplored:
+                    rej["relocate"] = {
+                        "unexplored_branches": unexplored,
+                        "hint": ("the fact may live in another area: locate with NEW "
+                                 "terms or move() into one of these branches")}
+                if verbose:
+                    print(f"    [reject] confidence={rej['confidence']} ({code}) "
+                          f"rejections={rejections}")
+                messages.append({"role": "user",
+                                 "content": json.dumps(rej, ensure_ascii=False)})
+                continue
             if entry_id is None and tool in ("look", "move", "pick", "query", "scan"):
                 entry_id = args.get("id") or args.get("parent_id")
-            call_key = f"{tool}:{json.dumps(args, ensure_ascii=False, sort_keys=True)}"
+            call_key = _call_key(tool, args)
             if call_key in visited:
+                stall += 1
+                if stall >= 2 and auto_opens < 3:
+                    digest = auto_open_next()
+                    if digest is not None:
+                        auto_opens += 1
+                        payload = {"auto_opened": digest.get("id"),
+                                   "note": ("you were stuck repeating searches, so the "
+                                            "harness opened this node for you"),
+                                   "digest": digest}
+                        if digest.get("type") == "dataset":
+                            payload["hint"] = ("this is a dataset: totals/aggregates exist "
+                                               "ONLY via query — copy the SQL from its Query manual.")
+                        if verbose:
+                            print(f"    [auto] opened {digest.get('id')} (stall rescue)")
+                        messages.append({"role": "user", "content": json.dumps(
+                            payload, ensure_ascii=False, default=str)})
+                        stall = 0
+                        continue
+                    break  # stuck with nothing left to open: synthesize from context
                 hint = ("Identical call to the previous one — the result would be the same. "
                         "Change the terms, the tool, or answer with what you already have.")
                 if use_sniff:
@@ -280,19 +567,151 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
                     result = fn(**args)
             except VineError as e:
                 result = e.to_dict()
-            except TypeError as e:
+            except (TypeError, ValueError, AttributeError) as e:
+                # model-fabricated args must never kill the hunt
                 result = {"error": {"code": "E_SCHEMA", "message": str(e)}}
+            # grounding bookkeeping + harness-side navigation nudges
+            ok = isinstance(result, dict) and "error" not in result
+            nid = args.get("id") or args.get("parent_id")
+            absorb(nid if (ok and tool in OPEN_TOOLS) else None, result)
+            stall = stall + 1 if not ok else 0  # errors stall too; progress resets
+            if ok and tool in OPEN_TOOLS and nid:
+                ground["harvested"].add(nid)
+                if tool == "query":
+                    ground["queried"].add(nid)
+            if not ok and tool == "query":
+                result["hint"] = ("only type:dataset nodes answer SQL — read text nodes "
+                                  'with {"tool": "pick", "args": {"id": "..."}} instead.')
+            if ok and tool == "sniff":
+                for key in ("results", "hits", "matches"):
+                    for h in result.get(key) or []:
+                        if isinstance(h, dict) and isinstance(h.get("id"), str):
+                            ground["harvested"].add(h["id"])  # the snippet was shown
+                            absorb(h["id"], h, global_too=False)
+            if ok and tool == "look" and result.get("type") == "dataset":
+                result["hint"] = ("this is a dataset: totals/aggregates exist ONLY via "
+                                  "query — copy the SQL from the Query manual above.")
+            if ok and tool in SEARCH_TOOLS:
+                hit_list = _hit_ids(result)
+                pending_hits.extend(i for i in hit_list
+                                    if i not in pending_hits and i not in ground["harvested"])
+                if tool == "locate":
+                    # eager harvest: the helicopter drops the monkey AT the tree —
+                    # top hits come back already opened (a 1B ignores "go look"
+                    # hints, but reads evidence placed inside the result), and the
+                    # top hit also brings its full body: a local SLM drinks tokens
+                    # cheaply, so feed it the flesh, not just the scent
+                    digests = [d for d in (open_digest(h) for h in hit_list[:2]) if d]
+                    if digests:
+                        try:
+                            body = vine.pick(digests[0]["id"])
+                            absorb(digests[0]["id"], body)
+                            digests[0]["body"] = body.get("body")
+                        except (VineError, KeyError):
+                            pass
+                        result["digests"] = digests
+                        result["digests_note"] = ("the top hits are already opened above: "
+                                                  "answer from these digests citing their ids, "
+                                                  "or go deeper with pick/query")
+                        if verbose:
+                            print(f"    [digest] {', '.join(d.get('id', '?') for d in digests)}")
+                top = _top_hit(result)
+                consec_search += 1
+                if top and top == last_top and consec_search >= 2:
+                    result["hint"] = ('the digests above may already contain the answer — reply '
+                                      'with {"tool": "answer", ...} citing those ids, or query '
+                                      "the dataset using its query_manual.")
+                if consec_search >= 3 and auto_opens < 3:
+                    # new-but-useless searches evade the visited cache (q06 pasted
+                    # result summaries as queries); rescue here too
+                    digest = auto_open_next()
+                    if digest is not None:
+                        auto_opens += 1
+                        result["rescue_digest"] = digest
+                        result["rescue_note"] = ("stop searching — the harness opened the "
+                                                 "next unread hit for you; answer from it "
+                                                 "or from the digests above")
+                        if verbose:
+                            print(f"    [auto] opened {digest.get('id')} (search-spiral rescue)")
+                last_top = top or last_top
+            elif ok:
+                consec_search = 0
             messages.append({"role": "user", "content": json.dumps(result, ensure_ascii=False, default=str)})
 
         if answer is None:
+            # forced synthesis is a short loop, not one shot (q06 died on a single
+            # parse failure); the last resort salvages the raw reply — the evidence
+            # is already in context and an unanswered hunt wastes every token spent.
             messages.append({"role": "user", "content": FORCED_ANSWER_MSG})
-            action = parse_action(chat(messages))
-            if action and action.get("tool") == "answer":
-                fargs = action.get("args") or {}
-                answer = str(fargs.get("text", "")).strip() or None
-                answer_nodes = list(fargs.get("answer_nodes") or [])
+            forced_replies, forced_bounced = [], False
+            for _attempt in range(3):
+                raw = chat(messages)
+                messages.append({"role": "assistant", "content": raw})
+                forced_replies.append(raw)
+                action = parse_action(raw)
+                fargs = None
+                if action and action.get("tool") == "answer":
+                    fargs = action.get("args") or {}
+                else:  # malformed/truncated JSON: salvage its text field
+                    etext, enodes = _extract_answer_fields(raw)
+                    if etext:
+                        fargs = {"text": etext, "answer_nodes": enodes}
+                if fargs is None:
+                    messages.append({"role": "user", "content":
+                                     'Output ONLY the JSON object — the first character of your reply must be "{".'})
+                    continue
+                text = str(fargs.get("text", "")).strip()
+                proof = str(fargs.get("proof") or "").strip()
+                nodes = [_clean_node_id(n) for n in (fargs.get("answer_nodes") or [])]
+                for i, n in enumerate(nodes):
+                    if n not in seen_ids and not vine.forest.exists(n):
+                        cand = [s for s in seen_ids if s.split("/")[-1] == n]
+                        if len(cand) == 1:
+                            nodes[i] = cand[0]
+                if not nodes:
+                    nodes = attribute_nodes(text, proof)
+                audit, code, hint = _audit_answer(
+                    nodes, text, proof, ground, bounced | {"no_proof"})
+                if audit <= 0.3 and not forced_bounced:
+                    # one bounce even at the deadline: an ungrounded forced
+                    # answer (invented number, unopened node) wastes the hunt
+                    forced_bounced = True
+                    messages.append({"role": "user", "content": json.dumps(
+                        {"answer_rejected": True, "fix": hint,
+                         "note": "fix it and answer again, same JSON format"},
+                        ensure_ascii=False)})
+                    continue
+                if text and proof and _norm_text(proof) in ground["blob"] \
+                        and _norm_text(proof) not in _norm_text(text):
+                    text += f' [evidence: "{proof}"]'
+                answer = text or None
+                answer_nodes = nodes
+                confidence = round(min(audit, 0.5), 2)
                 if verbose and answer:
                     print("    [force] synthesis after exhausting steps")
+                break
+            if answer is None:
+                for raw in reversed(forced_replies):  # last-resort text salvage
+                    etext, enodes = _extract_answer_fields(raw)
+                    if etext:
+                        answer = etext
+                        answer_nodes = [_clean_node_id(n) for n in enodes] or sorted(
+                            n for n in ground["harvested"] if "/" in n)[:3]
+                        confidence = 0.2
+                        if verbose:
+                            print("    [force] salvaged answer text from malformed reply")
+                        break
+            if answer is None and forced_replies:
+                # absolute last resort: no reply ever contained a "text" field
+                # (plain prose, JSON with a different key, or truncated mid-key)
+                # — never return None, a hunt that answers nothing wastes every
+                # token spent; use the raw reply itself as the answer text.
+                answer = re.sub(r"\s+", " ", forced_replies[-1]).strip()[:400] or None
+                answer_nodes = sorted(n for n in ground["harvested"] if "/" in n)[:3] \
+                    or ([last_top] if last_top else [])
+                confidence = 0.1
+                if verbose and answer:
+                    print("    [force] salvaged raw reply verbatim (no JSON text field found)")
 
         expected = set(q["expected_nodes"])
         harvested = set(answer_nodes)
@@ -331,6 +750,8 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
             "expected_nodes": q["expected_nodes"],
             "correct_text": correct_text,
             "banana_precision": round(precision, 2),
+            "confidence": confidence,
+            "rejections": rejections,
             "metrics": outcome["metrics"],
             "shortcuts": shortcuts,
             "trace": str(vine.tracer.trace_path),
@@ -343,9 +764,9 @@ def run_troop(forest: Path, chat, q: dict, troop: int, embedder=None,
               use_sniff: bool = True, learn: bool = False) -> dict:
     """Launch `troop` concurrent hunts for a single question; return the best result.
 
-    Selection order: first hunt with correct_text=True (by banana precision desc),
-    then highest precision among the rest. All individual runs are stored in
-    result["troop_runs"] for analysis.
+    Selection is confidence-first (self-reported x harness audit — no ground
+    truth involved), tie-broken by fewer tokens; correct_text is printed for
+    analysis only. All individual runs are stored in result["troop_runs"].
     """
     import concurrent.futures as _cf
 
@@ -357,22 +778,44 @@ def run_troop(forest: Path, chat, q: dict, troop: int, embedder=None,
         futures = [pool.submit(hunt, i) for i in range(troop)]
         runs = [f.result() for f in _cf.as_completed(futures)]
 
-    correct = [r for r in runs if r["correct_text"]]
-    best = max(correct or runs, key=lambda r: r["banana_precision"])
+    # Selection: audited confidence first; among near-ties (two monkeys can
+    # both get capped at the same low tier, e.g. "cited an unqueried dataset"),
+    # break by cross-monkey agreement (self-consistency, ground-truth-free) —
+    # a distractor is rarely reproduced independently by other monkeys, while
+    # the real fact's ids/numbers tend to recur across hunts.
+    top_conf = max((r.get("confidence") or 0.0) for r in runs)
+    tied = [r for r in runs if (r.get("confidence") or 0.0) >= top_conf - 0.01]
+
+    def _fingerprint(r: dict) -> set:
+        nums = set(_number_tokens(str(r.get("answer") or "")))
+        nodes = set(r.get("answer_nodes") or [])
+        return {_digits(n) for n in nums} | nodes
+
+    prints = {id(r): _fingerprint(r) for r in runs}
+
+    def _agreement(r: dict) -> int:
+        mine = prints[id(r)]
+        return sum(1 for o in runs if o is not r and mine & prints[id(o)])
+
+    if len(tied) > 1:
+        best = max(tied, key=lambda r: (_agreement(r),
+                                        -(r["metrics"]["tokens_to_banana"] or 10 ** 9)))
+    else:
+        best = tied[0]
 
     # print all runs so the user can see what each monkey did
     for i, r in enumerate(runs):
         m = r["metrics"]
         tag = "WINNER" if r is best else "      "
-        print(f"    monkey-{i+1} [{tag}] precision={r['banana_precision']}  "
-              f"correct={r['correct_text']}  hops={m['hops_to_banana']}  "
-              f"tokens={m['tokens_to_banana']}")
+        print(f"    monkey-{i+1} [{tag}] conf={r.get('confidence')}  "
+              f"precision={r['banana_precision']}  correct={r['correct_text']}  "
+              f"hops={m['hops_to_banana']}  tokens={m['tokens_to_banana']}")
         print(f"             answer: {str(r['answer'])[:120]}")
 
     best["troop_runs"] = [
-        {"monkey": i + 1, "answer": r["answer"],
-         "correct_text": r["correct_text"], "banana_precision": r["banana_precision"],
-         "metrics": r["metrics"]}
+        {"monkey": i + 1, "answer": r["answer"], "confidence": r.get("confidence"),
+         "answer_nodes": r["answer_nodes"], "correct_text": r["correct_text"],
+         "banana_precision": r["banana_precision"], "metrics": r["metrics"]}
         for i, r in enumerate(runs)
     ]
     best["troop_size"] = troop
@@ -428,7 +871,8 @@ def main() -> int:
             print(f"    answer: {str(r['answer'])[:160]}")
         print(
             f"    hops-to-banana={m['hops_to_banana']}  tokens-to-banana={m['tokens_to_banana']}  "
-            f"precision={r['banana_precision']}  correct_text={r['correct_text']}  time={r['wall_s']}s"
+            f"precision={r['banana_precision']}  correct_text={r['correct_text']}  "
+            f"conf={r.get('confidence')}  time={r['wall_s']}s"
         )
 
     ok = sum(1 for r in results if r["correct_text"])

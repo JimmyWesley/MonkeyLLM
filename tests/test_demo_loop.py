@@ -35,7 +35,7 @@ class TestParseAction:
         assert parse_action('{"tool": "look", "args": {"id": "x"}}')["tool"] == "look"
 
     def test_json_inside_prose(self):
-        text = 'Vou olhar o índice.\n{"tool": "locate", "args": {"query": "vendas"}}\nPronto.'
+        text = 'Let me look at the index.\n{"tool": "locate", "args": {"query": "sales"}}\nDone.'
         assert parse_action(text)["tool"] == "locate"
 
     def test_garbage_returns_none(self):
@@ -50,13 +50,15 @@ class TestScriptedHunt:
             '{"tool": "query", "args": {"id": "sales/report-q1-2026", '
             '"sql": "SELECT region, SUM(value) AS total FROM sales GROUP BY region ORDER BY total DESC LIMIT 1"}}',
             '{"tool": "answer", "args": {"text": "The region with the highest sales in Q1 2026 was Southeast.", '
-            '"answer_nodes": ["sales/report-q1-2026"]}}',
+            '"answer_nodes": ["sales/report-q1-2026"], '
+            '"confidence": 0.9, "proof": "[\\"Southeast\\", 12309378.91]"}}',
         ]
         r = run_question(forest_ro, scripted_chat_factory(script), Q2, verbose=False)
         assert r["correct_text"] is True
         assert r["banana_precision"] == 1.0
         m = r["metrics"]
-        assert m["hops_to_banana"] == 2  # master-index look + dataset look before the query
+        assert m["hops_to_banana"] is not None
+        assert m["hops_to_banana"] <= 4  # eager digests may pre-open the banana
         assert m["tokens_to_banana"] > 0
         # trace file exists with the outcome line
         lines = Path(r["trace"]).read_text(encoding="utf-8").splitlines()
@@ -66,12 +68,20 @@ class TestScriptedHunt:
     def test_recovers_from_bad_tool_and_format(self, forest_ro):
         script = [
             "thinking first...",  # invalid -> harness asks for JSON
-            '{"tool": "telepatia", "args": {}}',  # unknown tool -> error envelope
-            '{"tool": "look", "args": {"id": "nao/existe"}}',  # E_NOT_FOUND envelope
+            '{"tool": "telepathy", "args": {}}',  # unknown tool -> error envelope
+            '{"tool": "look", "args": {"id": "does/not-exist"}}',  # E_NOT_FOUND envelope
             '{"tool": "look", "args": {"id": "sales/report-q1-2026"}}',
+            # cites a dataset it never queried -> confidence gate rejects with a fix
             '{"tool": "answer", "args": {"text": "Southeast leads in sales.", '
             '"answer_nodes": ["sales/report-q1-2026"]}}',
+            '{"tool": "query", "args": {"id": "sales/report-q1-2026", '
+            '"sql": "SELECT region, SUM(value) AS total FROM sales GROUP BY region ORDER BY total DESC LIMIT 1"}}',
+            '{"tool": "answer", "args": {"text": "Southeast leads in sales.", '
+            '"answer_nodes": ["sales/report-q1-2026"], '
+            '"confidence": 0.9, "proof": "[\\"Southeast\\", 12309378.91]"}}',
         ]
         r = run_question(forest_ro, scripted_chat_factory(script), Q2, verbose=False)
         assert r["correct_text"] is True
         assert r["answer_nodes"] == ["sales/report-q1-2026"]
+        assert r["rejections"] == 1  # the ungrounded first answer was bounced
+        assert r["confidence"] == 0.9

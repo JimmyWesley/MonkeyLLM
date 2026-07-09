@@ -812,6 +812,12 @@ class Vine:
 
         # scope: branch -> physical subtree; banana -> that single node
         # (grep-within-the-node, the natural follow-up to locate/look).
+        if scope is not None and not isinstance(scope, str):
+            raise VineError(
+                E_SCHEMA,
+                "scope must be a single node or branch id (string)",
+                hint="Pass scope as one string: a branch id or a node id, not a list.",
+            )
         prefix = None
         only_id = None
         if scope:
@@ -823,7 +829,7 @@ class Vine:
                 scope_id = scope if scope == "_index" or scope.endswith("/_index") else f"{scope}/_index"
                 self._row_or_raise(scope_id)
                 if scope_id != "_index":
-                    prefix = scope_id[: -len("_index")]  # "vendas/_index" -> "vendas/"
+                    prefix = scope_id[: -len("_index")]  # "<branch>/_index" -> "<branch>/"
 
         k = min(max(1, k), SNIFF_MAX_K)
         rows = self.catalog.conn.execute("SELECT * FROM nodes ORDER BY id").fetchall()
