@@ -2,7 +2,7 @@
 
 Downloads (all resumable; safe to re-run):
 
-  1. llama.cpp prebuilt server (Windows CUDA) -> bin/llamacpp/
+  1. llama.cpp prebuilt server (Windows CUDA or macOS arm64) -> bin/llamacpp/
   2. Qwen2.5-7B-Instruct Q4_K_M GGUF (the navigator SLM) -> models/
   3. bge-m3 GGUF (the embedder for the canopy layer) -> models/
 
@@ -23,8 +23,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
 import sys
+import tarfile
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -80,42 +82,69 @@ def _download(url: str, dest: Path) -> Path:
     return dest
 
 
+def _bin_asset_patterns() -> tuple[str, str | None, str]:
+    """(main-asset regex, companion-asset regex, human label) per platform."""
+    machine = platform.machine().lower()
+    arm = machine in ("arm64", "aarch64")
+    if sys.platform == "darwin":
+        arch = "arm64" if arm else "x64"
+        return (rf"^llama-.*bin-macos-{arch}\.(zip|tar\.gz)$", None,
+                f"macOS {arch}" + ("/Metal" if arm else ""))
+    if sys.platform.startswith("linux"):
+        arch = "arm64" if arm else "x64"
+        # plain CPU build: universal. CUDA users on Linux typically build or
+        # install llama.cpp themselves — serve_llm.py also accepts it on PATH.
+        return (rf"^llama-.*bin-ubuntu-{arch}\.(zip|tar\.gz)$", None,
+                f"Linux {arch} (CPU build; for CUDA install llama.cpp yourself)")
+    # Windows: main bin (CUDA) + the matching CUDA runtime.
+    # NB: the cudart asset also contains "bin-win-cuda...x64.zip", so the main
+    # binary must be matched by its "llama-" prefix. Prefer CUDA 12.x (Ampere).
+    return (r"^llama-.*bin-win-cuda-.*x64\.zip$",
+            r"^cudart-.*win-cuda-.*x64\.zip$", "Windows CUDA")
+
+
 def setup_bin() -> None:
-    print("[1/3] llama.cpp server (Windows CUDA prebuilt)")
+    main_pat, extra_pat, label = _bin_asset_patterns()
+    print(f"[1/3] llama.cpp server ({label} prebuilt)")
     BIN.mkdir(parents=True, exist_ok=True)
-    if (BIN / "llama-server.exe").exists():
+    if (BIN / "llama-server.exe").exists() or list(BIN.rglob("llama-server")):
         print("  already present, skipping (delete bin/ to force re-download)")
         return
     rel = _http_json(LLAMA_RELEASES_API)
     tag = rel["tag_name"]
     assets = {a["name"]: a["browser_download_url"] for a in rel["assets"]}
-    # main bin (CUDA) + the matching CUDA runtime
-    # NB: the cudart asset also contains "bin-win-cuda...x64.zip", so the main
-    # binary must be matched by its "llama-" prefix. Prefer CUDA 12.x (Ampere).
+
     def pick(pattern: str) -> str | None:
         hits = sorted(n for n in assets if re.search(pattern, n))
         return hits[0] if hits else None  # 12.4 sorts before 13.3
 
-    main = pick(r"^llama-.*bin-win-cuda-.*x64\.zip$")
-    cudart = pick(r"^cudart-.*win-cuda-.*x64\.zip$")
+    main = pick(main_pat)
+    extra = pick(extra_pat) if extra_pat else None
     if not main:
-        print(f"  !! no win-cuda asset in release {tag}. Assets:\n   " +
+        print(f"  !! no matching asset in release {tag}. Assets:\n   " +
               "\n   ".join(sorted(assets)))
         print("  Pick one manually from https://github.com/ggml-org/llama.cpp/releases")
         sys.exit(1)
     print(f"  release {tag}")
-    for name in filter(None, (main, cudart)):
-        zip_path = BIN / name
-        _download(assets[name], zip_path)
-        with zipfile.ZipFile(zip_path) as z:
-            z.extractall(BIN)
-        zip_path.unlink()
+    for name in filter(None, (main, extra)):
+        arc_path = BIN / name
+        _download(assets[name], arc_path)
+        if name.endswith(".tar.gz"):
+            with tarfile.open(arc_path) as t:
+                t.extractall(BIN)  # noqa: S202 — official release archive
+        else:
+            with zipfile.ZipFile(arc_path) as z:
+                z.extractall(BIN)
+        arc_path.unlink()
     print(f"  extracted to {BIN}")
-    if not (BIN / "llama-server.exe").exists():
-        # some zips nest under a subfolder; flatten the .exe/.dll search later
-        exes = list(BIN.rglob("llama-server.exe"))
-        if exes:
-            print(f"  note: llama-server.exe at {exes[0].relative_to(ROOT)}")
+    if sys.platform != "win32":
+        # zipfile drops the exec bit; restore it on every extracted binary
+        for f in BIN.rglob("*"):
+            if f.is_file() and not f.suffix:
+                f.chmod(f.stat().st_mode | 0o755)
+    server = list(BIN.rglob("llama-server.exe")) or list(BIN.rglob("llama-server"))
+    if server:
+        print(f"  note: llama-server at {server[0].relative_to(ROOT)}")
 
 
 def setup_llm(repo: str, file: str) -> None:

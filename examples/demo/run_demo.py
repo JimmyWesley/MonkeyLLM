@@ -175,9 +175,15 @@ def make_llm():
         if reasoning_on:  # give the thinking tokens room beyond the content budget
             max_tokens += 1000
 
+        # 0.1 keeps big instruct models deterministic; hybrid reasoners
+        # (MiniCPM5 etc.) want their trained sampling (e.g. 0.9/0.95 thinking)
+        temperature = float(os.environ.get("MONKEYLLM_LLM_TEMPERATURE", "0.1"))
+        top_p = float(os.environ.get("MONKEYLLM_LLM_TOP_P", "1.0"))
+
         def chat(messages: list[dict]) -> str:
             payload = {"model": model, "messages": messages,
-                       "max_tokens": max_tokens, "temperature": 0.1}
+                       "max_tokens": max_tokens, "temperature": temperature,
+                       "top_p": top_p}
             if "openrouter" in endpoint and not reasoning_on:
                 payload["reasoning"] = {"enabled": False}
             for attempt in range(4):

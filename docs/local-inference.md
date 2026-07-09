@@ -54,6 +54,29 @@ designed this way — zero embeddings). Step 6's benchmark runs with no
 server at all for the `bm25` row; with `MONKEYLLM_EMBED_ENDPOINT` + a built
 canopy it adds the `hybrid` row alongside.
 
+## macOS (Apple Silicon / Metal)
+
+The same scripts work on a Mac. `setup_models.py --only bin` downloads the
+official `macos-arm64` build, but those are compiled against the latest
+macOS — on older systems (e.g. macOS 14) they fail with a Metal dyld error.
+Fallback: `brew install llama.cpp`; `serve_llm.py` probes each candidate
+with `--version` and falls back to the PATH `llama-server` automatically
+when the one under `bin/llamacpp/` is missing or does not run on this OS.
+
+Evaluating a 1B navigator (MiniCPM5-1B, Q8_0):
+
+```bash
+python scripts/setup_models.py --only llm \
+    --llm-repo openbmb/MiniCPM5-1B-GGUF --llm-file MiniCPM5-1B-Q8_0.gguf
+python scripts/serve_llm.py        # newest GGUF wins; alias "minicpm5-1b"
+export MONKEYLLM_LLM_ENDPOINT=http://localhost:8090/v1
+export MONKEYLLM_LLM_MODEL=minicpm5-1b
+```
+
+Use the official `openbmb/MiniCPM5-1B-GGUF` — the community
+"Agentic-toolUse" fine-tune needs a custom raw prompt format and does not
+speak the OpenAI chat/tools interface this stack relies on.
+
 ## Online model (OpenRouter) — no local GPU
 
 If you don't want (or can't) run a local model, use OpenRouter: the same

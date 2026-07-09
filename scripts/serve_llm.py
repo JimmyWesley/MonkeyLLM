@@ -23,6 +23,7 @@ Then, in another terminal, point the demo / canopy at them:
 from __future__ import annotations
 
 import argparse
+import shutil
 import signal
 import subprocess
 import sys
@@ -34,11 +35,29 @@ BIN = ROOT / "bin" / "llamacpp"
 MODELS = ROOT / "models"
 
 
+def _runs(server: Path) -> bool:
+    """Prebuilt binaries can be linked against a newer OS than this one
+    (e.g. macOS release builds on macOS 14 die with a Metal dyld error) —
+    probe with --version before committing to a candidate."""
+    try:
+        proc = subprocess.run([str(server), "--version"], capture_output=True, timeout=30)
+        return proc.returncode >= 0  # negative = killed by a signal (dyld abort)
+    except OSError:
+        return False
+    except subprocess.TimeoutExpired:
+        return True  # slow but alive
+
+
 def find_server() -> Path:
     hits = list(BIN.rglob("llama-server.exe")) or list(BIN.rglob("llama-server"))
-    if not hits:
-        sys.exit(f"llama-server not found under {BIN}. Run: python scripts/setup_models.py --only bin")
-    return hits[0]
+    on_path = shutil.which("llama-server")  # e.g. Homebrew / apt / self-built
+    for cand in [*hits[:1], *( [Path(on_path)] if on_path else [] )]:
+        if _runs(cand):
+            return cand
+        print(f"  (skipping {cand}: binary does not run on this OS)")
+    sys.exit(f"no working llama-server under {BIN} nor on PATH. "
+             "Run: python scripts/setup_models.py --only bin "
+             "(or install llama.cpp via your package manager)")
 
 
 def find_gguf(*needles: str) -> Path:
@@ -61,7 +80,7 @@ def find_chat_gguf(substring: str | None) -> Path:
 
 
 def launch(server: Path, model: Path, *, port: int, alias: str, embedding: bool, ngl: int, ctx: int,
-           parallel: int = 1):
+           parallel: int = 1, reasoning: str = "off"):
     cmd = [
         str(server), "-m", str(model),
         "--host", "127.0.0.1", "--port", str(port),
@@ -77,7 +96,7 @@ def launch(server: Path, model: Path, *, port: int, alias: str, embedding: bool,
     if embedding:
         cmd += ["--embedding", "--pooling", "cls", "-b", str(ctx), "-ub", str(ctx)]
     else:
-        cmd += ["--reasoning", "off",
+        cmd += ["--reasoning", reasoning,
                 "-ctk", "q8_0", "-ctv", "q8_0"]
     print(f"  $ {' '.join(cmd)}")
     return subprocess.Popen(cmd)
@@ -93,6 +112,9 @@ def main() -> int:
     ap.add_argument("--ngl", type=int, default=99, help="GPU layers to offload (99 = all)")
     ap.add_argument("--ctx", type=int, default=8192)
     ap.add_argument("--chat-gguf", help="substring to pick the chat GGUF (default: newest in models/)")
+    ap.add_argument("--reasoning", choices=["on", "off", "auto"], default="off",
+                    help="thinking mode for the chat model (hybrid reasoners like "
+                         "MiniCPM5 need 'on'; pair with MONKEYLLM_LLM_REASONING=on)")
     ap.add_argument("--parallel", type=int, default=1,
                     help="chat slots (llama.cpp -np): continuous batching for the "
                          "Troop (N monkeys share the GPU at ~1x wall-clock). "
@@ -111,7 +133,7 @@ def main() -> int:
             procs.append(launch(
                 server, gguf, port=args.chat_port,
                 alias=alias, embedding=False, ngl=args.ngl, ctx=args.ctx,
-                parallel=args.parallel,
+                parallel=args.parallel, reasoning=args.reasoning,
             ))
         if args.only in (None, "emb"):
             print("[emb] bge-m3 embedder")
