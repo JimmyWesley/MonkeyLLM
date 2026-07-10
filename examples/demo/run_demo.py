@@ -190,8 +190,14 @@ def make_llm():
         if reasoning_on:  # give the thinking tokens room beyond the content budget
             max_tokens += 1000
 
-        # 0.1 keeps big instruct models deterministic; hybrid reasoners
-        # (MiniCPM5 etc.) want their trained sampling (e.g. 0.9/0.95 thinking)
+        # 0.1 keeps big instruct models deterministic. Small hybrid reasoners
+        # (MiniCPM5 1B etc.) are sometimes shipped with a high default sampling
+        # temperature for open-ended chat/thinking, but for THIS harness — a
+        # strict single-JSON-object-per-turn tool loop — that same high
+        # temperature causes wide run-to-run swings (observed 40-90% on a
+        # 10-question suite at 0.6 vs a stable 70-80% at 0.2-0.3). Keep it low
+        # for agentic tool use; raise it only if a specific model demonstrably
+        # needs more sampling entropy to escape repetitive search loops.
         temperature = float(os.environ.get("MONKEYLLM_LLM_TEMPERATURE", "0.1"))
         top_p = float(os.environ.get("MONKEYLLM_LLM_TOP_P", "1.0"))
 
