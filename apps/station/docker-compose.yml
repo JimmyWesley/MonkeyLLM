@@ -1,0 +1,21 @@
+# Spec J.6: one image, two volumes, no external database.
+#
+#   docker compose -f apps/station/docker-compose.yml up --build
+#
+# On first run the Station mints a bootstrap admin key and prints it once.
+services:
+  station:
+    build:
+      context: ../..
+      dockerfile: apps/station/Dockerfile
+    ports:
+      - "8800:8800"
+    volumes:
+      # The forest registry. Phase A serves reads only, so :ro is honest.
+      - ../../forests:/forests:ro
+      # Principals, keys and grants — host state, never inside a forest.
+      - station-registry:/registry
+    restart: unless-stopped
+
+volumes:
+  station-registry:
