@@ -31,6 +31,45 @@ TODAY = "2026-06-10"
 CREATED = "2026-05-01"
 REPO = Path(__file__).resolve().parents[2]
 
+SCHEMA_MD = f"""---
+id: _meta/schema
+type: note
+title: Forest dialect
+summary: Node and edge types valid in this forest. New types are declared here before first use; the Vine rejects anything not declared.
+created: {CREATED}
+updated: {TODAY}
+---
+
+# Forest dialect
+
+## Node types (type)
+
+| `type` | Description | Harvest verb |
+|---|---|---|
+| `branch` | Index file (_index.md) of a folder | look |
+| `note` | Free-text knowledge | pick |
+| `document` | Converted document (PDF/DOCX origin) | pick |
+| `dataset` | Tabular data (sibling SQLite) | query |
+| `entity` | Person, organization, product, place | pick |
+| `concept` | Definition / technical term | pick |
+| `event` | Dated fact (meeting, decision, release) | pick |
+| `media` | Image/audio/video with description | pick |
+
+## Edge types (rel)
+
+| `rel` | Inverse | Semantics |
+|---|---|---|
+| `part-of` | `contains` | Logical hierarchy |
+| `related-to` | `related-to` | Generic association (symmetric) |
+| `mentioned-in` | `mentions` | Entity cited in a document |
+| `author` | `author-of` | Authorship |
+| `compared-with` | `compared-with` | Technical contrast (symmetric) |
+| `derived-from` | `origin-of` | Provenance |
+| `same-as` | `same-as` | Soft merge of duplicate entities |
+| `discovered-shortcut` | — | The monkey's shout (created by graft) |
+| `succeeds` | `precedes` | Temporal order |
+"""
+
 # ---------------------------------------------------------------------------
 # Pools (deterministic with SEED)
 # ---------------------------------------------------------------------------
@@ -396,6 +435,8 @@ BRANCH_DEFS = {
 
 
 def write_forest(out: Path):
+    (out / "_meta").mkdir(parents=True, exist_ok=True)
+    (out / "_meta" / "schema.md").write_text(SCHEMA_MD, encoding="utf-8", newline="\n")
     by_id = {n["id"]: n for n in N}
     for n in N:
         fm = {"id": n["id"], "type": n["type"], "title": n["title"], "summary": n["summary"],

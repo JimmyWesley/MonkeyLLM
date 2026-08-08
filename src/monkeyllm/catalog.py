@@ -199,6 +199,11 @@ class Catalog:
             is not None
         )
 
+    # bm25() per-column weights, positional over (id, title, aliases, tags,
+    # summary). A hit on curated naming (title/aliases) outranks the same hit
+    # in prose; id is UNINDEXED so its slot is 0.
+    FTS_WEIGHTS = (0.0, 4.0, 3.0, 2.0, 1.0)
+
     def fts_search(self, query: str, limit: int = 50) -> list[sqlite3.Row]:
         """BM25 search. User query is sanitized into quoted terms (no FTS
         syntax injection); bm25 rank: lower = better."""
@@ -206,8 +211,9 @@ class Catalog:
         if not terms:
             return []
         match = " OR ".join(f'"{t}"' for t in terms)
+        weights = ", ".join(str(w) for w in self.FTS_WEIGHTS)
         return self.conn.execute(
-            """SELECT n.*, bm25(nodes_fts) AS rank
+            f"""SELECT n.*, bm25(nodes_fts, {weights}) AS rank
                FROM nodes_fts f JOIN nodes n ON n.id = f.id
                WHERE nodes_fts MATCH ?
                ORDER BY rank LIMIT ?""",

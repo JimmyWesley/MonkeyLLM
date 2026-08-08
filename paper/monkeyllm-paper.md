@@ -155,7 +155,7 @@ A typical hop costs 200–500 tokens of observation. A five-hop answer costs ~1.
 
 ### 3.3 Entry search: BM25 + vectors under RRF, re-ranked by heat
 
-Phase 0 requires zero embeddings: `locate` is BM25 [35] over FTS5 [37] — a corpus becomes navigable with no GPU, no embedding pass, no vector database. When a vector index (the *Canopy*) and an embedder are present, `locate` becomes hybrid via Reciprocal Rank Fusion [36]:
+Phase 0 requires zero embeddings: `locate` is BM25 [35] over FTS5 [37] — a corpus becomes navigable with no GPU, no embedding pass, no vector database. The BM25 signal is *scent-weighted*: FTS5's per-column ranking weights the curated fields title : aliases : tags : summary at 4 : 3 : 2 : 1, so a term hit on a curator-controlled name outranks the same hit inside summary prose. The ordering is a consequence of the scent contract — the more deliberate the field, the more the ranking trusts it (measured in §5.1, mechanism discussed in §6.4). When a vector index (the *Canopy*) and an embedder are present, `locate` becomes hybrid via Reciprocal Rank Fusion [36]:
 
 $$
 s_{\mathrm{RRF}}(d) \;=\; \sum_{r \,\in\, \{\mathrm{BM25},\ \mathrm{vec}\}} \frac{1}{k + \mathrm{rank}_r(d) + 1}, \qquad k = 60
@@ -226,7 +226,7 @@ For hard questions, N monkeys (N = 3–5) hunt in parallel from distinct entry p
 - **iter** — iterative RAG: retrieve → read → reformulate → retrieve, until answered or budget exhausted;
 - **troop** — N = 3 monkeys + judge (quorum / coverage / patience variants).
 
-**Models.** Navigation, generation, and curation: **Gemma-4 12B served locally** (llama.cpp, one RTX 3090); the 2026-07-02 fork-tier runs used `qwen3.5-flash` via OpenRouter to remove GPU contention. Embeddings (hybrid locate only): bge-m3. *No frontier-scale model appears anywhere in this paper.*
+**Models.** Navigation, generation, and curation: **Gemma-4 12B served locally** (llama.cpp, one RTX 3090); the 2026-07-02 fork-tier runs and the 2026-08-08 ranking-validation runs (§6.4) used `qwen3.5-flash` via OpenRouter to remove GPU contention. Embeddings (hybrid locate only): bge-m3. *No frontier-scale model appears anywhere in this paper.*
 
 **Metrics.** *hops-to-banana* and *trail length* (read-primitive calls before first harvest of an answer node); *tokens-to-banana* (total observation tokens per question); *banana precision* $|H \cap E|/|H|$ for harvested set $H$ against expected nodes $E$; correctness; wall-clock (median, p95). {{OPTIONAL: statistical treatment — seeds/repeats per cell, CIs — add if the bench is rerun with repeats}}.
 
@@ -236,14 +236,15 @@ For hard questions, N monkeys (N = 3–5) hunt in parallel from distinct entry p
 
 ### 5.1 Entry search: the monkey starts on the right branch
 
-Hybrid locate (BM25 + bge-m3 under RRF), 153-node forest, 18 queries × 40 repeats:
+153-node forest, 18 v2 queries × 40 repeats. The two BM25 rows isolate the scent-weighting of §3.3 (2026-08-08 runs, laptop CPU, no GPU anywhere); the hybrid row adds bge-m3 under RRF (2026-07 run, flat BM25 inside the fusion):
 
 | Configuration | R@1 | R@3 | R@5 | MRR | p50 | p95 |
 |---|---|---|---|---|---|---|
-| BM25-only | 0.556 | 0.583 | 0.611 | 0.630 | — | 5.9 ms |
+| BM25 flat | 0.667 | 0.833 | 0.889 | 0.752 | 1.1 ms | 1.3 ms |
+| **BM25 scent-weighted** | 0.778 | 0.944 | **1.00** | 0.866 | 1.1 ms | 1.3 ms |
 | **Hybrid (RRF)** | **1.00** | **1.00** | **1.00** | **0.88** | 48 ms | **61.5 ms** |
 
-Perfect recall@5 at p95 = 61.5 ms means every hunt opens on or adjacent to the answer region. (The rare p99 spike of 2.1 s is first-call embedder warm-up.)
+Scent-weighting — five constants in the ranking call, zero embeddings, no measurable latency cost — recovers exactly one third of the flat-to-hybrid gap at R@1 and closes it entirely at R@5: even in the GPU-free Phase 0 configuration, every hunt now opens on or adjacent to the answer region within the k = 5 frontier. The residual R@1 misses are anti-leakage paraphrases whose vocabulary deliberately avoids the answer's naming fields. Hybrid retains perfect R@1 at ~47× the latency (embedding the query dominates); its row predates the weighting — RRF consumes ranks, so the weighted BM25 list can only help it — {{TODO: hybrid re-run with scent-weighted BM25 under RRF}}. (The rare p99 spike of 2.1 s is first-call embedder warm-up. The previously published flat-BM25 row — 0.556 / 0.583 / 0.611 — predates the English translation of the corpus generators; the rows above regenerate from the committed scripts at head.)
 
 ### 5.2 Multi-hop question answering: the cliff
 
@@ -268,7 +269,7 @@ On the 100-document heterogeneous dump (Gemma-4 12B as Curator): 100 nodes plant
 
 ## 6. Findings
 
-We report three findings that emerged from measurement, each with a traced mechanism. Two of them are "failures" by their original success criteria — and both taught us more than the successes did.
+We report four findings that emerged from measurement, each with a traced mechanism. Two of them are "failures" by their original success criteria — and both taught us more than the successes did.
 
 ### 6.1 The troop is an accuracy amplifier, not a speed amplifier
 
@@ -296,6 +297,14 @@ The learning layer was hypothesized to cut hops ≥25% over repeated exposure. M
 
 The resolution of this paradox is the finding: **hybrid locate plus disciplined curation already navigates the benchmark cold at ~1.4 hops — there is no 25% to reclaim near the 1-hop floor.** Trail learning needs headroom: weaker entry search, deeper hierarchies, or 4+-hop cold paths. Stated as economics: *curation quality and trail learning are substitutes.* Money spent on scent reduces the marginal value of pheromone, and vice versa — which tells an operator precisely where to spend next on any given corpus. {{TODO: deeper-corpus convergence run}}.
 
+### 6.4 Curated naming is the strongest scent
+
+This finding started as an engineering observation, not a hypothesis: FTS5's `bm25()` accepts per-column weights, and MonkeyLLM was calling it flat — a term hit in a title counted no more than the same hit in summary prose. But *which* columns deserve weight is not an engineering question; it is the scent contract again. The fields `locate` searches are exactly the ones the Curator disciplines, and they are not equally deliberate: a title is an act of naming, an alias is an act of anticipating the asker, a summary is compressed prose. Weighting them 4 : 3 : 2 : 1 (§3.3) merely pays each field attention proportional to the discipline the contract already imposes on it.
+
+The effect (§5.1): R@1 +0.111, MRR +0.114, R@5 0.889 → 1.00, latency unchanged at ~1.3 ms p95 — one third of the gap between flat BM25 and hybrid entry search closed by five constants, with no embedder, no GPU, and no new dependency. End-to-end, nothing regressed: `qwen3.5-flash` navigating the Phase-0 fixture with the new ranking scores 10/10 on the demo set and 4/4 on the buried-answers set (answers reachable only through body-level `sniff`), and the full suite stays green.
+
+The reading we defend: this is §6.3's substitution economics operating *inside* entry search. Curation spend raises the signal quality of the curated fields; a ranking that trusts them proportionally buys back part of what embeddings would otherwise be needed for — the Forest Principle at the smallest scale we have measured, intelligence in the environment (disciplined naming) substituting for intelligence at query time (an embedding pass three orders of magnitude slower). The episode also argues concretely for in-process search: because the ranking function lives inside the database (SQLite FTS5), the full loop — hypothesis, five-constant change, corpus-level measurement, end-to-end validation — fit in a single working session with no cluster, no external index, and no deployment. {{TODO: sensitivity sweep over the weight vector; per-corpus tuning may recover part of the residual R@1 gap}}
+
 ---
 
 ## 7. The Forest Principle
@@ -316,7 +325,7 @@ The principle is modality-independent: any system with (a) a decomposable knowle
 
 **The auditability dividend.** Because every write is a git commit and every read is a typed, budgeted call with a recorded trace, a MonkeyLLM answer is **replayable**: the exact trail, every observation, and the harvested evidence are inspectable after the fact. Ask a RAG pipeline *why* it retrieved what it retrieved and you get cosine similarities; ask a forest and you get a trail you can walk yourself. For regulated and high-stakes domains this is not a nicety — it is the difference between an answer and an account.
 
-**Costs and honest trade-offs.** Navigation pays per hop: on shallow questions, top-k is faster and adequate (v2: 12/18 at lower latency) — which is why `harvest` exists as a zero-LLM single-shot path for the easy case. The forest requires curation — human or a 12B curator (§5.3) — and the scent contract is load-bearing: bad summaries would poison every hop, which is exactly why the contract is machine-enforced rather than aspirational. Pheromone introduces a genuinely new failure class (§6.2). Our corpora are small (10²–10³ nodes); behavior at 10⁵–10⁶ nodes, where hierarchy depth interacts with entry-search quality, is untested. {{TODO: scale study}}.
+**Costs and honest trade-offs.** Navigation pays per hop: on shallow questions, top-k is faster and adequate (v2: 12/18 at lower latency) — which is why `harvest` exists as a zero-LLM single-shot path for the easy case. We measured that path directly (Phase-0 fixture, `qwen3.5-flash`, 2026-08-08): harvest retrieval is pure machine time (p50 ≈ 50 ms, bundle ≈ 1.3k tokens), and one external completion over the bundle answers in ≈ 3.0 s/question versus the navigating agent's 4.9 s — scoring 12/14. Retrieval and reading never both failed: whenever the bundle contained the answer the one-shot model extracted it (12/12), and the two structural misses are exactly the cases navigation exists for — a fact that lives only inside a SQLite dataset (the agent answers it via `query`; no amount of text retrieval can) and numeric needles buried in 4k-token bodies whose discriminating literals ("73%", "127") are too short for derived sniff terms (the agent finds them by choosing its own literal probes mid-hunt). The deployment rule that falls out: route through one-shot harvest first, escalate to the agent when the answer smells aggregate or the bundle comes back dry. The forest requires curation — human or a 12B curator (§5.3) — and the scent contract is load-bearing: bad summaries would poison every hop, which is exactly why the contract is machine-enforced rather than aspirational. Pheromone introduces a genuinely new failure class (§6.2). Our corpora are small (10²–10³ nodes); behavior at 10⁵–10⁶ nodes, where hierarchy depth interacts with entry-search quality, is untested. {{TODO: scale study}}.
 
 **Limitations.** (i) A single benchmark family, generated by the authors — external multi-hop suites are needed; (ii) correctness scored by substring matching; (iii) no statistical repeats on the headline table yet; (iv) entity extraction and `same-as` deduplication are specified but deferred; (v) the cross-talk mitigation is proposed, not implemented.
 
@@ -336,7 +345,7 @@ If the path to cheap, private, grounded AI runs anywhere, it does not run throug
 
 ## Reproducibility
 
-All code, the normative specification (`docs/monkeyllm-spec-v0.12.md`), corpus generators, question sets, and measurement scripts ship in the reference implementation. Key entry points: `bench/run_bench.py` (all arms), `scripts/bench_locate.py` (§5.1), `scripts/measure_curation.py` (§5.3), `scripts/convergence.py` (§6.2–6.3). Forests rebuild deterministically; the full test suite (272 tests, including SQL-injection suites for `query` and `tend`) passes green. See Appendix B for a five-minute quickstart.
+All code, the normative specification (`docs/monkeyllm-spec-v0.12.md`), corpus generators, question sets, and measurement scripts ship in the reference implementation. Key entry points: `bench/run_bench.py` (all arms), `scripts/bench_locate.py` (§5.1), `scripts/measure_curation.py` (§5.3), `scripts/convergence.py` (§6.2–6.3). Forests rebuild deterministically; the full test suite (276 tests, including SQL-injection suites for `query` and `tend`) passes green. See Appendix B for a five-minute quickstart.
 
 ## Acknowledgements
 
