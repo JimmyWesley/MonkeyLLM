@@ -22,6 +22,6 @@ Conventions:
 | T04 | Phase 2: Living Bank (Gardener, Ranger, dataset writes) | in-progress (tend v0.7; dataset birth v0.8; Gardener core v0.9; Ranger v0.10; curation measured 100%; tiered storage v0.11; DOCX built-in + edge proposals v0.12; convergence measured — criterion NOT met, floor-effect + cross-talk findings; ingest-tools.md + extending.md guidance done 2026-07-02; media extras + entity extraction remain, both need a spec bump) |
 | T05 | Publication readiness (GitHub + paper) | todo |
 | T06 | Monkey Bench: multi-hop question hardening | done (v3 set 100% min_hops>=3; first shouts fired via spec v0.6 trail_len) |
-| T07 | Station: self-hostable host (REST + MCP over the registry) | todo |
+| T07 | Station: self-hostable host (REST + MCP over the registry) | in-progress (Phase A done 2026-08-08: `apps/station/` read-only REST, API keys, ScopedVine seam, Docker; Phase B = writes/audit/MCP) |
 | T08 | ScopedVine: branch-level policies (the "RLS" of forests) | todo (unblocked — Part J normative as of spec v0.14) |
 | T09 | Studio: the web face of the Station | todo |
