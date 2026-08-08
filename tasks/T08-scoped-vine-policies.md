@@ -1,8 +1,8 @@
 # T08 — ScopedVine: branch-level policies (the "RLS" of forests)
 
-status: todo
-depends-on: Part J normative (J.3 enforcement matrix is contract, spec
-before code); T07 Phase A (the host that consumes it).
+status: todo (unblocked — Part J is normative as of spec v0.14)
+depends-on: T07 Phase A (the host that consumes it). The J.3 enforcement
+matrix is now contract: implement it, do not redesign it here.
 
 ## Goal
 
@@ -15,7 +15,7 @@ multi-principal access without any engine change.
 ## Context
 
 - Policy object and per-primitive enforcement matrix: J.3 of
-  `docs/drafts/part-j-station-governance.md`.
+  `docs/monkeyllm-spec-v0.14.md` (normative).
 - Two normative subtleties drive the design: scope filtering MUST precede
   budgeting (no truncation oracle), and out-of-scope MUST be
   byte-identical to `E_NOT_FOUND` (no existence oracle).
