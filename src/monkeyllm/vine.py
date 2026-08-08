@@ -1217,10 +1217,17 @@ class Vine:
     ) -> list[Path]:
         """Summary changes propagate VERBATIM to every index replicating it."""
         changed_paths: list[Path] = []
+        # Sub-branch entries carry a coverage suffix that the rewrite must
+        # preserve (A.5, spec v0.13).
+        child_row = self.catalog.get(child_id)
+        coverage = None
+        if child_row is not None and child_row["kind"] == "branch":
+            coverage = child_row["coverage"] or None
         for row in self.catalog.conn.execute("SELECT id FROM nodes WHERE kind = 'branch'"):
             idx_id = row[0]
             idx_node = self.forest.read(idx_id)
-            new_body, changed = indexer.sync_summary(idx_node.body, child_id, new_summary)
+            new_body, changed = indexer.sync_summary(
+                idx_node.body, child_id, new_summary, coverage)
             if changed:
                 assert idx_node.path is not None
                 touched.append((idx_node.path, idx_node.path.read_text(encoding="utf-8")))

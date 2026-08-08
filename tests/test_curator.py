@@ -46,7 +46,8 @@ class TestCurator:
         # tags: cleaned (lowercase slug only), deduped, merged after defaults
         assert out["tags"] == ["adopted", "sales", "discounts"]
         assert c.stats == {"llm_summaries": 1, "fallbacks": 0, "retries": 0,
-                           "links_proposed": 0, "proposal_fallbacks": 0}
+                           "links_proposed": 0, "proposal_fallbacks": 0,
+                           "branch_rollups": 0, "branch_fallbacks": 0}
 
     def test_retry_then_accept(self):
         c = Curator(scripted_chat([TOO_LONG, ANTI_PATTERN, GOOD]))
@@ -261,3 +262,35 @@ class TestGardenerIntegration:
             assert [l["target"] for l in managed] == ["prices"]
         finally:
             vine.close()
+
+
+class TestBranchSummary:
+    """G.4.4 (spec v0.13): branch rollup summaries."""
+
+    def test_good_reply(self):
+        c = Curator(scripted_chat([json.dumps(
+            {"summary": "Alpha region: sensors and budget for 2026."})]))
+        s = c.branch_summary("alpha", ["- [[a]] — Sensors.", "- [[b]] — Budget."])
+        validate_summary(s)
+        assert s.startswith("Alpha region")
+        assert c.stats["branch_rollups"] == 1
+        assert c.stats["branch_fallbacks"] == 0
+
+    def test_invalid_after_retries_returns_none(self):
+        bad = json.dumps({"summary": "word " * 120})
+        c = Curator(scripted_chat([bad, bad, bad]))
+        assert c.branch_summary("alpha", ["- [[a]] — Sensors."]) is None
+        assert c.stats["branch_fallbacks"] == 1
+
+    def test_transport_error_returns_none(self):
+        def chat(messages):
+            raise RuntimeError("down")
+        c = Curator(chat)
+        assert c.branch_summary("alpha", ["- [[a]] — Sensors."]) is None
+        assert c.stats["branch_fallbacks"] == 1
+
+    def test_empty_entries_short_circuit(self):
+        def chat(messages):
+            raise AssertionError("must not be called")
+        c = Curator(chat)
+        assert c.branch_summary("alpha", []) is None

@@ -18,8 +18,9 @@ from typing import Callable
 
 import yaml
 
+from monkeyllm import indexer
 from monkeyllm.errors import VineError
-from monkeyllm.parser import serialize_node
+from monkeyllm.parser import extract_section, replace_section, serialize_node
 from monkeyllm.tokens import estimate_tokens
 from monkeyllm.vine import Vine
 
@@ -37,6 +38,8 @@ DEFAULTS = {
 NEEDS_SPLIT_ENTRIES = 150   # A.5
 NEEDS_SPLIT_TOKENS = 3000   # A.5
 FAT_NODE_DEGREE = 50        # A.2
+LANDMARKS_SECTION = "Landmarks"  # A.5 / H.7
+MAX_LANDMARKS = 20               # A.5: 10-20 highest-degree nodes
 
 _ENTRY_LINE = re.compile(r"^- \[\[", re.MULTILINE)
 
@@ -124,6 +127,32 @@ class Ranger:
         self.vine.catalog.upsert_node(self.forest.read(node_id))
         self.vine.catalog.mark_stale(node_id)
 
+    # -- H.7 landmarks refresh (v0.13) ----------------------------------------
+
+    def tend_landmarks(self) -> dict:
+        """Keep the master `_index.md`'s `## Landmarks` section fresh (A.5):
+        top-degree non-branch nodes, idempotent, audited `.md`-only commit."""
+        rows = self.vine.catalog.top_degrees(MAX_LANDMARKS)
+        desired = [indexer.entry_line(r["id"], r["summary"]) for r in rows]
+
+        master = self.forest.read("_index")
+        body = indexer.ensure_section(master.body, LANDMARKS_SECTION)
+        current_sec = extract_section(body, LANDMARKS_SECTION) or ""
+        current = [l for l in current_sec.splitlines() if l.startswith("- [[")]
+        if current == desired:
+            return {"landmarks": len(desired), "changed": False}
+
+        new_body = replace_section(body, LANDMARKS_SECTION, "\n".join(desired))
+        assert new_body is not None  # ensure_section guarantees the heading
+        fm = dict(master.frontmatter)
+        fm["updated"] = dt.date.today().isoformat()
+        assert master.path is not None
+        master.path.write_text(serialize_node(fm, new_body),
+                               encoding="utf-8", newline="\n")
+        self.vine.git.commit([master.path], "ranger(landmarks): refresh")
+        self.vine.catalog.upsert_node(self.forest.read("_index"))
+        return {"landmarks": len(desired), "changed": True}
+
     # -- H.3 health report (read-only) ----------------------------------------
 
     def health(self) -> dict:
@@ -184,5 +213,6 @@ class Ranger:
         report["payload_cache"] = self.vine.payload_cache.evict(
             float(self.config["payload_cache_gb"]))
         report["links"] = self.tend_links()
+        report["landmarks"] = self.tend_landmarks()
         report["health"] = self.health()
         return report

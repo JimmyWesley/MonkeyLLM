@@ -60,6 +60,21 @@ Reply with ONE JSON object only, no prose around it:
 RETRY_PROMPT = ("Your previous summary was rejected: {error}. "
                 "Rewrite it following the rules strictly. JSON only.")
 
+BRANCH_PROMPT = """\
+You summarize a REGION (branch) of a knowledge forest. Below are the entry
+lines of its children — sub-branches and notes, each already summarized.
+Write the branch's summary: the SCENT an agent reads to decide whether to
+descend here. Rules (normative, spec A.4/A.5):
+- 1 to 3 sentences, at most 60 tokens total. Shorter is better.
+- Say WHAT lives here: themes, concrete names, time scope visible in the
+  entries. Synthesize the region — do not enumerate every child.
+- If the entries make it visible, add where to go for what is NOT here.
+- NEVER start with boilerplate like "This folder contains" or "This branch
+  groups" — go straight to the substance.
+- Write in the SAME LANGUAGE as the entries.
+Reply with ONE JSON object only, no prose around it:
+{"summary": "..."}"""
+
 PROPOSE_PROMPT = """\
 You connect nodes of a knowledge forest. Below is a NEW node and a closed
 list of EXISTING candidate nodes. Pick the candidates (0 to {max_proposals})
@@ -84,6 +99,23 @@ def _clip(text: str, budget: int = CONTENT_BUDGET_TOKENS) -> str:
     while words and estimate_tokens(" ".join(words)) > budget:
         del words[max(1, len(words) * 3 // 4):]
     return " ".join(words)
+
+
+def _clip_lines(lines: list[str], budget: int = CONTENT_BUDGET_TOKENS) -> str:
+    """Whole-line clipping: keep entry lines intact up to the budget."""
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        tokens = estimate_tokens(line)
+        if kept and used + tokens > budget:
+            kept.append(f"(... {len(lines) - len(kept)} more entries)")
+            break
+        kept.append(line)
+        used += tokens
+    return "\n".join(kept)
 
 
 def _extract_json(text: str) -> dict | None:
@@ -111,7 +143,8 @@ class Curator:
         self.system = SYSTEM_PROMPT.format(max_tags=MAX_TAGS,
                                            directives=directives_block)
         self.stats = {"llm_summaries": 0, "fallbacks": 0, "retries": 0,
-                      "links_proposed": 0, "proposal_fallbacks": 0}
+                      "links_proposed": 0, "proposal_fallbacks": 0,
+                      "branch_rollups": 0, "branch_fallbacks": 0}
 
     def __call__(self, draft: dict) -> dict:
         body = draft.get("body")
@@ -188,11 +221,36 @@ class Curator:
             draft["links"] = links
             self.stats["links_proposed"] += added
 
+    # -- G.4.4: branch rollup ------------------------------------------------
+
+    def branch_summary(self, title: str, entry_lines: list[str]) -> str | None:
+        """Synthesize a branch summary from its children's entry lines
+        (G.4.4). Returns None on failure — the caller falls back."""
+        entries = _clip_lines(entry_lines)
+        if not entries:
+            self.stats["branch_fallbacks"] += 1
+            return None
+        messages = [
+            {"role": "system", "content": BRANCH_PROMPT},
+            {"role": "user", "content": f"Branch: {title}\n\nChildren:\n{entries}"},
+        ]
+        result = self._validated(messages)
+        if result is None:
+            self.stats["branch_fallbacks"] += 1
+            return None
+        self.stats["branch_rollups"] += 1
+        return result[0]
+
     def _ask(self, title: str, body: str) -> tuple[str, list[str]] | None:
         messages = [
             {"role": "system", "content": self.system},
             {"role": "user", "content": f"Title: {title}\n\nContent:\n{_clip(body)}"},
         ]
+        return self._validated(messages)
+
+    def _validated(self, messages: list[dict]) -> tuple[str, list[str]] | None:
+        """Validate-and-retry loop shared by banana (_ask) and branch
+        (branch_summary) summaries."""
         for attempt in range(MAX_ATTEMPTS):
             try:
                 reply = self.chat(messages)

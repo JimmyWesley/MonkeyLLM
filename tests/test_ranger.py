@@ -135,6 +135,54 @@ class TestLinkTending:
         assert r.tend_links() == {"promoted": [], "pruned": []}
 
 
+class TestLandmarks:
+    def test_populates_master_index(self, vine_rw, ranger):
+        """H.7: top-degree non-branch nodes land in `## Landmarks` (A.5)."""
+        r, _ = ranger
+        report = r.tend_landmarks()
+        assert report["changed"] is True
+        assert 1 <= report["landmarks"] <= 20
+
+        from monkeyllm.parser import extract_section
+        body = vine_rw.forest.read("_index").body
+        sec = extract_section(body, "Landmarks")
+        lines = [l for l in sec.splitlines() if l.startswith("- [[")]
+        assert lines and len(lines) == report["landmarks"]
+        assert all("_index" not in l for l in lines)  # branches never appear
+        # entries carry the node summary (scent), not just the id
+        assert all(" — " in l for l in lines)
+
+    def test_second_run_is_idempotent(self, vine_rw, ranger):
+        r, _ = ranger
+        r.tend_landmarks()
+        head = vine_rw.git.head()
+        report = r.tend_landmarks()
+        assert report["changed"] is False
+        assert vine_rw.git.head() == head  # no new commit
+
+    def test_degree_zero_nodes_never_appear(self, vine_rw, ranger):
+        r, _ = ranger
+        vine_rw.plant({
+            "id": "concepts/lonely", "type": "concept", "parent": "concepts/_index",
+            "title": "Lonely", "summary": "A node with no links at all.",
+            "body": "# Lonely\n\nNo links.",
+        })
+        r.tend_landmarks()
+        from monkeyllm.parser import extract_section
+        sec = extract_section(vine_rw.forest.read("_index").body, "Landmarks")
+        assert "concepts/lonely" not in sec
+
+    def test_ordered_by_degree(self, vine_rw, ranger):
+        r, _ = ranger
+        r.tend_landmarks()
+        from monkeyllm.parser import extract_section
+        sec = extract_section(vine_rw.forest.read("_index").body, "Landmarks")
+        ids = [l.split("[[")[1].split("]]")[0]
+               for l in sec.splitlines() if l.startswith("- [[")]
+        degrees = [vine_rw.catalog.degree(i) for i in ids]
+        assert degrees == sorted(degrees, reverse=True)
+
+
 class TestHealth:
     def test_health_flags_problems(self, vine_rw, ranger, forest_rw):
         r, _ = ranger
@@ -171,4 +219,5 @@ class TestFullCycle:
     def test_run_returns_all_sections(self, ranger):
         r, _ = ranger
         report = r.run()
-        assert set(report) == {"evaporation", "payload_cache", "links", "health"}
+        assert set(report) == {"evaporation", "payload_cache", "links",
+                               "landmarks", "health"}

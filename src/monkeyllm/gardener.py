@@ -29,9 +29,10 @@ from typing import Callable, Protocol
 
 import yaml
 
+from monkeyllm import indexer
 from monkeyllm.errors import E_SCHEMA, VineError
 from monkeyllm.models import validate_summary
-from monkeyllm.parser import serialize_node
+from monkeyllm.parser import extract_section, serialize_node
 from monkeyllm.tokens import estimate_tokens
 from monkeyllm.vine import Vine
 
@@ -391,6 +392,29 @@ def derive_summary(markdown: str, title: str) -> str:
     return summary
 
 
+def derive_branch_summary(title: str, child_titles: list[str]) -> str:
+    """Deterministic G.4.4 fallback: compose the region's scent from child
+    titles, <= 60 tokens (A.4). Never raises."""
+    names = [t.strip() for t in child_titles if t and t.strip()]
+    summary = f"Region '{title}' with {len(names)} entries."
+    listing: list[str] = []
+    for name in names:
+        candidate = (f"Region '{title}': " + ", ".join(listing + [name])
+                     + f" (+{len(names) - len(listing) - 1} more).")
+        if listing and estimate_tokens(candidate) > SUMMARY_TARGET_TOKENS:
+            break
+        listing.append(name)
+    if listing:
+        more = len(names) - len(listing)
+        tail = f" (+{more} more)." if more > 0 else "."
+        summary = f"Region '{title}': " + ", ".join(listing) + tail
+    try:
+        validate_summary(summary)
+    except VineError:
+        summary = f"Region '{title}' with {len(names)} entries."
+    return summary
+
+
 # ===========================================================================
 # The Gardener
 # ===========================================================================
@@ -486,6 +510,50 @@ class Gardener:
         })
         report.branches.append(branch_id)
         return branch_id
+
+    # -- rollup (G.4.4) ------------------------------------------------------
+
+    def rollup(self, curator=None, *, only_ingest: bool = True) -> dict:
+        """G.4.4: synthesize branch summaries bottom-up (deepest first) from
+        the children's entry lines. Writes through C.8 graft, so parent-entry
+        propagation and `.md`-only commits are inherited."""
+        rolled: list[str] = []
+        fallbacks: list[str] = []
+        skipped = 0
+        rows = self.vine.catalog.conn.execute(
+            "SELECT id, source, title, summary FROM nodes WHERE kind = 'branch' "
+            "ORDER BY LENGTH(id) - LENGTH(REPLACE(id, '/', '')) DESC, id"
+        ).fetchall()
+        for row in rows:
+            branch_id = row["id"]
+            if branch_id.startswith("_meta/"):
+                continue
+            if only_ingest and row["source"] != "ingest":
+                skipped += 1
+                continue
+            # Fresh read: a deeper child's rollup may have just rewritten
+            # this branch's entry lines via summary propagation.
+            node = self.forest.read(branch_id)
+            entries: list[str] = []
+            for section in (indexer.SUBBRANCH_SECTION, indexer.BANANAS_SECTION):
+                sec = extract_section(node.body, section) or ""
+                entries += [l for l in sec.splitlines() if l.startswith("- [[")]
+            if not entries:
+                skipped += 1  # empty region: the template summary stays
+                continue
+            new_summary = (curator.branch_summary(row["title"], entries)
+                           if curator is not None else None)
+            if new_summary is None:
+                child_titles = [c["title"]
+                                for c in self.vine.catalog.children(branch_id)]
+                new_summary = derive_branch_summary(row["title"], child_titles)
+                fallbacks.append(branch_id)
+            if new_summary == row["summary"]:
+                continue
+            self.vine.graft(branch_id,
+                            {"set_frontmatter": {"summary": new_summary}})
+            rolled.append(branch_id)
+        return {"rolled": rolled, "fallbacks": fallbacks, "skipped": skipped}
 
     # -- curation (G.4) -----------------------------------------------------
 

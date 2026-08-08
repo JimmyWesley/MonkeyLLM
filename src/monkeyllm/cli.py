@@ -55,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     p_sync.add_argument("--path", default=None,
                         help="targeted sync (G.8): reconcile only this source-relative path")
 
+    p_rollup = sub.add_parser("rollup", help="Gardener: synthesize branch summaries bottom-up (spec G.4.4)")
+    p_rollup.add_argument("--forest", default=".")
+    p_rollup.add_argument("--all", action="store_true", dest="rollup_all",
+                          help="also roll up hand-authored branches (default: source: ingest only)")
+
     p_ranger = sub.add_parser("ranger", help="Ranger: evaporate heat, tend links, report health (spec H)")
     p_ranger.add_argument("--forest", default=".")
     p_ranger.add_argument("--every", type=int, default=None,
@@ -148,33 +153,43 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
 
-    if args.command in ("adopt", "sync"):
+    if args.command in ("adopt", "sync", "rollup"):
         from monkeyllm.gardener import Gardener, discover_hooks
         from monkeyllm.vine import Vine
 
+        def _make_curator(vine):
+            import yaml
+
+            from monkeyllm.curator import Curator, make_candidates, make_chat
+
+            chat, model = make_chat()
+            print(f"curation model: {model}")
+            directives = ""
+            cfg_path = forest_root / "_meta" / "gardener.yaml"
+            if cfg_path.is_file():
+                cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+                directives = (cfg.get("curation") or {}).get("directives") or ""
+            return Curator(chat, directives=directives,
+                           candidates=make_candidates(vine))
+
         vine = Vine(forest_root, writable=True)
         try:
-            curator = None
-            if args.curate:
-                import yaml
-
-                from monkeyllm.curator import Curator, make_candidates, make_chat
-
-                chat, model = make_chat()
-                print(f"curation model: {model}")
-                directives = ""
-                cfg_path = forest_root / "_meta" / "gardener.yaml"
-                if cfg_path.is_file():
-                    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-                    directives = (cfg.get("curation") or {}).get("directives") or ""
-                curator = Curator(chat, directives=directives,
-                                  candidates=make_candidates(vine))
-            hooks = discover_hooks() + ([curator] if curator else [])
-            gardener = Gardener(vine, hooks=hooks)
-            if args.command == "adopt":
-                report = gardener.adopt(args.source, dest=args.dest)
+            if args.command == "rollup":
+                curator = _make_curator(vine)
+                gardener = Gardener(vine, hooks=[])
+                rollup_report = gardener.rollup(
+                    curator, only_ingest=not args.rollup_all)
+                report = {}
             else:
-                report = gardener.sync(args.source, path=args.path)
+                curator = _make_curator(vine) if args.curate else None
+                hooks = discover_hooks() + ([curator] if curator else [])
+                gardener = Gardener(vine, hooks=hooks)
+                if args.command == "adopt":
+                    report = gardener.adopt(args.source, dest=args.dest)
+                else:
+                    report = gardener.sync(args.source, path=args.path)
+                # G.4.4: curated ingests finish with a bottom-up rollup
+                rollup_report = gardener.rollup(curator) if curator else None
         finally:
             vine.close()
         for key in ("planted", "branches", "updated", "unchanged", "stale",
@@ -183,9 +198,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{key} ({len(report[key])}):")
                 for item in report[key]:
                     print(f"  {item}")
+        if rollup_report is not None:
+            print(f"rollup: {len(rollup_report['rolled'])} branch(es) rolled, "
+                  f"{len(rollup_report['fallbacks'])} fallback(s), "
+                  f"{rollup_report['skipped']} skipped")
         if curator:
             print(f"curation: {curator.stats}")
-        if not any(report.values()):
+        if args.command != "rollup" and not any(report.values()):
             print("nothing to do")
         return 1 if report.get("errors") else 0
 

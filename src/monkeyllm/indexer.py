@@ -24,7 +24,7 @@ def entry_line(node_id: str, summary: str, coverage: str | None = None) -> str:
     return line
 
 
-def _ensure_section(body: str, section: str) -> str:
+def ensure_section(body: str, section: str) -> str:
     if extract_section(body, section) is not None:
         return body
     return body.rstrip() + f"\n\n## {section}\n"
@@ -34,7 +34,7 @@ def add_entry(index_node: ParsedNode, child_id: str, summary: str, *, is_branch:
               coverage: str | None = None) -> str:
     """Return new index body with the child's entry added (or replaced)."""
     section = SUBBRANCH_SECTION if is_branch else BANANAS_SECTION
-    body = _ensure_section(index_node.body, section)
+    body = ensure_section(index_node.body, section)
     body = remove_entry_from_body(body, child_id)
     sec = extract_section(body, section)
     new_sec = sec.rstrip() + "\n" + entry_line(child_id, summary, coverage)
@@ -46,13 +46,17 @@ def remove_entry_from_body(body: str, child_id: str) -> str:
     return pattern.sub("", body).replace("\n\n\n", "\n\n")
 
 
-def sync_summary(body: str, child_id: str, new_summary: str) -> tuple[str, bool]:
-    """Replace the child's entry line summary verbatim. Returns (body, changed)."""
+def sync_summary(body: str, child_id: str, new_summary: str,
+                 coverage: str | None = None) -> tuple[str, bool]:
+    """Replace the child's entry line summary verbatim. Returns (body, changed).
+
+    `coverage` preserves the sub-branch coverage suffix (A.5, spec v0.13):
+    without it a sync rewrite would silently drop `. N bananas, ...`."""
     pattern = re.compile(_ENTRY_RE_TPL.format(id=re.escape(child_id)), re.MULTILINE)
     m = pattern.search(body)
     if not m:
         return body, False
-    new_line = entry_line(child_id, new_summary)
+    new_line = entry_line(child_id, new_summary, coverage)
     if m.group(0) == new_line:
         return body, False
     return body[: m.start()] + new_line + body[m.end():], True
