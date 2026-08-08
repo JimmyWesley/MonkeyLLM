@@ -41,7 +41,7 @@ def station(station_root, tmp_path):
 
     from monkeyllm_station.app import build_app
 
-    app = build_app(root=station_root, registry_path=tmp_path / "station.db")
+    app = build_app(root=station_root, registry_path=tmp_path / "station.db", mcp=False)
     # TestClient's context manager runs the lifespan, so shutdown closes the
     # pool inside its own forest thread — the same path production takes.
     with TestClient(app) as client:
@@ -58,6 +58,23 @@ def test_health_is_open(station):
     client, _ = station
     r = client.get("/v1/health")
     assert r.status_code == 200 and r.json()["status"] == "ok"
+
+
+def test_studio_is_served(station):
+    client, _ = station
+    r = client.get("/")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert "MonkeyLLM Studio" in r.text
+
+
+def test_studio_holds_no_credentials(station):
+    """Studio is a plain REST client (J.5): whatever it can do, an API client
+    with the same principal can do — so it must ship no key of its own."""
+    import re
+
+    client, _ = station
+    # the placeholder text "mk_..." is fine; an actual minted key is not
+    assert not re.search(r"mk_[A-Za-z0-9_-]{20,}", client.get("/").text)
 
 
 def test_no_key_is_401(station):
@@ -146,14 +163,54 @@ def test_query_works_with_cap(station):
     assert r.status_code == 200 and r.json()["rows"]
 
 
-def test_write_primitives_are_not_exposed_in_phase_a(station):
-    """Writes wait for J.4 principal-stamped commits — an unattributed write
-    endpoint is worse than none."""
+def test_writes_require_the_write_cap(station):
     client, registry = station
-    headers = _key(registry, caps=("read", "write", "tend", "admin"))
-    for name in ("plant", "graft", "tend"):
-        assert client.post(f"/v1/forests/{FOREST}/{name}", json={},
-                           headers=headers).status_code == 404, name
+    r = client.post(f"/v1/forests/{FOREST}/plant",
+                    json={"node": {"id": "notes/x", "parent": "notes/_index",
+                                   "type": "note", "title": "X", "summary": "y"}},
+                    headers=_key(registry, caps=("read",)))
+    assert r.status_code == 403 and r.json()["error"]["code"] == "E_FORBIDDEN"
+
+
+def test_write_is_attributed_to_the_principal(station, station_root):
+    """J.4: the commit the engine made must name who asked for it."""
+    import subprocess
+
+    client, registry = station
+    headers = _key(registry, caps=("read", "write"), principal="writer")
+    r = client.post(
+        f"/v1/forests/{FOREST}/plant",
+        json={"node": {"id": "notes/station-made-this", "parent": "notes/_index",
+                       "type": "note", "title": "Station made this",
+                       "summary": "A node planted through the Station, for attribution."}},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    sha = r.json()["commit"]
+    root = station_root / FOREST
+    message = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%B", sha],
+                             capture_output=True, text=True)
+    assert message.returncode == 0, "the returned sha must exist after amending"
+    assert "station-principal: writer" in message.stdout
+
+
+def test_reads_and_writes_are_audited(station):
+    client, registry = station
+    headers = _key(registry, caps=("read",), principal="watched")
+    client.post(f"/v1/forests/{FOREST}/locate", json={"query": "stigmergy"}, headers=headers)
+    entries = registry.audit(limit=10, principal="watched")
+    assert entries and entries[0]["primitive"] == "locate"
+    assert entries[0]["forest"] == FOREST
+
+
+def test_audit_stores_no_content(station):
+    """The log records access, not what was read (J.4)."""
+    client, registry = station
+    headers = _key(registry, caps=("read",), principal="watched")
+    secret = "x" * 500
+    client.post(f"/v1/forests/{FOREST}/locate", json={"query": secret}, headers=headers)
+    entry = registry.audit(limit=1, principal="watched")[0]
+    assert secret not in entry["args"] and "chars>" in entry["args"]
 
 
 def test_bad_body_is_400(station):
@@ -175,15 +232,33 @@ def test_keys_are_stored_hashed_only(station):
     assert registry.authenticate("mk_wrong") is None
 
 
-def test_prefix_policy_is_refused_until_t08(station):
-    """Safe failure mode: the Station refuses a policy it cannot enforce
-    rather than accepting it and serving everything."""
-    from monkeyllm_station.policy import Policy
+def test_scoped_principal_sees_only_its_subtree_over_rest(station):
+    """The leak suite proves this at the library surface; this is the same
+    guarantee arriving through HTTP."""
+    client, registry = station
+    key = registry.issue_key("scoped")
+    registry.grant("scoped", FOREST, {"read"}, allow=["projects/"])
+    headers = {"Authorization": f"Bearer {key}"}
 
-    with pytest.raises(NotImplementedError):
-        Policy(forest=FOREST, caps=frozenset({"read"}), allow=("projects/",))
-    with pytest.raises(NotImplementedError):
-        Policy(forest=FOREST, caps=frozenset({"read"}), deny=("projects/secret/",))
+    hits = client.post(f"/v1/forests/{FOREST}/locate",
+                       json={"query": "model", "k": 5}, headers=headers).json()["results"]
+    assert hits and all(h["id"].startswith("projects/") for h in hits)
+
+    hidden = client.post(f"/v1/forests/{FOREST}/look",
+                         json={"id": "people/jimmy-wesley"}, headers=headers)
+    absent = client.post(f"/v1/forests/{FOREST}/look",
+                         json={"id": "projects/nope-not-real"}, headers=headers)
+    assert hidden.status_code == absent.status_code == 404
+    assert hidden.json()["error"]["hint"] == absent.json()["error"]["hint"]
+
+
+def test_me_reports_roots_for_a_scoped_principal(station):
+    client, registry = station
+    key = registry.issue_key("scoped")
+    registry.grant("scoped", FOREST, {"read"}, allow=["projects/"])
+    body = client.get("/v1/me", headers={"Authorization": f"Bearer {key}"}).json()
+    assert body["principal"] == "scoped"
+    assert body["grants"][0]["roots"] == ["projects/_index"]
 
 
 def test_unknown_capability_is_rejected(station):

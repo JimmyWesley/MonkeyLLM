@@ -1,6 +1,7 @@
 # T08 — ScopedVine: branch-level policies (the "RLS" of forests)
 
-status: todo (unblocked — Part J is normative as of spec v0.14)
+status: done (2026-08-08 — prefix policies enforced across every primitive
+and both surfaces; leak suite green)
 depends-on: T07 Phase A (the host that consumes it). The J.3 enforcement
 matrix is now contract: implement it, do not redesign it here.
 
@@ -15,7 +16,7 @@ multi-principal access without any engine change.
 ## Context
 
 - Policy object and per-primitive enforcement matrix: J.3 of
-  `docs/monkeyllm-spec-v0.14.md` (normative).
+  `docs/monkeyllm-spec-v0.15.md` (normative).
 - Two normative subtleties drive the design: scope filtering MUST precede
   budgeting (no truncation oracle), and out-of-scope MUST be
   byte-identical to `E_NOT_FOUND` (no existence oracle).
@@ -32,18 +33,33 @@ multi-principal access without any engine change.
 3. **Leak suite** (the deliverable that makes this trustworthy):
    for each primitive × surface, prove a `projects/`-scoped principal
    cannot obtain id/title/summary/body/edge/snippet of any node outside
-   `projects/` (J.7.2) — including via `harvest` composites and
-   truncation behavior (J.7.3).
+   `projects/` (F.18) — including via `harvest` composites and
+   truncation behavior (F.18).
 4. Property tests: same query, scoped vs unscoped, identical response
    shape and budgets.
 
 ## Acceptance criteria
 
-- [ ] J.3 matrix implemented with one rule per primitive, documented
+- [x] J.3 matrix implemented with one rule per primitive, documented
       inline against the spec section.
-- [ ] Leak suite green (one test per primitive per surface minimum).
-- [ ] No existence/truncation oracle (J.7.2, J.7.3).
-- [ ] Zero edits under `src/monkeyllm` (J.7.5).
+- [x] Leak suite green (`tests/test_station_scoping.py`, plus the REST and
+      MCP surfaces in `test_station_api.py` / `test_station_mcp.py`).
+      The load-bearing test walks the WHOLE response of every primitive
+      rather than checking known fields — that is what caught the leaks
+      below.
+- [x] No existence/truncation oracle (F.18). Out-of-scope reads reproduce
+      the engine's own `E_NOT_FOUND` text, with a tripwire test that fails
+      if that wording ever drifts apart.
+- [x] Zero edits under `src/monkeyllm` (F.18).
+
+## Leaks the sweep found (kept as a record — none were on the checklist)
+
+- `trail` on every locate/sniff hit carries ancestor ids, so a scoped
+  principal was handed the master `_index`.
+- `coverage` on a branch counts its real children, hidden ones included.
+- `stats.degree` counts hidden edges.
+- `scanned_nodes` from `sniff` reports how many bodies the engine opened —
+  a forest-size oracle. It now reports what the caller can see.
 
 ## Out of scope
 

@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { color-scheme: dark; }
+  body {
+    @apply bg-canvas text-bark-300 antialiased;
+    background-image:
+      radial-gradient(60rem 40rem at 15% -10%, rgba(74,157,113,.07), transparent 60%),
+      radial-gradient(50rem 30rem at 100% 0%, rgba(74,157,113,.05), transparent 55%);
+    background-attachment: fixed;
+  }
+  ::selection { @apply bg-moss-600/40 text-moss-50; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { @apply bg-canvas-line rounded-full; }
+}
+
+@layer components {
+  .panel { @apply rounded-xl border border-canvas-line bg-canvas-card shadow-panel; }
+  .field {
+    @apply w-full rounded-lg border border-canvas-line bg-canvas-soft px-3 py-2
+           text-sm text-moss-50 placeholder:text-bark-500 outline-none
+           focus:border-moss-500 focus:shadow-ring transition;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-lg border border-canvas-line
+           bg-canvas-soft px-3 py-2 text-sm text-bark-300 transition
+           hover:border-moss-600 hover:text-moss-50 disabled:opacity-40
+           disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply border-moss-500 bg-moss-500 text-canvas font-medium
+           hover:bg-moss-400 hover:border-moss-400 hover:text-canvas;
+  }
+  .chip {
+    @apply inline-flex items-center rounded-full border border-canvas-line
+           px-2 py-0.5 text-[11px] text-bark-400;
+  }
+  .chip-moss { @apply border-moss-600/50 bg-moss-900/60 text-moss-200; }
+  .nodeid { @apply font-mono text-[12.5px] text-moss-400; }
+  .label { @apply block text-[11px] uppercase tracking-wide text-bark-500 mb-1.5; }
+}

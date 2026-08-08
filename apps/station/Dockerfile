@@ -2,6 +2,16 @@
 #
 # Build from the REPOSITORY ROOT so the engine source is in context:
 #   docker build -f apps/station/Dockerfile -t monkeyllm-station .
+
+# --- Studio: a static React/Vite bundle, no server half (J.5) --------------
+FROM node:22-slim AS studio
+WORKDIR /studio
+COPY apps/studio/package.json apps/studio/package-lock.json* ./
+RUN npm install --no-audit --no-fund
+COPY apps/studio/ ./
+RUN npm run build
+
+# --- Station ---------------------------------------------------------------
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -15,8 +25,12 @@ COPY apps/station/pyproject.toml ./apps/station/
 COPY apps/station/monkeyllm_station/ ./apps/station/monkeyllm_station/
 RUN pip install --no-cache-dir ./apps/station
 
-# /forests  the forest registry (read-only mount is fine in Phase A)
-# /registry the host registry: principals, keys, grants — never inside a forest
+# The Station serves this directory as static files and nothing else.
+COPY --from=studio /studio/dist ./apps/studio/dist
+
+# /forests  the forest registry
+# /registry the host registry: principals, keys, grants, provider secrets —
+#           never inside a forest, and worth backing up with the snapshots
 VOLUME ["/forests", "/registry"]
 EXPOSE 8800
 
