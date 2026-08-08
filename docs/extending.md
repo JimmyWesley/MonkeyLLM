@@ -1,7 +1,7 @@
 # Extending MonkeyLLM
 
 A map of every place MonkeyLLM is designed to be extended, and — just as
-important — the boundaries that stay closed. `docs/monkeyllm-spec-v0.12.md`
+important — the boundaries that stay closed. `docs/monkeyllm-spec-v0.14.md`
 is the normative contract; nothing below overrides it. Ingest-specific
 plugins (converters, `on_curate` hooks) are covered in
 `docs/ingest-tools.md` — this doc is the wider picture.

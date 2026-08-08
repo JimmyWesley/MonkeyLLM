@@ -345,7 +345,7 @@ If the path to cheap, private, grounded AI runs anywhere, it does not run throug
 
 ## Reproducibility
 
-All code, the normative specification (`docs/monkeyllm-spec-v0.12.md`), corpus generators, question sets, and measurement scripts ship in the reference implementation. Key entry points: `bench/run_bench.py` (all arms), `scripts/bench_locate.py` (§5.1), `scripts/measure_curation.py` (§5.3), `scripts/convergence.py` (§6.2–6.3). Forests rebuild deterministically; the full test suite (276 tests, including SQL-injection suites for `query` and `tend`) passes green. See Appendix B for a five-minute quickstart.
+All code, the normative specification (`docs/monkeyllm-spec-v0.14.md`), corpus generators, question sets, and measurement scripts ship in the reference implementation. Key entry points: `bench/run_bench.py` (all arms), `scripts/bench_locate.py` (§5.1), `scripts/measure_curation.py` (§5.3), `scripts/convergence.py` (§6.2–6.3). Forests rebuild deterministically; the full test suite (294 tests, including SQL-injection suites for `query` and `tend`) passes green. See Appendix B for a five-minute quickstart.
 
 ## Acknowledgements
 

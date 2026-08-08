@@ -1,9 +1,8 @@
 # T07 — Station: self-hostable host (REST + MCP over the forest registry)
 
-status: todo
-depends-on: Part J normative (fold `docs/drafts/part-j-station-governance.md`
-into the first spec version after v0.13 lands) for J.3 semantics; Phase A
-below is buildable before that because it adds no scoping.
+status: todo (unblocked — Part J is normative as of spec v0.14)
+depends-on: nothing. Part J (spec v0.14) governs J.1 surfaces and J.6
+deployment; scoping semantics come from T08.
 
 ## Goal
 

@@ -11,7 +11,7 @@ Conventions:
 - Language policy: **everything in English** — task files, code comments,
   docstrings, docs, CLI output. See `T02-english-normalization.md` for the
   one-time cleanup; new work must already comply.
-- The spec is the truth (`docs/monkeyllm-spec-v0.12.md`): contract changes
+- The spec is the truth (`docs/monkeyllm-spec-v0.14.md`): contract changes
   require a new spec version *before* code, and that rule applies to tasks too.
 
 | Task | Title | Status |
@@ -23,5 +23,5 @@ Conventions:
 | T05 | Publication readiness (GitHub + paper) | todo |
 | T06 | Monkey Bench: multi-hop question hardening | done (v3 set 100% min_hops>=3; first shouts fired via spec v0.6 trail_len) |
 | T07 | Station: self-hostable host (REST + MCP over the registry) | todo |
-| T08 | ScopedVine: branch-level policies (the "RLS" of forests) | todo (spec Part J before code — draft in docs/drafts/) |
+| T08 | ScopedVine: branch-level policies (the "RLS" of forests) | todo (unblocked — Part J normative as of spec v0.14) |
 | T09 | Studio: the web face of the Station | todo |
