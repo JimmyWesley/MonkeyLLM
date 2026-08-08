@@ -1,20 +1,20 @@
 [
   {
     "id": "b01",
-    "question": "Qual foi o resultado e a latência média do experimento com semente 1045 no log do MixerLLM?",
+    "question": "What was the result and the average latency of the experiment with seed 1045 in the MixerLLM log?",
     "expected_nodes": [
-      "projetos/mixerllm/log-experimentos"
+      "projects/mixerllm/experiment-log"
     ],
     "answer_contains": [
-      "descartado",
+      "discarded",
       "615"
     ]
   },
   {
     "id": "b02",
-    "question": "Em qual rodada do log de experimentos o cache de blocos atingiu hit-rate de 73% pela primeira vez, e qual era a semente dessa rodada?",
+    "question": "In which run of the experiment log did the block cache reach a 73% hit-rate for the first time, and what was that run's seed?",
     "expected_nodes": [
-      "projetos/mixerllm/log-experimentos"
+      "projects/mixerllm/experiment-log"
     ],
     "answer_contains": [
       "1013"
@@ -22,9 +22,9 @@
   },
   {
     "id": "b03",
-    "question": "Quantas delegações consecutivas sem fragmentação foram observadas na rodada 27 do log de experimentos?",
+    "question": "How many consecutive delegations without fragmentation were observed in run 27 of the experiment log?",
     "expected_nodes": [
-      "projetos/mixerllm/log-experimentos"
+      "projects/mixerllm/experiment-log"
     ],
     "answer_contains": [
       "127"
@@ -32,12 +32,12 @@
   },
   {
     "id": "b04",
-    "question": "O processo de qualidade aberto pela falha de vedacao do Sensor X envolve o fornecedor de qual componente?",
+    "question": "The quality process opened for the Sensor X seal failure involves the supplier of which component?",
     "expected_nodes": [
-      "vendas/devolucoes-q1"
+      "sales/returns-q1"
     ],
     "answer_contains": [
-      "carcaça"
+      "casing"
     ]
   }
 ]

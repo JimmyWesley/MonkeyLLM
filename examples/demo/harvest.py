@@ -4,8 +4,8 @@ Zero-LLM retrieval: one call, ranked bananas + exact snippets back, so the
 caller's LLM decides the next steps.
 
 Usage:
-    python examples/demo/harvest.py "semente 1045"
-    python examples/demo/harvest.py --terms 1045,Experimento --k 3 "..."
+    python examples/demo/harvest.py "seed 1045"
+    python examples/demo/harvest.py --terms 1045,experiment --k 3 "..."
 """
 
 from __future__ import annotations
