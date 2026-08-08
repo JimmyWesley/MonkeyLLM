@@ -173,6 +173,24 @@ class Catalog:
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
 
+    def top_degrees(self, limit: int = 20) -> list[sqlite3.Row]:
+        """Highest-degree non-branch nodes over the typed-edge table (H.7).
+        Only nodes with degree >= 1 appear (the SELECT starts from edges)."""
+        return self.conn.execute(
+            """
+            SELECT n.id, n.title, n.summary, d.degree FROM (
+                SELECT node, SUM(cnt) AS degree FROM (
+                    SELECT src AS node, COUNT(*) AS cnt FROM edges GROUP BY src
+                    UNION ALL
+                    SELECT dst AS node, COUNT(*) AS cnt FROM edges GROUP BY dst
+                ) GROUP BY node
+            ) d JOIN nodes n ON n.id = d.node
+            WHERE n.kind != 'branch' AND n.id NOT LIKE '\\_meta/%' ESCAPE '\\'
+            ORDER BY d.degree DESC, n.id LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
     def degree(self, node_id: str) -> int:
         return self.conn.execute(
             "SELECT (SELECT COUNT(*) FROM edges WHERE src = ?) + "
