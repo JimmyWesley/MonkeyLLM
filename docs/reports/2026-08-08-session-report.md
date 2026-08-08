@@ -106,6 +106,33 @@ in a single call? Measured on the fixture (14 questions = 10 demo +
   agent when the bundle comes back dry or the question is aggregate
   (SQL-shaped). Added to the paper's §8 trade-offs paragraph with numbers.
 
+## Addendum — MiniCPM5-1B local A/B (aborted: MacBook too slow)
+
+Does the scent-weighting raise the tiny navigator's correct count?
+Setup: MiniCPM5-1B Q8_0 via `llama-server` (Metal), `--ctx 32768`
+(the 8192 default overflows the demo conversation: HTTP 400
+`exceed_context_size` at ~9.7k tokens), temp 0.1, fixture demo set.
+Completed 4 flat + 3 weighted runs (~65 s/question here; one question
+pegged ~310 s in every run) before stopping — this eval belongs on the
+3090 box.
+
+| Arm | Correct (runs) | Mean | Precision (mean) | Tok-to-banana |
+| --- | --- | --- | --- | --- |
+| flat | 9, 8, 8, 10 | 8.75 | ~0.29 | ~2,550 |
+| weighted | 8, 8, 7 | 7.67 | ~0.35 | ~2,170 |
+
+**No correct-count gain** — the difference is within this model's
+documented run-to-run swings. Weighted was consistently better on
+harvest precision (+0.06) and ~15% cheaper in observation tokens.
+Reading: the fixture set is near-saturated at locate level even flat
+(R@1 0.9), and the 1B's failures are protocol collapse (locate-repetition
+loops, stall rescues, forced synthesis) — not entry-search misses. Better
+scent cannot substitute for navigation discipline below the capability
+floor; this is §6.3's substitution thesis seen from the other side. The
+weighting's end-to-end payoff should be sought where flat BM25 actually
+misses (bench-forest, flat R@1 0.667), with repeats, on hardware fast
+enough to afford them.
+
 ## Follow-ups
 
 - Hybrid re-run with scent-weighted BM25 under RRF (needs the bge-m3
