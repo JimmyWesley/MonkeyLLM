@@ -47,13 +47,13 @@ multi-forest registry, deployable with `docker compose up`.
 ## Acceptance criteria
 
 - [ ] `docker compose up` + one API key = working REST + MCP against an
-      example registry (J.7.1). *(REST verified live over uvicorn
+      example registry (F.18). *(REST verified live over uvicorn
       2026-08-08: health, 401 without key, granted-forest listing,
       `locate`, dataset `query`, 404 on ungranted. MCP pending Phase B;
       the image itself is written but not yet built in CI.)*
 - [x] No surface can reach an unscoped `Vine` — the `ScopedVine` seam
       landed in Phase A rather than being retrofitted in Phase B.
-- [x] Engine suite passes with zero engine edits (J.7.5) — `git status
+- [x] Engine suite passes with zero engine edits (F.18) — `git status
       src/` clean; suite 310 green (294 engine + 16 Station).
 - [x] Station test suite (authn, capability gates, endpoint contracts,
       error-envelope mapping, forest-level existence oracle).

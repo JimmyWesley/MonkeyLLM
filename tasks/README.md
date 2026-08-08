@@ -11,7 +11,7 @@ Conventions:
 - Language policy: **everything in English** — task files, code comments,
   docstrings, docs, CLI output. See `T02-english-normalization.md` for the
   one-time cleanup; new work must already comply.
-- The spec is the truth (`docs/monkeyllm-spec-v0.14.md`): contract changes
+- The spec is the truth (`docs/monkeyllm-spec-v0.15.md`): contract changes
   require a new spec version *before* code, and that rule applies to tasks too.
 
 | Task | Title | Status |
@@ -22,6 +22,6 @@ Conventions:
 | T04 | Phase 2: Living Bank (Gardener, Ranger, dataset writes) | in-progress (tend v0.7; dataset birth v0.8; Gardener core v0.9; Ranger v0.10; curation measured 100%; tiered storage v0.11; DOCX built-in + edge proposals v0.12; convergence measured — criterion NOT met, floor-effect + cross-talk findings; ingest-tools.md + extending.md guidance done 2026-07-02; media extras + entity extraction remain, both need a spec bump) |
 | T05 | Publication readiness (GitHub + paper) | todo |
 | T06 | Monkey Bench: multi-hop question hardening | done (v3 set 100% min_hops>=3; first shouts fired via spec v0.6 trail_len) |
-| T07 | Station: self-hostable host (REST + MCP over the registry) | in-progress (Phase A done 2026-08-08: `apps/station/` read-only REST, API keys, ScopedVine seam, Docker; Phase B = writes/audit/MCP) |
-| T08 | ScopedVine: branch-level policies (the "RLS" of forests) | todo (unblocked — Part J normative as of spec v0.14) |
-| T09 | Studio: the web face of the Station | todo |
+| T07 | Station: self-hostable host (REST + MCP over the registry) | in-progress (Phases A+B done 2026-08-08: REST + authenticated MCP, governed writes with principal-stamped commits, audit log, per-forest model bindings; OIDC/quotas + ingest endpoints remain) |
+| T08 | ScopedVine: branch-level policies (the "RLS" of forests) | done (2026-08-08: J.3 matrix across every primitive and both surfaces; leak suite green — the whole-response sweep caught trail/coverage/degree/scanned_nodes) |
+| T09 | Studio: the web face of the Station | in-progress (2026-08-08: React/Tailwind/Vite SPA — Ask, Browse, Search, Datasets, Models, Governance, Audit; ingestion + trails consoles remain) |

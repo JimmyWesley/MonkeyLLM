@@ -1,7 +1,18 @@
 # T09 — Studio: the web face of the Station
 
-status: todo
+status: in-progress (2026-08-08 — React/Tailwind/Vite SPA shipped with Ask,
+Browse, Search, Datasets, Models, Governance and Audit; ingestion console
+and trails dashboard remain)
 depends-on: T07 (REST surface), T08 (policies, for the governance console).
+
+## What shipped
+
+`apps/studio/` — React 18 + Tailwind + Vite, built to static files the
+Station serves. No server half of its own (J.5), so the deployment stays
+one image. Verified in a browser against a live Station with both an admin
+key and a `projects/`-scoped key: the scoped principal opens on its own
+root, never the master `_index`, and Governance degrades to a plain
+explanation instead of an empty admin form.
 
 ## Goal
 
@@ -19,20 +30,24 @@ without ever touching the filesystem.
 
 ## Consoles (J.5), in delivery order
 
-1. **Forest browser** — tree by branch, node passport (frontmatter),
-   body render, links/edges, git history of the node.
-2. **Search console** — locate/sniff playground with the same budgets
+1. [x] **Ask** — question in, grounded answer out, with the evidence nodes
+   clickable through to Browse (J.10.3).
+2. [x] **Forest browser** — branch tree, node passport, body, edges,
+   scope-aware breadcrumbs.
+3. [x] **Search console** — locate/sniff/harvest with the same budgets
    the agent sees (great for tuning scent).
-3. **Dataset console** — `## Query manual` surfaced, read-only SQL
-   runner (C.9 guards), `tend` as forms (C.10 guards).
-4. **Ingestion console** — adopt/sync runs, converter status, stale
-   report, curation review queue (0.3-confidence edge proposals:
-   approve -> promote path, reject -> prune).
-5. **Trails dashboard** — heat over the tree, shortcuts, promote/prune
+4. [x] **Dataset console** — dataset discovery, read-only SQL runner
+   (C.9 guards). `tend` forms still to come.
+5. [x] **Models** — providers (write-only keys, connection test) and the
+   per-forest ingest/answer bindings (J.10).
+6. [x] **Governance console** — principals, capabilities, allow/deny
+   prefixes, key issuance.
+7. [x] **Audit** — the host read log plus the commit each write produced.
+8. [ ] **Ingestion console** — adopt/sync runs, converter status, stale
+   report, curation review queue (0.3-confidence edge proposals).
+9. [ ] **Trails dashboard** — heat over the tree, shortcuts, promote/prune
    history, session replays from telemetry.
-6. **Governance console** — members, roles, policies, tokens, audit log
-   (writes from git, reads from the host registry).
-7. **Health** — Ranger reports, snapshot create/restore (Part I).
+10. [ ] **Health** — Ranger reports, snapshot create/restore (Part I).
 
 ## Acceptance criteria
 
