@@ -1,5 +1,4 @@
 {
-  "forest.created": "Forest \"{id}\" is ready. You have full access to it.",
   "forest.id": "Identifier",
   "forest.id_hint": "Lowercase letters, digits, \"-\" and \"_\". It becomes the folder name and cannot be changed later.",
   "forest.new": "New forest",

@@ -4,7 +4,6 @@
   "overview.can": "What you can do here",
   "overview.cannot": "What you cannot do here",
   "overview.datasets": "Datasets",
-  "overview.hello": "This forest at a glance",
   "overview.no_model": "No model is bound to this forest yet, so Ask cannot answer. Everything else works.",
   "overview.nodes": "Nodes in reach",
   "overview.roots": "You start from",

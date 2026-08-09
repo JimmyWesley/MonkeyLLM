@@ -1,7 +1,6 @@
 {
   "files.as_page": "Renderizado como página",
   "files.body_stored": "Cuerpo, tal como está guardado",
-  "files.db_columns": "Columnas",
   "files.db_guard": "SELECT de solo lectura · limitado · 2s de tiempo máximo",
   "files.db_needs_query": "Leer un dataset exige la capacidad de query.",
   "files.db_no_rows": "Sin filas.",

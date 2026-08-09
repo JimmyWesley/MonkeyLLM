@@ -2,7 +2,6 @@
   "ask.answer": "Respuesta",
   "ask.collapse": "Trazer o painel de volta",
   "ask.depth": "Cuánto leer",
-  "ask.depth_hint": "Más nodos significa una respuesta mejor fundamentada y una llamada más lenta y más cara.",
   "ask.download_md": "Baixar .md",
   "ask.download_pdf": "Salvar em PDF",
   "ask.evidence_hint": "Cada id de abajo fue realmente leído para producir esta respuesta. Haz clic para abrirlo.",

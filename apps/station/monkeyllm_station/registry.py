@@ -11,6 +11,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -152,11 +153,31 @@ def hash_password(password: str, salt: str) -> str:
 
 
 class Registry:
+    """The host's own storage: principals, keys, grants, bindings, audit.
+
+    **One connection per thread.** The Station touches this file from two
+    threads by design — the event loop authenticates every request, and the
+    forest worker writes the audit record once a call has run — and a single
+    `sqlite3.Connection` shared between them shares its *transaction state*
+    too. One thread's `commit()` then lands inside the other's open
+    transaction, and the loser raises "cannot commit - no transaction is
+    active" mid-request: a 500 for the caller and a silently dropped audit
+    row. It is intermittent, which is why a mostly-sequential test suite
+    never saw it.
+
+    A lock around every method would work and would be wrong to maintain:
+    thirty-odd methods touch the connection, and the thirty-first added later
+    reintroduces the bug quietly. Giving each thread its own connection makes
+    the isolation structural — no method can forget it — and lets SQLite
+    arbitrate between them, which is what it is for.
+    """
+
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
+        self._local = threading.local()
+        self._opened: list[sqlite3.Connection] = []
+        self._opened_lock = threading.Lock()
         self.conn.executescript(SCHEMA_SQL)
         self._migrate()
         self.conn.commit()
@@ -172,8 +193,39 @@ class Registry:
                 if name not in have:
                     self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """This thread's connection, opened the first time it asks."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            # `check_same_thread=False` is not what makes this safe — one
+            # connection per thread is. It is here only so `close()` can shut
+            # down connections belonging to threads that have already gone.
+            conn = sqlite3.connect(self.path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            # WAL lets the reader on the event loop and the writer on the
+            # forest thread proceed at once; without it they serialise on the
+            # whole file and a read can fail while a write is in flight.
+            conn.execute("PRAGMA journal_mode=WAL")
+            # Two writers still take turns. Waiting a moment is the right
+            # answer; failing the request is not.
+            conn.execute("PRAGMA busy_timeout=5000")
+            self._local.conn = conn
+            with self._opened_lock:
+                self._opened.append(conn)
+        return conn
+
     def close(self) -> None:
-        self.conn.close()
+        with self._opened_lock:
+            for conn in self._opened:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    # Shutdown is not the place to raise about a connection
+                    # that is already gone.
+                    pass
+            self._opened.clear()
+        self._local = threading.local()
 
     # -- principals and keys ------------------------------------------------
 

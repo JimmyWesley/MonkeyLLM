@@ -1,5 +1,4 @@
 {
-  "forest.created": "El bosque \"{id}\" está listo. Tienes acceso total a él.",
   "forest.id": "Identificador",
   "forest.id_hint": "Minúsculas, dígitos, \"-\" y \"_\". Será el nombre de la carpeta y no puede cambiarse después.",
   "forest.new": "Nuevo bosque",

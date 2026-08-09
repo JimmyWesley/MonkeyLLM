@@ -4,7 +4,6 @@
   "overview.can": "O que você pode fazer aqui",
   "overview.cannot": "O que você não pode fazer aqui",
   "overview.datasets": "Datasets",
-  "overview.hello": "Esta floresta em resumo",
   "overview.no_model": "Nenhum modelo está ligado a esta floresta, então Perguntar não responde ainda. O resto funciona normalmente.",
   "overview.nodes": "Nós ao seu alcance",
   "overview.roots": "Você começa em",
