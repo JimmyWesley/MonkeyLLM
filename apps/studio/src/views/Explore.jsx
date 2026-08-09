@@ -4,32 +4,113 @@ import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, Code, Empty, ErrorNote, Skeleton, Spinner,
 } from '../design/ui.jsx'
-import { ChevronRight, Explore as Tree, File, Link, Search } from '../design/icons.jsx'
+import {
+  ChevronRight, Explore as Tree, File, Files, Graph, Link, Pencil, Search,
+} from '../design/icons.jsx'
 import {
   Metric, NeedsCapability, branchOf, has, rootsOf, useAsync, useCrumbs,
   useForestTree,
 } from './shared.jsx'
+import ForestGraph from './graph.jsx'
+import ForestFiles from './files.jsx'
+import NodeEditor from './editor.jsx'
+
+/** One console, three ways of looking at the same forest (spec J.5.4).
+ *
+ *  The selection survives a mode change, deliberately: switching from the
+ *  graph to the files is not a new question, it is the same node seen
+ *  differently — so the file for the selected node is what opens.
+ *
+ *  Graph and files share one map projection (J.11). It is a single call for
+ *  the whole region, so asking for it twice would be two copies of the same
+ *  answer, and letting the tree mode pay for it would slow down the console
+ *  a principal with a narrow scope actually uses.
+ */
+export default function Explore({ forest, grant, node, setNode }) {
+  const { t } = useI18n()
+  const [mode, setMode] = useState('tree')
+  const [editing, setEditing] = useState(null)
+
+  const roots = rootsOf(grant)
+  const current = node || roots[0]
+
+  const map = useAsync(() => api.map(forest, 'graph'), [forest],
+                       { skip: mode === 'tree' })
+
+  useEffect(() => { setEditing(null) }, [forest])
+
+  if (!has(grant, 'read')) {
+    return <NeedsCapability message={t('access.needs_admin')} hint={t('cap.read')} />
+  }
+
+  if (editing) {
+    return (
+      <NodeEditor forest={forest} grant={grant} id={editing}
+                  onClose={() => setEditing(null)}
+                  onSaved={() => map.reload()} />
+    )
+  }
+
+  const MODES = [
+    ['tree', Tree, t('explore.mode_tree')],
+    ['graph', Graph, t('explore.mode_graph')],
+    ['files', Files, t('explore.mode_files')],
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="segment">
+          {MODES.map(([value, Icon, label]) => (
+            <button key={value} type="button" aria-pressed={mode === value}
+                    onClick={() => setMode(value)}>
+              <Icon size={14} /> {label}
+            </button>
+          ))}
+        </div>
+        {node && (
+          <span className="nodeid truncate text-[12px]">{node}</span>
+        )}
+        {has(grant, 'write') && node && mode !== 'tree' && (
+          <button className="btn btn-sm ml-auto" onClick={() => setEditing(node)}>
+            <Pencil size={13} /> {t('files.edit')}
+          </button>
+        )}
+      </div>
+
+      {mode === 'graph' && (
+        <ForestGraph data={map.data} busy={map.busy} error={map.error}
+                     onReload={map.reload} selected={node} onSelect={setNode}
+                     onOpen={(id) => { setNode(id); setMode('files') }} />
+      )}
+
+      {mode === 'files' && (
+        <ForestFiles forest={forest} grant={grant} data={map.data}
+                     busy={map.busy} selected={node} onSelect={setNode}
+                     onEdit={has(grant, 'write') ? setEditing : null} />
+      )}
+
+      {mode === 'tree' && (
+        <BrowseAndSearch forest={forest} grant={grant} current={current}
+                         setNode={setNode} />
+      )}
+    </div>
+  )
+}
 
 /** Browsing and searching were two consoles over one question — "where does
  *  this live" — so they are one console now: the tree on the left, what you
  *  found on the right, and a search box that fills the tree's place when it
  *  has something to say. */
-export default function Explore({ forest, grant, node, setNode }) {
+function BrowseAndSearch({ forest, grant, current, setNode }) {
   const { t } = useI18n()
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState(null)
   const [searching, setSearching] = useState(false)
 
-  const roots = rootsOf(grant)
-  const current = node || roots[0]
   const tree = useForestTree(forest, grant, api.call)
-
   const digest = useAsync(() => api.call(forest, 'look', { id: current }),
                           [forest, current])
-
-  if (!has(grant, 'read')) {
-    return <NeedsCapability message={t('access.needs_admin')} hint={t('cap.read')} />
-  }
 
   async function search(e) {
     e?.preventDefault()

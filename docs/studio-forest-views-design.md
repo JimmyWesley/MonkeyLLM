@@ -1,12 +1,41 @@
-# Studio Forest Views — design note (pre-spec)
+# Studio Forest Views — design note
 
-Status: **approved direction, pre-spec** — contract items below require a spec
-version bump (Part J additions) before code, per the project rule.
-Date: 2026-08-09. Source: ideation session with an interactive prototype built
-from the real `forests/forest-fixture` (82 nodes, 97 edges, live force
-simulation, working file browser / db browser / query shortcuts). The
-prototype is a session artifact, intentionally not committed (page chrome is
-pt-BR); everything normative about it is captured here.
+Status: **shipped** (2026-08-09). The contract landed first as spec v0.22
+(J.5.4 Forest Views, J.11 map projections, J.8's `compose` mode, criterion
+F.25); the code followed. This note is the design record — what was decided,
+what was built, and where the build deviates from the sketch.
+
+Source: an ideation session with an interactive prototype built from the real
+`forests/forest-fixture` (82 nodes, 97 edges, live force simulation, working
+file browser / db browser / query shortcuts). The prototype is a session
+artifact, intentionally not committed (its page chrome is pt-BR); everything
+normative about it is captured here and in the spec.
+
+## What shipped, and where it differs from this sketch
+
+- **The force layout is hand-written** (`apps/studio/src/views/graph.jsx`),
+  not d3-force. Sixty lines of physics against a megabyte of dependency, for
+  a simulation whose only job is presentation.
+- **Editing is section-scoped.** `graft` replaces one section atomically, so
+  the editor works at that grain: one section plus the passport form, one
+  patch, one commit. Editing a whole body would have meant several commits
+  and a half-applied edit whenever the third one failed.
+- **The inspector has three tabs, not four.** Passport, Index and Trails all
+  come from primitives that exist. A Git tab would need a history endpoint,
+  which is contract this work did not need — so it was not invented.
+- **HTML rendering is body-level.** A node whose body is HTML renders as a
+  sanitised page; there is no file-serving endpoint, because a console that
+  could read bytes directly would be the side-channel J.5 forbids.
+- **`compose` is a Gardener mode**, not a new write path: authored prose is
+  staged as one document and walks the existing pipeline, so it gets the same
+  converters, curation and closed-candidate edge proposals as any file. The
+  sketch showed a review step before planting; what shipped plants and then
+  shows the report. Reviewing the Curator's proposal *before* it lands wants
+  a two-phase ingest, which is contract, and it is logged as a follow-up.
+- **No Monaco.** The source view is a plain preformatted block. Monaco is an
+  editor, and this view is deliberately not one: the editing door is `graft`.
+  Shipping a code editor to render read-only text would have been the
+  heaviest dependency in the console, bought for a scrollbar.
 
 ## Vision
 
@@ -119,18 +148,20 @@ reviews (accept/reject per link, adjust fields), then the node lands as a
 The Ranger manages the 0.3 population afterwards (H.2). Nothing is planted
 without review.
 
-## Contract additions (spec bump required BEFORE code)
+## Contract additions (landed in spec v0.22)
 
-1. `GET /v1/forests/{forest}/graph` — scoped catalog projection (Part J).
-2. `GET /v1/forests/{forest}/trails` — per-node persistent heat (Part J);
-   also unblocks T09 item 11 (trails dashboard).
-3. Ingest "Write": likely covered by the existing ingest endpoint with a
-   text payload + curation; confirm or extend in the spec.
-4. Explore modes, Reading/Source toggles, db browser and HTML rendering are
-   **presentation** (J.5) — no contract change.
-5. Editing uses existing primitives (`graft`/`tend`) — no contract change.
-6. Resolve the normative-spec question first: CLAUDE.md declares v0.20
-   normative but `docs/monkeyllm-spec-v0.21.md` exists.
+1. `GET /v1/forests/{forest}/graph` — scoped Catalog projection joined with
+   persistent heat (J.11).
+2. `GET /v1/forests/{forest}/trails` — persistent heat per node (J.11); this
+   is also what T09 item 11 needed.
+3. `compose`, J.8's fourth ingest mode: `{title, text, dest?}`.
+4. J.5.4 records the presentation rules — Explore modes, Reading/Source,
+   the dataset browser, HTML bodies — which change no request or permission.
+5. Editing uses `graft`/`tend` unchanged; J.5.4 states the prohibition that
+   makes that the only option.
+6. The normative-version question is resolved: CLAUDE.md pointed at v0.20
+   while v0.21 existed and was implemented. v0.22 is now normative and
+   CLAUDE.md says so.
 
 ## Non-goals
 
@@ -154,3 +185,26 @@ source is its own contract change). No realtime collaboration.
 Every phase is independently demoable. i18n is contractual: every new string
 in en/pt/es (the i18n test fails otherwise); semantic Tailwind tokens only;
 `api.js` remains the only module that calls `fetch`.
+
+## Verified end to end
+
+Against a live Station serving the fixture (82 nodes, synthetic pheromone,
+one `discovered-shortcut`):
+
+- the graph self-organises, drags, zooms and selects; light and dark both
+  read correctly, and heat, proposals and structure each toggle off;
+- a node opens rendered by default with wikilinks followed inside the
+  console, and the source view shows the passport and the stored body as two
+  labelled halves;
+- the `.db` opens on its first table with the top 100 loaded, and the Query
+  manual's own examples run as shortcuts through `query`;
+- an edit committed `graft(people/jimmy-wesley): replace 'Profile'` with a
+  `station-principal` trailer, and the text is in the file;
+- a composed post committed `plant(rtx-5090-drops-local-inference-prices)`
+  with a derived summary — the forest had no ingest model bound, which is
+  the documented fallback rather than a failure.
+
+Two defects were found this way and fixed: the dataset browser deadlocked on
+an effect that invalidated its own dependency, and the shared table's
+min-width pushed right-aligned numbers out of the scroller while their
+left-aligned headers stayed visible — a column that looked empty and was not.

@@ -63,6 +63,20 @@ class Trails:
     def heat_map(self, node_ids: list[str], session: str | None = None) -> dict[str, float]:
         return {nid: self.get_heat(nid, session) for nid in node_ids}
 
+    def heat_all(self) -> dict[str, float]:
+        """Every warm node in the persistent scope, in one read.
+
+        `heat_map` asks per node, which is right for the handful a primitive
+        returns and wrong for a caller holding the whole region (J.11): one
+        statement beats two thousand. Persistent scope only — session heat
+        belongs to a hunt in flight, never to a map.
+        """
+        return {
+            nid: round(heat, 4)
+            for nid, heat in self.conn.execute(
+                "SELECT node_id, heat FROM heat WHERE scope = ''")
+        }
+
     def promote_session(self, session: str, node_ids: list[str], amount: float = 0.1) -> None:
         """Convert winning-trail session heat into persistent heat."""
         self.add_heat(node_ids, amount, PERSISTENT_SCOPE)
