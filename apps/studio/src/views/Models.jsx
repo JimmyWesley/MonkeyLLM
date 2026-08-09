@@ -60,7 +60,12 @@ function SaveButton({ busy, done, dirty, disabled, label }) {
  *  One global endpoint cannot express that, and it cannot express "this
  *  corpus stays local while that one uses a hosted model" either. */
 const ROLES = [
-  { key: 'ingest', icon: Ingest, defaultTokens: 300 },
+  // 300 was sized for the summary (60 tokens) and not for the reply that
+  // carries it: JSON envelope, tags, and — on a hybrid thinker — a whole
+  // reasoning pass before the first character of content. Too small a
+  // budget truncates the reply mid-JSON, which reads downstream as "the
+  // model said nothing useful" rather than "it was cut off".
+  { key: 'ingest', icon: Ingest, defaultTokens: 600 },
   { key: 'answer', icon: Ask, defaultTokens: 600 },
 ]
 
@@ -429,7 +434,8 @@ function RoleBinding({ role, forest, providers, binding, catalogue, loadCatalogu
             reply-length label wrapped to two lines while its neighbour did
             not, and the reasoning select clipped its own option mid-word. */}
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t('models.max_tokens')} type="number" min="64" value={form.max_tokens}
+          <Field label={t('models.max_tokens')} type="number" min="64"
+                 hint={t('models.max_tokens_hint')} value={form.max_tokens}
                  onChange={(e) => setForm({ ...form, max_tokens: Number(e.target.value) })} />
           <Select label={t('models.reasoning')} value={form.reasoning}
                   onChange={(e) => setForm({ ...form, reasoning: e.target.value })}>

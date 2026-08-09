@@ -100,6 +100,48 @@ def validate_summary(summary: str) -> None:
             )
 
 
+def fit_summary(summary: str) -> str | None:
+    """Trim an over-long summary into the A.4 budget, or None if trimming
+    cannot rescue it.
+
+    Length is the one A.4 failure that is mechanical: the text is good, there
+    is simply too much of it. Discarding a model's summary over length throws
+    away the part that took the tokens to produce and falls back to a
+    first-sentences heuristic that is strictly worse. Emptiness and
+    anti-patterns are NOT mechanical — no amount of cutting gives boilerplate
+    a scent — so those still return None.
+
+    Whole sentences go first; only if a single sentence still overflows do
+    words come off, and then the cut is marked with an ellipsis.
+    """
+    text = (summary or "").strip()
+    if not text:
+        return None
+    low = text.lower()
+    if any(low.startswith(anti) for anti in dlt.SUMMARY_ANTI_PATTERNS):
+        return None
+
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    while len(sentences) > 1 and \
+            estimate_tokens(" ".join(sentences)) > dlt.SUMMARY_MAX_TOKENS:
+        sentences.pop()
+    text = " ".join(sentences)
+
+    if estimate_tokens(text) > dlt.SUMMARY_MAX_TOKENS:
+        words = text.split()
+        while words and estimate_tokens(" ".join(words)) > dlt.SUMMARY_MAX_TOKENS:
+            words.pop()
+        if not words:
+            return None
+        text = " ".join(words).rstrip(",;:") + "…"
+
+    try:
+        validate_summary(text)
+    except VineError:
+        return None
+    return text
+
+
 def validate_frontmatter(fm: dict, dialect: dlt.Dialect, *, strict_summary: bool = True) -> Frontmatter:
     """Validate raw frontmatter dict against A.1-A.4. Raises VineError."""
     try:
