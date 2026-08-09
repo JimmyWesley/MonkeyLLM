@@ -1,0 +1,11 @@
+# Allowlist: only what apps/station/Dockerfile actually copies enters the
+# build context — keeps .env, .git, forests/ and models/ off the daemon and
+# the context small.
+*
+!pyproject.toml
+!README.md
+!src/
+!apps/
+**/__pycache__/
+apps/studio/node_modules/
+apps/studio/dist/

@@ -1,0 +1,118 @@
+# MonkeyLLM — the whole environment, clean, in one command (spec J.6:
+# one image, two volumes, no external database).
+#
+# The Station serves all three surfaces from the same container: the REST
+# API (/v1), the MCP surface (/mcp) and the Studio web console (/) — the
+# Studio is a static React bundle built into the image, so "frontend +
+# backend" is this single service.
+#
+#   cp .env.example .env      # optional but recommended — fill in what you use
+#   docker compose up --build -d
+#   docker compose logs station | grep "API key"   # first boot mints the
+#                                                  # bootstrap admin key ONCE
+#
+# Everything worth keeping lives in the named volumes below, so the
+# container can crash, be rebuilt or be updated without losing data.
+#
+# Optional local inference (no external provider needed):
+#   docker compose --profile local-llm --profile local-embed up -d
+# then set in .env:
+#   MONKEYLLM_LLM_ENDPOINT=http://llm:8090/v1
+#   MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1
+
+services:
+  station:
+    build:
+      context: .
+      dockerfile: apps/station/Dockerfile
+    image: monkeyllm-station
+    ports:
+      - "${STATION_PORT:-8800}:8800"
+    # --writable accepts plant/graft/tend, ingest and forest creation.
+    # Remove the flag for a read-only Station (reads always work).
+    command: ["station", "serve", "--host", "0.0.0.0", "--port", "8800", "--writable"]
+    # Values come from .env via compose interpolation (see .env.example for
+    # the full commentary); the fallbacks mirror the code's own defaults.
+    environment:
+      # Break-glass Studio login (J.2.1) — optional; without both there is
+      # no password door, only API keys. Never stored, rotated by restart.
+      MONKEYLLM_STATION_ADMIN: ${MONKEYLLM_STATION_ADMIN:-}
+      MONKEYLLM_STATION_PASSWORD: ${MONKEYLLM_STATION_PASSWORD:-}
+      # Hosts the MCP surface answers to. If you change STATION_PORT or
+      # serve through a proxy, add that host:port here (or `*` to skip the
+      # check — every request still carries an API key).
+      MONKEYLLM_STATION_ALLOWED_HOSTS: ${MONKEYLLM_STATION_ALLOWED_HOSTS:-localhost,localhost:8800,127.0.0.1,127.0.0.1:8800}
+      # Chat provider (J.10.1) — arrives pre-configured and read-only in
+      # Studio -> Models, key never copied into the registry.
+      MONKEYLLM_LLM_ENDPOINT: ${MONKEYLLM_LLM_ENDPOINT:-}
+      MONKEYLLM_LLM_API_KEY: ${MONKEYLLM_LLM_API_KEY:-}
+      MONKEYLLM_LLM_PROVIDER: ${MONKEYLLM_LLM_PROVIDER:-}
+      MONKEYLLM_LLM_MODEL: ${MONKEYLLM_LLM_MODEL:-local}
+      MONKEYLLM_LLM_MAX_TOKENS: ${MONKEYLLM_LLM_MAX_TOKENS:-300}
+      MONKEYLLM_LLM_REASONING: ${MONKEYLLM_LLM_REASONING:-off}
+      # Embedder (optional Canopy vector layer; unset = BM25-only contract).
+      MONKEYLLM_EMBED_ENDPOINT: ${MONKEYLLM_EMBED_ENDPOINT:-}
+      MONKEYLLM_EMBED_MODEL: ${MONKEYLLM_EMBED_MODEL:-bge-m3}
+      MONKEYLLM_EMBED_API_KEY: ${MONKEYLLM_EMBED_API_KEY:-no-key}
+      MONKEYLLM_EMBED_PROVIDER: ${MONKEYLLM_EMBED_PROVIDER:-}
+      # S3-compatible endpoint for remote payloads (MinIO/R2, spec G.9).
+      MONKEYLLM_S3_ENDPOINT: ${MONKEYLLM_S3_ENDPOINT:-}
+    volumes:
+      # The forest registry: every forest, its markdown, its embedded git
+      # history, its dataset .db payloads and its _derived/ caches.
+      - forests:/forests
+      # The host registry: principals, keys, grants, audit — one SQLite
+      # file, never inside a forest, worth backing up with the snapshots.
+      - registry:/registry
+      # Model weights (GGUFs). The Station itself calls OpenAI-compatible
+      # endpoints and never loads a weight, but the optional local-llm /
+      # local-embed services below download into this volume, and it keeps
+      # multi-GB files out of the image and alive across updates.
+      - models:/models
+    restart: unless-stopped
+    healthcheck:
+      # python:3.12-slim ships no curl; urllib is already there.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8800/v1/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  # -- Optional: local chat LLM (llama.cpp), profile `local-llm` -----------
+  # First start downloads the GGUF from Hugging Face into the models
+  # volume (LLAMA_CACHE); later starts reuse it. CPU by default — fine for
+  # the 7B Q4 navigator; give it a GPU via `deploy.resources` if you have one.
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    profiles: ["local-llm"]
+    environment:
+      LLAMA_CACHE: /models
+    command: >
+      -hf ${LLAMA_CHAT_HF:-bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M}
+      --host 0.0.0.0 --port 8090 -c ${LLAMA_CTX:-8192}
+    volumes:
+      - models:/models
+    ports:
+      - "${LLM_PORT:-8090}:8090"
+    restart: unless-stopped
+
+  # -- Optional: local embedder (Canopy vector layer), profile `local-embed`
+  embed:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    profiles: ["local-embed"]
+    environment:
+      LLAMA_CACHE: /models
+    command: >
+      -hf ${LLAMA_EMBED_HF:-gpustack/bge-m3-GGUF:Q8_0}
+      --embeddings --host 0.0.0.0 --port 8091
+    volumes:
+      - models:/models
+    ports:
+      - "${EMBED_PORT:-8091}:8091"
+    restart: unless-stopped
+
+volumes:
+  forests:
+  registry:
+  models:

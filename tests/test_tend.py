@@ -118,4 +118,4 @@ class TestMcpExposure:
             tools = anyio.run(mcp.list_tools)
             assert "tend" in {t.name for t in tools}
         finally:
-            mcp._pool.close()
+            mcp._close()

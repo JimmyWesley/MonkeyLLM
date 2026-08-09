@@ -102,6 +102,6 @@ a second that accepts it. That is contract, so it needs a spec bump before
 code. Until then the honest description of the tab is "publish, then see what
 the Curator made of it" — and the console says exactly that.
 
-**Follow-up, unrelated to this task but found by it:** `pyproject.toml` pins
-`mcp>=1.2` with no upper bound, and `mcp` 2.0 removed `mcp.server.fastmcp` —
-a fresh install of the project fails to import. Worth a `<2` bound.
+**Not a follow-up after all:** this task's branch hit `mcp` 2.0 having removed `mcp.server.fastmcp`, and flagged the unbounded `mcp>=1.2` pin as a
+defect. `develop` had already fixed it forward — the MCP surface is migrated
+to 2.x and the pin is `mcp>=2,<3`. Resolved on merge, nothing to do.

@@ -55,7 +55,7 @@ class TestMCPServer:
             tools = {t.name for t in asyncio.run(server.list_tools())}
             assert {"locate", "look", "move", "pick", "query", "scan", "plant", "graft", "close_session"} <= tools
         finally:
-            server._vine.close()
+            server._close()
 
     def test_error_envelope(self, forest_ro):
         from monkeyllm.server import build_server
@@ -65,7 +65,7 @@ class TestMCPServer:
             result = asyncio.run(server.call_tool("look", {"id": "nao/existe"}))
             assert "E_NOT_FOUND" in str(result)
         finally:
-            server._vine.close()
+            server._close()
 
 
 def p95(samples):
