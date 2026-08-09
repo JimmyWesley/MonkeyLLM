@@ -21,7 +21,7 @@ import unicodedata
 from pathlib import Path
 
 from monkeyllm import indexer
-from monkeyllm.canopy import CanopyIndex, rrf_fuse
+from monkeyllm.canopy import CanopyIndex, cosine, rrf_fuse
 from monkeyllm.catalog import Catalog
 from monkeyllm.dialect import MAX_LINKS_PER_NODE
 from monkeyllm.errors import (
@@ -202,6 +202,7 @@ class Vine:
         alpha: float = 0.3,
         embedder=None,
         beta: float = 1.0,
+        hybrid_locate: bool = False,
     ):
         self.forest = Forest(root)
         self.catalog = Catalog(self.forest)
@@ -224,10 +225,98 @@ class Vine:
         # unchanged otherwise — architecture doc §3).
         self.embedder = embedder
         self.canopy = CanopyIndex.load(self.forest.derived_dir)
+        # The Gauntlet's goal (Part K): the vector of the most recent hunt.
+        # `locate` embeds the query anyway when the dense layer is on, so
+        # carrying it costs one embedding per hunt instead of one per hop.
+        # Entry search stays lexical unless explicitly asked otherwise.
+        # Measurement (Part K changelog) showed fusing a dense ranker into
+        # an already-correct BM25 *degrades* it — so the dense layer being
+        # available must not imply using it here.
+        self._hybrid_locate = hybrid_locate
+        self._goal: list[float] | None = None
+        self._goal_text: str | None = None
+
+    @property
+    def dense_ready(self) -> bool:
+        """Whether a usable vector layer exists. NOT whether to use it: the
+        two consumers — entry search and the Gauntlet — decide separately,
+        because measurement says one is helped by it and the other harmed."""
+        return (
+            self.embedder is not None
+            and self.canopy is not None
+            and len(self.canopy) > 0
+            # K.4: comparing a query embedded by one model against vectors
+            # produced by another compares two unrelated spaces. That does
+            # not rank badly, it ranks meaninglessly — and it fails silently,
+            # because a dot product always returns a number. A mismatched
+            # index is therefore treated as no index at all.
+            and self.canopy.model == self.embedder.model
+        )
 
     @property
     def hybrid(self) -> bool:
-        return self.embedder is not None and self.canopy is not None and len(self.canopy) > 0
+        """RRF fusion in `locate`. Off unless asked for, on purpose."""
+        return self._hybrid_locate and self.dense_ready
+
+    @property
+    def canopy_status(self) -> dict:
+        """Why the dense layer is or is not active (K.4), for validation and
+        for any surface that shows index health."""
+        index_model = self.canopy.model if self.canopy is not None else None
+        query_model = self.embedder.model if self.embedder is not None else None
+        if self.embedder is None:
+            state = "no-embedder"
+        elif self.canopy is None or len(self.canopy) == 0:
+            state = "no-index"
+        elif index_model != query_model:
+            state = "model-mismatch"
+        else:
+            state = "active"
+        return {"state": state, "active": state == "active",
+                "index_model": index_model, "query_model": query_model,
+                "vectors": len(self.canopy) if self.canopy is not None else 0}
+
+    # -- the Gauntlet (Part K) ---------------------------------------------
+
+    def _goal_for(self, toward: str | None, enabled: bool | None):
+        """The goal vector for this call, or None to leave the order alone.
+
+        Returns None whenever ANY precondition fails (K.1), because the
+        contract is that an absent Gauntlet is not a degraded mode — it is
+        v0.20 behaviour, byte for byte. Every caller therefore only has to
+        check for None.
+        """
+        if enabled is False or not self.dense_ready:
+            return None
+        if toward:
+            # An explicit goal costs its own embedding. That is the price of
+            # testability, and it is why it is not the default path.
+            return self.embedder.embed([toward])[0], toward
+        if self._goal_text is None:
+            return None
+        if self._goal is None:
+            # Paid once, on the first hop of the hunt — not in `locate`, and
+            # never at all for a hunt that only ever reads the entry list.
+            self._refresh_canopy()
+            self._goal = self.embedder.embed([self._goal_text])[0]
+        return self._goal, self._goal_text
+
+    def _rank_frontier(self, items, goal, id_of=lambda x: x["id"],
+                       signal_of=lambda x: 0.0):
+        """Order a frontier by proximity to the goal, in place.
+
+        Proximity decides and the existing signal — heat, degree — breaks
+        near-ties: rounding the cosine to three places makes "as close as
+        each other" mean something, so a node the colony has found useful
+        before still wins between equals. Heat stays a memory of past hunts
+        (Part H depends on that); it simply stops being the only voice.
+        """
+        vectors = {i: v for i, v in zip(self.canopy.ids, self.canopy.vectors)}
+        def key(item):
+            vec = vectors.get(id_of(item))
+            prox = cosine(goal, vec) if vec is not None else -1.0
+            return (-round(prox, 3), -signal_of(item))
+        items.sort(key=key)
 
     def build_canopy(self, embedder=None) -> dict:
         """Embed every node's summary and persist the vector index. Offline
@@ -322,9 +411,15 @@ class Vine:
 
         # base strength per id, in [0, 1]. BM25-only by default (Phase 0);
         # RRF(vector, BM25) when the canopy layer is active (Phase 1).
+        # The hunt's goal is REMEMBERED here and embedded later, on the first
+        # hop that actually needs it (K.2). Embedding it now would put a
+        # network round trip inside `locate`, whose budget is 100 ms p95 —
+        # and would charge it to every hunt that never leaves the entry list.
+        self._goal, self._goal_text = None, query
         if self.hybrid:
             self._refresh_canopy()
             qvec = self.embedder.embed([query])[0]
+            self._goal = qvec
             vec_hits = self.canopy.search(qvec, k=cand)
             for vid, _cos in vec_hits:
                 if vid not in by_id:
@@ -377,7 +472,8 @@ class Vine:
     # =======================================================================
 
     @_traced
-    def look(self, id: str, fields: list[str] | None = None) -> dict:
+    def look(self, id: str, fields: list[str] | None = None,
+             gauntlet: bool | None = None, toward: str | None = None) -> dict:
         row = self._row_or_raise(id)
         node = self.forest.read(id)
         digest: dict = {
@@ -409,7 +505,19 @@ class Vine:
             edges_in.append({"rel": shown_rel, "source": e["src"], "_heat": self._heat(e["src"])})
         edges_in.sort(key=lambda e: e["_heat"], reverse=True)
         degree = len(edges_out) + len(edges_in)
-        for e in edges_out + edges_in:
+        _defer_heat_pop = edges_out + edges_in
+        # Part K: condition the frontier BEFORE the cap, which is the whole
+        # point — reordering after the cut cannot recover what the cut hid.
+        goal = self._goal_for(toward, gauntlet)
+        if goal is not None:
+            self._rank_frontier(edges_out, goal[0],
+                                id_of=lambda e: e["target"],
+                                signal_of=lambda e: e["_heat"])
+            self._rank_frontier(edges_in, goal[0],
+                                id_of=lambda e: e["source"],
+                                signal_of=lambda e: e["_heat"])
+            digest["frontier"] = {"ranked": True, "toward": goal[1]}
+        for e in _defer_heat_pop:
             e.pop("_heat", None)
         digest["edges_out"] = edges_out[:MAX_EDGES_SHOWN]
         digest["edges_in"] = edges_in[:MAX_EDGES_SHOWN]
@@ -536,7 +644,8 @@ class Vine:
     # =======================================================================
 
     @_traced
-    def move(self, id: str, rel: str | None = None, direction: str = "out") -> dict:
+    def move(self, id: str, rel: str | None = None, direction: str = "out",
+             gauntlet: bool | None = None, toward: str | None = None) -> dict:
         self._row_or_raise(id)
         neighbors: list[dict] = []
 
@@ -584,7 +693,13 @@ class Vine:
                     )
 
         neighbors.sort(key=lambda n: n["heat"], reverse=True)
+        goal = self._goal_for(toward, gauntlet)
+        if goal is not None:
+            self._rank_frontier(neighbors, goal[0],
+                                signal_of=lambda n: n.get("heat", 0.0))
         payload = {"neighbors": neighbors, "truncated": False}
+        if goal is not None:
+            payload["frontier"] = {"ranked": True, "toward": goal[1]}
         return shrink_list_to_budget(payload, "neighbors", BUDGET_MOVE)
 
     # =======================================================================
@@ -724,6 +839,8 @@ class Vine:
         fields: list[str] | None = None,
         recursive: bool = False,
         limit: int = 50,
+        gauntlet: bool | None = None,
+        toward: str | None = None,
     ) -> dict:
         self._row_or_raise(parent_id)
         filter = filter or {}
@@ -748,9 +865,17 @@ class Vine:
             item["_heat"] = self._heat(r["id"])
             out.append(item)
         out.sort(key=lambda x: x["_heat"], reverse=True)
+        # Part K: 60 children cut to 14 by the budget, ordered by heat, is the
+        # forager seeing a quarter of the frontier chosen by something that
+        # has nothing to do with the question. Rank first, then cut.
+        goal = self._goal_for(toward, gauntlet)
+        if goal is not None:
+            self._rank_frontier(out, goal[0], signal_of=lambda x: x["_heat"])
         for item in out:
             item.pop("_heat", None)
         payload = {"nodes": out[:limit], "truncated": len(out) > limit}
+        if goal is not None:
+            payload["frontier"] = {"ranked": True, "toward": goal[1]}
         return shrink_list_to_budget(payload, "nodes", BUDGET_SCAN)
 
     @staticmethod

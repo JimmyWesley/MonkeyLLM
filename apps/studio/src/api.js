@@ -46,6 +46,25 @@ export const api = {
     request(`/v1/forests/${encodeURIComponent(forest)}/${primitive}`,
             { method: 'POST', body: payload }),
 
+  // credentials (J.2.1 / J.2.2)
+  login: (username, password) =>
+    request('/v1/auth/login', { method: 'POST', body: { username, password } }),
+  keys: () => request('/v1/admin/keys'),
+
+  // Person-shaped governance (J.2.3): one read, one write, per person.
+  people: () => request('/v1/admin/people'),
+  savePerson: (body) => request('/v1/admin/people', { method: 'POST', body }),
+  issueKey: (body) => request('/v1/admin/keys', { method: 'POST', body }),
+  revokeKey: (id) => request('/v1/admin/keys', { method: 'POST', body: { revoke: id } }),
+  setPassword: (principal, password) =>
+    request('/v1/admin/password', { method: 'POST', body: { principal, password } }),
+
+  // forest lifecycle (J.7) and the Gardener over REST (J.8)
+  createForest: (body) => request('/v1/admin/forests', { method: 'POST', body }),
+  ingest: (forest, body) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/ingest`,
+            { method: 'POST', body }),
+
   // governance
   principals: () => request('/v1/admin/principals'),
   grant: (body) => request('/v1/admin/grant', { method: 'POST', body }),
@@ -55,6 +74,13 @@ export const api = {
   providers: () => request('/v1/admin/providers'),
   putProvider: (body) => request('/v1/admin/providers', { method: 'POST', body }),
   testProvider: (body) => request('/v1/admin/providers/test', { method: 'POST', body }),
+  // The Gauntlet's index (Part K)
+  canopy: (forest) => request(`/v1/admin/canopy?forest=${encodeURIComponent(forest)}`),
+  buildCanopy: (forest) =>
+    request('/v1/admin/canopy', { method: 'POST', body: { forest } }),
+  setCanopy: (forest, enabled) =>
+    request('/v1/admin/canopy', { method: 'POST', body: { forest, enabled } }),
+
   bindings: (forest) =>
     request(`/v1/admin/models?forest=${encodeURIComponent(forest)}`),
   bindModel: (body) => request('/v1/admin/models', { method: 'POST', body }),

@@ -11,7 +11,7 @@ Conventions:
 - Language policy: **everything in English** — task files, code comments,
   docstrings, docs, CLI output. See `T02-english-normalization.md` for the
   one-time cleanup; new work must already comply.
-- The spec is the truth (`docs/monkeyllm-spec-v0.15.md`): contract changes
+- The spec is the truth (`docs/monkeyllm-spec-v0.20.md`): contract changes
   require a new spec version *before* code, and that rule applies to tasks too.
 
 | Task | Title | Status |

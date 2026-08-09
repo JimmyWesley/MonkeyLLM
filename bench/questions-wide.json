@@ -1,0 +1,242 @@
+[
+  {
+    "id": "runbooks-003",
+    "question": "How long are database failover records kept in identity before destruction?",
+    "expected_nodes": [
+      "runbooks/database-failover-identity"
+    ],
+    "answer_contains": [
+      "26"
+    ]
+  },
+  {
+    "id": "runbooks-013",
+    "question": "What is the recovery target for the certificate expiry path in checkout?",
+    "expected_nodes": [
+      "runbooks/certificate-expiry-checkout"
+    ],
+    "answer_contains": [
+      "6"
+    ]
+  },
+  {
+    "id": "runbooks-023",
+    "question": "What was the variance against plan for queue backlog in notifications?",
+    "expected_nodes": [
+      "runbooks/queue-backlog-notifications"
+    ],
+    "answer_contains": [
+      "76"
+    ]
+  },
+  {
+    "id": "runbooks-033",
+    "question": "How long are region evacuation records kept in identity before destruction?",
+    "expected_nodes": [
+      "runbooks/region-evacuation-identity"
+    ],
+    "answer_contains": [
+      "56"
+    ]
+  },
+  {
+    "id": "runbooks-043",
+    "question": "What is the recovery target for the clock drift path in checkout?",
+    "expected_nodes": [
+      "runbooks/clock-drift-checkout"
+    ],
+    "answer_contains": [
+      "36"
+    ]
+  },
+  {
+    "id": "runbooks-053",
+    "question": "What was the variance against plan for DNS propagation in notifications?",
+    "expected_nodes": [
+      "runbooks/DNS-propagation-notifications"
+    ],
+    "answer_contains": [
+      "16"
+    ]
+  },
+  {
+    "id": "policies-003",
+    "question": "How long are expense approval records kept in support before destruction?",
+    "expected_nodes": [
+      "policies/expense-approval-support"
+    ],
+    "answer_contains": [
+      "26"
+    ]
+  },
+  {
+    "id": "policies-013",
+    "question": "What is the recovery target for the vendor onboarding path in finance?",
+    "expected_nodes": [
+      "policies/vendor-onboarding-finance"
+    ],
+    "answer_contains": [
+      "6"
+    ]
+  },
+  {
+    "id": "policies-023",
+    "question": "What was the variance against plan for access review in people?",
+    "expected_nodes": [
+      "policies/access-review-people"
+    ],
+    "answer_contains": [
+      "76"
+    ]
+  },
+  {
+    "id": "policies-033",
+    "question": "How long are incident disclosure records kept in support before destruction?",
+    "expected_nodes": [
+      "policies/incident-disclosure-support"
+    ],
+    "answer_contains": [
+      "56"
+    ]
+  },
+  {
+    "id": "policies-043",
+    "question": "What is the recovery target for the contractor access path in finance?",
+    "expected_nodes": [
+      "policies/contractor-access-finance"
+    ],
+    "answer_contains": [
+      "36"
+    ]
+  },
+  {
+    "id": "policies-053",
+    "question": "What was the variance against plan for records disposal in people?",
+    "expected_nodes": [
+      "policies/records-disposal-people"
+    ],
+    "answer_contains": [
+      "16"
+    ]
+  },
+  {
+    "id": "decisions-003",
+    "question": "How long are storage engine records kept in data before destruction?",
+    "expected_nodes": [
+      "decisions/storage-engine-data"
+    ],
+    "answer_contains": [
+      "26"
+    ]
+  },
+  {
+    "id": "decisions-013",
+    "question": "What is the recovery target for the auth protocol path in mobile?",
+    "expected_nodes": [
+      "decisions/auth-protocol-mobile"
+    ],
+    "answer_contains": [
+      "6"
+    ]
+  },
+  {
+    "id": "decisions-023",
+    "question": "What was the variance against plan for deploy strategy in ml?",
+    "expected_nodes": [
+      "decisions/deploy-strategy-ml"
+    ],
+    "answer_contains": [
+      "76"
+    ]
+  },
+  {
+    "id": "decisions-033",
+    "question": "How long are caching layer records kept in data before destruction?",
+    "expected_nodes": [
+      "decisions/caching-layer-data"
+    ],
+    "answer_contains": [
+      "56"
+    ]
+  },
+  {
+    "id": "decisions-043",
+    "question": "What is the recovery target for the feature flagging path in mobile?",
+    "expected_nodes": [
+      "decisions/feature-flagging-mobile"
+    ],
+    "answer_contains": [
+      "36"
+    ]
+  },
+  {
+    "id": "decisions-053",
+    "question": "What was the variance against plan for build system in ml?",
+    "expected_nodes": [
+      "decisions/build-system-ml"
+    ],
+    "answer_contains": [
+      "16"
+    ]
+  },
+  {
+    "id": "reports-003",
+    "question": "How long are headcount records kept in q4-2025 before destruction?",
+    "expected_nodes": [
+      "reports/headcount-q4-2025"
+    ],
+    "answer_contains": [
+      "26"
+    ]
+  },
+  {
+    "id": "reports-013",
+    "question": "What is the recovery target for the latency path in q2-2025?",
+    "expected_nodes": [
+      "reports/latency-q2-2025"
+    ],
+    "answer_contains": [
+      "6"
+    ]
+  },
+  {
+    "id": "reports-023",
+    "question": "What was the variance against plan for revenue in q2-2026?",
+    "expected_nodes": [
+      "reports/revenue-q2-2026"
+    ],
+    "answer_contains": [
+      "76"
+    ]
+  },
+  {
+    "id": "reports-033",
+    "question": "How long are spend records kept in q4-2025 before destruction?",
+    "expected_nodes": [
+      "reports/spend-q4-2025"
+    ],
+    "answer_contains": [
+      "56"
+    ]
+  },
+  {
+    "id": "reports-043",
+    "question": "What is the recovery target for the backlog path in q2-2025?",
+    "expected_nodes": [
+      "reports/backlog-q2-2025"
+    ],
+    "answer_contains": [
+      "36"
+    ]
+  },
+  {
+    "id": "reports-053",
+    "question": "What was the variance against plan for satisfaction in q2-2026?",
+    "expected_nodes": [
+      "reports/satisfaction-q2-2026"
+    ],
+    "answer_contains": [
+      "16"
+    ]
+  }
+]

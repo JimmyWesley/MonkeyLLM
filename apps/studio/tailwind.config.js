@@ -1,26 +1,52 @@
-/** @type {import('tailwindcss').Config} */
+/** Semantic tokens only (spec J.5.3).
+ *
+ * Every colour resolves through a CSS variable defined per theme in
+ * index.css, so `bg-surface` is right in light and dark without a `dark:`
+ * variant anywhere in the component tree. The theme is an attribute on
+ * <html>, not a class, so an OS-preference change can repaint without React
+ * re-rendering a single component.
+ *
+ * @type {import('tailwindcss').Config} */
+const token = (name) => `rgb(var(--${name}) / <alpha-value>)`
+
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
+  darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     extend: {
       colors: {
-        canvas: { DEFAULT: '#0d0f0d', soft: '#141714', card: '#191d19', line: '#252a25' },
-        moss: { 50: '#eef6f1', 200: '#bfe0cd', 400: '#6cb98f', 500: '#4a9d71', 600: '#3a7f5b', 900: '#16281e' },
-        bark: { 300: '#a8a49a', 400: '#8b877d', 500: '#6d6a61' },
-        ember: { 400: '#e08b6f', 500: '#c96a4c' },
+        bg: { DEFAULT: token('bg'), elev: token('bg-elev') },
+        surface: {
+          DEFAULT: token('surface'),
+          2: token('surface-2'),
+          3: token('surface-3'),
+        },
+        line: { DEFAULT: token('line'), strong: token('line-strong') },
+        text: {
+          DEFAULT: token('text'),
+          2: token('text-2'),
+          3: token('text-3'),
+        },
+        accent: {
+          DEFAULT: token('accent'),
+          hover: token('accent-hover'),
+          fg: token('accent-fg'),
+          soft: token('accent-soft'),
+        },
+        danger: { DEFAULT: token('danger'), soft: token('danger-soft') },
+        warn: { DEFAULT: token('warn'), soft: token('warn-soft') },
+        ok: { DEFAULT: token('ok'), soft: token('ok-soft') },
       },
       fontFamily: {
-        sans: ['Inter var', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        sans: ['Inter var', 'Inter', 'ui-sans-serif', 'system-ui',
+               '-apple-system', 'Segoe UI', 'sans-serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       boxShadow: {
-        panel: '0 1px 2px rgba(0,0,0,.30), 0 8px 24px -12px rgba(0,0,0,.45)',
-        ring: '0 0 0 1px rgba(74,157,113,.25)',
+        card: 'var(--shadow)',
+        pop: '0 12px 32px -8px rgb(0 0 0 / 0.18), 0 2px 8px -2px rgb(0 0 0 / 0.10)',
       },
-      keyframes: {
-        rise: { '0%': { opacity: 0, transform: 'translateY(4px)' }, '100%': { opacity: 1, transform: 'none' } },
-      },
-      animation: { rise: 'rise .18s ease-out both' },
+      maxWidth: { content: '78rem' },
     },
   },
   plugins: [],

@@ -35,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8800)
     p_serve.add_argument("--writable", action="store_true",
-                         help="open forests writable (Phase A still serves reads only)")
+                         help="accept writes: plant/graft/tend and ingest "
+                              "(off by default; reads always work)")
 
     p_key = sub.add_parser("key", parents=[common],
                            help="mint an API key and grant a forest")

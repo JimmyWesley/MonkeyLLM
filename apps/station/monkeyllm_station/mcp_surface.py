@@ -172,6 +172,20 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive):
         """Single-statement dataset write (needs the 'tend' capability)."""
         return await call(forest, "tend", id=id, sql=sql)
 
+    @mcp.tool()
+    async def ingest(forest: str, mode: str = "upload",
+                     files: list[dict] | None = None, path: str | None = None,
+                     dest: str | None = None) -> dict:
+        """Put documents into the forest (needs the 'ingest' capability).
+
+        `upload` sends the documents themselves as [{name, text}]; `adopt`
+        and `sync` mirror a directory the Station host can read and
+        additionally need 'admin'. Converters, summarisation and commits are
+        the Gardener's, so an agent ingests exactly as an operator does.
+        """
+        return await call(forest, "ingest", mode=mode, files=files,
+                          path=path, dest=dest)
+
     inner = mcp.streamable_http_app()
 
     class Authenticated:
