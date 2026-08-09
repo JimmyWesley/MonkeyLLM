@@ -1,4 +1,4 @@
-status: done (2026-08-09 — spec v0.22 first, then code; full suite green and verified against a live Station)
+status: done (2026-08-09 — spec v0.22 first, then code; full suite green and verified against a live Station. One acceptance criterion is partial and carried to T10.1: the Write tab plants then reports, rather than reviewing first)
 
 # T10 — Studio Forest Views: graph mode, files mode, governed editing, Write tab
 
@@ -56,8 +56,11 @@ item 11 (trails dashboard) along the way. The Data console is untouched.
       throughout.
 - [x] No Studio code path writes a file directly: every mutation is a
       `graft`/`tend`/`plant` commit stamped with the principal.
-- [x] Write tab: posted text is never planted without review; link proposals
-      only ever target catalog-offered candidates (cap 3, conf 0.3).
+- [~] Write tab: link proposals only ever target catalog-offered candidates
+      (cap 3, conf 0.3) — inherited from the pipeline, so it holds. **Review
+      before planting does NOT hold:** what shipped plants the node and then
+      shows the report. Reviewing the Curator's proposal first needs a
+      two-phase ingest, which is contract; see the follow-up below.
 - [x] Data console behavior unchanged; i18n test green; `api.js` remains the
       only `fetch` caller.
 
@@ -91,6 +94,13 @@ hand-written rather than d3-force; editing is section-scoped because that is
 what `graft` replaces atomically; the inspector has three tabs, not four (a
 Git tab would have needed a history endpoint nobody had asked for); HTML
 renders at body level, since there is no file-serving endpoint by design.
+
+**Follow-up — review before planting (T10.1).** The Write tab publishes and
+then reports. To review the Curator's passport and its edge proposals *first*,
+J.8 needs a two-phase shape: one call that stages and returns the proposal,
+a second that accepts it. That is contract, so it needs a spec bump before
+code. Until then the honest description of the tab is "publish, then see what
+the Curator made of it" — and the console says exactly that.
 
 **Follow-up, unrelated to this task but found by it:** `pyproject.toml` pins
 `mcp>=1.2` with no upper bound, and `mcp` 2.0 removed `mcp.server.fastmcp` —
