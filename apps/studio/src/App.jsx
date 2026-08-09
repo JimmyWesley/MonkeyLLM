@@ -14,11 +14,13 @@ import Ingest from './views/Ingest.jsx'
 import Models from './views/Models.jsx'
 import People from './views/People.jsx'
 import Audit from './views/Audit.jsx'
+import Health from './views/Health.jsx'
 import Integrations from './views/Integrations.jsx'
 
 const VIEWS = {
   overview: Overview, ask: Ask, explore: Explore, playground: Playground,
   data: Data, ingest: Ingest, models: Models, people: People, audit: Audit,
+  health: Health,
   integrations: Integrations,
 }
 

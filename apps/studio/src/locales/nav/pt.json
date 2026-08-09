@@ -11,6 +11,8 @@
   "nav.expand": "Expandir o menu",
   "nav.explore": "Explorar",
   "nav.explore.blurb": "Percorra a árvore e leia o que cada nó guarda",
+  "nav.health": "Saúde",
+  "nav.health.blurb": "O que o Ranger enxerga, e tire um snapshot",
   "nav.ingest": "Ingestão",
   "nav.ingest.blurb": "Coloque seus documentos dentro da floresta",
   "nav.integrations": "Integrações",

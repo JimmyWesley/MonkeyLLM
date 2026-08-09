@@ -91,6 +91,19 @@ export const api = {
   setCanopy: (forest, enabled) =>
     request('/v1/admin/canopy', { method: 'POST', body: { forest, enabled } }),
 
+  // maintenance (J.13): the Ranger's report, and Part I over REST.
+  // NOT `health` — that name belongs to the Station's own liveness probe
+  // above, and a second definition silently replaced it: the Gate asks
+  // `api.health()` whether a password door exists, got a 403 from this
+  // endpoint instead, and stopped offering the password form entirely.
+  forestHealth: (forest) =>
+    request(`/v1/admin/health?forest=${encodeURIComponent(forest)}`),
+  snapshots: (forest) =>
+    request(`/v1/admin/snapshots?forest=${encodeURIComponent(forest)}`),
+  takeSnapshot: (forest, withPayloads = false) =>
+    request('/v1/admin/snapshots',
+            { method: 'POST', body: { forest, with_payloads: withPayloads } }),
+
   bindings: (forest) =>
     request(`/v1/admin/models?forest=${encodeURIComponent(forest)}`),
   bindModel: (body) => request('/v1/admin/models', { method: 'POST', body }),

@@ -170,6 +170,9 @@ export const Flame = (p) => (
 export const Git = (p) => (
   <S {...p}><circle cx="7" cy="6" r="2.3" /><circle cx="7" cy="18" r="2.3" /><circle cx="17" cy="10" r="2.3" /><path d="M7 8.3v7.4M17 12.3c0 3-2.6 3.6-5.4 3.9" /></S>
 )
+export const Health = (p) => (
+  <S {...p}><path d="M3 12.5h4l2-5 3.5 9 2.5-5.5 1.5 1.5H21" /><path d="M4 7.5V5.5A1.5 1.5 0 015.5 4h13A1.5 1.5 0 0120 5.5v13a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 014 18.5v-2" /></S>
+)
 export const PanelLeft = (p) => (
   <S {...p}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9.5 4v16" /></S>
 )
@@ -180,5 +183,5 @@ export const Plug = (p) => (
 export const CONSOLE_ICON = {
   overview: Overview, ask: Ask, explore: Explore, playground: Playground,
   data: Data, ingest: Ingest, models: Models, people: Users, audit: Audit,
-  integrations: Plug,
+  integrations: Plug, health: Health,
 }

@@ -18,6 +18,7 @@ import secrets
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -126,6 +127,11 @@ def _forest_list(value: object, fallback: object = None) -> list[str]:
         if name and name not in out:
             out.append(name)
     return out
+
+
+def _iso(epoch: float) -> str:
+    """A file mtime as the same ISO shape every other timestamp uses."""
+    return datetime.fromtimestamp(epoch, timezone.utc).isoformat(timespec="seconds")
 
 
 def _git(root: Path, *args: str) -> str:
@@ -1452,6 +1458,125 @@ def build_app(
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
         return JSONResponse(result)
 
+    # -- maintenance (J.13) -------------------------------------------------
+
+    def snapshot_dir(forest: str) -> Path:
+        """Bundles are host state, beside the registry — never inside a forest.
+
+        A `.bundle` in the tree would be a binary where A.3.1 keeps binaries
+        out, and the next snapshot would package the previous one.
+        """
+        return Path(registry_path).resolve().parent / "snapshots" / forest
+
+    async def admin_health(request: Request) -> JSONResponse:
+        """The Ranger's H.3 report, relayed rather than recomputed."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.query_params.get("forest") or ""
+        if not forest or not is_admin(principal, forest):
+            return _envelope(VineError(
+                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+        policy = registry.policy_for(principal, forest)
+        # J.13: the report counts and names things across the whole forest, so
+        # a scoped principal cannot be served a filtered version — the numbers
+        # would quietly describe nodes they may not see. Refused with the
+        # reason, which is more useful than a half-report.
+        if policy is None or not policy.unrestricted:
+            return _envelope(VineError(
+                E_FORBIDDEN, "the health report covers the whole forest",
+                hint="It counts lint errors and names nodes everywhere, so it "
+                     "needs an admin grant that is not limited to a branch."), 403)
+
+        def work():
+            from monkeyllm.ranger import Ranger
+
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            # Reporting only: evaporation and promote/prune are the Ranger's
+            # own scheduled run, never a side effect of opening a console.
+            return Ranger(vine).health()
+
+        result = await in_forest_thread(work)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        return JSONResponse(result)
+
+    async def admin_snapshots(request: Request) -> JSONResponse:
+        """Part I over REST: take a bundle, list the ones taken.
+
+        Restore is absent by design (J.13): Part I restores into an *empty*
+        destination, so there is nothing to offer a console pointed at a live
+        forest, and taking a filesystem destination from an HTTP caller would
+        spend the Station's authority rather than the caller's.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+
+        if request.method == "GET":
+            forest = request.query_params.get("forest") or ""
+        else:
+            try:
+                body = await request.json() if await request.body() else {}
+            except json.JSONDecodeError as e:
+                return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+            forest = str(body.get("forest") or "")
+        if not forest or not is_admin(principal, forest):
+            return _envelope(VineError(
+                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+
+        directory = snapshot_dir(forest)
+        if request.method == "GET":
+            bundles = sorted(directory.glob("*.bundle"), reverse=True) \
+                if directory.is_dir() else []
+            return JSONResponse({"snapshots": [
+                {"name": b.name, "bytes": b.stat().st_size,
+                 "created": _iso(b.stat().st_mtime),
+                 "payloads": b.with_suffix(b.suffix + ".payloads.zip").is_file()}
+                for b in bundles]})
+
+        def work():
+            from monkeyllm.snapshot import create_snapshot
+
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            directory.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            # Two snapshots inside the same second must not become one. The
+            # name is second-resolution because a person reads it, so the
+            # collision is resolved by counting rather than by borrowing
+            # digits nobody wants — overwriting would silently destroy the
+            # bundle somebody took a moment before doing something risky.
+            out = directory / f"{forest}-{stamp}.bundle"
+            attempt = 2
+            while out.exists():
+                out = directory / f"{forest}-{stamp}-{attempt}.bundle"
+                attempt += 1
+            try:
+                return create_snapshot(
+                    Path(vine.forest.root), out=out,
+                    with_payloads=bool(body.get("with_payloads")))
+            except VineError as e:
+                return e.to_dict()
+
+        result = await in_forest_thread(work)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        registry.record(principal=principal, forest=forest, primitive="snapshot",
+                        args={}, result="ok", size=result.get("bytes", 0))
+        # The absolute path is host detail; the caller gets the name it will
+        # see in the listing.
+        return JSONResponse({"name": Path(result["bundle"]).name,
+                             "bytes": result["bytes"],
+                             "payloads": result.get("payloads")})
+
     async def studio_missing(request: Request):
         return JSONResponse(
             {"error": {"code": E_NOT_FOUND, "message": "the Studio build is not present",
@@ -1476,6 +1601,8 @@ def build_app(
         Route("/v1/admin/providers", admin_providers, methods=["GET", "POST"]),
         Route("/v1/admin/providers/test", admin_provider_test, methods=["POST"]),
         Route("/v1/admin/models", admin_models, methods=["GET", "POST"]),
+        Route("/v1/admin/health", admin_health),
+        Route("/v1/admin/snapshots", admin_snapshots, methods=["GET", "POST"]),
         # Before the primitive catch-all, which is POST-only: these are GETs
         # of a projection, not calls of a primitive.
         Route("/v1/forests/{forest}/{kind:str}", forest_map, methods=["GET"]),
