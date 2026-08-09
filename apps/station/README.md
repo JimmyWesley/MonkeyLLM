@@ -92,6 +92,25 @@ curl -sX POST localhost:8800/v1/forests/forest-fixture/answer \
 `POST /v1/admin/forests` (J.7) and the other `/v1/admin/*` routes the Studio
 uses. Failures are the spec's error envelope mapped onto HTTP codes.
 
+### Map projections (J.11)
+
+```bash
+curl -s localhost:8800/v1/forests/forest-fixture/graph \
+     -H "Authorization: Bearer $KEY"
+```
+
+`GET /v1/forests/{forest}/graph` returns `{nodes, edges, types, rels,
+truncated}` — the Catalog joined with persistent heat — and
+`GET .../trails` returns `{heat, stats, truncated}`. Both take `scope`
+(a branch) and `limit`, both need `read`, and both are scoped exactly like
+the primitives: **an edge appears only when both of its endpoints do**, and
+`degree` is recomputed from the edges that survived rather than reported
+from the Catalog, because a count taken over the whole forest is itself a
+disclosure. They add no authority — everything in them is reachable node by
+node through `look`/`move`/`scan`; what they add is a shape you can ask for
+in one call. Like the Catalog itself they are **derived**: a consumer that
+finds one stale reindexes rather than reconciling.
+
 ### Putting documents in (J.8)
 
 ```bash
@@ -101,9 +120,13 @@ curl -sX POST localhost:8800/v1/forests/handbook/ingest \
           "files":[{"name":"expenses.md","text":"# Expenses\n…"}]}'
 ```
 
-Three modes: `upload` sends the documents themselves, `adopt` mirrors a
-directory the Station host can read, `sync` re-reads what was adopted. All
-three need the `ingest` capability and a `dest` inside the caller's scope —
+Four modes: `upload` sends the documents themselves, `compose` sends one
+authored document as `{title, text}` (the console's Write tab), `adopt`
+mirrors a directory the Station host can read, and `sync` re-reads what was
+adopted. Authored prose is a source like any other: it walks the same
+converters, curation and commits, so there is no second write path with its
+own idea of what a passport is. All of them need the `ingest` capability
+and a `dest` inside the caller's scope —
 a principal who may not read a subtree must not be able to write into it.
 
 Naming a **host path** additionally needs `admin`: that path is read with
@@ -307,7 +330,8 @@ weaken that. A worker per forest is the scale-out step.
 |---|---|
 | Curation review queue for the 0.3-confidence edge proposals | T09 |
 | Binary uploads (`.docx`, `.xlsx`) — today they take the folder-mirror route | T09 |
-| Trails dashboard, Ranger health, snapshots in Studio | T09 |
+| Ranger health and snapshots in Studio | T09 |
+| Curation review before a composed post is planted (today it lands, then is reviewable) | T10 follow-up |
 | OIDC/SSO, per-token quotas, rate limits | T07 Phase C |
 | `answer` over datasets (a tool-calling loop; today it honestly refuses aggregate questions) | J.10 follow-up |
-| Per-node ACLs finer than the branch prefix | out of scope (J.11) |
+| Per-node ACLs finer than the branch prefix | out of scope (J.12) |

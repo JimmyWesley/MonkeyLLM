@@ -46,6 +46,16 @@ export const api = {
     request(`/v1/forests/${encodeURIComponent(forest)}/${primitive}`,
             { method: 'POST', body: payload }),
 
+  // Map projections (J.11): a region in one call rather than one call per
+  // node. Read-only, scoped exactly like the primitives, and derived — a
+  // stale answer is fixed by reindexing, never by reconciling here.
+  map: (forest, kind, params = {}) => {
+    const q = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== ''))
+    const tail = q.toString() ? `?${q}` : ''
+    return request(`/v1/forests/${encodeURIComponent(forest)}/${kind}${tail}`)
+  },
+
   // credentials (J.2.1 / J.2.2)
   login: (username, password) =>
     request('/v1/auth/login', { method: 'POST', body: { username, password } }),

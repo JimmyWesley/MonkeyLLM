@@ -57,6 +57,13 @@ SERVED_PRIMITIVES = READ_PRIMITIVES | WRITE_PRIMITIVES | set(COMPOSITES) | HOST_
 # work happens inside them.
 EXPLAINED = frozenset({"answer", "harvest"})
 
+# Map projections (J.11): a region in one payload, never a primitive. The
+# default bound is generous enough that no ordinary forest meets it and low
+# enough that meeting it is survivable; either way `truncated` says so.
+MAP_KINDS = frozenset({"graph", "trails"})
+MAP_LIMIT = 2000
+MAP_MAX = 10000
+
 # A forest id becomes a directory name under the registry root, so it is
 # validated as a NAME before it is ever joined to a path (J.7). Separators
 # and relative segments cannot survive this character set, which is why the
@@ -561,9 +568,36 @@ def build_app(
                 hint="Start it with --writable to accept ingest and writes.").to_dict()
 
         mode = str(payload.get("mode") or "adopt")
-        if mode not in ("adopt", "sync", "upload"):
+        if mode not in ("adopt", "sync", "upload", "compose"):
             return VineError(E_SCHEMA, f"unknown ingest mode: {mode}",
-                             hint="One of: adopt, sync, upload.").to_dict()
+                             hint="One of: adopt, sync, upload, compose.").to_dict()
+
+        if mode == "compose":
+            # Authored prose is a source like any other (J.8): it becomes one
+            # staged document and then walks the whole pipeline — converter,
+            # curation, closed-candidate edge proposals, commit. Planting it
+            # directly would be a second write path with its own idea of what
+            # a passport is, and nothing would keep the two honest.
+            title = str(payload.get("title") or "").strip()
+            text = str(payload.get("text") or "")
+            if not title:
+                return VineError(E_SCHEMA, "compose needs a title",
+                                 hint="The title names the node and its file.").to_dict()
+            if not text.strip():
+                return VineError(E_SCHEMA, "compose needs text").to_dict()
+            slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:63]
+            if not slug:
+                # A title of punctuation alone leaves nothing to name a file.
+                return VineError(
+                    E_SCHEMA, "the title has no letters or digits to name a file by",
+                    hint="Titles become filenames, so they need something to slug.",
+                ).to_dict()
+            # The H1 is how every converter and the Curator learn the title;
+            # a composer who already wrote one keeps theirs.
+            document = text if text.lstrip().startswith("# ") else f"# {title}\n\n{text}"
+            payload = {k: v for k, v in payload.items() if k not in ("path", "source")}
+            payload["files"] = [{"name": f"{slug}.md", "text": document}]
+            mode = "upload"
 
         # `dest` is a branch *path segment*: everything the Gardener writes
         # lands under `dest/`. So the prefix is what must be in scope — testing
@@ -664,6 +698,169 @@ def build_app(
             # amending the last one and claiming the whole ingest (J.8).
             "commit": after or None, "commit_before": before or None,
             "curated": written, "bound": curator is not None, "curation": stats,
+        }
+
+    # -- map projections (J.11) ---------------------------------------------
+
+    def run_map(principal: str, forest: str, kind: str, params: dict):
+        """A whole region in one payload, under the caller's own policy.
+
+        Executed on the forest thread like every other forest touch. This is
+        not a primitive and grants nothing new: every id it returns is one
+        the same principal could reach through `look`, and the filtering is
+        `policy.in_scope` — the same predicate `ScopedVine` applies node by
+        node (J.3). What it adds is shape, which a per-node walk cannot give
+        without asking once per node.
+        """
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            return None
+        if not policy.grants("read"):
+            return VineError(
+                E_FORBIDDEN, f"'{kind}' requires the 'read' capability",
+                hint=f"This principal holds: {sorted(policy.caps)}.").to_dict()
+        try:
+            vine = pool.get(forest)
+        except VineError:
+            return None
+
+        try:
+            limit = max(1, min(int(params.get("limit") or MAP_LIMIT), MAP_MAX))
+        except (TypeError, ValueError):
+            return VineError(E_SCHEMA, "limit must be a number").to_dict()
+
+        # A branch id (`projects/_index`) and the bare branch (`projects`)
+        # both name the same region; the operator picked it from a tree that
+        # shows the first and reads like the second.
+        branch = str(params.get("scope") or "").strip().strip("/")
+        if branch.endswith("/_index"):
+            branch = branch[: -len("/_index")]
+        if branch in ("", "_index"):
+            branch = ""
+        elif not policy.in_scope(f"{branch}/_index"):
+            # Out of scope is absent, exactly as everywhere else (J.3).
+            return VineError(E_NOT_FOUND, f"node not found: {branch}/_index",
+                             hint="Use locate() to find entry points.").to_dict()
+
+        def in_region(node_id: str) -> bool:
+            if branch and not (node_id == f"{branch}/_index"
+                               or node_id.startswith(f"{branch}/")):
+                return False
+            return policy.in_scope(node_id)
+
+        heat = vine.trails.heat_all()
+        try:
+            if kind == "trails":
+                return _trails_payload(vine, in_region, heat, limit)
+            return _graph_payload(vine, in_region, heat, limit)
+        except VineError as e:
+            return e.to_dict()
+
+    def _trails_payload(vine, in_region, heat: dict, limit: int) -> dict:
+        """Persistent heat, for nodes that exist and are visible.
+
+        A row in `trails.db` for a node the caller may not see would be an
+        existence oracle with a number attached, and `stats` computed over
+        the whole forest would be the same disclosure in aggregate — so both
+        are derived from what survived.
+        """
+        known = {r[0] for r in vine.catalog.conn.execute("SELECT id FROM nodes")}
+        warm = sorted(
+            ({"id": nid, "heat": value} for nid, value in heat.items()
+             if nid in known and in_region(nid)),
+            key=lambda row: (-row["heat"], row["id"]),
+        )
+        shown = warm[:limit]
+        values = [row["heat"] for row in shown]
+        return {
+            "heat": shown,
+            "stats": {
+                "rows": len(shown),
+                "max": round(max(values), 4) if values else 0.0,
+                "mean": round(sum(values) / len(values), 4) if values else 0.0,
+            },
+            "truncated": len(warm) > limit,
+            "derived": True,
+        }
+
+    def _graph_payload(vine, in_region, heat: dict, limit: int) -> dict:
+        """Nodes and trails as a graph.
+
+        Two rules from J.11 shape the order of what follows. An edge needs
+        BOTH ends visible, because one visible end discloses the other. And
+        `degree` is recomputed from the edges that survived — the Catalog's
+        own degree counted the hidden ones, and publishing it would leak the
+        size of what was withheld.
+        """
+        conn = vine.catalog.conn
+        rows = [
+            row for row in conn.execute(
+                "SELECT id, kind, type, title, summary, tags, parent, coverage, "
+                "body_tokens, payload, payload_type, updated "
+                "FROM nodes ORDER BY id")
+            if in_region(row["id"])
+        ]
+        edges_all = [
+            e for e in conn.execute("SELECT src, rel, dst, confidence FROM edges")
+            if in_region(e["src"]) and in_region(e["dst"])
+        ]
+
+        keep = {row["id"] for row in rows}
+        truncated = len(rows) > limit
+        if truncated:
+            # Over the bound, the most connected nodes are the ones a map is
+            # for. Ranked over the in-scope edge set, so the choice cannot be
+            # steered by edges the caller may not see.
+            ranked: dict[str, int] = {}
+            for e in edges_all:
+                ranked[e["src"]] = ranked.get(e["src"], 0) + 1
+                ranked[e["dst"]] = ranked.get(e["dst"], 0) + 1
+            rows.sort(key=lambda row: (-ranked.get(row["id"], 0), row["id"]))
+            rows = rows[:limit]
+            keep = {row["id"] for row in rows}
+            rows.sort(key=lambda row: row["id"])
+
+        edges = [
+            {"src": e["src"], "rel": e["rel"], "dst": e["dst"],
+             "confidence": round(float(e["confidence"] or 1.0), 3)}
+            for e in edges_all if e["src"] in keep and e["dst"] in keep
+        ]
+        degree: dict[str, int] = {}
+        for e in edges:
+            degree[e["src"]] = degree.get(e["src"], 0) + 1
+            degree[e["dst"]] = degree.get(e["dst"], 0) + 1
+
+        nodes = []
+        for row in rows:
+            try:
+                tags = json.loads(row["tags"] or "[]")
+            except json.JSONDecodeError:
+                tags = []
+            nodes.append({
+                "id": row["id"], "kind": row["kind"], "type": row["type"],
+                "title": row["title"], "summary": row["summary"], "tags": tags,
+                "parent": row["parent"] if row["parent"] in keep else None,
+                "coverage": row["coverage"], "body_tokens": row["body_tokens"],
+                "payload": row["payload"], "payload_type": row["payload_type"],
+                "updated": row["updated"],
+                # `nodes.stale` is deliberately NOT here. In the engine it
+                # means "this node's vector needs re-embedding after a write"
+                # (Part K bookkeeping), not "this node is unhealthy" — and a
+                # field of that name on a map would be read as the second by
+                # everyone who has not read the Catalog.
+                "degree": degree.get(row["id"], 0),
+                "heat": heat.get(row["id"], 0.0),
+            })
+
+        return {
+            "nodes": nodes, "edges": edges, "truncated": truncated,
+            # The dialect the forest declares, so a legend names what this
+            # forest actually holds instead of a list compiled into a console.
+            "types": sorted(vine.forest.dialect.node_types),
+            "rels": sorted(vine.forest.dialect.rels),
+            # C.6.1: the Catalog is derived and rebuildable. A consumer that
+            # finds it stale reindexes; it never reconciles.
+            "derived": True,
         }
 
     # -- routes -------------------------------------------------------------
@@ -1227,6 +1424,28 @@ def build_app(
             return _envelope(VineError(E_SCHEMA, str(e)))
         return JSONResponse({"bindings": registry.bindings(forest)})
 
+    async def forest_map(request: Request) -> JSONResponse:
+        """`GET /v1/forests/{forest}/graph` and `.../trails` (J.11)."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        kind = request.path_params["kind"]
+        if kind not in MAP_KINDS:
+            return _envelope(VineError(
+                E_NOT_FOUND, f"no such endpoint: {kind}",
+                hint=f"Map projections: {sorted(MAP_KINDS)}. "
+                     "Primitives are POSTed to this path."))
+        params = dict(request.query_params)
+        result = await in_forest_thread(
+            lambda: run_map(principal, forest, kind, params))
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        return JSONResponse(result)
+
     async def studio_missing(request: Request):
         return JSONResponse(
             {"error": {"code": E_NOT_FOUND, "message": "the Studio build is not present",
@@ -1251,6 +1470,9 @@ def build_app(
         Route("/v1/admin/providers", admin_providers, methods=["GET", "POST"]),
         Route("/v1/admin/providers/test", admin_provider_test, methods=["POST"]),
         Route("/v1/admin/models", admin_models, methods=["GET", "POST"]),
+        # Before the primitive catch-all, which is POST-only: these are GETs
+        # of a projection, not calls of a primitive.
+        Route("/v1/forests/{forest}/{kind:str}", forest_map, methods=["GET"]),
         Route("/v1/forests/{forest}/{primitive}", primitive, methods=["POST"]),
     ]
 

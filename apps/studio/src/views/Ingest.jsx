@@ -1,10 +1,15 @@
 import { useRef, useState } from 'react'
+import { EditorContent, useEditor } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Placeholder from '@tiptap/extension-placeholder'
+import TurndownService from 'turndown'
+
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, Empty, ErrorNote, Field, Note, Select, Spinner, Tabs,
 } from '../design/ui.jsx'
-import { File, Ingest as Upload, Refresh, X } from '../design/icons.jsx'
+import { File, Ingest as Upload, Pencil, Refresh, X } from '../design/icons.jsx'
 import {
   NeedsCapability, branchOf, has, useAsync, useForestTree,
 } from './shared.jsx'
@@ -55,9 +60,16 @@ async function filesFromEntry(entry, prefix = '') {
   return out
 }
 
+/* The composer writes prose; the forest stores markdown. One converter,
+ * configured once, so the round trip cannot drift. */
+const turndown = new TurndownService({
+  headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced',
+})
+
 export default function Ingest({ forest, grant, goto }) {
   const { t } = useI18n()
   const [mode, setMode] = useState('upload')
+  const [title, setTitle] = useState('')
   const [files, setFiles] = useState([])
   const [dest, setDest] = useState('')
   const [path, setPath] = useState('')
@@ -67,6 +79,18 @@ export default function Ingest({ forest, grant, goto }) {
   const [dragging, setDragging] = useState(false)
   const picker = useRef(null)
   const folderPicker = useRef(null)
+
+  /* The composer (J.8's `compose`). Mounted once, not per tab switch: a
+     draft that vanished because somebody looked at the Upload tab would be
+     a draft nobody trusts. */
+  const composer = useEditor({
+    extensions: [
+      StarterKit.configure({ heading: { levels: [2, 3] } }),
+      Placeholder.configure({ placeholder: t('ingest.compose_placeholder') }),
+    ],
+    content: '',
+    editorProps: { attributes: { class: 'editor-surface' } },
+  }, [])
 
   const tree = useForestTree(forest, grant, api.call)
   // undefined = still asking, null = nothing bound, object = the binding.
@@ -135,6 +159,10 @@ export default function Ingest({ forest, grant, goto }) {
       const body = mode === 'upload'
         ? { mode, files: payload, dest: dest || undefined }
         : mode === 'adopt' ? { mode, path, dest: dest || undefined }
+        : mode === 'compose'
+          ? { mode, title: title.trim(),
+              text: turndown.turndown(composer?.getHTML() || ''),
+              dest: dest || undefined }
         : { mode: 'sync' }
       const report = await api.ingest(forest, body)
       setState({ busy: false, report })
@@ -143,11 +171,14 @@ export default function Ingest({ forest, grant, goto }) {
       // this card contradicting the report right below it.
       bindings.reload()
       if (mode === 'upload') { setFiles([]); setSkipped([]) }
+      if (mode === 'compose') { setTitle(''); composer?.commands.clearContent() }
     } catch (error) { setState({ busy: false, error }) }
   }
 
+  const composed = (composer?.getText() || '').trim()
   const ready = mode === 'upload' ? files.length > 0
-    : mode === 'adopt' ? Boolean(path) : true
+    : mode === 'adopt' ? Boolean(path)
+    : mode === 'compose' ? Boolean(title.trim() && composed) : true
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
@@ -155,6 +186,7 @@ export default function Ingest({ forest, grant, goto }) {
         <Card title={t('ingest.title')} subtitle={t('ingest.sub')} icon={Upload}>
           <Tabs value={mode} onChange={(m) => { setMode(m); setState({}) }} options={[
             { value: 'upload', label: t('ingest.mode_upload') },
+            { value: 'compose', label: t('ingest.mode_compose') },
             ...(has(grant, 'admin') ? [{ value: 'adopt', label: t('ingest.mode_adopt') }] : []),
             { value: 'sync', label: t('ingest.mode_sync') },
           ]} />
@@ -240,6 +272,20 @@ export default function Ingest({ forest, grant, goto }) {
               </>
             )}
 
+            {mode === 'compose' && (
+              <>
+                <Note>{t('ingest.compose_hint')}</Note>
+                <Field label={t('ingest.compose_title')} value={title} required
+                       placeholder={t('ingest.compose_title_ph')}
+                       hint={t('ingest.compose_title_hint')}
+                       onChange={(e) => setTitle(e.target.value)} />
+                <div>
+                  <div className="label">{t('ingest.compose_body')}</div>
+                  <Composer editor={composer} />
+                </div>
+              </>
+            )}
+
             {mode === 'adopt' && (
               <Field label={t('ingest.path')} value={path} required
                      placeholder="/data/handbook" hint={t('ingest.path_hint')}
@@ -261,8 +307,10 @@ export default function Ingest({ forest, grant, goto }) {
 
             <div className="flex justify-end">
               <button className="btn btn-primary" disabled={!ready || state.busy}>
-                {mode === 'sync' ? <Refresh size={14} /> : <Upload size={14} />}
-                {state.busy ? t('ingest.running') : t('ingest.start')}
+                {mode === 'sync' ? <Refresh size={14} />
+                  : mode === 'compose' ? <Pencil size={14} /> : <Upload size={14} />}
+                {state.busy ? t('ingest.running')
+                  : mode === 'compose' ? t('ingest.publish') : t('ingest.start')}
               </button>
             </div>
           </form>
@@ -298,6 +346,45 @@ export default function Ingest({ forest, grant, goto }) {
               </>
             ) : null}
         </Card>
+      </div>
+    </div>
+  )
+}
+
+/** The compose surface. Deliberately the same editor the node editor uses:
+ *  writing a new node and editing an old one are one skill, not two. */
+function Composer({ editor }) {
+  const { t } = useI18n()
+  if (!editor) return <Spinner label={t('common.loading')} />
+  const item = (label, active, run, title) => (
+    <button key={label} type="button" title={title} aria-pressed={active}
+            onClick={run}
+            className={`rounded-md px-2 py-1 text-[12px] transition
+              ${active ? 'bg-accent-soft text-accent' : 'text-text-3 hover:bg-surface-2'}`}>
+      {label}
+    </button>
+  )
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-0.5 rounded-t-lg border
+                      border-line bg-surface-2 p-1">
+        {item('B', editor.isActive('bold'),
+              () => editor.chain().focus().toggleBold().run(), t('editor.bold'))}
+        {item('I', editor.isActive('italic'),
+              () => editor.chain().focus().toggleItalic().run(), t('editor.italic'))}
+        {item('H2', editor.isActive('heading', { level: 2 }),
+              () => editor.chain().focus().toggleHeading({ level: 2 }).run(), 'H2')}
+        {item('•', editor.isActive('bulletList'),
+              () => editor.chain().focus().toggleBulletList().run(), t('editor.list'))}
+        {item('1.', editor.isActive('orderedList'),
+              () => editor.chain().focus().toggleOrderedList().run(), t('editor.ordered'))}
+        {item('❝', editor.isActive('blockquote'),
+              () => editor.chain().focus().toggleBlockquote().run(), t('editor.quote'))}
+        {item('</>', editor.isActive('codeBlock'),
+              () => editor.chain().focus().toggleCodeBlock().run(), t('editor.code'))}
+      </div>
+      <div className="rounded-b-lg border border-t-0 border-line bg-surface-2 p-3">
+        <EditorContent editor={editor} />
       </div>
     </div>
   )
