@@ -269,7 +269,7 @@ Create a new banana / edit an existing one. Every write: (a) validates against `
 | 2 | **Gardener** | Ingest pipeline: parse (PDF/DOCX/MD → MD), semantic chunking, entity/relation extraction via SLM, summary generation, index updates | Python + quantised Qwen on the 3090; PDF via docling/marker |
 | 3 | **Ranger** | Maintenance: detects stale indexes, broken links, folders that need splitting, entity merge candidates | Python, periodic jobs |
 | 4 | **Canopy** | Derived layer: embeddings (bge-m3, Matryoshka 1024→256, binary quantisation + rescore), BM25 (Tantivy or SQLite FTS5), graph cache | Python; embedded LanceDB (Apache 2.0, free) or even plain numpy in v0 |
-| 5 | **Vine** | MCP server exposing the 6 primitives | Python FastMCP |
+| 5 | **Vine** | MCP server exposing the 6 primitives | Python MCP SDK (`MCPServer`) |
 | 6 | **Monkey Bench** | Evaluation harness: corpus + multi-hop questions + metrics (hops-to-banana, tokens-to-banana, precision) vs RAG baseline | Python |
 
 Build order: **1 → 5 (with L2 empty, pure file navigation) → 6 → 2 → 4 → 3.** Note: the MCP server comes before the ingest pipeline — validate navigation on a hand-built forest (e.g. your own notes vault) before automating ingestion.
