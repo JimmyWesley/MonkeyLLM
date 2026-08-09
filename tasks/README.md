@@ -25,3 +25,4 @@ Conventions:
 | T07 | Station: self-hostable host (REST + MCP over the registry) | in-progress (Phases A+B done 2026-08-08: REST + authenticated MCP, governed writes with principal-stamped commits, audit log, per-forest model bindings; OIDC/quotas + ingest endpoints remain) |
 | T08 | ScopedVine: branch-level policies (the "RLS" of forests) | done (2026-08-08: J.3 matrix across every primitive and both surfaces; leak suite green — the whole-response sweep caught trail/coverage/degree/scanned_nodes) |
 | T09 | Studio: the web face of the Station | in-progress (2026-08-08: React/Tailwind/Vite SPA — Ask, Browse, Search, Datasets, Models, Governance, Audit; ingestion + trails consoles remain) |
+| T10 | Studio Forest Views: graph mode, files mode, governed editing, Write tab | todo (design approved 2026-08-09 — see `docs/studio-forest-views-design.md`; spec bump required before code) |
