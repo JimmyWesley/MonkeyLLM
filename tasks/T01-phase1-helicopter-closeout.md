@@ -1,4 +1,4 @@
-﻿# T01 — Phase 1 closeout: official Monkey Bench run
+# T01 — Phase 1 closeout: official Monkey Bench run
 
 status: in-progress
 

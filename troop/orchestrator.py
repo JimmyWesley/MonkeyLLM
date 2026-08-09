@@ -1,4 +1,4 @@
-﻿"""Troop orchestrator (spec Part E, Phase 1.5): N monkeys, one question.
+"""Troop orchestrator (spec Part E, Phase 1.5): N monkeys, one question.
 
 Coordination is intra-session stigmergy only — the monkeys never exchange
 messages, they smell each other's trails:
