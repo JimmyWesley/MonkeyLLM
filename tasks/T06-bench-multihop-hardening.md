@@ -1,4 +1,4 @@
-﻿# T06 — Monkey Bench: multi-hop question hardening
+# T06 — Monkey Bench: multi-hop question hardening
 
 status: DONE (2026-06-11) — results below; criterion decision handed to T01
 depends-on: T01 (motivating data)
