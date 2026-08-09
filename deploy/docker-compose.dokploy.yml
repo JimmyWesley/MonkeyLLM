@@ -62,23 +62,23 @@ services:
       start_period: 15s
       retries: 3
 
-  # -- Optional: local chat LLM (llama.cpp), profile `local-llm` -----------
-  # If your Dokploy version cannot pass `--profile`, delete the `profiles:`
-  # line to always run it. First start downloads the GGUF into the models
-  # volume; then set MONKEYLLM_LLM_ENDPOINT=http://llm:8090/v1 above.
-  llm:
-    image: ghcr.io/ggml-org/llama.cpp:server
-    profiles: ["local-llm"]
-    environment:
-      LLAMA_CACHE: /models
-    command: >
-      -hf ${LLAMA_CHAT_HF:-bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M}
-      --host 0.0.0.0 --port 8090 -c ${LLAMA_CTX:-8192}
-    volumes:
-      - models:/models
-    networks:
-      - dokploy-network
-    restart: unless-stopped
+#  # -- Optional: local chat LLM (llama.cpp), profile `local-llm` -----------
+#  # If your Dokploy version cannot pass `--profile`, delete the `profiles:`
+#  # line to always run it. First start downloads the GGUF into the models
+#  # volume; then set MONKEYLLM_LLM_ENDPOINT=http://llm:8090/v1 above.
+#  llm:
+#    image: ghcr.io/ggml-org/llama.cpp:server
+#    profiles: ["local-llm"]
+#    environment:
+#      LLAMA_CACHE: /models
+#    command: >
+#      -hf ${LLAMA_CHAT_HF:-bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M}
+#      --host 0.0.0.0 --port 8090 -c ${LLAMA_CTX:-8192}
+#    volumes:
+#      - models:/models
+#    networks:
+#      - dokploy-network
+#    restart: unless-stopped
 
   # -- Optional: local embedder (Canopy), profile `local-embed` ------------
   # Then set MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1 above.

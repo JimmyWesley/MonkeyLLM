@@ -79,23 +79,23 @@ services:
       start_period: 15s
       retries: 3
 
-  # -- Optional: local chat LLM (llama.cpp), profile `local-llm` -----------
-  # First start downloads the GGUF from Hugging Face into the models
-  # volume (LLAMA_CACHE); later starts reuse it. CPU by default — fine for
-  # the 7B Q4 navigator; give it a GPU via `deploy.resources` if you have one.
-  llm:
-    image: ghcr.io/ggml-org/llama.cpp:server
-    profiles: ["local-llm"]
-    environment:
-      LLAMA_CACHE: /models
-    command: >
-      -hf ${LLAMA_CHAT_HF:-bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M}
-      --host 0.0.0.0 --port 8090 -c ${LLAMA_CTX:-8192}
-    volumes:
-      - models:/models
-    ports:
-      - "${LLM_PORT:-8090}:8090"
-    restart: unless-stopped
+#  # -- Optional: local chat LLM (llama.cpp), profile `local-llm` -----------
+#  # First start downloads the GGUF from Hugging Face into the models
+#  # volume (LLAMA_CACHE); later starts reuse it. CPU by default — fine for
+#  # the 7B Q4 navigator; give it a GPU via `deploy.resources` if you have one.
+#  llm:
+#    image: ghcr.io/ggml-org/llama.cpp:server
+#    profiles: ["local-llm"]
+#    environment:
+#      LLAMA_CACHE: /models
+#    command: >
+#      -hf ${LLAMA_CHAT_HF:-bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M}
+#      --host 0.0.0.0 --port 8090 -c ${LLAMA_CTX:-8192}
+#    volumes:
+#      - models:/models
+#    ports:
+#      - "${LLM_PORT:-8090}:8090"
+#    restart: unless-stopped
 
   # -- Optional: local embedder (Canopy vector layer), profile `local-embed`
   embed:
