@@ -352,6 +352,53 @@ def test_a_model_that_answers_badly_is_not_reported_as_unreachable(
     assert stats["last_reply"] == ""
 
 
+def test_a_verbose_model_is_trimmed_rather_than_discarded(station, monkeypatch):
+    """The failure Jimmy hit end to end: the model answers, the summary is
+    real but over the A.4 budget, and three retries do not shrink it. Giving
+    up there files the document with a first-sentences heuristic — worse
+    text, for tokens already spent."""
+    import json as _json
+
+    client, registry, _ = station
+    head = _key(registry, ["read", "ingest"])
+    _bind_ingest(registry, "http://127.0.0.1:9/v1", model="chatty")
+
+    from monkeyllm_station import inference
+
+    long_summary = (
+        "Onboarding handbook 2026: the laptop request form lives on the "
+        "intranet and is approved by the hiring manager. It also covers "
+        "badge collection, the first-week buddy assignment, the payroll "
+        "forms due before day five, and the security training that every "
+        "new joiner must finish inside the first calendar month.")
+
+    def fake_chat_from_binding(binding, *, timeout=180.0):
+        return (lambda messages: _json.dumps({"summary": long_summary,
+                                              "tags": ["onboarding"]}),
+                binding["model"])
+
+    monkeypatch.setattr(inference, "chat_from_binding", fake_chat_from_binding)
+
+    r = client.post(f"/v1/forests/{FOREST}/ingest",
+                    json={"mode": "upload", "files": DOCS, "dest": "uploads"},
+                    headers=head)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["curated"] is True, "a trimmed model summary is still curated"
+    assert body["curation"]["llm_summaries"] == len(DOCS)
+    assert body["curation"]["rejected"] == 0
+    # Documents plus the region rollups: the repair has to reach both, or
+    # every branch keeps the template summary the Gardener planted.
+    assert body["curation"]["repaired"] >= len(DOCS)
+    assert body["curation"]["branch_fallbacks"] == 0
+
+    node = client.post(f"/v1/forests/{FOREST}/look",
+                       json={"id": body["planted"][0]}, headers=head).json()
+    assert node["summary"].startswith("Onboarding handbook 2026")
+    assert "pending curation" not in node["summary"]
+    assert "onboarding" in node["tags"]
+
+
 def test_a_working_ingest_model_reports_what_it_wrote(station, monkeypatch):
     client, registry, _ = station
     head = _key(registry, ["read", "ingest"])
