@@ -22,12 +22,30 @@ station serve --root forests --registry ./station.db --port 8800 --writable
 ```
 
 First run mints a bootstrap `admin` key with full capabilities on every
-forest in the root and prints it once — only its digest is stored.
+forest in the root and prints it once — only its digest is stored. You do
+not need it to reach the console: open the Studio and the **setup screen**
+(J.2.4) creates the owner.
+
+### The owner (J.2.4)
+
+A Station with no credential offers exactly one unauthenticated route,
+`POST /v1/auth/setup`, and it closes permanently the first time it is used.
+What it creates is the **owner**: a principal carrying a bit rather than a
+pile of grants, which makes it `admin` on every forest present and future —
+including on none at all. That last part is the point. Authority to create
+the first forest cannot be derived from a forest, or a fresh install has
+nobody able to make one.
+
+There is exactly one owner, enforced by a unique index rather than by the
+code path that happens to create it, and the bit cannot be handed out
+through `/v1/admin/people`. Everything else stays per forest: the owner uses
+the same consoles as everybody, with the same capability rules.
 
 ### Signing in (J.2.1)
 
-Two doors, one identity. Set a super-administrator in the environment and
-the console offers a login form as well as the key field:
+Two doors, one identity. A super-administrator in the environment is
+**break-glass** — setting it replaces the setup screen rather than
+complementing it, so the two never race for the first identity:
 
 ```bash
 export MONKEYLLM_STATION_ADMIN=jimmy

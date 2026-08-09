@@ -62,6 +62,10 @@ export const api = {
   // credentials (J.2.1 / J.2.2)
   login: (username, password) =>
     request('/v1/auth/login', { method: 'POST', body: { username, password } }),
+  // First-run setup (J.2.4). Exists only while the Station has no credential;
+  // once it has run it answers like any unrouted path, which is how the
+  // console learns it lost the race.
+  setup: (body) => request('/v1/auth/setup', { method: 'POST', body }),
   keys: () => request('/v1/admin/keys'),
 
   // Person-shaped governance (J.2.3): one read, one write, per person.
