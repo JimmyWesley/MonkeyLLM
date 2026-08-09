@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Jimmy Wesley
+
 """The host registry (spec J.2) — principals, API keys, grants.
 
 Deliberately NOT inside any forest: a forest handed to another operator

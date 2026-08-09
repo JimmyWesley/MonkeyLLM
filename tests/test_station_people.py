@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Person-shaped governance (spec J.2.3, criterion F.23).
 
 Onboarding somebody is one decision with three consequences — access, a way

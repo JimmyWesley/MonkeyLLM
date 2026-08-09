@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Canopy — the optional vector layer for `locate` (Phase 1 kickoff).
 
 Phase 0 `locate` is BM25-only (zero embeddings) by design — that is a spec

@@ -7,6 +7,10 @@ name = "monkeyllm-station"
 version = "0.1.0"
 description = "MonkeyLLM Station — self-hostable host layer for forests (spec Part J)"
 requires-python = ">=3.11"
+# The host is AGPL while the engine it depends on is Apache-2.0. That
+# direction is the legal one (Apache-2.0 is one-way compatible with AGPL);
+# see LICENSING.md at the repository root.
+license = { text = "AGPL-3.0-only" }
 # starlette and uvicorn already ship with `mcp`, so the host adds no new
 # runtime dependency (spec J.6: one image, no external database).
 dependencies = [

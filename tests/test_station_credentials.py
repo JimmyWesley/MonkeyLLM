@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Credentials: the two doors and the token lifecycle (J.2.1/J.2.2, F.21).
 
 The object that grants access was, until v0.17, the one object the

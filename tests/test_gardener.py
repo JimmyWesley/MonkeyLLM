@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Part G (spec v0.9): the Gardener — adopt, sync, converters, hooks."""
 
 import subprocess

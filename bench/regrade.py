@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Re-grade a saved bench report against the (possibly fixed) questions file,
 without re-running the models. Grading bugs/gabarito fixes shouldn't cost a
 GPU pass: the raw answers and harvested nodes are all in the report.

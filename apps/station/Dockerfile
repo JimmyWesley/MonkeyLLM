@@ -22,12 +22,16 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# Shipping the image is distributing both works: the Apache-2.0 engine and
+# the AGPL-3.0 host. Each license (and the NOTICE) has to be inside it.
+COPY LICENSE NOTICE LICENSING.md ./
+
 # Engine first: it changes least, so the layer caches well.
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 RUN pip install --no-cache-dir .
 
-COPY apps/station/pyproject.toml ./apps/station/
+COPY apps/station/pyproject.toml apps/station/LICENSE ./apps/station/
 COPY apps/station/monkeyllm_station/ ./apps/station/monkeyllm_station/
 # Editable on purpose: the Station locates the Studio bundle relative to its
 # own source tree (app.py's STUDIO_DIST), so the package must run from
@@ -36,6 +40,7 @@ RUN pip install --no-cache-dir -e ./apps/station
 
 # The Station serves this directory as static files and nothing else.
 COPY --from=studio /studio/dist ./apps/studio/dist
+COPY apps/studio/LICENSE ./apps/studio/
 
 # /forests  the forest registry
 # /registry the host registry: principals, keys, grants, provider secrets —

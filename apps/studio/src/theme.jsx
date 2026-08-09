@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* Light and dark (spec J.5.3), with "system" as the honest default.
  *
  * The choice is written to <html data-theme>, not held in React state that

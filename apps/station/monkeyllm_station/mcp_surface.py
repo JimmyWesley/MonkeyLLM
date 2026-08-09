@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Jimmy Wesley
+
 """The Station's MCP surface (spec J.1) — the same forests, the same policy,
 spoken in the protocol agents already use.
 

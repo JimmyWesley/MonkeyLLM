@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Build `forests/wide-forest` — a corpus with a realistic branching factor.
 
 Every forest in this repository is hand-built and *narrow*: the fixture has

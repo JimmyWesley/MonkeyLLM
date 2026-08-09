@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* Rendering model output as what it is: markdown.
  *
  * An answer arrives as markdown — headings, lists, tables, fenced code — and

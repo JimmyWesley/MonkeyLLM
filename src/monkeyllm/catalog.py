@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The Catalog (_derived/catalog.db, spec C.6.1).
 
 One row per node: frontmatter + trail + degree. FTS5 over

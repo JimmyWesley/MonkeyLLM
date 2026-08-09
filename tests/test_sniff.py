@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """C.6b sniff — literal search over bodies (spec v0.2, acceptance F.7)."""
 
 import pytest

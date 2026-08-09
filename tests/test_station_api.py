@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Station Phase A (spec J.1/J.2/J.3): auth, capabilities, and the two
 oracle-shaped invariants the host can already honour at forest granularity.
 

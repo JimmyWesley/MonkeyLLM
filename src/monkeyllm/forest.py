@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Forest layer: id <-> path mapping, trails, node IO, writer lock,
 forest bootstrap (`init_forest`).
 

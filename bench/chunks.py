@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Chunk store for the RAG baselines (Monkey Bench v1).
 
 Fairness rules (roadmap, Fase 1): the baselines see the SAME corpus with the

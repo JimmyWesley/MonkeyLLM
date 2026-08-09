@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The Studio ships three complete languages (spec J.5.3, criterion F.20).
 
 "Complete" is a rule, not an intention, so it has to be checkable: these

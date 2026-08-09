@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """C.7.1 dataset planting (spec v0.8): declarative schema births the payload."""
 
 import copy

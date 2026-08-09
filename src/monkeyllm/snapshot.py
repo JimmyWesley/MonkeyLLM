@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Part I (spec v0.11) — forest snapshots: one file, full history.
 
 A snapshot is the forest's git repository packaged as a `git bundle`: every

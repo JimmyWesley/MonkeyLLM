@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* The component vocabulary every console is built from.
  *
  * Deliberately small: nine consoles sharing eleven components is what makes

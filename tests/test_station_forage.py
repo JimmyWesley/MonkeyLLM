@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The answer that navigates (spec J.10.5).
 
 The model is scripted here, so what is under test is the harness around it:

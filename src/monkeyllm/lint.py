@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """`vine validate` — lint the forest against the schema (roadmap deliverable 3)."""
 
 from __future__ import annotations

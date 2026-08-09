@@ -4,6 +4,10 @@
 *
 !pyproject.toml
 !README.md
+# The image distributes both works, so both licenses must travel with it.
+!LICENSE
+!NOTICE
+!LICENSING.md
 !src/
 !apps/
 **/__pycache__/

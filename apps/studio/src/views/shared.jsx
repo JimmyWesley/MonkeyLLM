@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* Small pieces every console needs, in one place so nine views cannot drift
  * into nine subtly different ideas of "loading" or "you may not do this". */
 import { useCallback, useEffect, useState } from 'react'

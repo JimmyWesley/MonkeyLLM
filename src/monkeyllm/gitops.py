@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Git-native writes: every plant/graft is a commit (architecture §2.6)."""
 
 from __future__ import annotations

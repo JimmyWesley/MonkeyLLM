@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Providers declared by the deployment (spec J.10.1).
 
 A Station whose endpoint and key already live in environment variables knows
