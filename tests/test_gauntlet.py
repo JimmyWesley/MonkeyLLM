@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The Gauntlet (spec Part K, criterion F.24).
 
 The feature's central promise is not that it ranks well — it is that a

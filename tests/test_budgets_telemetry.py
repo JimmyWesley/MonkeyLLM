@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Part F criterion 3 (budgets with synthetic giant nodes) + Part D telemetry."""
 
 import json

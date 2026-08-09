@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Build the Monkey Bench v1 corpus (forests/bench-forest/) + derived questions.
 
 A deterministic, programmatically-expanded universe ("Telemetrix Systems",

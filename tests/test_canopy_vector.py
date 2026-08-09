@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Canopy vector layer (Phase 1 kickoff): index build/persist, RRF fusion,
 and the locate contract (BM25-only unchanged; hybrid when index+embedder).
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """G.9 fetchers + H.6 eviction + Part I snapshots (spec v0.11)."""
 
 import hashlib

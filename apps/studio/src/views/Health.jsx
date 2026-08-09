@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* The Health console (spec J.13) — what the Ranger sees.
  *
  * Part H has been able to describe a forest's shape since v0.10, and the

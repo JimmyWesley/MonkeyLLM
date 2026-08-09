@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The MCP surface (spec J.1): the same forests, the same policy, spoken in
 the protocol agents already use.
 

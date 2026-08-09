@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Vine CLI: `vine serve`, `vine reindex`, `vine validate`."""
 
 from __future__ import annotations

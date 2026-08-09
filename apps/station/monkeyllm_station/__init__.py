@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Jimmy Wesley
+
 """MonkeyLLM Station — the host layer (spec Part J).
 
 Serves a forest registry to many principals over REST (and, from Phase B,

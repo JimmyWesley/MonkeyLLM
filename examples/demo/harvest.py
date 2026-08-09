@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """CLI wrapper for the harvest tool (spec C.6c) — see monkeyllm.harvest.
 
 Zero-LLM retrieval: one call, ranked bananas + exact snippets back, so the

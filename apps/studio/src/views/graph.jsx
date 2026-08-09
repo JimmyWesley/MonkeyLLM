@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* The graph mode of Explore (spec J.5.4).
  *
  * A forest is a graph with heat on it, and every list-shaped console so far

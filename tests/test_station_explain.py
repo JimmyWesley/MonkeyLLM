@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Explaining a composite (spec J.10.4) and the entry-search switch (K.3).
 
 Two things an operator cannot get from a total: *which* call was slow, and

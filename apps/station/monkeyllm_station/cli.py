@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Jimmy Wesley
+
 """`station` CLI: run the host, mint keys, grant access.
 
     station serve  --root /forests --registry /registry/station.db

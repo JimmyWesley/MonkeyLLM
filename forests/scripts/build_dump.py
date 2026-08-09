@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Deterministic 100-document mixed dump for the T04 curation measurement.
 
 Generates `forests/dump-ingest/` (git-ignored): a realistic brownfield

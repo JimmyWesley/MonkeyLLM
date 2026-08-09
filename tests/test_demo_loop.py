@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """End-to-end agent-loop test with a scripted model (no network, no GPU).
 
 Proves the demo harness machinery: master-index priming, JSON action

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """G.4.2 — the Gardener's LLM curation stage (spec v0.9; edge proposals
 G.4.2.1, spec v0.12).
 

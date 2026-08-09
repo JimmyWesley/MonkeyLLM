@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """MCP-only demo — the hunt runs 100% through the MCP protocol.
 
 Unlike run_demo.py (which imports Vine and calls primitives in-process),

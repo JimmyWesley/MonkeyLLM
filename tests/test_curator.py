@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """G.4.2: the Curator — LLM summaries with A.4 validate-and-retry,
 plus G.4.2.1 edge proposals (spec v0.12)."""
 

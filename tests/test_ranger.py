@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Part H (spec v0.10): the Ranger — evaporation, promotion/pruning, health."""
 
 import subprocess

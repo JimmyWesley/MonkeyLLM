@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Writer lock, CLI, MCP server surface, latency budgets (Part F criterion 6)."""
 
 import asyncio

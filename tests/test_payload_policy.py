@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Spec A.3.1 (acceptance F.8): binaries never enter the forest git."""
 
 import subprocess

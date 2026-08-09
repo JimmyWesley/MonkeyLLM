@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Jimmy Wesley
+
 """Two-phase compose: reviewing a passport before the forest keeps it (J.8.1).
 
 Curation is the one ingest step whose output somebody may want to see first.
