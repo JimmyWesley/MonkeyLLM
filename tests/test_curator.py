@@ -21,6 +21,18 @@ GOOD = json.dumps({
 TOO_LONG = json.dumps({"summary": "word " * 120, "tags": []})
 ANTI_PATTERN = json.dumps({"summary": "This document describes the discount "
                                       "policy in detail.", "tags": []})
+# Over budget, but real prose: trimming it leaves a usable scent. This is
+# what a chatty model actually produces, and it must NOT be thrown away.
+VERBOSE = json.dumps({
+    "summary": "Discount policy 2026: up to 8% direct and 15% via partner "
+               "with approval. Bundles are excluded from every tier and the "
+               "approval flow runs through the regional sales director, who "
+               "signs off within two business days of the request being "
+               "filed by the account owner in the CRM.",
+    "tags": ["sales"],
+})
+# Nothing to salvage: no summary at all in the reply.
+NO_SUMMARY = json.dumps({"summary": "   ", "tags": []})
 
 DRAFT = {
     "id": "sales/policy", "type": "note", "title": "Policy",
@@ -49,7 +61,7 @@ class TestCurator:
         assert c.stats == {"llm_summaries": 1, "fallbacks": 0, "retries": 0,
                            "links_proposed": 0, "proposal_fallbacks": 0,
                            "branch_rollups": 0, "branch_fallbacks": 0,
-                           "transport_errors": 0, "rejected": 0}
+                           "transport_errors": 0, "rejected": 0, "repaired": 0}
         assert c.last_error is None and c.last_reject is None
 
     def test_retry_then_accept(self):
@@ -57,9 +69,34 @@ class TestCurator:
         out = c(dict(DRAFT))
         assert out["summary"].startswith("Discount policy 2026")
         assert c.stats["retries"] == 2 and c.stats["llm_summaries"] == 1
+        assert c.stats["repaired"] == 0, "an accepted reply needs no repair"
+
+    def test_an_overlong_summary_is_trimmed_instead_of_discarded(self):
+        """Length is the one A.4 failure that is mechanical. Falling back to
+        the first-sentences heuristic here throws away the tokens the
+        operator already paid for, to get a worse summary."""
+        c = Curator(scripted_chat([VERBOSE, VERBOSE, VERBOSE]))
+        out = c(dict(DRAFT))
+        validate_summary(out["summary"])
+        assert out["summary"].startswith("Discount policy 2026: up to 8%")
+        assert out["summary"] != "Derived fallback summary."
+        assert c.stats["repaired"] == 1 and c.stats["rejected"] == 0
+        # It is the model's summary, so it counts as one — and `curated` in
+        # the ingest report is true, because a model really did write it.
+        assert c.stats["llm_summaries"] == 1 and c.stats["fallbacks"] == 0
+        # Whole sentences go first: no mid-sentence cut while one can be dropped.
+        assert "…" not in out["summary"]
+
+    def test_trimming_does_not_rescue_boilerplate(self):
+        """An anti-pattern is not a length problem: cutting it shorter still
+        leaves a summary with no scent."""
+        c = Curator(scripted_chat([ANTI_PATTERN] * 3))
+        out = c(dict(DRAFT))
+        assert out["summary"] == "Derived fallback summary."
+        assert c.stats["repaired"] == 0 and c.stats["rejected"] == 1
 
     def test_exhausted_retries_fall_back(self):
-        c = Curator(scripted_chat([TOO_LONG, TOO_LONG, TOO_LONG]))
+        c = Curator(scripted_chat([NO_SUMMARY] * 3))
         out = c(dict(DRAFT))
         assert out["summary"] == "Derived fallback summary."  # untouched
         assert c.stats["fallbacks"] == 1 and c.stats["llm_summaries"] == 0
@@ -67,8 +104,7 @@ class TestCurator:
         # never answered: same fallback, opposite fix.
         assert c.stats["rejected"] == 1 and c.stats["transport_errors"] == 0
         assert c.last_error is None
-        assert "60 tokens" in c.last_reject
-        assert c.last_reply and "word word" in c.last_reply
+        assert c.last_reject == "no summary found in the JSON reply"
 
     def test_an_empty_reply_is_named_as_such(self):
         """A thinking model that spends its whole budget reasoning returns
@@ -80,10 +116,21 @@ class TestCurator:
         assert c.last_reject == "the model returned an empty message"
         assert c.last_reply == ""
 
+    def test_a_truncated_reply_is_salvaged(self):
+        """`max_tokens` cuts the message, not the sentence: the summary is
+        whole and only the closing brace is missing. Spending three calls to
+        reach the deterministic fallback over that is pure waste."""
+        cut = ('{"summary": "Discount policy 2026: up to 8% direct and 15% '
+               'via partner with approval.", "tags": ["sal')
+        c = Curator(scripted_chat([cut]))
+        out = c(dict(DRAFT))
+        assert out["summary"].startswith("Discount policy 2026")
+        assert c.stats["llm_summaries"] == 1 and c.stats["retries"] == 0
+
     def test_a_rejection_survives_a_later_success(self):
         """A batch whose last document happened to pass still owes the
         operator an example of the ones that did not."""
-        c = Curator(scripted_chat([TOO_LONG, TOO_LONG, TOO_LONG, GOOD]))
+        c = Curator(scripted_chat([NO_SUMMARY, NO_SUMMARY, NO_SUMMARY, GOOD]))
         c(dict(DRAFT))
         c(dict(DRAFT))
         assert c.stats["llm_summaries"] == 1 and c.stats["rejected"] == 1
@@ -228,7 +275,7 @@ class TestEdgeProposals:
 
     def test_proposals_run_even_after_summary_fallback(self):
         reply = json.dumps({"related": [{"id": "hr/vacation"}]})
-        c = self.curator([TOO_LONG, TOO_LONG, TOO_LONG, reply])
+        c = self.curator([NO_SUMMARY, NO_SUMMARY, NO_SUMMARY, reply])
         out = c(dict(DRAFT))
         assert out["summary"] == "Derived fallback summary."
         assert out["links"][0]["target"] == "hr/vacation"
@@ -322,10 +369,26 @@ class TestBranchSummary:
         assert c.stats["branch_fallbacks"] == 0
 
     def test_invalid_after_retries_returns_none(self):
-        bad = json.dumps({"summary": "word " * 120})
+        bad = json.dumps({"summary": "   "})
         c = Curator(scripted_chat([bad, bad, bad]))
         assert c.branch_summary("alpha", ["- [[a]] — Sensors."]) is None
         assert c.stats["branch_fallbacks"] == 1
+
+    def test_an_overlong_branch_summary_is_trimmed_too(self):
+        """Rollup runs once per region and hits the same chatty model — the
+        repair has to reach it, or every branch keeps its template summary."""
+        long = json.dumps({"summary":
+                           "Alpha region: industrial sensor telemetry for the "
+                           "Northeast fleet. Holds the 2026 rollout plan, the "
+                           "predictive maintenance notes and the field data "
+                           "integration with the central ERP, plus the weekly "
+                           "operational reports filed by each site lead."})
+        c = Curator(scripted_chat([long, long, long]))
+        s = c.branch_summary("alpha", ["- [[a]] — Sensors."])
+        validate_summary(s)
+        assert s.startswith("Alpha region: industrial sensor telemetry")
+        assert c.stats["branch_rollups"] == 1 and c.stats["repaired"] == 1
+        assert c.stats["branch_fallbacks"] == 0
 
     def test_transport_error_returns_none(self):
         def chat(messages):
