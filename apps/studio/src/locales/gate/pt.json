@@ -1,0 +1,15 @@
+{
+  "gate.connect": "Conectar",
+  "gate.connecting": "Conectando…",
+  "gate.key": "Chave de API",
+  "gate.key_hint": "A Station guarda apenas o digest — esta chave nunca é armazenada no servidor.",
+  "gate.password": "Senha",
+  "gate.password_hint": "O super-administrador é configurado no ambiente da Station; as outras pessoas recebem a senha em Tokens.",
+  "gate.rejected": "Esta chave não foi aceita.",
+  "gate.title": "Conecte-se à sua Station",
+  "gate.username": "Usuário",
+  "gate.where": "Onde consigo uma?",
+  "gate.where_hint": "A primeira execução de `station serve` imprime uma chave de admin uma única vez. Depois disso, as chaves são emitidas em Acessos.",
+  "gate.with_key": "Chave de API",
+  "gate.with_password": "Usuário"
+}

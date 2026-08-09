@@ -1,0 +1,19 @@
+{
+  "overview.bind_model": "Ligar um modelo",
+  "overview.branches": "Galhos",
+  "overview.can": "O que você pode fazer aqui",
+  "overview.cannot": "O que você não pode fazer aqui",
+  "overview.datasets": "Datasets",
+  "overview.hello": "Esta floresta em resumo",
+  "overview.no_model": "Nenhum modelo está ligado a esta floresta, então Perguntar não responde ainda. O resto funciona normalmente.",
+  "overview.nodes": "Nós ao seu alcance",
+  "overview.roots": "Você começa em",
+  "overview.scope": "Seu escopo",
+  "overview.scope_all": "Floresta inteira",
+  "overview.scope_n": "{n} galho(s)",
+  "overview.start": "Comece por aqui",
+  "overview.start_ask": "Faça uma pergunta em linguagem natural",
+  "overview.start_explore": "Dê uma olhada na árvore",
+  "overview.start_ingest": "Adicione seus próprios documentos",
+  "overview.sub": "Tudo abaixo é o que a sua chave alcança — nada está escondido atrás de um filtro."
+}

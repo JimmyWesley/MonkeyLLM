@@ -1,0 +1,14 @@
+{
+  "forest.created": "A floresta \"{id}\" está pronta. Você tem acesso total a ela.",
+  "forest.id": "Identificador",
+  "forest.id_hint": "Letras minúsculas, dígitos, \"-\" e \"_\". Vira o nome da pasta e não pode mudar depois.",
+  "forest.new": "Nova floresta",
+  "forest.new_sub": "Uma floresta vazia: o índice mestre, o dialeto e um histórico git próprio.",
+  "forest.new_title": "Criar uma floresta",
+  "forest.none": "Nenhuma floresta foi concedida a esta chave ainda.",
+  "forest.none_admin": "Crie sua primeira floresta para começar.",
+  "forest.summary": "Para que serve",
+  "forest.switch": "Trocar de floresta",
+  "forest.title": "Nome",
+  "forest.title_hint": "Aparece como título do índice mestre."
+}

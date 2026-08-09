@@ -1,0 +1,15 @@
+{
+  "gate.connect": "Connect",
+  "gate.connecting": "Connecting…",
+  "gate.key": "API key",
+  "gate.key_hint": "The Station keeps only its digest — this key is never stored server-side.",
+  "gate.password": "Password",
+  "gate.password_hint": "The super-administrator is configured in the Station environment; other people are given one under Tokens.",
+  "gate.rejected": "That key was not accepted.",
+  "gate.title": "Connect to your Station",
+  "gate.username": "Username",
+  "gate.where": "Where do I get one?",
+  "gate.where_hint": "The first run of `station serve` prints a bootstrap admin key once. After that, keys are issued under Access.",
+  "gate.with_key": "API key",
+  "gate.with_password": "Username"
+}

@@ -1,0 +1,14 @@
+{
+  "role.analyst": "Analyst",
+  "role.analyst_desc": "Reads, and runs read-only SQL over datasets.",
+  "role.curator": "Curator",
+  "role.curator_desc": "Everything an editor can do, plus loading new documents in.",
+  "role.custom": "Custom",
+  "role.custom_desc": "A capability set you chose by hand.",
+  "role.editor": "Editor",
+  "role.editor_desc": "Reads and queries, and can create and edit nodes and dataset rows.",
+  "role.owner": "Owner",
+  "role.owner_desc": "Full control, including giving access to other people.",
+  "role.reader": "Reader",
+  "role.reader_desc": "Can read what you choose. Nothing else."
+}

@@ -1,0 +1,8 @@
+{
+  "cap.admin": "conceder acceso a otras personas",
+  "cap.ingest": "añadir documentos nuevos",
+  "cap.query": "ejecutar SQL de solo lectura",
+  "cap.read": "leer el material",
+  "cap.tend": "cambiar filas de dataset",
+  "cap.write": "crear y editar nodos"
+}

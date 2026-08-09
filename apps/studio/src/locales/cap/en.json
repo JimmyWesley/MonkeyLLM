@@ -1,0 +1,8 @@
+{
+  "cap.admin": "grant access to others",
+  "cap.ingest": "add new documents",
+  "cap.query": "run read-only SQL",
+  "cap.read": "read the material",
+  "cap.tend": "change dataset rows",
+  "cap.write": "create and edit nodes"
+}

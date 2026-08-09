@@ -1,0 +1,16 @@
+{
+  "graph.empty": "Nada que dibujar",
+  "graph.empty_hint": "Ningún nodo dentro de su alcance ha sido indexado todavía.",
+  "graph.heat": "Calor",
+  "graph.hint": "Arrastre un nodo, use la rueda para acercar, haga clic para seleccionar",
+  "graph.legend_heat": "feromona",
+  "graph.legend_proposal": "propuesta, aún sin promover",
+  "graph.legend_shortcut": "atajo que descubrió una cacería",
+  "graph.legend_trail": "sendero curado",
+  "graph.open_in_files": "Abrir en Archivos",
+  "graph.proposals": "Propuestas",
+  "graph.reorganize": "Reorganizar",
+  "graph.structure": "Estructura",
+  "graph.tip_stats": "{degree} senderos · calor {heat}",
+  "graph.truncated": "Mostrando solo los nodos más conectados"
+}
