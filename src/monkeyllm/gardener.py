@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The Gardener (spec v0.9, Part G): brownfield ingest — adopt + sync.
 
 Four stages, only stage 2 ever needs an LLM (and v1 runs without one):

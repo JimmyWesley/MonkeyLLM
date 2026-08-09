@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* Governed editing (spec J.5.4).
  *
  * The whole point of this screen is what it does NOT do: it never writes a

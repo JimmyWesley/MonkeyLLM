@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """G.9 — payload fetchers (spec v0.11): remote BONE, resolved on first use.
 
 `payload` (and future remote references) MAY carry a URI scheme. Plain

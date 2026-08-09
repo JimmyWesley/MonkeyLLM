@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 // The only way this app reaches a forest. Studio holds no privileged
 // side-channel (spec J.5): every call carries the operator's own key, so
 // whatever Studio can show, an API client with that key could fetch too.

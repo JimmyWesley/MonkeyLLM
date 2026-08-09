@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* The files mode of Explore (spec J.5.4).
  *
  * The same forest as the graph, seen the way it lives on disk: a tree of

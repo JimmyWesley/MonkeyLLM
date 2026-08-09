@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Vine — the navigation protocol (spec Part C).
 
 Ten primitives over a markdown forest:

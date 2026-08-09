@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The maintenance surface (spec J.13, criterion F.26).
 
 The Ranger's report and Part I's snapshots reach the operator who has a

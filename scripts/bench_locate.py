@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Monkey Bench (locate slice): how fast and how accurately does the
 helicopter drop the agent near the answer?
 

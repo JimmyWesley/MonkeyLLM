@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """`vine init` / init_forest: bootstrap an empty, valid, servable forest."""
 
 import subprocess

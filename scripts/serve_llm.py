@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Launch the local inference servers on the RTX 3090 (llama.cpp).
 
 Two OpenAI-compatible servers:

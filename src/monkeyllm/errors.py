@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Error envelope per spec Part C: {error: {code, message, hint}}."""
 
 from __future__ import annotations

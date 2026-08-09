@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* Localisation (spec J.5.3): English, Portuguese, Spanish — complete.
  *
  * The catalogues live in `locales/<namespace>/{en,pt,es}.json` — one folder

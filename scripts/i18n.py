@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Work on the Studio's translation catalogues without hand-editing JSON.
 
 The catalogues are `apps/studio/src/locales/<namespace>/{en,pt,es}.json`, and

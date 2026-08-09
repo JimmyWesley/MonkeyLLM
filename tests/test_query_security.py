@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Part F criterion 4: query() rejects every write/escape attempt."""
 
 import sqlite3

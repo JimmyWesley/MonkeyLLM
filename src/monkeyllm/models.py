@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Normative data models (spec A.3/A.4, C.7, C.8)."""
 
 from __future__ import annotations

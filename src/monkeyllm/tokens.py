@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Token estimation and budget enforcement.
 
 Phase 0 uses a deterministic heuristic (~4 chars/token, tuned for

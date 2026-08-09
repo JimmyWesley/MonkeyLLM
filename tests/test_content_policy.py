@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """G.7/G.8 (spec v0.11): tiered storage — content policies, targeted sync."""
 
 import os

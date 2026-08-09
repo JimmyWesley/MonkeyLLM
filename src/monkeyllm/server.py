@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Vine MCP server — the 9 primitives + harvest as MCP tools (spec Part C).
 
 Transport: stdio for dev, streamable-http for the network/Docker.

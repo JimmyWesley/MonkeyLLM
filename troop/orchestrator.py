@@ -1,4 +1,7 @@
-﻿"""Troop orchestrator (spec Part E, Phase 1.5): N monkeys, one question.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
+"""Troop orchestrator (spec Part E, Phase 1.5): N monkeys, one question.
 
 Coordination is intra-session stigmergy only — the monkeys never exchange
 messages, they smell each other's trails:

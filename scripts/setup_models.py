@@ -1,4 +1,7 @@
-﻿"""Provision the local inference stack for the Phase 0 demo + Phase 1 vectors.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
+"""Provision the local inference stack for the Phase 0 demo + Phase 1 vectors.
 
 Downloads (all resumable; safe to re-run):
 

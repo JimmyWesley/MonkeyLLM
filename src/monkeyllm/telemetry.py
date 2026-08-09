@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Telemetry (spec Part D): traces feed the pheromone and the Monkey Bench."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { Card, Note, Skeleton, Stat } from '../design/ui.jsx'

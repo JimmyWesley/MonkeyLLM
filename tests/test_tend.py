@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """C.10 tend (spec v0.7): dataset writes with guard rails + audit commit."""
 
 import hashlib

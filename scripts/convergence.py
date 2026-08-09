@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """T04 convergence curve: recurring questions over a LEARNING forest.
 
 The paper's signature chart: run the same multi-hop question set N times

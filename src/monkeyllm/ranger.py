@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The Ranger (spec v0.10, Part H): long-term maintenance.
 
 The compounding loop only works if the pheromone can also forget:

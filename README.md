@@ -47,4 +47,13 @@ including Dokploy and optional local llama.cpp inference.
 
 ## License
 
-Apache-2.0
+Two licenses, split along the line the architecture already draws:
+
+- **Engine** (`src/monkeyllm/`, the spec, the benchmark, the tooling) —
+  [Apache-2.0](LICENSE). The MCP contract is meant to spread.
+- **Host** (`apps/station/`, `apps/studio/`) —
+  [AGPL-3.0-only](apps/station/LICENSE). Self-hosting is free and
+  unrestricted; offering it as a managed service means opening your stack.
+
+See [LICENSING.md](LICENSING.md) for the full map, the commercial option and
+the DCO requirement for contributions.

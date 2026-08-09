@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Monkey Bench v1 machinery, offline: chunker, chunk store, and the two
 RAG baselines driven by a scripted chat (no network, no GPU)."""
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Harvest (spec C.6c) — zero-LLM, one-shot retrieval over the forest.
 
 Composite tool for bring-your-own-model clients: a deterministic

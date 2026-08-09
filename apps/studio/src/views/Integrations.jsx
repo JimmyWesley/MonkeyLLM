@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* Integrations (J.5): the deployment and integration manual, inside the
  * deployment it describes.
  *

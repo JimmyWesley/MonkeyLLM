@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Two-phase compose: review before planting (spec J.8.1, criterion F.27).
 
 The property worth testing is negative and easy to lose: the staging call

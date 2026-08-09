@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Jimmy Wesley
+
 """Per-forest inference (spec J.10).
 
 A forest is not one workload. Ingest wants a careful summariser that obeys

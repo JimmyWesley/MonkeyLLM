@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Phase 0 demo (Part F criterion 5): an LLM navigates the forest with the
 Vine primitives only, answering multi-hop questions with traces + metrics.
 
