@@ -10,7 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
-    "mcp>=1.2",
+    # mcp 2.0 renamed FastMCP to mcp.server.mcpserver.MCPServer; the engine
+    # targets the 2.x line (1.x lacks the import path).
+    "mcp>=2,<3",
     "pydantic>=2.7",
     "pyyaml>=6.0",
 ]

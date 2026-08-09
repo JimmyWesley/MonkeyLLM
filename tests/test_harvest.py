@@ -67,4 +67,4 @@ class TestHarvest:
             tools = anyio.run(mcp.list_tools)
             assert "harvest" in {t.name for t in tools}
         finally:
-            mcp._vine.close()
+            mcp._close()

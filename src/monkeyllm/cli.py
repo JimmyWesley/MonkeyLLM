@@ -112,13 +112,17 @@ def main(argv: list[str] | None = None) -> int:
             forest_root=forest_root if not args.root else None,
             root=Path(args.root).resolve() if args.root else None,
             writable=not args.readonly,
-            host=args.host,
-            port=args.port,
         )
         try:
-            server.run(transport="streamable-http" if args.transport == "http" else "stdio")
+            if args.transport == "http":
+                # mcp 2.x takes host/port at run() time, not at construction
+                http = {k: v for k, v in (("host", args.host), ("port", args.port))
+                        if v is not None}
+                server.run(transport="streamable-http", **http)
+            else:
+                server.run(transport="stdio")
         finally:
-            server._pool.close()
+            server._close()
         return 0
 
     if args.command == "init":
