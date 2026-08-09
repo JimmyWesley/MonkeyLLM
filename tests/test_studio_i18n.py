@@ -1,55 +1,50 @@
 """The Studio ships three complete languages (spec J.5.3, criterion F.20).
 
 "Complete" is a rule, not an intention, so it has to be checkable: these
-tests parse `src/i18n.jsx` and fail on the first key missing from any
-dictionary. A fallback that silently renders English would make a missing
-translation invisible exactly where it matters — in the language the
-operator actually reads.
+tests load the per-language catalogues in `src/locales/{en,pt,es}.json` and
+fail on the first key missing from any of them. A fallback that silently
+renders English would make a missing translation invisible exactly where it
+matters — in the language the operator actually reads.
 
-Parsing the source rather than running a JS toolchain keeps this inside the
-one suite that must stay green, with no node dependency in CI.
+The catalogues are plain JSON precisely so this suite (and any translation
+tool) can read them without a JS toolchain — no node dependency in CI.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 import pytest
 
 STUDIO = Path(__file__).resolve().parents[1] / "apps" / "studio" / "src"
-I18N = STUDIO / "i18n.jsx"
+LOCALES = STUDIO / "locales"
+LANGS = ("en", "pt", "es")
 
-# 'some.key': 'value'  —  the only shape the dictionaries use.
-ENTRY = re.compile(r"^\s*'([a-z0-9_.]+)':\s*'(.*)',\s*$")
+# Keys are flat and dotted; anything else is a typo or a nested object that
+# slipped in and would silently vanish from the interface.
+KEY = re.compile(r"^[a-z0-9_.]+$")
 
 
 def _dictionaries() -> dict[str, dict[str, str]]:
-    """Split i18n.jsx into its `const <lang> = {...}` blocks."""
-    text = I18N.read_text(encoding="utf-8")
     out: dict[str, dict[str, str]] = {}
-    current: str | None = None
-    for line in text.splitlines():
-        start = re.match(r"^const (en|pt|es) = \{$", line)
-        if start:
-            current = start.group(1)
-            out[current] = {}
-            continue
-        if current and line.startswith("}"):
-            current = None
-            continue
-        if current:
-            entry = ENTRY.match(line)
-            if entry:
-                out[current][entry.group(1)] = entry.group(2)
+    for lang in LANGS:
+        path = LOCALES / f"{lang}.json"
+        entries = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(entries, dict), f"{path.name} must be one flat object"
+        for key, value in entries.items():
+            assert KEY.match(key), f"{lang}: malformed key {key!r}"
+            assert isinstance(value, str), f"{lang}:{key} is not a string"
+        out[lang] = entries
     return out
 
 
 @pytest.fixture(scope="module")
 def dicts():
     found = _dictionaries()
-    assert set(found) == {"en", "pt", "es"}, "three languages are contractual"
-    assert len(found["en"]) > 150, "the parser found suspiciously few keys"
+    assert set(found) == set(LANGS), "three languages are contractual"
+    assert len(found["en"]) > 150, "the catalogue is suspiciously small"
     return found
 
 
@@ -88,8 +83,6 @@ def test_every_used_key_is_defined(dicts):
     """Catches `t('acess.title')` at test time rather than at demo time."""
     used: set[str] = set()
     for path in STUDIO.rglob("*.jsx"):
-        if path.name == "i18n.jsx":
-            continue
         used |= set(re.findall(r"\bt\('([a-z0-9_.]+)'", path.read_text(encoding="utf-8")))
     undefined = sorted(used - set(dicts["en"]))
     assert not undefined, f"used but never defined: {undefined}"

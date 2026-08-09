@@ -28,6 +28,7 @@ export const CONSOLES = [
   { key: 'models', group: 'build', cap: 'admin' },
   { key: 'people', group: 'govern', cap: 'admin' },
   { key: 'audit', group: 'govern', cap: 'admin' },
+  { key: 'integrations', group: 'govern', cap: 'admin' },
 ]
 
 const GROUPS = ['use', 'build', 'govern']
