@@ -143,6 +143,33 @@ export const Star = ({ filled = false, ...p }) => (
     <path d="M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.75L12 16.9l-5.2 2.7 1-5.75-4.2-4.1 5.8-.85z" />
   </S>
 )
+export const Graph = (p) => (
+  <S {...p}><circle cx="6" cy="7" r="2.4" /><circle cx="18" cy="6" r="2.2" /><circle cx="17" cy="18" r="2.4" /><circle cx="7" cy="17" r="2" /><path d="M8.3 8.2l7 8M8.2 6.6h7.6M6.4 9.4l.4 5.6M9 16.6l5.6.9" /></S>
+)
+export const Files = (p) => (
+  <S {...p}><path d="M3 6.5A1.5 1.5 0 014.5 5h4l1.6 2H19a1.5 1.5 0 011.5 1.5V18a1.5 1.5 0 01-1.5 1.5H4.5A1.5 1.5 0 013 18z" /><path d="M8.5 12h7M8.5 15.2h4.5" /></S>
+)
+export const Database = (p) => (
+  <S {...p}><ellipse cx="12" cy="6" rx="7.5" ry="3" /><path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6" /><path d="M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" /></S>
+)
+export const Pencil = (p) => (
+  <S {...p}><path d="M4 20l4.5-1.2L20 7.3a2 2 0 00-2.8-2.8L5.7 15.9z" /><path d="M15.5 6.2l2.8 2.8" /></S>
+)
+export const Eye = (p) => (
+  <S {...p}><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="2.8" /></S>
+)
+export const Code2 = (p) => (
+  <S {...p}><path d="M9 7.5L4 12l5 4.5M15 7.5l5 4.5-5 4.5" /></S>
+)
+export const Compass = (p) => (
+  <S {...p}><circle cx="12" cy="12" r="9" /><path d="M15.6 8.4l-2 5.2-5.2 2 2-5.2z" /></S>
+)
+export const Flame = (p) => (
+  <S {...p}><path d="M12 3s4.8 3.4 4.8 8.2a4.8 4.8 0 01-9.6 0C7.2 9.6 8.6 8 8.6 8s.4 1.8 1.6 2.4C10.7 8.4 12 6.2 12 3z" /><path d="M12 21a4.5 4.5 0 004.8-4.5c0-1.3-.6-2.4-1.4-3.3" /></S>
+)
+export const Git = (p) => (
+  <S {...p}><circle cx="7" cy="6" r="2.3" /><circle cx="7" cy="18" r="2.3" /><circle cx="17" cy="10" r="2.3" /><path d="M7 8.3v7.4M17 12.3c0 3-2.6 3.6-5.4 3.9" /></S>
+)
 export const PanelLeft = (p) => (
   <S {...p}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9.5 4v16" /></S>
 )

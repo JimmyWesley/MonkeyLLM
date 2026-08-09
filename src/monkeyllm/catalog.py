@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS edges (
     src TEXT NOT NULL,
     rel TEXT NOT NULL,
     dst TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 1.0,
     PRIMARY KEY (src, rel, dst)
 );
 CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst);
@@ -64,6 +65,14 @@ class Catalog:
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA_SQL)
+        # A catalog written before link-level confidence was indexed is a
+        # valid catalog: it is derived, so the column is added in place and
+        # filled by the next reindex rather than forcing one.
+        if "confidence" not in {
+            r[1] for r in self.conn.execute("PRAGMA table_info(edges)")
+        }:
+            self.conn.execute(
+                "ALTER TABLE edges ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0")
         self.conn.commit()
 
     def close(self) -> None:
@@ -141,9 +150,18 @@ class Catalog:
         )
         for link in links:
             if isinstance(link, dict) and link.get("rel") and link.get("target"):
+                # Link-level confidence (G.4.2.1 proposals, C.8 shortcuts) is
+                # what separates a proposal from an assertion. The Ranger reads
+                # it from the files it manages; indexing it too lets a reader
+                # tell them apart without opening every node.
+                try:
+                    confidence = float(link.get("confidence", 1.0))
+                except (TypeError, ValueError):
+                    confidence = 1.0
                 self.conn.execute(
-                    "INSERT OR IGNORE INTO edges (src, rel, dst) VALUES (?,?,?)",
-                    (node.id, link["rel"], link["target"]),
+                    "INSERT OR IGNORE INTO edges (src, rel, dst, confidence) "
+                    "VALUES (?,?,?,?)",
+                    (node.id, link["rel"], link["target"], confidence),
                 )
 
     def delete_node(self, node_id: str) -> None:

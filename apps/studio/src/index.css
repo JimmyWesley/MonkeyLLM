@@ -40,6 +40,24 @@
 
     --ring: 47 125 88;
     --shadow: 0 1px 2px rgb(16 24 20 / 0.04), 0 8px 24px -14px rgb(16 24 20 / 0.14);
+
+    /* Node-type hues for the graph (J.5.4). A type is a category, not a
+       magnitude, so these are equally-weighted hues rather than a ramp —
+       and they live here, with every other colour, so the map repaints
+       with the theme instead of carrying a palette of its own. The legend
+       is still built from the forest's dialect: a forest that declares a
+       type nobody anticipated gets the fallback below, never silence. */
+    --type-branch: 47 125 88;
+    --type-note: 122 142 60;
+    --type-document: 52 110 176;
+    --type-dataset: 26 145 122;
+    --type-entity: 138 92 176;
+    --type-concept: 186 84 130;
+    --type-event: 190 108 52;
+    --type-media: 46 140 156;
+    --type-other: 120 132 124;
+    --graph-edge: 122 138 126;
+    --graph-shortcut: 200 132 40;
     color-scheme: light;
   }
 
@@ -70,6 +88,18 @@
 
     --ring: 92 178 130;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -14px rgb(0 0 0 / 0.5);
+
+    --type-branch: 92 178 130;
+    --type-note: 174 202 108;
+    --type-document: 108 166 232;
+    --type-dataset: 70 205 174;
+    --type-entity: 192 148 232;
+    --type-concept: 232 138 182;
+    --type-event: 236 152 96;
+    --type-media: 100 210 214;
+    --type-other: 150 162 152;
+    --graph-edge: 110 126 114;
+    --graph-shortcut: 255 190 100;
     color-scheme: dark;
   }
 
@@ -246,4 +276,36 @@
   /* Page breaks land where a reader would put them. */
   .md h1, .md h2, .md h3 { break-after: avoid; }
   .md table, .md pre, .md .md-diagram-print { break-inside: avoid; }
+}
+
+/* Forest Views (spec J.5.4) — the graph canvas, the file tree and the
+ * rich editor. Kept here with every other component class so the views
+ * stay free of raw colour and the two themes cannot drift apart. */
+@layer components {
+  .graph-canvas {
+    @apply block w-full cursor-grab touch-none rounded-lg bg-surface-2;
+  }
+  .graph-canvas[data-dragging='true'] { @apply cursor-grabbing; }
+
+  .tree-row {
+    @apply flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left
+           text-[12.5px] text-text-2 transition hover:bg-surface-2;
+  }
+  .tree-row[aria-current='true'] { @apply bg-accent-soft text-accent; }
+  .tree-dot { @apply h-[7px] w-[7px] shrink-0 rounded-full; }
+
+  .source-view {
+    @apply overflow-x-auto whitespace-pre rounded-lg border border-line
+           bg-surface-2 p-3 font-mono text-[12px] leading-relaxed text-text-2;
+  }
+
+  /* The rich editor is a plain prose surface: the toolbar is the chrome,
+     the text is not. `.md` already styles rendered markdown, so the editor
+     borrows it and only adds what an editable region needs. */
+  .editor-surface { @apply md min-h-[16rem] outline-none; }
+  .editor-surface p.is-editor-empty:first-child::before {
+    @apply pointer-events-none float-left h-0 text-text-3;
+    content: attr(data-placeholder);
+  }
+  .editor-surface :first-child { @apply mt-0; }
 }

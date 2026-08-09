@@ -101,8 +101,10 @@ without ever touching the filesystem.
 10. [~] **Ingestion console** — drag-and-drop upload, folder mirror, sync,
     and the full Part G report (J.8). Converter status and the curation
     review queue (0.3-confidence edge proposals) remain.
-11. [ ] **Trails dashboard** — heat over the tree, shortcuts, promote/prune
-    history, session replays from telemetry.
+11. [x] **Trails dashboard** — closed by T10: heat is drawn over the graph
+    mode alongside shortcuts and proposals, and `GET /trails` exposes the
+    persistent layer. Session replays from telemetry are not built; they
+    need a telemetry endpoint and belong with Health below.
 12. [ ] **Health** — Ranger reports, snapshot create/restore (Part I).
 
 ## Acceptance criteria
