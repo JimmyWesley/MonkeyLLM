@@ -92,6 +92,22 @@ curl -sX POST localhost:8800/v1/forests/forest-fixture/answer \
 `POST /v1/admin/forests` (J.7) and the other `/v1/admin/*` routes the Studio
 uses. Failures are the spec's error envelope mapped onto HTTP codes.
 
+### Maintenance (J.13)
+
+`GET /v1/admin/health?forest=` relays the Ranger's H.3 report unchanged —
+lint counts, branches grown too wide, overloaded nodes, passports whose
+source vanished, link proposals by confidence, pheromone stats. It requires
+`admin` **and** an unrestricted scope: the report counts things across the
+whole forest, so a filtered version would carry numbers describing nodes the
+caller cannot see. Reading it writes nothing.
+
+`GET|POST /v1/admin/snapshots` takes and lists Part I bundles, which land
+beside the registry rather than inside any forest. **Restore is not
+exposed**: a bundle unpacks into an empty directory, so there is nothing to
+restore over a live forest, and taking a filesystem destination from an HTTP
+caller would spend the Station's authority rather than the caller's. It stays
+`vine snapshot restore`.
+
 ### Map projections (J.11)
 
 ```bash
@@ -330,7 +346,6 @@ weaken that. A worker per forest is the scale-out step.
 |---|---|
 | Curation review queue for the 0.3-confidence edge proposals | T09 |
 | Binary uploads (`.docx`, `.xlsx`) — today they take the folder-mirror route | T09 |
-| Ranger health and snapshots in Studio | T09 |
 | Curation review before a composed post is planted (today it lands, then is reviewable) | T10 follow-up |
 | OIDC/SSO, per-token quotas, rate limits | T07 Phase C |
 | `answer` over datasets (a tool-calling loop; today it honestly refuses aggregate questions) | J.10 follow-up |

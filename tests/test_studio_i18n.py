@@ -163,3 +163,20 @@ def test_no_dark_only_colour_classes_in_components():
             if palette.search(line):
                 offenders.append(f"{path.name}:{n}")
     assert not offenders, f"raw palette colours (theme-blind): {offenders}"
+
+
+def test_api_defines_no_method_twice():
+    """A duplicate key in `api.js` replaces the first silently (J.5).
+
+    This is not hypothetical: a maintenance endpoint was added as `health`,
+    the Station's own liveness probe was already called `health`, and the
+    later definition won — so the sign-in screen asked the wrong endpoint
+    whether a password door existed, got a 403, and stopped offering the
+    password form. Nothing failed loudly; the door simply disappeared.
+    """
+    api = (STUDIO / "api.js").read_text(encoding="utf-8")
+    body = api[api.index("export const api = {"):]
+    names = re.findall(r"^  ([a-zA-Z][a-zA-Z0-9_]*):", body, flags=re.M)
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    assert not duplicates, f"api.js defines these more than once: {duplicates}"
+    assert len(names) > 15, "the parser found suspiciously few methods"

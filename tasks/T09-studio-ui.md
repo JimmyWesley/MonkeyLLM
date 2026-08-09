@@ -105,7 +105,11 @@ without ever touching the filesystem.
     mode alongside shortcuts and proposals, and `GET /trails` exposes the
     persistent layer. Session replays from telemetry are not built; they
     need a telemetry endpoint and belong with Health below.
-12. [ ] **Health** — Ranger reports, snapshot create/restore (Part I).
+12. [x] **Health** — the Ranger's H.3 report and Part I snapshots, over
+    `GET /v1/admin/health` and `/v1/admin/snapshots` (spec v0.23, J.13).
+    Restore is deliberately NOT exposed: Part I unpacks a bundle into an
+    empty directory, so there is nothing to restore over a live forest and a
+    button for it would only ever refuse.
 
 ## Acceptance criteria
 

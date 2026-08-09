@@ -90,6 +90,7 @@ def test_the_route_table_is_what_we_think_it_is(station):
         ("/v1/admin/canopy", "GET"), ("/v1/admin/canopy", "POST"),
         ("/v1/admin/forests", "POST"),
         ("/v1/admin/grant", "POST"),
+        ("/v1/admin/health", "GET"),
         ("/v1/admin/keys", "GET"), ("/v1/admin/keys", "POST"),
         ("/v1/admin/models", "GET"), ("/v1/admin/models", "POST"),
         ("/v1/admin/password", "POST"),
@@ -97,6 +98,7 @@ def test_the_route_table_is_what_we_think_it_is(station):
         ("/v1/admin/principals", "GET"),
         ("/v1/admin/providers", "GET"), ("/v1/admin/providers", "POST"),
         ("/v1/admin/providers/test", "POST"),
+        ("/v1/admin/snapshots", "GET"), ("/v1/admin/snapshots", "POST"),
     ]
 
 
