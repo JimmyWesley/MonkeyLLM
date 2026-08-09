@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -144,6 +145,37 @@ def test_every_namespace_has_exactly_the_three_languages():
         if present != expected:
             offenders[namespace.name] = sorted(present)
     assert not offenders, f"namespace folders not exactly {sorted(expected)}: {offenders}"
+
+
+def test_every_catalogue_file_is_actually_in_the_repository():
+    """A catalogue on disk is not a catalogue that ships (spec J.5.3).
+
+    This suite reads the working tree, so it cannot tell a committed
+    translation from an ignored one — and that gap was a real bug, not a
+    hypothetical. `.gitignore` carried an unanchored `models/` for downloaded
+    inference weights, which also matched `src/locales/models/`: the Models
+    console's 38 translations existed on every developer's machine, this
+    suite passed on every one of them, and a fresh clone had no such
+    namespace at all. The console rendered raw keys, in all three languages,
+    for anybody who had not written them.
+
+    So the question is not "is the file here" but "would a clone get it",
+    and only git can answer that.
+    """
+    root = LOCALES.parents[3]
+    tracked = subprocess.run(["git", "ls-files", "--", str(LOCALES)],
+                             cwd=root, capture_output=True, text=True, check=True)
+    committed = set(tracked.stdout.split())
+    assert committed, "git listed no catalogue files at all, so this is vacuous"
+
+    missing = sorted(
+        path.relative_to(root).as_posix()
+        for namespace in _namespaces() for path in namespace.glob("*.json")
+        if path.relative_to(root).as_posix() not in committed)
+    assert not missing, (
+        f"present on disk but not in the repository: {missing}. "
+        "Check .gitignore — an unanchored rule can swallow a namespace whose "
+        "name collides with a build artifact.")
 
 
 def test_no_dark_only_colour_classes_in_components():
