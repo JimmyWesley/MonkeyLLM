@@ -79,12 +79,23 @@ class TestLocateContract:
         out = vine_ro.locate("inference architecture")
         assert out["results"]  # still works, Phase 0 path
 
-    def test_hybrid_activates_with_index_and_embedder(self, forest_ro):
+    def test_hybrid_is_opt_in_even_when_the_layer_is_ready(self, forest_ro):
+        """Availability is not consent (Part K). Measurement showed RRF
+        degrades an already-correct BM25, so a built index must NOT switch
+        entry search over by merely existing — the Gauntlet needs the same
+        index and must not drag fusion in with it."""
         emb = HashEmbedder()
-        v = Vine(forest_ro, writable=False, embedder=emb)
+        ready = Vine(forest_ro, writable=False, embedder=emb)
         try:
-            info = v.build_canopy()
+            info = ready.build_canopy()
             assert info["nodes"] > 0
+            assert ready.dense_ready is True
+            assert ready.hybrid is False, "the layer being usable is not a decision"
+        finally:
+            ready.close()
+
+        v = Vine(forest_ro, writable=False, embedder=emb, hybrid_locate=True)
+        try:
             assert v.hybrid is True
             out = v.locate("arquitetura do mixerllm", k=5)
             ids = [r["id"] for r in out["results"]]
@@ -96,7 +107,7 @@ class TestLocateContract:
         """Spec Fase 1, exit criterion 4: write → stale → next hybrid search
         reflects the change, without an offline rebuild."""
         emb = HashEmbedder()
-        v = Vine(forest_rw, writable=True, embedder=emb)
+        v = Vine(forest_rw, writable=True, embedder=emb, hybrid_locate=True)
         try:
             v.build_canopy()
             n0 = len(v.canopy)
@@ -121,7 +132,7 @@ class TestLocateContract:
 
     def test_lazy_reembed_after_graft_summary_change(self, forest_rw):
         emb = HashEmbedder()
-        v = Vine(forest_rw, writable=True, embedder=emb)
+        v = Vine(forest_rw, writable=True, embedder=emb, hybrid_locate=True)
         try:
             v.build_canopy()
             target = "notes/internal-faq"
@@ -143,10 +154,14 @@ class TestLocateContract:
             v.build_canopy()
         finally:
             v.close()
-        # a fresh Vine with an embedder picks the saved index up -> hybrid
+        # A fresh Vine picks the saved index up. That makes the dense layer
+        # *ready*; whether entry search uses it is a separate choice.
         v2 = Vine(forest_ro, writable=False, embedder=emb)
         try:
-            assert v2.canopy is not None and v2.hybrid is True
+            assert v2.canopy is not None and v2.dense_ready is True
+            assert v2.hybrid is False
+            assert Vine(forest_ro, writable=False, embedder=emb,
+                        hybrid_locate=True).hybrid is True
         finally:
             v2.close()
         # ...but with no embedder it stays BM25-only even if vectors exist

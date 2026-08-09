@@ -18,11 +18,36 @@ database — the host registry is a single SQLite file.
 ```bash
 pip install -e . && pip install -e apps/station
 (cd apps/studio && npm ci && npm run build)
-station serve --root forests --registry ./station.db --port 8800
+station serve --root forests --registry ./station.db --port 8800 --writable
 ```
 
 First run mints a bootstrap `admin` key with full capabilities on every
 forest in the root and prints it once — only its digest is stored.
+
+### Signing in (J.2.1)
+
+Two doors, one identity. Set a super-administrator in the environment and
+the console offers a login form as well as the key field:
+
+```bash
+export MONKEYLLM_STATION_ADMIN=jimmy
+export MONKEYLLM_STATION_PASSWORD='something long and unguessable'
+```
+
+That account is compared against the environment and **never stored** — it
+is break-glass, and hashing a value that already sits in the environment
+protects nothing while giving a rotation two places to go wrong. Rotate it
+by changing the variable and restarting. If the variables are absent there
+is no password door at all, which is the only safe default.
+
+Everyone else gets a password under **Studio → Tokens**, stored as a salted
+scrypt hash. A login returns a **session token**: an ordinary API key with a
+12-hour life, so from that point on there is exactly one authorization path
+no matter which door was used.
+
+`--writable` is off by default: reads always work, and writes, ingest and
+forest creation are refused up front with `E_READONLY` rather than failing
+file by file once the work is under way.
 
 ```bash
 docker compose -f apps/station/docker-compose.yml up --build
@@ -38,6 +63,20 @@ docker compose -f apps/station/docker-compose.yml up --build
 
 All three route through one `ScopedVine`. There is no unscoped path.
 
+Navigation lists exactly the consoles the caller's capabilities permit on
+the selected forest, and re-evaluates when the forest changes. That is
+presentation, not enforcement: each console guards itself, and the API
+refuses regardless — including for a request the console never sent.
+
+The Studio (J.5) is nine consoles in three groups — **Use** (Overview, Ask,
+Explore, Playground, Data), **Build** (Ingest, Models) and **Govern**
+(People, Audit) — in English, Portuguese and Spanish, light and dark. It
+addresses the operator in the operator's vocabulary: access is granted by
+ticking the **forests** it covers, picking a **role**, and — for a single
+forest — **branches from the actual tree**, with the resulting capability set
+shown as a consequence and the whole grant restated in a sentence before it
+is saved. A policy an operator cannot read back is one they cannot audit.
+
 ### REST
 
 ```bash
@@ -48,9 +87,33 @@ curl -sX POST localhost:8800/v1/forests/forest-fixture/answer \
 
 `POST /v1/forests/{forest}/{name}` where `name` is a primitive
 (`locate`, `look`, `move`, `pick`, `scan`, `sniff`, `harvest`, `query`,
-`plant`, `graft`, `tend`) or a composite (`answer`, `curate`). Also
-`GET /v1/health`, `/v1/me`, `/v1/forests`, and the `/v1/admin/*` routes the
-Studio uses. Failures are the spec's error envelope mapped onto HTTP codes.
+`plant`, `graft`, `tend`), a composite (`answer`, `curate`) or `ingest`
+(J.8). Also `GET /v1/health`, `/v1/me`, `/v1/forests`,
+`POST /v1/admin/forests` (J.7) and the other `/v1/admin/*` routes the Studio
+uses. Failures are the spec's error envelope mapped onto HTTP codes.
+
+### Putting documents in (J.8)
+
+```bash
+curl -sX POST localhost:8800/v1/forests/handbook/ingest \
+     -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
+     -d '{"mode":"upload","dest":"policies",
+          "files":[{"name":"expenses.md","text":"# Expenses\n…"}]}'
+```
+
+Three modes: `upload` sends the documents themselves, `adopt` mirrors a
+directory the Station host can read, `sync` re-reads what was adopted. All
+three need the `ingest` capability and a `dest` inside the caller's scope —
+a principal who may not read a subtree must not be able to write into it.
+
+Naming a **host path** additionally needs `admin`: that path is read with
+the Station's filesystem access, not the caller's, so `ingest` alone would
+quietly become arbitrary read access to the container. `upload` needs no
+such privilege because the caller supplies the bytes.
+
+Uploads stage under the forest's `_derived/uploads/` — outside git, one
+stable directory per forest, so re-sending a filename is an *update* (the
+G.8 hash diff) rather than a second node beside the first.
 
 ### MCP — pointing an existing harness at a governed forest
 
@@ -68,8 +131,85 @@ scope** (`allow` / `deny`, deny wins, absent grant means no access).
 
 ```bash
 station key --principal alice --forest forest-fixture --caps read,query
-# then narrow the scope from Studio → Governance, or POST /v1/admin/grant
+# then narrow the scope from Studio → Access, or POST /v1/admin/grant
 ```
+
+## People (J.2.3 / J.5.5)
+
+Grants, passwords and API keys are three tables and one thought. **Studio →
+People** is organised around the thought: one form onboards somebody —
+who they are, what they may see, how they sign in, a token if they need one
+— and afterwards their row owns every change to them.
+
+```bash
+curl -sX POST localhost:8800/v1/admin/people \
+     -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
+     -d '{"principal":"carlos",
+          "grant":{"forest":"handbook","caps":["read","query"],"allow":["projects/"]},
+          "password":"a long enough passphrase",
+          "issue_key":{"label":"carlos laptop","expires_in_days":30}}'
+```
+
+The response reports `applied` and `refused` per step. It is a composite,
+**not a new authority**: every step re-checks the rule that already governed
+it, and a step the caller may not perform is refused without abandoning the
+steps they may — silently dropping half a submitted form is worse than
+doing it or failing it. The order is normative: the grant lands first, so a
+principal that did not exist a moment ago is administrable by the time its
+password and key are created.
+
+Access is rarely forest-shaped, so `grant` takes `forests` and
+`revoke_access` takes a list — one request for a group of forests or for all
+of them, and one token that reads in each:
+
+```bash
+curl -sX POST localhost:8800/v1/admin/people \
+     -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
+     -d '{"principal":"reporting-service",
+          "grant":{"forests":["handbook","sales","support"],"caps":["read"]},
+          "issue_key":{"label":"nightly report"}}'
+```
+
+The scalar `forest` still works and means a one-element list. A set is a
+convenience, never a relaxation: each forest is authorised, applied and
+refused **on its own**, so an administrator of two of the three grants those
+two and gets the third back in `refused` with its `forest` named.
+`allow`/`deny` apply to every forest in the grant — branch names are
+forest-local, which is why Studio offers the branch picker only when a single
+forest is ticked and grants each forest whole otherwise.
+
+`GET /v1/admin/people` returns the person-shaped read the console uses:
+identity, grants, whether a password exists, tokens, and last-seen — already
+filtered by J.3.2.
+
+A token carries the permissions of the principal it belongs to and has none
+of its own — so "what can this token do" is answered by that person's
+access, never by the token. Two consequences worth knowing:
+
+- Minting or revoking a key for a principal requires `admin` on **every**
+  forest that principal is granted, not merely on one. Otherwise the
+  administrator of one forest could mint a credential that opens another.
+  The console shows such a person without their credentials, for the same
+  reason.
+- Expired and revoked keys fail inside `authenticate()`, the single gate
+  every surface passes through. A lifecycle enforced anywhere else is a
+  lifecycle with a bypass.
+
+There is **no separate super-administrator panel**, deliberately: one
+console over one API, with capabilities deciding what appears. A second
+panel would need a second way in.
+
+**Administration is per forest (J.3.2).** Holding `admin` somewhere lets a
+caller into a host route; it never entitles them to rows about forests they
+do not administer. `/v1/admin/people`, `/v1/admin/principals` and `/v1/admin/audit` filter to
+the administered set, so an administrator of one forest sees neither the
+branch prefixes nor the read history of another. `/v1/admin/keys` is
+stricter still — a key spans forests, so issuing one needs `admin` on
+*every* forest its principal holds.
+
+*Known boundary:* providers (J.10) are a host resource shared by all
+forests, so any administrator can edit them — and removing one removes the
+bindings of forests they may not administer.
 
 Two properties worth knowing, because they are what make the scoping
 trustworthy rather than decorative:
@@ -99,6 +239,36 @@ then bind a model per role:
 Provider keys are **write-only**: the API accepts one and afterwards
 reports only that a key is set. Saving with an empty key keeps the stored
 one, so an endpoint typo can be fixed without re-pasting a secret.
+
+**A provider you already configured arrives configured (J.10.1).** If the
+deployment sets the variables this project already documents, the Station
+publishes them at boot and the console shows them as *from the environment*:
+
+```bash
+export MONKEYLLM_LLM_ENDPOINT=https://openrouter.ai/api/v1
+export MONKEYLLM_LLM_API_KEY=sk-or-…
+export MONKEYLLM_LLM_PROVIDER=openrouter      # optional; host name if unset
+export MONKEYLLM_EMBED_ENDPOINT=http://ollama.local/v1   # same, for the Gauntlet
+```
+
+Nobody is asked to paste that key into a form — and it is **not copied into
+the registry**: it lives in the process for as long as the process does and
+is read when a call is made. The registry file is something you back up;
+the environment is not. Rotation stays where it already was: change the
+variable, restart.
+
+Consequently these rows are read-only in the console — an edit would be
+undone by the next restart. Unset the variables to remove one; at the next
+boot it becomes an ordinary console provider, keyless and visibly so,
+rather than vanishing and taking its bindings with it.
+
+**Choosing the model** uses the provider's own `/models`: pick from a
+searchable list showing per-token prices where the provider states them
+(OpenRouter does; Ollama and llama.cpp do not, and silence is reported as
+silence rather than as free). Typing a name is still allowed — catalogues
+under-report — but a model the provider does not advertise is flagged,
+because a model id from *another* provider is the usual cause and it fails
+only at the first call.
 
 Binding a model cannot widen access: retrieval runs through `ScopedVine`
 *before* the model is called, so it only ever sees what the caller could
@@ -135,7 +305,8 @@ weaken that. A worker per forest is the scale-out step.
 
 | Missing | Where it goes |
 |---|---|
-| Ingest endpoints (`adopt`/`sync`) and the curation review queue | T07 / T09 |
+| Curation review queue for the 0.3-confidence edge proposals | T09 |
+| Binary uploads (`.docx`, `.xlsx`) — today they take the folder-mirror route | T09 |
 | Trails dashboard, Ranger health, snapshots in Studio | T09 |
 | OIDC/SSO, per-token quotas, rate limits | T07 Phase C |
 | `answer` over datasets (a tool-calling loop; today it honestly refuses aggregate questions) | J.10 follow-up |

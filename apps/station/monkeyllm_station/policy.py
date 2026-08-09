@@ -187,18 +187,25 @@ class ScopedVine:
 
     def scan(self, parent_id: str, filter: dict | None = None,
              fields: list[str] | None = None, recursive: bool = False,
-             limit: int = 50) -> dict:
+             limit: int = 50, gauntlet: bool | None = None,
+             toward: str | None = None) -> dict:
         self._gate(parent_id)
+        # Part K is ordering, not access: it changes which in-scope nodes come
+        # first, never which nodes are in scope. So it is forwarded as-is and
+        # the filtering below is unchanged.
         if self.policy.unrestricted:
             return self._vine.scan(parent_id, filter=filter, fields=fields,
-                                   recursive=recursive, limit=limit)
+                                   recursive=recursive, limit=limit,
+                                   gauntlet=gauntlet, toward=toward)
         raw = self._vine.scan(parent_id, filter=filter, fields=fields,
-                              recursive=recursive, limit=self._fetch(limit))
+                              recursive=recursive, limit=self._fetch(limit),
+                              gauntlet=gauntlet, toward=toward)
         return self._trim(raw, "nodes", limit)
 
-    def look(self, id: str, fields: list[str] | None = None) -> dict:
+    def look(self, id: str, fields: list[str] | None = None,
+             gauntlet: bool | None = None, toward: str | None = None) -> dict:
         self._gate(id)
-        digest = self._vine.look(id, fields=fields)
+        digest = self._vine.look(id, fields=fields, gauntlet=gauntlet, toward=toward)
         if self.policy.unrestricted:
             return digest
 
@@ -228,9 +235,11 @@ class ScopedVine:
         targets = _WIKILINK.findall(entry or "")
         return all(self._visible(t.strip()) for t in targets)
 
-    def move(self, id: str, rel: str | None = None, direction: str = "out") -> dict:
+    def move(self, id: str, rel: str | None = None, direction: str = "out",
+             gauntlet: bool | None = None, toward: str | None = None) -> dict:
         self._gate(id)
-        payload = self._vine.move(id, rel=rel, direction=direction)
+        payload = self._vine.move(id, rel=rel, direction=direction,
+                                  gauntlet=gauntlet, toward=toward)
         if self.policy.unrestricted:
             return payload
         payload = dict(payload)

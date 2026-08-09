@@ -50,7 +50,8 @@ def first_hit_rank(result_ids, expected):
 
 
 def run_config(forest: Path, questions, *, embedder, repeats: int, label: str) -> dict:
-    vine = Vine(forest, writable=False, embedder=embedder, session=f"bench-{label}")
+    vine = Vine(forest, writable=False, embedder=embedder,
+                hybrid_locate=embedder is not None, session=f"bench-{label}")
     try:
         if embedder is not None and not vine.hybrid:
             print(f"  [{label}] embedder set but canopy not built — run `vine canopy build` first. Skipping.")

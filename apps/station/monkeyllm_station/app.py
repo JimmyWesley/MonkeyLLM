@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
+import secrets
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -44,7 +48,22 @@ WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend"})
 # Not engine primitives: retrieval composed with the forest's bound model
 # (J.10). `answer` reads, `curate` proposes a summary for a human to apply.
 COMPOSITES = {"answer": ("read", "answer"), "curate": ("write", "ingest")}
-SERVED_PRIMITIVES = READ_PRIMITIVES | WRITE_PRIMITIVES | set(COMPOSITES)
+# The Gardener over REST (J.8). Not a primitive either: `adopt`/`sync` are
+# Part G, and the host only adds identity, scope and a staging area.
+HOST_ACTIONS = frozenset({"ingest"})
+SERVED_PRIMITIVES = READ_PRIMITIVES | WRITE_PRIMITIVES | set(COMPOSITES) | HOST_ACTIONS
+
+# A forest id becomes a directory name under the registry root, so it is
+# validated as a NAME before it is ever joined to a path (J.7). Separators
+# and relative segments cannot survive this character set, which is why the
+# check is a whitelist and not a blacklist of the escapes we thought of.
+FOREST_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+
+# Uploaded documents are a source, not content: they stage under the
+# forest's disposable `_derived/` (gitignored, A.3.1) and become nodes only
+# by going through the same converters and commits as any adopted folder.
+# One stable directory per forest, so a later `sync` still has its source.
+UPLOAD_DIR = ("_derived", "uploads")
 
 # The Studio is a React/Vite build: static files only, no server rendering,
 # so it stays a plain REST client with no privileged side-channel (J.5).
@@ -79,6 +98,25 @@ def _unknown_forest(forest: str) -> JSONResponse:
     )
 
 
+def _forest_list(value: object, fallback: object = None) -> list[str]:
+    """One forest or several, as the caller pleased (J.2.3, v0.20).
+
+    `grant` and `revoke_access` accept a list, and the scalar form means a
+    one-element list — so a client written against v0.19 keeps working. The
+    order the caller sent is preserved (refusals are reported against it) and
+    duplicates collapse, because granting the same forest twice in one
+    request is a typo, not an instruction.
+    """
+    raw = value if value not in (None, "", [], ()) else fallback
+    items = raw if isinstance(raw, (list, tuple, set)) else [raw]
+    out: list[str] = []
+    for item in items:
+        name = str(item or "").strip()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
 def _git(root: Path, *args: str) -> str:
     out = subprocess.run(["git", "-C", str(root), *args],
                          capture_output=True, text=True)
@@ -89,7 +127,7 @@ def stamp_principal(root: Path, principal: str, before: str | None) -> str | Non
     """Write the acting principal into the commit the engine just made (J.4).
 
     The engine commits with a fixed identity and the host may not change it
-    (J.7 forbids engine edits), so the Station amends the message it just
+    (J.11 forbids engine edits), so the Station amends the message it just
     produced. Amending rewrites the sha, so the caller is handed the new one —
     a response carrying a sha that no longer exists would be worse than no
     attribution at all. Safe because forest access is serialised on one
@@ -110,6 +148,78 @@ def stamp_principal(root: Path, principal: str, before: str | None) -> str | Non
     return _git(root, "rev-parse", "HEAD") or after
 
 
+def super_admin_from_env() -> tuple[str, str] | None:
+    """The break-glass account (J.2.1), or None.
+
+    Absent variables mean the password door does not exist — a deployment
+    that never sets them has no default credential, which is the only safe
+    default. An empty password is treated as absent for the same reason.
+    """
+    user = os.environ.get("MONKEYLLM_STATION_ADMIN", "").strip()
+    password = os.environ.get("MONKEYLLM_STATION_PASSWORD", "")
+    return (user, password) if user and password else None
+
+
+# The variables this project already documents (`.env.example`) — the same
+# ones the CLI, the bench and the measurement scripts read. A deployment that
+# has already configured them has said everything the console's provider form
+# would ask for, so the Station publishes them instead of asking again.
+ENV_PROVIDERS = (
+    ("chat", "MONKEYLLM_LLM_PROVIDER", "MONKEYLLM_LLM_ENDPOINT",
+     "MONKEYLLM_LLM_API_KEY"),
+    ("embed", "MONKEYLLM_EMBED_PROVIDER", "MONKEYLLM_EMBED_ENDPOINT",
+     "MONKEYLLM_EMBED_API_KEY"),
+)
+
+
+def _name_from_endpoint(endpoint: str) -> str:
+    """`https://openrouter.ai/api/v1` → `openrouter.ai`, and the port comes
+    along when there is one so two local servers do not become one name."""
+    parts = urlsplit(endpoint if "//" in endpoint else f"//{endpoint}")
+    host = parts.hostname or endpoint
+    return f"{host}:{parts.port}" if parts.port else host
+
+
+def providers_from_env(environ: dict | None = None) -> list[dict]:
+    """Providers declared by the deployment (J.10.1).
+
+    An endpoint is what makes a provider exist here; the name is optional
+    (derived from the host) and the key is optional (local servers need
+    none). Nothing is declared when no endpoint is set — the console form
+    stays the only way in, exactly as before.
+    """
+    env = os.environ if environ is None else environ
+    out: list[dict] = []
+    named: set[str] = set()
+    for role, name_var, endpoint_var, key_var in ENV_PROVIDERS:
+        endpoint = (env.get(endpoint_var) or "").strip().rstrip("/")
+        if not endpoint:
+            continue
+        explicit = (env.get(name_var) or "").strip()
+        entry = {"name": explicit or _name_from_endpoint(endpoint),
+                 "endpoint": endpoint,
+                 "api_key": (env.get(key_var) or "").strip() or None}
+        # Identity is the endpoint and the key, not the variable that named
+        # it: one gateway serving both roles is one provider in the console.
+        same = next((p for p in out
+                     if (p["endpoint"], p["api_key"])
+                     == (entry["endpoint"], entry["api_key"])), None)
+        if same is not None:
+            if explicit and same["name"] not in named:
+                named.discard(same["name"])
+                same["name"] = entry["name"]
+                named.add(entry["name"])
+            continue
+        if any(p["name"] == entry["name"] for p in out):
+            # Same name over a different endpoint or key. Merging them would
+            # bind one role to the other's server.
+            entry["name"] = f"{entry['name']}-{role}"
+        out.append(entry)
+        if explicit:
+            named.add(entry["name"])
+    return out
+
+
 def build_app(
     *,
     root: str | Path,
@@ -119,6 +229,11 @@ def build_app(
 ) -> Starlette:
     pool = ForestPool(root=Path(root), writable=writable)
     registry = Registry(registry_path)
+    registry.adopt_env_providers(providers_from_env())
+    super_admin = super_admin_from_env()
+    if super_admin:
+        registry.ensure_super_admin(
+            super_admin[0], [f["id"] for f in pool.list()["forests"]])
 
     # A SQLite connection belongs to the thread that opened it, and the engine
     # rightly does not weaken that guarantee for the host's convenience. So the
@@ -164,7 +279,39 @@ def build_app(
             grants = [g for g in grants if g["forest"] == forest]
         return any("admin" in g["caps"] for g in grants)
 
+    def administered(principal: str) -> set[str]:
+        """The forests this principal governs (J.3.2).
+
+        `is_admin` answers "may they in at all"; this answers "over what".
+        Conflating the two is how a host route ends up returning every
+        forest's governance data to whoever administers one of them.
+        """
+        return {g["forest"] for g in registry.grants_of(principal)
+                if "admin" in g["caps"]}
+
     # -- forest calls -------------------------------------------------------
+
+    # One embedder per (endpoint, model, key). The Vine caches per forest and
+    # exposes `embedder` as a plain attribute for exactly this — the Station
+    # supplies one without forking `ForestPool` (J.0).
+    _embedders: dict[tuple, object] = {}
+
+    def attach_embedder(vine, forest: str) -> None:
+        # Switching the Gauntlet off is expressed as "there is no embedder",
+        # deliberately: that is the state Part K already promises to be
+        # byte-identical to v0.20, and it is the one the suite proves. A
+        # second, parallel "disabled" path would need its own proof.
+        binding = (registry.binding(forest, "embed")
+                   if registry.setting(forest, "gauntlet", True) else None)
+        if not binding or not binding.get("endpoint") or not binding.get("model"):
+            vine.embedder = None
+            return
+        key = (binding["endpoint"], binding["model"], binding.get("api_key"))
+        if key not in _embedders:
+            from monkeyllm_station import inference
+
+            _embedders[key] = inference.embedder_from_binding(binding)
+        vine.embedder = _embedders[key]
 
     def run_primitive(principal: str, forest: str, name: str, payload: dict):
         """Executed on the forest thread: resolve, scope, call, attribute."""
@@ -175,13 +322,16 @@ def build_app(
             vine = pool.get(forest)
         except VineError:
             return None
+        attach_embedder(vine, forest)
 
-        if name in COMPOSITES:
-            result = run_composite(principal, forest, vine, policy, name, payload)
+        if name in COMPOSITES or name in HOST_ACTIONS:
+            runner = run_composite if name in COMPOSITES else run_ingest
+            result = runner(principal, forest, vine, policy, name, payload)
             registry.record(
                 principal=principal, forest=forest, primitive=name, args=payload,
                 result="error" if isinstance(result.get("error"), dict) else "ok",
                 size=len(json.dumps(result, default=str)),
+                commit_sha=result.get("commit"),
             )
             return result
 
@@ -234,10 +384,145 @@ def build_app(
         except Exception as e:  # provider outages must not 500 the Station
             return VineError(E_SCHEMA, f"{name} failed: {e}"[:300]).to_dict()
 
+    def stage_upload(root: Path, files: list) -> tuple[Path, list[str]]:
+        """Write uploaded documents into the forest's staging directory.
+
+        Each name is resolved and then checked to still be *under* the
+        staging root. Inspecting the string for `..` would miss symlinks and
+        absolute paths; comparing the resolved paths cannot.
+        """
+        staging = root.joinpath(*UPLOAD_DIR)
+        staging.mkdir(parents=True, exist_ok=True)
+        written = []
+        for entry in files:
+            if not isinstance(entry, dict):
+                raise VineError(E_SCHEMA, "each file must be an object "
+                                          "{name, text}")
+            name = str(entry.get("name") or "").strip()
+            if not name:
+                raise VineError(E_SCHEMA, "each file needs a name")
+            # An absolute name is refused rather than quietly re-read as
+            # relative: stripping the slash would land the file somewhere safe
+            # while hiding the caller's bug.
+            if Path(name).is_absolute() or name.startswith(("/", "\\")):
+                raise VineError(E_SCHEMA, f"file name must be relative: {name}")
+            target = (staging / name).resolve()
+            if not target.is_relative_to(staging.resolve()):
+                raise VineError(E_SCHEMA, f"file name escapes the upload area: {name}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(str(entry.get("text") or ""), encoding="utf-8")
+            written.append(name)
+        return staging, written
+
+    def run_ingest(principal, forest, vine, policy, _name, payload) -> dict:
+        """The Gardener over REST (J.8), with the host's three additions:
+        the `ingest` capability, a scope check on where it may write, and a
+        staging area for operators who have a browser and no shell."""
+        from monkeyllm.gardener import Gardener, discover_hooks
+        from monkeyllm_station import inference
+
+        if not policy.grants("ingest"):
+            return VineError(E_FORBIDDEN, "ingest requires the 'ingest' capability",
+                             hint=f"This principal holds: {sorted(policy.caps)}.").to_dict()
+        if not writable:
+            # Checked before anything is staged. The Gardener catches per-file
+            # write failures and reports them as `errors`, so without this the
+            # caller gets a list of identical "read-only" lines instead of the
+            # one fact that matters: this deployment does not accept writes.
+            return VineError(
+                E_READONLY, "this Station serves read-only forests",
+                hint="Start it with --writable to accept ingest and writes.").to_dict()
+
+        mode = str(payload.get("mode") or "adopt")
+        if mode not in ("adopt", "sync", "upload"):
+            return VineError(E_SCHEMA, f"unknown ingest mode: {mode}",
+                             hint="One of: adopt, sync, upload.").to_dict()
+
+        # `dest` is a branch *path segment*: everything the Gardener writes
+        # lands under `dest/`. So the prefix is what must be in scope — testing
+        # the bare name would reject `projects` for a principal allowed
+        # `projects/`, and testing nothing would let it write anywhere.
+        dest = (payload.get("dest") or "").strip("/") or None
+        allowed_dests = [a.rstrip("/") for a in policy.allow if a]
+        if dest and not policy.in_scope(f"{dest}/"):
+            return VineError(E_FORBIDDEN, f"'{dest}' is outside this principal's scope",
+                             hint="Ingest may only write where the principal can read.").to_dict()
+        if not dest and not policy.unrestricted:
+            return VineError(
+                E_SCHEMA, "a scoped principal must say where the documents go",
+                hint=f"Pass dest as one of: {allowed_dests}.").to_dict()
+        if dest and not policy.unrestricted and not vine.forest.exists(f"{dest}/_index"):
+            # A brand-new top-level dest would make the Gardener graft an entry
+            # into the master index — a node this principal may not even read.
+            return VineError(
+                E_SCHEMA, f"'{dest}' is not an existing branch",
+                hint="A scoped principal adopts into a branch that already "
+                     "exists; creating one at the root touches the master index.",
+            ).to_dict()
+
+        # Naming a host path spends the Station's filesystem authority, not the
+        # caller's, so it needs 'admin' on top of 'ingest' — otherwise a content
+        # capability would read anything the container can see.
+        source = payload.get("path") or payload.get("source") or None
+        if source and not policy.grants("admin"):
+            return VineError(
+                E_FORBIDDEN, "reading a host path requires the 'admin' capability",
+                hint="Use mode 'upload' to send the documents themselves.").to_dict()
+
+        root = Path(vine.forest.root)
+        before = _git(root, "rev-parse", "HEAD")
+        staged: list[str] = []
+        try:
+            if mode == "upload":
+                files = payload.get("files")
+                if not isinstance(files, list) or not files:
+                    return VineError(E_SCHEMA, "upload needs a non-empty 'files' list",
+                                     hint='Each entry is {"name": "notes.md", "text": "…"}.').to_dict()
+                source, staged = stage_upload(root, files)
+
+            curator = inference.curator_from_binding(
+                vine, policy, registry.binding(forest, "ingest"))
+            gardener = Gardener(vine, hooks=discover_hooks() + ([curator] if curator else []))
+
+            if mode == "upload" and gardener.config.get("source_root") == \
+                    Path(source).as_posix():
+                # The staging area is stable per forest, so re-sending a
+                # filename means "this document changed". `adopt` would plant a
+                # second node beside the first; the Gardener's update path is
+                # the G.8 hash diff, which is exactly what `sync` runs.
+                mode, report = "sync", gardener.sync(source)
+            elif mode == "sync":
+                # A targeted path here is relative to the source root a prior
+                # adopt recorded — vetted then, so it needs no admin now.
+                report = gardener.sync(source if payload.get("source") else None,
+                                       path=payload.get("path"))
+            else:
+                report = gardener.adopt(source, dest=dest)
+            rollup = gardener.rollup(curator) if curator else None
+        except VineError as e:
+            return e.to_dict()
+        except Exception as e:
+            return VineError(E_SCHEMA, f"ingest failed: {e}"[:300]).to_dict()
+
+        after = _git(root, "rev-parse", "HEAD")
+        return {
+            **report, "mode": mode, "staged": staged,
+            "rollup": rollup,
+            # A batch is many commits; the Station reports the range instead of
+            # amending the last one and claiming the whole ingest (J.8).
+            "commit": after or None, "commit_before": before or None,
+            "curated": curator is not None,
+        }
+
     # -- routes -------------------------------------------------------------
 
     async def health(request: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok", "mode": pool.mode})
+        # `password_login` lets the console decide whether to offer the door
+        # at all. It reveals that a door exists, not who may walk through it.
+        return JSONResponse({
+            "status": "ok", "mode": pool.mode, "writable": writable,
+            "password_login": super_admin is not None or registry.has_any_password(),
+        })
 
     async def me(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
@@ -263,6 +548,379 @@ def build_app(
             listed.append({**f, "caps": granted[f["id"]]["caps"],
                            "roots": policy.roots() if policy else []})
         return JSONResponse({"forests": listed, "mode": pool.mode})
+
+    # -- credentials (J.2.1 / J.2.2) ----------------------------------------
+
+    def administers_fully(principal: str, target: str) -> bool:
+        """May `principal` mint or revoke credentials for `target`?
+
+        A key authenticates a principal, and a principal may hold grants on
+        several forests — so issuing one needs `admin` on EVERY forest the
+        target is granted, not merely on one of them. Otherwise the
+        administrator of one forest could mint a credential that opens
+        another (J.2.2).
+        """
+        theirs = {g["forest"] for g in registry.grants_of(target)}
+        mine = {g["forest"] for g in registry.grants_of(principal)
+                if "admin" in g["caps"]}
+        return bool(mine) and theirs <= mine
+
+    async def auth_login(request: Request) -> JSONResponse:
+        """Password in, session token out (J.2.1).
+
+        The session is an ordinary API key with a short life, so everything
+        downstream — authenticate, policy, audit — is the single path it
+        already was. The door decides how the principal was established,
+        never what it may do.
+        """
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+
+        ok = False
+        if username and password:
+            if super_admin and secrets.compare_digest(username, super_admin[0]):
+                # Break-glass: compared against the environment, never stored.
+                ok = secrets.compare_digest(password, super_admin[1])
+            else:
+                ok = registry.verify_password(username, password)
+        if not ok:
+            # One message for a wrong password, an unknown user and a user
+            # with no password at all: distinguishing them would turn the
+            # login form into a directory of who exists.
+            return _envelope(VineError(E_FORBIDDEN, "invalid username or password"), 401)
+
+        session = registry.open_session(username)
+        return JSONResponse({"key": session["key"], "principal": username,
+                             "expires_at": session["expires_at"],
+                             "admin": is_admin(username)})
+
+    async def admin_keys(request: Request) -> JSONResponse:
+        principal, err = require_principal(request)
+        if err:
+            return err
+        if not is_admin(principal):
+            return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
+
+        if request.method == "GET":
+            # Only principals this caller fully administers — the same rule
+            # that governs issuing, applied to seeing (J.2.2).
+            visible = [p["id"] for p in registry.principals()
+                       if administers_fully(principal, p["id"])]
+            return JSONResponse({"keys": registry.keys_of(visible),
+                                 "principals": visible})
+
+        body = await request.json()
+        if body.get("revoke"):
+            # Authorize BEFORE the effect. Revoking first and checking after
+            # would answer 403 while the token was already dead — a refusal
+            # that refuses nothing.
+            owner = registry.owner_of_key(str(body["revoke"]))
+            if owner is None:
+                return _envelope(VineError(E_NOT_FOUND, "no such token"))
+            if not administers_fully(principal, owner):
+                return _envelope(VineError(
+                    E_FORBIDDEN, f"'{owner}' holds forests you do not administer"), 403)
+            registry.revoke_key(str(body["revoke"]))
+            return JSONResponse({"revoked": body["revoke"], "principal": owner})
+
+        target = str(body.get("principal") or "").strip()
+        if not target:
+            return _envelope(VineError(E_SCHEMA, "principal is required"))
+        if not administers_fully(principal, target):
+            return _envelope(VineError(
+                E_FORBIDDEN, f"'{target}' holds forests you do not administer",
+                hint="Minting a key for a principal needs 'admin' on every "
+                     "forest it is granted, or the key would reach further "
+                     "than you can."), 403)
+        try:
+            days = body.get("expires_in_days")
+            days = float(days) if days not in (None, "", 0) else None
+        except (TypeError, ValueError):
+            return _envelope(VineError(E_SCHEMA, "expires_in_days must be a number"))
+        key = registry.issue_key(target, label=body.get("label") or None,
+                                 expires_in_days=days)
+        return JSONResponse({"api_key": key, "principal": target,
+                             "keys": registry.keys_of([target])})
+
+    async def admin_password(request: Request) -> JSONResponse:
+        principal, err = require_principal(request)
+        if err:
+            return err
+        body = await request.json()
+        target = str(body.get("principal") or "").strip()
+        if not target or not administers_fully(principal, target):
+            return _envelope(VineError(
+                E_FORBIDDEN, "requires 'admin' on every forest that principal holds"), 403)
+        if super_admin and target == super_admin[0]:
+            return _envelope(VineError(
+                E_FORBIDDEN, "the environment account has no stored password",
+                hint="Rotate MONKEYLLM_STATION_PASSWORD and restart."), 403)
+        registry.set_password(target, body.get("password") or None)
+        return JSONResponse({"principal": target,
+                             "has_password": registry.has_password(target)})
+
+    async def admin_canopy(request: Request) -> JSONResponse:
+        """Index health and rebuild (Part K).
+
+        Building is offline work by design — it re-embeds every summary — so
+        it runs on the forest thread like every other forest touch, and the
+        caller waits. A fire-and-forget build would leave the console unable
+        to say whether the index it is about to rely on exists.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.query_params.get("forest")
+        body = await request.json() if request.method == "POST" else {}
+        if not forest:
+            forest = body.get("forest")
+        if not is_admin(principal, forest):
+            return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
+
+        def work():
+            try:
+                vine = pool.get(forest)
+            except VineError:
+                return None
+            attach_embedder(vine, forest)
+            if request.method == "POST" and "enabled" in body:
+                registry.set_setting(forest, "gauntlet", bool(body["enabled"]))
+                attach_embedder(vine, forest)
+                return {**vine.canopy_status,
+                        "enabled": registry.setting(forest, "gauntlet", True)}
+            if request.method == "POST":
+                if vine.embedder is None:
+                    return {"error": VineError(
+                        E_SCHEMA, "no embedding model is bound to this forest",
+                        hint="Bind one under Models, then build the index.").to_dict()["error"]}
+                vine.build_canopy()
+            return {**vine.canopy_status,
+                    "enabled": registry.setting(forest, "gauntlet", True)}
+
+        status = await in_forest_thread(work)
+        if status is None:
+            return _unknown_forest(forest)
+        if "error" in status:
+            return JSONResponse(status, status_code=400)
+        return JSONResponse(status)
+
+    async def admin_people(request: Request) -> JSONResponse:
+        """Governance shaped like a person, not like the tables (J.2.3).
+
+        Grants, passwords and keys are three tables and one thought: nobody
+        administers a grant, they onboard somebody. This endpoint applies
+        any combination of those changes in one call so the console can ask
+        once.
+
+        It is a composite, never a new authority: every step re-checks the
+        rule that already governed it, and a step the caller may not perform
+        is refused *without abandoning the steps they may*. Silently
+        dropping half a submitted form is worse than doing it or failing it.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        if not is_admin(principal):
+            return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
+        mine = administered(principal)
+
+        if request.method == "GET":
+            people = []
+            for p in registry.principals():
+                grants = [g for g in registry.grants_of(p["id"]) if g["forest"] in mine]
+                if not grants:
+                    continue
+                tokens = registry.keys_of([p["id"]])
+                seen = [t["last_used_at"] for t in tokens if t["last_used_at"]]
+                people.append({
+                    "id": p["id"], "kind": p["kind"], "created": p["created"],
+                    "has_password": p["has_password"], "grants": grants,
+                    # Credentials are only shown for a principal this caller
+                    # administers in full (J.2.2), so a partial administrator
+                    # sees the person without their keys.
+                    "manageable": administers_fully(principal, p["id"]),
+                    "tokens": tokens if administers_fully(principal, p["id"]) else [],
+                    "live_tokens": sum(1 for t in tokens if t["status"] == "active"),
+                    "last_seen": max(seen) if seen else None,
+                })
+            return JSONResponse({"people": people, "forests": sorted(mine)})
+
+        body = await request.json()
+        target = str(body.get("principal") or "").strip()
+        if not target:
+            return _envelope(VineError(E_SCHEMA, "principal is required"))
+
+        applied: list[str] = []
+        refused: list[dict] = []
+
+        def deny(step: str, message: str, hint: str | None = None,
+                 forest: str | None = None) -> None:
+            entry = {"step": step, "message": message, "hint": hint}
+            if forest is not None:
+                # Which forest was refused, so a partly applied multi-forest
+                # grant can be reported as the operator submitted it (J.2.3).
+                entry["forest"] = forest
+            refused.append(entry)
+
+        # 1. grant — the order is normative (J.2.3): it lands first so a
+        #    principal that did not exist a moment ago is administrable by
+        #    the time its password and key are created below.
+        #
+        #    A grant may name several forests (v0.20). The set is a
+        #    convenience for the operator, never a relaxation: each forest is
+        #    authorised, applied and refused on its own, so an administrator
+        #    of two forests out of three grants the two and is told, by id,
+        #    about the third.
+        grant = body.get("grant")
+        if isinstance(grant, dict):
+            targets = _forest_list(grant.get("forests"), grant.get("forest"))
+            caps = set(grant.get("caps") or ["read"])
+            if not targets:
+                deny("grant", "a grant must name at least one forest")
+            elif caps - CAPS:
+                deny("grant", f"unknown capabilities: {sorted(caps - CAPS)}")
+            else:
+                landed = False
+                for forest in targets:
+                    if not is_admin(principal, forest):
+                        deny("grant", f"you do not administer '{forest}'", forest=forest)
+                        continue
+                    try:
+                        # allow/deny travel with the grant, not with the
+                        # forest: a grant is one policy expressed once.
+                        registry.grant(target, forest, caps, allow=grant.get("allow"),
+                                       deny=grant.get("deny"), tables=grant.get("tables"))
+                        landed = True
+                    except ValueError as e:
+                        deny("grant", str(e), forest=forest)
+                if landed:
+                    applied.append("grant")
+
+        # 2. revoke access — the same set, under the same per-forest rule.
+        drop = _forest_list(body.get("revoke_access"))
+        if drop:
+            dropped = False
+            for forest in drop:
+                if not is_admin(principal, forest):
+                    deny("revoke_access", f"you do not administer '{forest}'", forest=forest)
+                    continue
+                registry.revoke(target, forest)
+                dropped = True
+            if dropped:
+                applied.append("revoke_access")
+
+        # From here on the target's *credentials* are at stake, and a key
+        # spans forests — so the whole-person rule applies (J.2.2).
+        full = administers_fully(principal, target)
+
+        # 3. password
+        if "password" in body:
+            if not full:
+                deny("password", f"'{target}' holds forests you do not administer")
+            elif super_admin and target == super_admin[0]:
+                deny("password", "the environment account has no stored password",
+                     "Rotate MONKEYLLM_STATION_PASSWORD and restart.")
+            else:
+                registry.set_password(target, body.get("password") or None)
+                applied.append("password")
+
+        # 4. issue a key
+        issued = None
+        issue = body.get("issue_key")
+        if issue:
+            if not full:
+                deny("issue_key", f"'{target}' holds forests you do not administer")
+            else:
+                spec = issue if isinstance(issue, dict) else {}
+                try:
+                    days = spec.get("expires_in_days")
+                    days = float(days) if days not in (None, "", 0) else None
+                except (TypeError, ValueError):
+                    days = None
+                issued = registry.issue_key(target, label=spec.get("label") or None,
+                                            expires_in_days=days)
+                applied.append("issue_key")
+
+        # 5. revoke keys
+        kill = body.get("revoke_keys")
+        if kill:
+            if not full:
+                deny("revoke_keys", f"'{target}' holds forests you do not administer")
+            else:
+                ids = ([k["id"] for k in registry.keys_of([target])]
+                       if kill is True else list(kill))
+                for key_id in ids:
+                    if registry.owner_of_key(key_id) == target:
+                        registry.revoke_key(key_id)
+                applied.append("revoke_keys")
+
+        out = {"principal": target, "applied": applied, "refused": refused}
+        if issued:
+            out["api_key"] = issued
+        # 403 only when nothing at all could be done; a partial success has
+        # to report as one, or the console cannot tell the two apart.
+        return JSONResponse(out, status_code=200 if applied else
+                            (403 if refused else 200))
+
+    async def admin_create_forest(request: Request) -> JSONResponse:
+        """J.7: a deployment reaches its second forest without shell access.
+
+        Creation is A.5 `init_forest` and nothing else — the Station adds no
+        second way to make a forest, so what it produces is byte-identical to
+        what `vine init` produces.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        if pool.mode != "registry":
+            return _envelope(VineError(
+                E_SCHEMA, "this Station serves a single forest",
+                hint="Start it with --root <registry> to host more than one."))
+        if not writable:
+            return _envelope(VineError(
+                E_READONLY, "this Station serves read-only forests",
+                hint="Start it with --writable to create forests."), 403)
+        if not is_admin(principal):
+            return _envelope(
+                VineError(E_FORBIDDEN, "creating a forest requires the 'admin' "
+                                       "capability on an existing forest"), 403)
+        body = await request.json()
+        forest_id = str(body.get("id") or "").strip()
+        title = str(body.get("title") or "").strip()
+        if not FOREST_ID.match(forest_id):
+            return _envelope(VineError(
+                E_SCHEMA, f"invalid forest id: {forest_id!r}",
+                hint="Lowercase letters, digits, '-' and '_'; up to 63 characters."))
+        if not title:
+            return _envelope(VineError(E_SCHEMA, "title is required",
+                                       hint="It becomes the master index heading."))
+
+        target = pool.root / forest_id
+        if target.exists():
+            # Returning the existing forest because the name matched would be
+            # an access-control bug wearing a convenience feature (J.7).
+            return _envelope(VineError(E_SCHEMA, f"'{forest_id}' already exists",
+                                       hint="Pick another id."))
+
+        def create():
+            from monkeyllm.forest import init_forest
+
+            return init_forest(target, title=title,
+                               summary=body.get("summary") or None)
+
+        try:
+            info = await in_forest_thread(create)
+        except VineError as e:
+            return _envelope(e)
+        # A forest nobody can open is a silent failure with a 200 (J.7).
+        registry.grant(principal, forest_id, set(CAPS))
+        return JSONResponse({"forest": {"id": forest_id, "title": title,
+                                        "commit": info.get("commit")},
+                             "grants": registry.grants_of(principal)})
 
     async def primitive(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
@@ -302,9 +960,15 @@ def build_app(
             return err
         if not is_admin(principal):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
-        people = registry.principals()
-        for p in people:
-            p["grants_detail"] = registry.grants_of(p["id"])
+        # J.3.2: a branch prefix describes somebody's world. It does not
+        # become readable because the reader administers a different forest.
+        mine = administered(principal)
+        people = []
+        for p in registry.principals():
+            detail = [g for g in registry.grants_of(p["id"]) if g["forest"] in mine]
+            if detail:
+                people.append({**p, "grants_detail": detail,
+                               "grants": len(detail)})
         return JSONResponse({"principals": people})
 
     async def admin_grant(request: Request) -> JSONResponse:
@@ -341,8 +1005,14 @@ def build_app(
         if not is_admin(principal):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
         limit = min(int(request.query_params.get("limit", 100)), 500)
-        return JSONResponse({"entries": registry.audit(limit=limit,
-                                                       principal=request.query_params.get("principal"))})
+        # An audit entry records what somebody read. Same rule as J.3.2:
+        # over-fetch, then keep only the forests this caller governs, so a
+        # short page is a short page rather than a leak.
+        mine = administered(principal)
+        entries = [e for e in registry.audit(
+            limit=limit * 4, principal=request.query_params.get("principal"))
+            if e["forest"] in mine]
+        return JSONResponse({"entries": entries[:limit]})
 
     async def admin_providers(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
@@ -417,6 +1087,12 @@ def build_app(
         Route("/v1/health", health),
         Route("/v1/me", me),
         Route("/v1/forests", forests),
+        Route("/v1/auth/login", auth_login, methods=["POST"]),
+        Route("/v1/admin/canopy", admin_canopy, methods=["GET", "POST"]),
+        Route("/v1/admin/people", admin_people, methods=["GET", "POST"]),
+        Route("/v1/admin/keys", admin_keys, methods=["GET", "POST"]),
+        Route("/v1/admin/password", admin_password, methods=["POST"]),
+        Route("/v1/admin/forests", admin_create_forest, methods=["POST"]),
         Route("/v1/admin/principals", admin_principals),
         Route("/v1/admin/grant", admin_grant, methods=["POST"]),
         Route("/v1/admin/audit", admin_audit),
@@ -433,6 +1109,18 @@ def build_app(
                                                 run_primitive)
         if mcp_app is not None:
             routes.append(Mount("/mcp", app=mcp_app))
+
+    # Before the SPA: anything under /v1 that reached here matched no route,
+    # so it answers as the API rather than falling through to the static file
+    # server — which would hand an HTML 404 (or, for a mistyped path, the
+    # console itself) to something expecting JSON.
+    async def api_not_found(request: Request) -> JSONResponse:
+        return _envelope(VineError(
+            E_NOT_FOUND, f"no such endpoint: /{request.path_params['rest']}",
+            hint="Check the method too: several /v1/admin routes are POST-only."))
+
+    routes.append(Route("/v1/{rest:path}", api_not_found,
+                        methods=["GET", "POST", "PUT", "PATCH", "DELETE"]))
 
     # Last: the SPA catch-all must not shadow the API routes above it.
     if (STUDIO_DIST / "index.html").is_file():

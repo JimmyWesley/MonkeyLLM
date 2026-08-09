@@ -11,7 +11,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from monkeyllm_station.policy import CAPS, Policy
@@ -20,13 +20,26 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS principals (
     id      TEXT PRIMARY KEY,
     kind    TEXT NOT NULL DEFAULT 'service',   -- 'user' | 'service'
-    created TEXT NOT NULL
+    created TEXT NOT NULL,
+    -- J.2.1: unlike an API key, a password is guessable, so it is stored as
+    -- a salted memory-hard hash rather than a plain digest. NULL means this
+    -- principal simply has no password door — never a blank one.
+    pw_salt TEXT,
+    pw_hash TEXT
 );
 CREATE TABLE IF NOT EXISTS api_keys (
-    key_hash  TEXT PRIMARY KEY,
-    principal TEXT NOT NULL REFERENCES principals(id),
-    label     TEXT,
-    created   TEXT NOT NULL
+    key_hash     TEXT PRIMARY KEY,
+    principal    TEXT NOT NULL REFERENCES principals(id),
+    label        TEXT,
+    created      TEXT NOT NULL,
+    -- J.2.2: a credential that cannot be listed, expired or revoked is not
+    -- governed. `prefix` is the non-secret head, so a token can be
+    -- recognised in a list without being disclosed.
+    prefix       TEXT,
+    kind         TEXT NOT NULL DEFAULT 'api',   -- 'api' | 'session'
+    expires_at   TEXT,
+    revoked_at   TEXT,
+    last_used_at TEXT
 );
 CREATE TABLE IF NOT EXISTS grants (
     principal TEXT NOT NULL REFERENCES principals(id),
@@ -52,11 +65,15 @@ CREATE INDEX IF NOT EXISTS idx_audit_principal ON audit(principal);
 
 -- Inference providers (J.10): any OpenAI-compatible /v1 — OpenRouter,
 -- LiteLLM, vLLM, a local llama.cpp. The key is write-only over the API.
+-- `origin` says who declared it: 'console' rows are typed in and keep their
+-- key here; 'env' rows are declared by the deployment (J.10.1) and their
+-- key is NEVER stored — it is read back from the environment at call time.
 CREATE TABLE IF NOT EXISTS providers (
     name     TEXT PRIMARY KEY,
     endpoint TEXT NOT NULL,
     api_key  TEXT,
-    created  TEXT NOT NULL
+    created  TEXT NOT NULL,
+    origin   TEXT NOT NULL DEFAULT 'console'
 );
 -- Which model serves which ROLE on which forest: a forest ingested by a
 -- careful summariser can be answered by a fast reader, and vice versa.
@@ -69,9 +86,20 @@ CREATE TABLE IF NOT EXISTS model_bindings (
     reasoning  TEXT NOT NULL DEFAULT 'off',
     PRIMARY KEY (forest, role)
 );
+-- Per-forest switches that are not bindings. Today only the Gauntlet's
+-- on/off (Part K); a table rather than a column because the next one will
+-- not be about models either.
+CREATE TABLE IF NOT EXISTS forest_settings (
+    forest TEXT NOT NULL,
+    key    TEXT NOT NULL,
+    value  TEXT NOT NULL,
+    PRIMARY KEY (forest, key)
+);
 """
 
-ROLES = ("ingest", "answer")
+# `embed` is not a chat model: it builds the Canopy and points the
+# Gauntlet (Part K). Absent, navigation is unchanged.
+ROLES = ("ingest", "answer", "embed")
 
 # Columns added after the Phase A schema shipped; a Station upgraded in place
 # must not lose its principals over a migration.
@@ -81,17 +109,46 @@ MIGRATIONS = {
         "deny": "TEXT NOT NULL DEFAULT '[]'",
         "tables": "TEXT NOT NULL DEFAULT '{}'",
     },
+    "principals": {"pw_salt": "TEXT", "pw_hash": "TEXT"},
+    "api_keys": {
+        "prefix": "TEXT",
+        "kind": "TEXT NOT NULL DEFAULT 'api'",
+        "expires_at": "TEXT",
+        "revoked_at": "TEXT",
+        "last_used_at": "TEXT",
+    },
+    "providers": {"origin": "TEXT NOT NULL DEFAULT 'console'"},
 }
+
+# A login is good for a working day. Long enough not to nag, short enough
+# that a browser left open in a meeting room is not a permanent credential.
+SESSION_HOURS = 12
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _in_hours(hours: float) -> str:
+    return (datetime.now(timezone.utc)
+            + timedelta(hours=hours)).isoformat(timespec="seconds")
+
+
 def hash_key(key: str) -> str:
     """API keys are 256-bit random tokens, so a plain digest is enough — the
     slow-KDF argument applies to guessable secrets, not to these."""
     return hashlib.sha256(key.encode()).hexdigest()
+
+
+def hash_password(password: str, salt: str) -> str:
+    """scrypt from the standard library: memory-hard, no new dependency.
+
+    A password is guessable, which is exactly the case `hash_key`'s plain
+    digest does not cover — a stolen registry with sha256 password digests
+    is a wordlist away from every account.
+    """
+    return hashlib.scrypt(password.encode("utf-8"), salt=bytes.fromhex(salt),
+                          n=2 ** 14, r=8, p=1, dklen=32).hex()
 
 
 class Registry:
@@ -103,6 +160,10 @@ class Registry:
         self.conn.executescript(SCHEMA_SQL)
         self._migrate()
         self.conn.commit()
+        # Keys of environment-declared providers (J.10.1). In memory, for the
+        # life of the process, and never written: the registry file is a
+        # backup target and the environment is not.
+        self._env_secrets: dict[str, str] = {}
 
     def _migrate(self) -> None:
         for table, columns in MIGRATIONS.items():
@@ -123,26 +184,137 @@ class Registry:
         )
         self.conn.commit()
 
-    def issue_key(self, principal_id: str, label: str | None = None) -> str:
+    def issue_key(self, principal_id: str, label: str | None = None, *,
+                  expires_in_days: float | None = None,
+                  kind: str = "api") -> str:
         """Mint an API key. The plaintext is returned ONCE and never stored."""
         self.add_principal(principal_id)
         key = f"mk_{secrets.token_urlsafe(32)}"
+        expires = (_in_hours(expires_in_days * 24)
+                   if expires_in_days else None)
         self.conn.execute(
-            "INSERT INTO api_keys (key_hash, principal, label, created) VALUES (?,?,?,?)",
-            (hash_key(key), principal_id, label, _now()),
+            "INSERT INTO api_keys (key_hash, principal, label, created, prefix, "
+            "kind, expires_at) VALUES (?,?,?,?,?,?,?)",
+            (hash_key(key), principal_id, label, _now(), key[:9], kind, expires),
         )
         self.conn.commit()
         return key
 
     def authenticate(self, key: str | None) -> str | None:
-        """API key -> principal id, or None. Lookup is by digest, so a stolen
-        registry file yields no usable keys."""
+        """API key -> principal id, or None.
+
+        Lookup is by digest, so a stolen registry file yields no usable keys.
+        Revoked and expired keys fail here rather than at some later gate:
+        this is the single place every surface passes through, and a
+        lifecycle enforced anywhere else is a lifecycle with a bypass.
+        """
         if not key:
             return None
         row = self.conn.execute(
-            "SELECT principal FROM api_keys WHERE key_hash = ?", (hash_key(key),)
+            "SELECT principal, revoked_at, expires_at FROM api_keys "
+            "WHERE key_hash = ?", (hash_key(key),)
         ).fetchone()
+        if row is None or row["revoked_at"]:
+            return None
+        if row["expires_at"] and row["expires_at"] <= _now():
+            return None
+        # Last use is what makes an unused token safe to remove. Written on
+        # every call, so it is second-resolution and best-effort, not an
+        # audit record — the audit log is next door and keeps the detail.
+        self.conn.execute(
+            "UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?",
+            (_now(), hash_key(key)))
+        self.conn.commit()
+        return row["principal"]
+
+    def keys_of(self, principals: list[str] | None = None) -> list[dict]:
+        """Token metadata — never the secret, which exists only in the reply
+        to the call that minted it. Sessions are excluded: they are the
+        by-product of a login, not a credential anyone manages (J.2.2)."""
+        sql = ("SELECT key_hash, principal, label, created, prefix, expires_at, "
+               "revoked_at, last_used_at FROM api_keys WHERE kind = 'api'")
+        args: tuple = ()
+        if principals is not None:
+            if not principals:
+                return []
+            sql += f" AND principal IN ({','.join('?' * len(principals))})"
+            args = tuple(principals)
+        rows = self.conn.execute(sql + " ORDER BY created DESC", args)
+        now = _now()
+        out = []
+        for r in rows:
+            item = dict(r)
+            # The digest is the handle for revocation. It is not a secret —
+            # it is what a stolen registry already contains — but the key it
+            # came from cannot be derived from it.
+            item["id"] = item.pop("key_hash")
+            item["status"] = ("revoked" if r["revoked_at"]
+                              else "expired" if r["expires_at"] and r["expires_at"] <= now
+                              else "active")
+            out.append(item)
+        return out
+
+    def owner_of_key(self, key_id: str) -> str | None:
+        """Whose token is this? Separate from `revoke_key` so a caller can
+        authorize before acting rather than after."""
+        row = self.conn.execute(
+            "SELECT principal FROM api_keys WHERE key_hash = ?", (key_id,)).fetchone()
         return row["principal"] if row else None
+
+    def revoke_key(self, key_id: str) -> str | None:
+        """Revoke by digest. Returns the principal it belonged to, or None."""
+        owner = self.owner_of_key(key_id)
+        if owner is None:
+            return None
+        self.conn.execute("UPDATE api_keys SET revoked_at = ? WHERE key_hash = ?",
+                          (_now(), key_id))
+        self.conn.commit()
+        return owner
+
+    # -- passwords (J.2.1) ---------------------------------------------------
+
+    def set_password(self, principal_id: str, password: str | None) -> None:
+        """Set or clear a principal's password. Clearing removes the door
+        entirely rather than leaving a blank one behind."""
+        self.add_principal(principal_id, kind="user")
+        if not password:
+            self.conn.execute(
+                "UPDATE principals SET pw_salt = NULL, pw_hash = NULL WHERE id = ?",
+                (principal_id,))
+        else:
+            salt = secrets.token_bytes(16).hex()
+            self.conn.execute(
+                "UPDATE principals SET pw_salt = ?, pw_hash = ? WHERE id = ?",
+                (salt, hash_password(password, salt), principal_id))
+        self.conn.commit()
+
+    def has_any_password(self) -> bool:
+        """Whether the password door is worth offering at all."""
+        return bool(self.conn.execute(
+            "SELECT 1 FROM principals WHERE pw_hash IS NOT NULL LIMIT 1").fetchone())
+
+    def has_password(self, principal_id: str) -> bool:
+        row = self.conn.execute("SELECT pw_hash FROM principals WHERE id = ?",
+                                (principal_id,)).fetchone()
+        return bool(row and row["pw_hash"])
+
+    def verify_password(self, principal_id: str, password: str) -> bool:
+        row = self.conn.execute(
+            "SELECT pw_salt, pw_hash FROM principals WHERE id = ?",
+            (principal_id,)).fetchone()
+        if not row or not row["pw_hash"] or not password:
+            return False
+        return secrets.compare_digest(
+            hash_password(password, row["pw_salt"]), row["pw_hash"])
+
+    def open_session(self, principal_id: str, hours: float = SESSION_HOURS) -> dict:
+        key = self.issue_key(principal_id, label="session", kind="session")
+        self.conn.execute(
+            "UPDATE api_keys SET expires_at = ? WHERE key_hash = ?",
+            (_in_hours(hours), hash_key(key)))
+        self.conn.commit()
+        return {"key": key, "principal": principal_id,
+                "expires_at": _in_hours(hours)}
 
     # -- grants -------------------------------------------------------------
 
@@ -238,12 +410,13 @@ class Registry:
 
     def principals(self) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT p.id, p.kind, p.created, "
-            "  (SELECT COUNT(*) FROM api_keys k WHERE k.principal = p.id) AS keys, "
+            "SELECT p.id, p.kind, p.created, p.pw_hash IS NOT NULL AS has_password, "
+            "  (SELECT COUNT(*) FROM api_keys k WHERE k.principal = p.id "
+            "     AND k.kind = 'api' AND k.revoked_at IS NULL) AS keys, "
             "  (SELECT COUNT(*) FROM grants g WHERE g.principal = p.id) AS grants "
             "FROM principals p ORDER BY p.id"
         )
-        return [dict(r) for r in rows]
+        return [{**dict(r), "has_password": bool(r["has_password"])} for r in rows]
 
     def grants_of(self, principal_id: str) -> list[dict]:
         rows = self.conn.execute(
@@ -257,25 +430,99 @@ class Registry:
             for r in rows
         ]
 
+    # -- per-forest settings -------------------------------------------------
+
+    def setting(self, forest: str, key: str, default=None):
+        row = self.conn.execute(
+            "SELECT value FROM forest_settings WHERE forest = ? AND key = ?",
+            (forest, key)).fetchone()
+        if row is None:
+            return default
+        return json.loads(row["value"])
+
+    def set_setting(self, forest: str, key: str, value) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO forest_settings (forest, key, value) VALUES (?,?,?)",
+            (forest, key, json.dumps(value)))
+        self.conn.commit()
+
     # -- inference providers and per-forest model bindings (J.10) -----------
+
+    def adopt_env_providers(self, declared: list[dict]) -> None:
+        """Publish the deployment's own providers (J.10.1).
+
+        A Station whose endpoint and key already live in the environment
+        should not ask an operator to paste that key into a form — they would
+        be copying a secret from the place that governs it into a place that
+        does not. So the row is published here with `api_key` NULL; the key
+        stays in this process's memory and is overlaid on read. Rotating it
+        means editing the environment and restarting, which is the same
+        lifecycle the variable already had.
+
+        A provider that WAS declared and no longer is becomes an ordinary
+        console row rather than disappearing: dropping it would silently take
+        its bindings with it, and a binding that vanished because a variable
+        was renamed is the kind of failure nobody traces back.
+        """
+        names = set()
+        for entry in declared:
+            name, endpoint = entry.get("name"), entry.get("endpoint")
+            if not name or not endpoint:
+                continue
+            names.add(name)
+            # Upsert, not REPLACE: a declaration that lands on a name somebody
+            # already typed takes the name over, but must not destroy the key
+            # stored under it. The environment's key wins while it is declared
+            # (see `provider_secret`), and withdrawing the variables leaves a
+            # console provider that still works.
+            self.conn.execute(
+                "INSERT INTO providers (name, endpoint, api_key, created, origin) "
+                "VALUES (?,?,NULL,?,'env') "
+                "ON CONFLICT(name) DO UPDATE SET endpoint = excluded.endpoint, "
+                "origin = 'env'",
+                (name, endpoint.rstrip("/"), _now()),
+            )
+            if entry.get("api_key"):
+                self._env_secrets[name] = entry["api_key"]
+            else:
+                self._env_secrets.pop(name, None)
+        stale = [r["name"] for r in
+                 self.conn.execute("SELECT name FROM providers WHERE origin = 'env'")
+                 if r["name"] not in names]
+        for name in stale:
+            self.conn.execute(
+                "UPDATE providers SET origin = 'console' WHERE name = ?", (name,))
+            self._env_secrets.pop(name, None)
+        self.conn.commit()
+
+    def _origin(self, name: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT origin FROM providers WHERE name = ?", (name,)).fetchone()
+        return row["origin"] if row else None
 
     def put_provider(self, name: str, endpoint: str, api_key: str | None) -> None:
         """Store a provider. An empty `api_key` keeps the stored one, so the
         console can edit an endpoint without ever holding the secret."""
         if not name or not endpoint:
             raise ValueError("provider needs a name and an endpoint")
+        if self._origin(name) == "env":
+            raise ValueError(f"'{name}' is declared by the environment; "
+                             "edit the variables and restart the Station")
         existing = self.conn.execute(
             "SELECT api_key FROM providers WHERE name = ?", (name,)
         ).fetchone()
         key = api_key if api_key else (existing["api_key"] if existing else None)
         self.conn.execute(
-            "INSERT OR REPLACE INTO providers (name, endpoint, api_key, created) "
-            "VALUES (?,?,?,?)",
+            "INSERT OR REPLACE INTO providers (name, endpoint, api_key, created, origin) "
+            "VALUES (?,?,?,?,'console')",
             (name, endpoint.rstrip("/"), key, _now()),
         )
         self.conn.commit()
 
     def delete_provider(self, name: str) -> None:
+        if self._origin(name) == "env":
+            raise ValueError(f"'{name}' is declared by the environment; "
+                             "unset the variables and restart the Station")
         self.conn.execute("DELETE FROM providers WHERE name = ?", (name,))
         self.conn.execute("DELETE FROM model_bindings WHERE provider = ?", (name,))
         self.conn.commit()
@@ -284,16 +531,23 @@ class Registry:
         """Never returns secrets — only whether one is set."""
         return [
             {"name": r["name"], "endpoint": r["endpoint"],
-             "has_key": bool(r["api_key"]), "created": r["created"]}
+             "has_key": bool(r["api_key"] or self._env_secrets.get(r["name"])),
+             "origin": r["origin"], "created": r["created"]}
             for r in self.conn.execute("SELECT * FROM providers ORDER BY name")
         ]
 
     def provider_secret(self, name: str) -> dict | None:
         """Server-side only: the one path that reads the key back."""
         row = self.conn.execute(
-            "SELECT name, endpoint, api_key FROM providers WHERE name = ?", (name,)
+            "SELECT name, endpoint, api_key, origin FROM providers WHERE name = ?",
+            (name,)
         ).fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return None
+        out = dict(row)
+        if out["origin"] == "env":
+            out["api_key"] = self._env_secrets.get(name)
+        return out
 
     def bind_model(self, forest: str, role: str, provider: str, model: str,
                    max_tokens: int = 600, reasoning: str = "off") -> None:
@@ -349,3 +603,15 @@ class Registry:
         for forest in forests:
             self.grant(principal_id, forest, set(CAPS))
         return key
+
+    def ensure_super_admin(self, principal_id: str, forests: list[str]) -> None:
+        """The environment account (J.2.1): a principal with `admin`
+        everywhere and **no stored credential**.
+
+        Its password is checked against the environment at login, so nothing
+        here is secret — this only makes sure the identity and its grants
+        exist, and re-runs on every start so a forest added later is covered.
+        """
+        self.add_principal(principal_id, kind="user")
+        for forest in forests:
+            self.grant(principal_id, forest, set(CAPS))

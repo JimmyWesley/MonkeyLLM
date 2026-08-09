@@ -2,42 +2,167 @@
 @tailwind components;
 @tailwind utilities;
 
+/* The design system's one source of truth (spec J.5.3).
+ *
+ * Colours are declared as semantic roles — surface, line, text, accent — not
+ * as a palette. A component that says `bg-surface` is correct in both themes
+ * by construction; one that says `bg-neutral-900` is a light-mode bug waiting
+ * for someone to open the console in daylight.
+ *
+ * Channels are space-separated RGB so Tailwind can apply opacity to them
+ * (`rgb(var(--surface) / <alpha-value>)`).
+ */
 @layer base {
-  html { color-scheme: dark; }
-  body {
-    @apply bg-canvas text-bark-300 antialiased;
-    background-image:
-      radial-gradient(60rem 40rem at 15% -10%, rgba(74,157,113,.07), transparent 60%),
-      radial-gradient(50rem 30rem at 100% 0%, rgba(74,157,113,.05), transparent 55%);
-    background-attachment: fixed;
+  :root {
+    --bg: 249 250 249;
+    --bg-elev: 255 255 255;
+    --surface: 255 255 255;
+    --surface-2: 244 246 244;
+    --surface-3: 236 240 237;
+    --line: 226 231 227;
+    --line-strong: 205 213 207;
+
+    --text: 24 32 27;
+    --text-2: 88 100 92;
+    --text-3: 133 145 137;
+
+    --accent: 47 125 88;
+    --accent-hover: 38 105 73;
+    --accent-fg: 255 255 255;
+    --accent-soft: 232 244 237;
+
+    --danger: 190 70 48;
+    --danger-soft: 253 238 234;
+    --warn: 176 116 27;
+    --warn-soft: 253 245 230;
+    --ok: 47 125 88;
+    --ok-soft: 232 244 237;
+
+    --ring: 47 125 88;
+    --shadow: 0 1px 2px rgb(16 24 20 / 0.04), 0 8px 24px -14px rgb(16 24 20 / 0.14);
+    color-scheme: light;
   }
-  ::selection { @apply bg-moss-600/40 text-moss-50; }
+
+  [data-theme='dark'] {
+    --bg: 13 15 13;
+    --bg-elev: 20 23 20;
+    --surface: 25 29 25;
+    --surface-2: 20 23 20;
+    --surface-3: 33 38 33;
+    --line: 39 45 39;
+    --line-strong: 56 64 56;
+
+    --text: 235 241 236;
+    --text-2: 162 170 164;
+    --text-3: 118 126 120;
+
+    --accent: 92 178 130;
+    --accent-hover: 116 196 152;
+    --accent-fg: 10 20 14;
+    --accent-soft: 24 45 33;
+
+    --danger: 224 139 111;
+    --danger-soft: 52 28 22;
+    --warn: 212 165 92;
+    --warn-soft: 48 38 20;
+    --ok: 92 178 130;
+    --ok-soft: 24 45 33;
+
+    --ring: 92 178 130;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -14px rgb(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+
+  html { -webkit-tap-highlight-color: transparent; }
+  body {
+    @apply bg-bg text-text-2 antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+  ::selection { @apply bg-accent/25 text-text; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
-  ::-webkit-scrollbar-thumb { @apply bg-canvas-line rounded-full; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { @apply rounded-full bg-line-strong; }
+  * { scrollbar-color: rgb(var(--line-strong)) transparent; scrollbar-width: thin; }
 }
 
 @layer components {
-  .panel { @apply rounded-xl border border-canvas-line bg-canvas-card shadow-panel; }
-  .field {
-    @apply w-full rounded-lg border border-canvas-line bg-canvas-soft px-3 py-2
-           text-sm text-moss-50 placeholder:text-bark-500 outline-none
-           focus:border-moss-500 focus:shadow-ring transition;
+  .card {
+    @apply rounded-xl border border-line bg-surface shadow-card;
   }
+
+  .field {
+    @apply w-full rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm
+           text-text placeholder:text-text-3 outline-none transition
+           focus:border-accent focus:ring-2 focus:ring-accent/20
+           disabled:opacity-50;
+  }
+  select.field { @apply cursor-pointer pr-8; }
+
   .btn {
-    @apply inline-flex items-center gap-2 rounded-lg border border-canvas-line
-           bg-canvas-soft px-3 py-2 text-sm text-bark-300 transition
-           hover:border-moss-600 hover:text-moss-50 disabled:opacity-40
-           disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border
+           border-line bg-surface px-3 py-2 text-sm font-medium text-text-2
+           transition select-none
+           hover:border-line-strong hover:bg-surface-2 hover:text-text
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40
+           disabled:pointer-events-none disabled:opacity-40;
   }
   .btn-primary {
-    @apply border-moss-500 bg-moss-500 text-canvas font-medium
-           hover:bg-moss-400 hover:border-moss-400 hover:text-canvas;
+    @apply border-transparent bg-accent text-accent-fg
+           hover:bg-accent-hover hover:text-accent-fg;
   }
-  .chip {
-    @apply inline-flex items-center rounded-full border border-canvas-line
-           px-2 py-0.5 text-[11px] text-bark-400;
+  .btn-ghost { @apply border-transparent bg-transparent hover:bg-surface-2; }
+  .btn-danger { @apply border-transparent bg-danger-soft text-danger hover:bg-danger/15; }
+  .btn-sm { @apply px-2.5 py-1.5 text-[13px]; }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-md border border-line
+           bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-text-2;
   }
-  .chip-moss { @apply border-moss-600/50 bg-moss-900/60 text-moss-200; }
-  .nodeid { @apply font-mono text-[12.5px] text-moss-400; }
-  .label { @apply block text-[11px] uppercase tracking-wide text-bark-500 mb-1.5; }
+  .badge-accent { @apply border-accent/25 bg-accent-soft text-accent; }
+  .badge-danger { @apply border-danger/25 bg-danger-soft text-danger; }
+  .badge-warn { @apply border-warn/25 bg-warn-soft text-warn; }
+
+  /* Segmented control — the shape the theme and language pickers share. */
+  .segment {
+    @apply inline-flex rounded-lg border border-line bg-surface-2 p-0.5;
+  }
+  .segment > button {
+    @apply flex flex-1 items-center justify-center gap-1.5 rounded-[6px] px-2.5
+           py-1 text-[12.5px] font-medium text-text-3 transition
+           hover:text-text-2;
+  }
+  .segment > button[aria-pressed='true'] {
+    @apply bg-surface text-text shadow-sm;
+  }
+
+  .label {
+    @apply mb-1.5 block text-[11px] font-medium uppercase tracking-[0.06em] text-text-3;
+  }
+  .nodeid {
+    @apply font-mono text-[12.5px] text-accent;
+  }
+  .prose-body {
+    @apply whitespace-pre-wrap break-words font-mono text-[12.5px] leading-relaxed text-text-2;
+  }
+
+  .nav-item {
+    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px]
+           text-[13.5px] font-medium text-text-2 transition
+           hover:bg-surface-2 hover:text-text;
+  }
+  .nav-item[aria-current='page'] {
+    @apply bg-accent-soft text-accent;
+  }
+  .nav-group {
+    @apply px-2.5 pb-1.5 pt-4 text-[10.5px] font-semibold uppercase
+           tracking-[0.09em] text-text-3;
+  }
+}
+
+@layer utilities {
+  .animate-rise { animation: rise 0.18s ease-out both; }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
 }

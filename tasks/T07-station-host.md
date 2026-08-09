@@ -1,8 +1,13 @@
 # T07 — Station: self-hostable host (REST + MCP over the forest registry)
 
-status: in-progress (Phase A DONE 2026-08-08 — read-only REST + auth +
-ScopedVine seam, live-verified; Phase B = writes, audit, MCP surface)
-depends-on: nothing. Part J (spec v0.14) governs J.1 surfaces and J.6
+status: in-progress (Phases A and B DONE 2026-08-08 — REST + auth +
+ScopedVine seam, governed writes with principal-stamped commits, the MCP
+mount, per-forest models with catalogue-driven model selection, forest
+creation (J.7), the ingest surface (J.8), and the credential lifecycle
+(J.2.1/J.2.2: password login, session tokens, expiry, revocation, last
+use), all live-verified. Phase C = OIDC/SSO, per-token quotas, rate
+limits.)
+depends-on: nothing. Part J (spec v0.20) governs J.1 surfaces and J.6
 deployment; scoping semantics come from T08.
 
 ## Goal

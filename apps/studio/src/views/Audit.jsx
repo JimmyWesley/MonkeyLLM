@@ -1,47 +1,67 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api } from '../api.js'
-import { Panel, ErrorNote, Spinner, Empty, Chip, Table } from '../components/ui.jsx'
+import { useI18n } from '../i18n.jsx'
+import {
+  Badge, Card, Empty, ErrorNote, Note, Skeleton, Table, Td,
+} from '../design/ui.jsx'
+import { Audit as Log, Refresh, Search } from '../design/icons.jsx'
+import { NeedsCapability, has, useAsync } from './shared.jsx'
 
-export default function Audit({ me }) {
-  const [entries, setEntries] = useState(null)
-  const [error, setError] = useState(null)
+export default function Audit({ grant }) {
+  const { t } = useI18n()
+  const [filter, setFilter] = useState('')
+  const admin = has(grant, 'admin')
+  const log = useAsync(() => api.audit(200).then((r) => r.entries), [], { skip: !admin })
 
-  useEffect(() => {
-    if (!me.admin) return
-    api.audit(200).then((r) => setEntries(r.entries)).catch(setError)
-  }, [me.admin])
-
-  if (!me.admin) {
-    return <Panel><Empty>Reading the audit log needs the <b>admin</b> capability.</Empty></Panel>
+  if (!admin) {
+    return <NeedsCapability message={t('audit.needs_admin')} hint={t('cap.admin')} />
   }
 
+  const rows = (log.data || []).filter(
+    (e) => !filter || e.principal.toLowerCase().includes(filter.toLowerCase()))
+
   return (
-    <Panel
-      title="Audit"
-      subtitle="Reads come from the host log; writes are git commits inside the forest, stamped with the principal that asked."
-    >
-      {error && <ErrorNote error={error} />}
-      {entries === null ? <Spinner label="loading" />
-        : entries.length === 0 ? <Empty>Nothing recorded yet.</Empty> : (
-        <Table head={['when', 'principal', 'forest', 'call', 'arguments', 'result', 'commit']}>
-          {entries.map((e, i) => (
-            <tr key={i}>
-              <td className="px-2 py-1.5 whitespace-nowrap text-[12px] text-bark-500">{e.ts}</td>
-              <td className="px-2 py-1.5 text-moss-50">{e.principal}</td>
-              <td className="px-2 py-1.5 text-bark-400">{e.forest}</td>
-              <td className="px-2 py-1.5"><span className="font-mono text-[12px] text-moss-400">{e.primitive}</span></td>
-              <td className="px-2 py-1.5 max-w-[22rem] truncate font-mono text-[11.5px] text-bark-500"
-                  title={e.args}>{e.args}</td>
-              <td className="px-2 py-1.5">
-                {e.result === 'ok' ? <Chip tone="moss">ok</Chip> : <Chip>error</Chip>}
-              </td>
-              <td className="px-2 py-1.5 font-mono text-[11.5px] text-bark-500">
-                {(e.commit_sha || '').slice(0, 8)}
-              </td>
-            </tr>
-          ))}
-        </Table>
-      )}
-    </Panel>
+    <div className="space-y-4">
+      <Card title={t('audit.title')} subtitle={t('audit.sub')} icon={Log}
+            actions={<button className="btn btn-sm" onClick={log.reload}>
+              <Refresh size={14} /> {t('common.refresh')}
+            </button>}>
+        <label className="relative mb-4 block max-w-xs">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2
+                                       -translate-y-1/2 text-text-3" />
+          <input className="field pl-9 !py-1.5 text-[13px]" value={filter}
+                 placeholder={t('audit.filter')}
+                 onChange={(e) => setFilter(e.target.value)} />
+        </label>
+
+        {log.busy ? <Skeleton rows={5} />
+          : log.error ? <ErrorNote error={log.error} onRetry={log.reload} />
+          : rows.length === 0 ? <Empty icon={Log}>{t('audit.none')}</Empty> : (
+          <Table head={[t('audit.when'), t('audit.who'), t('audit.what'), t('audit.where'),
+                        t('audit.result'), t('audit.size'), t('audit.commit')]}>
+            {rows.map((e, i) => (
+              <tr key={i}>
+                <Td className="whitespace-nowrap font-mono text-[11.5px] text-text-3">
+                  {String(e.at || '').replace('T', ' ').slice(0, 19)}
+                </Td>
+                <Td className="font-medium text-text">{e.principal}</Td>
+                <Td><Badge tone="accent">{e.primitive}</Badge></Td>
+                <Td className="font-mono text-[11.5px] text-text-3">{e.forest}</Td>
+                <Td>
+                  {e.result === 'ok' ? <Badge>ok</Badge>
+                                     : <Badge tone="danger">{e.result}</Badge>}
+                </Td>
+                <Td className="tabular-nums text-text-3">{e.size}</Td>
+                <Td className="font-mono text-[11.5px] text-text-3">
+                  {e.commit_sha ? e.commit_sha.slice(0, 7) : '—'}
+                </Td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Card>
+
+      <Note>{t('audit.no_bodies')}</Note>
+    </div>
   )
 }
