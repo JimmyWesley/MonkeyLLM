@@ -428,20 +428,35 @@ class IngestReport:
     stale: list[str] = field(default_factory=list)
     unsupported: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Dry-run only (spec J.8.1): the passports a real run would have planted,
+    # in the order it would have planted them. Empty on every ordinary run,
+    # so `as_dict` keeps reporting the same shape it always did.
+    drafts: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {k: list(v) for k, v in self.__dict__.items()}
 
 
 class Gardener:
+    """Adopts a directory into forest (Part G).
+
+    `dry_run` makes the whole object incapable of writing: it converts,
+    curates and proposes exactly as a real run does, and then collects the
+    drafts instead of planting them (spec J.8.1). The flag lives here rather
+    than on `adopt`/`sync` on purpose — a per-call flag is forgotten by the
+    next call somebody adds, and the guarantee this exists to give ("nothing
+    was written") has to hold for the object, not for one entry point.
+    """
+
     def __init__(self, vine: Vine, converters: list | None = None,
-                 hooks: list[Callable] | None = None):
+                 hooks: list[Callable] | None = None, *, dry_run: bool = False):
         self.vine = vine
         self.forest = vine.forest
         self.config = self._load_config()
         self.converters = (converters if converters is not None
                            else discover_converters(self.config))
         self.hooks = hooks if hooks is not None else discover_hooks()
+        self.dry_run = bool(dry_run)
 
     # -- config (G.6) -------------------------------------------------------
 
@@ -455,6 +470,8 @@ class Gardener:
         return {}
 
     def _save_config(self) -> None:
+        if self.dry_run:
+            return  # a preview that recorded a source root would misdirect
         p = self._config_path()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(yaml.safe_dump(self.config, allow_unicode=True, sort_keys=False),
@@ -497,6 +514,11 @@ class Gardener:
             if rel_dir.parts else "_index"
         name = rel_dir.parts[-1] if rel_dir.parts else dest
         title = str(name).replace("_", " ").replace("-", " ")
+        if self.dry_run:
+            # `branches` becomes "would create" — the id is still returned so
+            # the drafts below name the parent the real run would give them.
+            report.branches.append(branch_id)
+            return branch_id
         self.vine.plant({
             "id": branch_id,
             "type": "branch",
@@ -517,6 +539,8 @@ class Gardener:
         """G.4.4: synthesize branch summaries bottom-up (deepest first) from
         the children's entry lines. Writes through C.8 graft, so parent-entry
         propagation and `.md`-only commits are inherited."""
+        if self.dry_run:
+            return {"rolled": [], "fallbacks": [], "skipped": 0}
         rolled: list[str] = []
         fallbacks: list[str] = []
         skipped = 0
@@ -578,11 +602,14 @@ class Gardener:
         Returns (payload, payload_type | None, payload_hash)."""
         branch_dir = self.forest.path_for(branch_id).parent
         assets = branch_dir / ASSETS_DIR
-        assets.mkdir(parents=True, exist_ok=True)
         data = src_file.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
         name = f"{digest[:8]}-{slugify(src_file.stem)}{src_file.suffix.lower()}"
-        (assets / name).write_bytes(data)
+        # The digest and the name are computed either way, so a dry run's
+        # draft carries the same payload fields a real one would write.
+        if not self.dry_run:
+            assets.mkdir(parents=True, exist_ok=True)
+            (assets / name).write_bytes(data)
         ptype = PAYLOAD_TYPE_BY_EXT.get(src_file.suffix.lower())
         return f"{ASSETS_DIR}/{name}", ptype, digest
 
@@ -619,7 +646,12 @@ class Gardener:
 
         branch_id = self._ensure_branch(rel.parent, dest, report)
         node_id = self._node_id(rel, dest)
-        if self.forest.exists(node_id):
+        # A real run collides against nodes that now exist; a dry run has to
+        # count the drafts too, or two previewed files that slug the same way
+        # would both claim the id and only one of them would be right.
+        taken = self.forest.exists(node_id) or (
+            self.dry_run and any(d["id"] == node_id for d in report.drafts))
+        if taken:
             node_id = f"{node_id}-{hashlib.sha256(rel.as_posix().encode()).hexdigest()[:6]}"
 
         st = f.stat()
@@ -665,6 +697,9 @@ class Gardener:
         if conversion.kind != "dataset":
             draft = self._apply_content_policy(draft, conversion.title,
                                                is_text_source)
+        if self.dry_run:
+            report.drafts.append(draft)
+            return
         try:
             self.vine.plant(draft)
             report.planted.append(node_id)
@@ -686,6 +721,8 @@ class Gardener:
         return draft
 
     def _write_body_cache(self, node_id: str, body: str) -> None:
+        if self.dry_run:
+            return
         p = self.forest.body_cache_path(node_id)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body, encoding="utf-8", newline="\n")
@@ -797,6 +834,13 @@ class Gardener:
             return
         except Exception as e:
             report.errors.append(f"{node_id}: converter error: {e}")
+            return
+
+        if self.dry_run:
+            # An update refreshes the body and keeps the curated scent (G.3),
+            # so there is no passport to review — reporting that it *would*
+            # be refreshed is the whole preview.
+            report.updated.append(node_id)
             return
 
         node = self.forest.read(node_id)

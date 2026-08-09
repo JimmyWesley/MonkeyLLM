@@ -565,7 +565,7 @@ def build_app(
         the `ingest` capability, a scope check on where it may write, and a
         staging area for operators who have a browser and no shell."""
         from monkeyllm.gardener import Gardener, discover_hooks
-        from monkeyllm_station import inference
+        from monkeyllm_station import compose, inference
 
         if not policy.grants("ingest"):
             return VineError(E_FORBIDDEN, "ingest requires the 'ingest' capability",
@@ -583,6 +583,27 @@ def build_app(
         if mode not in ("adopt", "sync", "upload", "compose"):
             return VineError(E_SCHEMA, f"unknown ingest mode: {mode}",
                              hint="One of: adopt, sync, upload, compose.").to_dict()
+
+        # The two phases of J.8.1. `stage` previews, `draft` accepts a
+        # preview; the review itself is stateless, because the alternative is
+        # server-side drafts with a lifetime, an owner and a garbage
+        # collector, and every field has to be re-validated on the way back
+        # regardless of who held it in the meantime.
+        stage = bool(payload.get("stage"))
+        approved = payload.get("draft")
+        if approved is not None and not isinstance(approved, dict):
+            return VineError(E_SCHEMA, "draft must be an object").to_dict()
+        if stage and approved is not None:
+            # Two intentions in one body; picking either would be guessing.
+            return VineError(
+                E_SCHEMA, "a request may stage or accept, not both",
+                hint="Send stage:true to preview, then the returned draft to "
+                     "accept it.").to_dict()
+        if (stage or approved is not None) and mode != "compose":
+            return VineError(
+                E_SCHEMA, f"review is not available for mode '{mode}'",
+                hint="adopt, sync and upload are batches; there is no single "
+                     "draft to decide on. Use mode 'compose'.").to_dict()
 
         if mode == "compose":
             # Authored prose is a source like any other (J.8): it becomes one
@@ -657,7 +678,18 @@ def build_app(
 
             curator = inference.curator_from_binding(
                 vine, policy, registry.binding(forest, "ingest"))
-            gardener = Gardener(vine, hooks=discover_hooks() + ([curator] if curator else []))
+            # Accepting a reviewed draft replaces the model's curation with
+            # the reviewer's, as an ordinary `on_curate` hook (J.8.1). The
+            # Curator object is still built — `rollup` below is a different
+            # write about a different node — but it does not curate this one
+            # again: it would answer differently, and what shipped would then
+            # not be what was approved.
+            hooks = discover_hooks()
+            if approved is not None:
+                hooks.append(compose.approval_hook(approved, vine, policy))
+            elif curator is not None:
+                hooks.append(curator)
+            gardener = Gardener(vine, hooks=hooks, dry_run=stage)
 
             if mode == "upload" and gardener.config.get("source_root") == \
                     Path(source).resolve().as_posix():
@@ -681,7 +713,7 @@ def build_app(
                                        path=payload.get("path"))
             else:
                 report = gardener.adopt(source, dest=dest)
-            rollup = gardener.rollup(curator) if curator else None
+            rollup = gardener.rollup(curator) if (curator and not stage) else None
         except VineError as e:
             return e.to_dict()
         except Exception as e:
@@ -703,12 +735,22 @@ def build_app(
             stats["rejected_because"] = curator.last_reject
             stats["last_reply"] = curator.last_reply or ""
         written = bool(stats and (stats["llm_summaries"] or stats["branch_rollups"]))
+        if stage:
+            # Ids alone would make the reviewer open another console to find
+            # out what they are agreeing to (J.8.1).
+            report["drafts"] = compose.review_of(vine, policy, report["drafts"])
+        else:
+            report.pop("drafts", None)  # an ordinary ingest has none
         return {
             **report, "mode": mode, "staged": staged,
+            **({"preview": True} if stage else {}),
             "rollup": rollup,
             # A batch is many commits; the Station reports the range instead of
-            # amending the last one and claiming the whole ingest (J.8).
-            "commit": after or None, "commit_before": before or None,
+            # amending the last one and claiming the whole ingest (J.8). A
+            # preview produced none, and reporting HEAD unchanged as `commit`
+            # would put a sha in the audit log for a call that wrote nothing.
+            "commit": None if stage else (after or None),
+            "commit_before": before or None,
             "curated": written, "bound": curator is not None, "curation": stats,
         }
 

@@ -11,7 +11,7 @@ Conventions:
 - Language policy: **everything in English** — task files, code comments,
   docstrings, docs, CLI output. See `T02-english-normalization.md` for the
   one-time cleanup; new work must already comply.
-- The spec is the truth (`docs/monkeyllm-spec-v0.20.md`): contract changes
+- The spec is the truth (`docs/monkeyllm-spec-v0.24.md`): contract changes
   require a new spec version *before* code, and that rule applies to tasks too.
 
 | Task | Title | Status |
@@ -25,4 +25,5 @@ Conventions:
 | T07 | Station: self-hostable host (REST + MCP over the registry) | in-progress (Phases A+B done 2026-08-08: REST + authenticated MCP, governed writes with principal-stamped commits, audit log, per-forest model bindings; OIDC/quotas + ingest endpoints remain) |
 | T08 | ScopedVine: branch-level policies (the "RLS" of forests) | done (2026-08-08: J.3 matrix across every primitive and both surfaces; leak suite green — the whole-response sweep caught trail/coverage/degree/scanned_nodes) |
 | T09 | Studio: the web face of the Station | done (2026-08-09: every console shipped — Forest Views closed the trails item (T10), Health + snapshots close the last one (spec v0.23 J.13). Curation review queue for 0.3 proposals carried to T10.1) |
-| T10 | Studio Forest Views: graph mode, files mode, governed editing, Write tab | done (2026-08-09: spec v0.22 → J.11 map projections + J.5.4 + J.8 compose; graph/files/editor/Write shipped, F.25 suite green; review-before-planting carried to T10.1) |
+| T10 | Studio Forest Views: graph mode, files mode, governed editing, Write tab | done (2026-08-09: spec v0.22 → J.11 map projections + J.5.4 + J.8 compose; graph/files/editor/Write shipped, F.25 suite green) |
+| T10.1 | Compose with review: the passport before the plant | done (2026-08-09: spec v0.24 → J.8.1 two-phase compose + F.27; `Gardener(dry_run=True)`, approval-as-`on_curate`, review card in the Write tab) |

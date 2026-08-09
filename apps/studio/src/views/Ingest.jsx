@@ -79,6 +79,7 @@ export default function Ingest({ forest, grant, goto }) {
   const [dragging, setDragging] = useState(false)
   const picker = useRef(null)
   const folderPicker = useRef(null)
+  const staging = useRef(0)
 
   /* The composer (J.8's `compose`). Mounted once, not per tab switch: a
      draft that vanished because somebody looked at the Upload tab would be
@@ -156,23 +157,55 @@ export default function Ingest({ forest, grant, goto }) {
     try {
       // `bytes` is display-only; the wire contract is {name, text|b64}.
       const payload = files.map(({ bytes, ...rest }) => rest)
+      // Composing does NOT publish (J.8.1): it stages, and what comes back
+      // is a proposal. The text travels with the review so the accepting
+      // call sends the same bytes the Curator read — re-serialising the
+      // editor at publish time would let a stray keystroke change the
+      // document out from under the passport that was approved.
+      const composition = {
+        mode: 'compose', title: title.trim(),
+        text: turndown.turndown(composer?.getHTML() || ''),
+        dest: dest || undefined,
+      }
       const body = mode === 'upload'
         ? { mode, files: payload, dest: dest || undefined }
         : mode === 'adopt' ? { mode, path, dest: dest || undefined }
-        : mode === 'compose'
-          ? { mode, title: title.trim(),
-              text: turndown.turndown(composer?.getHTML() || ''),
-              dest: dest || undefined }
+        : mode === 'compose' ? { ...composition, stage: true }
         : { mode: 'sync' }
       const report = await api.ingest(forest, body)
-      setState({ busy: false, report })
       // The report is the fresher fact about what is bound: a model bound
       // from another tab (or from Models, moments ago) would otherwise leave
       // this card contradicting the report right below it.
       bindings.reload()
+      if (mode === 'compose') {
+        // `stamp` remounts the review card. Keying it on the draft id would
+        // not: staging the same title twice returns the same id, so an
+        // edited text would come back under the previous review's summary,
+        // tags and unticked boxes — the reviewer would approve a passport
+        // they never saw.
+        staging.current += 1
+        setState({ busy: false,
+                   review: { ...composition, ...report, stamp: staging.current } })
+        return  // nothing has been planted yet; the composer keeps its text
+      }
+      setState({ busy: false, report })
       if (mode === 'upload') { setFiles([]); setSkipped([]) }
-      if (mode === 'compose') { setTitle(''); composer?.commands.clearContent() }
     } catch (error) { setState({ busy: false, error }) }
+  }
+
+  /** Phase two: the reviewer accepted, with whatever edits they made. */
+  async function publish(draft) {
+    const { title: t0, text, dest: d0 } = state.review
+    setState({ ...state, busy: true })
+    try {
+      const report = await api.ingest(forest, {
+        mode: 'compose', title: t0, text, dest: d0, draft,
+      })
+      setState({ busy: false, report })
+      setTitle('')
+      composer?.commands.clearContent()
+      bindings.reload()
+    } catch (error) { setState({ ...state, busy: false, error }) }
   }
 
   const composed = (composer?.getText() || '').trim()
@@ -310,7 +343,7 @@ export default function Ingest({ forest, grant, goto }) {
                 {mode === 'sync' ? <Refresh size={14} />
                   : mode === 'compose' ? <Pencil size={14} /> : <Upload size={14} />}
                 {state.busy ? t('ingest.running')
-                  : mode === 'compose' ? t('ingest.publish') : t('ingest.start')}
+                  : mode === 'compose' ? t('ingest.review') : t('ingest.start')}
               </button>
             </div>
           </form>
@@ -318,8 +351,13 @@ export default function Ingest({ forest, grant, goto }) {
 
         {state.busy && <Card><Spinner label={t('ingest.running')} /></Card>}
         {state.error && <Card><ErrorNote error={state.error} /></Card>}
+        {state.review && !state.busy && (
+          <ReviewDraft key={state.review.stamp} review={state.review}
+                       onPublish={publish}
+                       onDiscard={() => setState({})} />
+        )}
         {state.report && <Report report={state.report} goto={goto} />}
-        {!state.busy && !state.error && !state.report && (
+        {!state.busy && !state.error && !state.report && !state.review && (
           <Card><Empty icon={Upload}>{t('ingest.empty')}</Empty></Card>
         )}
       </div>
@@ -387,6 +425,124 @@ function Composer({ editor }) {
         <EditorContent editor={editor} />
       </div>
     </div>
+  )
+}
+
+/** The engine's own budget for a summary (models.validate_summary): 60
+ *  tokens, counted the way the parser counts them — whitespace-separated. */
+const SUMMARY_TOKENS = 60
+const countTokens = (s) => String(s || '').split(/\s+/).filter(Boolean).length
+
+/** Phase one's answer, made decidable (J.8.1).
+ *
+ *  What is under review is the *passport*, not the prose: the summary is the
+ *  scent every later hop navigates by, and each proposal is something the
+ *  Ranger will spend the next month promoting or pruning. Both are cheap to
+ *  fix here and expensive to fix in a node that already exists.
+ *
+ *  Dropping a proposal is a checkbox rather than a delete button because
+ *  nothing is destroyed by unchecking it — the draft is not stored anywhere,
+ *  and Discard throws the whole thing away.
+ */
+function ReviewDraft({ review, onPublish, onDiscard }) {
+  const { t } = useI18n()
+  const draft = review.drafts?.[0]
+  const [summary, setSummary] = useState(draft?.summary || '')
+  const [tags, setTags] = useState((draft?.tags || []).join(', '))
+  const [dropped, setDropped] = useState(() => new Set())
+
+  if (!draft) {
+    // The Gardener converted nothing — an empty document, or a converter
+    // that refused it. Its own errors are the answer, not a blank card.
+    return (
+      <Card title={t('ingest.review_title')}>
+        <ErrorNote error={{ message: review.errors?.[0] || t('ingest.review_none') }} />
+        <button className="btn btn-sm mt-3" onClick={onDiscard}>{t('common.close')}</button>
+      </Card>
+    )
+  }
+
+  const links = draft.links || []
+  const tokens = countTokens(summary)
+  const tooLong = tokens > SUMMARY_TOKENS
+
+  function accept() {
+    onPublish({
+      ...draft,
+      summary,
+      tags: tags.split(',').map((s) => s.trim()).filter(Boolean),
+      links: links.filter((l) => !dropped.has(l.target)),
+    })
+  }
+
+  return (
+    <Card title={t('ingest.review_title')} subtitle={t('ingest.review_sub')}
+          icon={Pencil}
+          actions={<Badge tone="warn">{t('ingest.review_pending')}</Badge>}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge>id: {draft.id}</Badge>
+        <Badge>type: {draft.type}</Badge>
+        <Badge>{t('ingest.review_parent', { id: draft.parent })}</Badge>
+      </div>
+
+      <div className="mt-3">
+        <Field as="textarea" rows={3} label={t('ingest.review_summary')}
+               value={summary} hint={t('editor.summary_count', { n: tokens,
+                                                                 max: SUMMARY_TOKENS })}
+               error={tooLong ? t('editor.summary_long') : undefined}
+               onChange={(e) => setSummary(e.target.value)} />
+      </div>
+      <div className="mt-3">
+        <Field label={t('editor.tags')} value={tags} hint={t('editor.tags_hint')}
+               onChange={(e) => setTags(e.target.value)} />
+      </div>
+
+      <div className="mt-4">
+        <div className="label">{t('ingest.review_links')}</div>
+        {links.length === 0 ? (
+          <p className="text-[12.5px] text-text-3">{t('ingest.review_no_links')}</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {links.map((l) => (
+              <li key={l.target}
+                  className="flex items-start gap-2 rounded-lg border border-line
+                             bg-surface-2 px-2.5 py-2">
+                <input type="checkbox" className="mt-1" checked={!dropped.has(l.target)}
+                       onChange={(e) => {
+                         const next = new Set(dropped)
+                         if (e.target.checked) next.delete(l.target)
+                         else next.add(l.target)
+                         setDropped(next)
+                       }} />
+                <div className="min-w-0 flex-1">
+                  {/* The title, not just the id: agreeing to a link whose
+                      target you cannot name is not a review. */}
+                  <div className="truncate text-[13px] text-text">
+                    {l.target_title || l.target}
+                  </div>
+                  <div className="truncate font-mono text-[11.5px] text-text-3">
+                    {l.target}
+                  </div>
+                  {l.note && (
+                    <div className="mt-0.5 text-[12px] text-text-2">{l.note}</div>
+                  )}
+                </div>
+                <Badge>{l.confidence}</Badge>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <Note className="mt-4">{t('ingest.review_note')}</Note>
+
+      <div className="mt-4 flex justify-end gap-2">
+        <button className="btn" onClick={onDiscard}>{t('ingest.review_discard')}</button>
+        <button className="btn btn-primary" onClick={accept} disabled={tooLong}>
+          <Pencil size={14} /> {t('ingest.publish')}
+        </button>
+      </div>
+    </Card>
   )
 }
 

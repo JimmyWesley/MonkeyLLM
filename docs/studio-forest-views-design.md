@@ -153,6 +153,13 @@ reviews (accept/reject per link, adjust fields), then the node lands as a
 The Ranger manages the 0.3 population afterwards (H.2). Nothing is planted
 without review.
 
+*Landed in two steps.* v0.22 shipped the tab as publish-then-report, because
+"nothing is planted without review" is a **contract** shape and not a console
+one — the Gardener converted, curated and planted in one flow, with nothing
+in between to show. v0.24's J.8.1 added the two phases (`stage` → `draft`)
+and the dry-run Gardener underneath them, and the paragraph above is now
+true as written. See `tasks/T10.1-compose-review.md`.
+
 ## Contract additions (landed in spec v0.22)
 
 1. `GET /v1/forests/{forest}/graph` — scoped Catalog projection joined with
