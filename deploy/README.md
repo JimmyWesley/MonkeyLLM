@@ -26,22 +26,31 @@ cp .env.example .env      # uncomment and fill in what you use
 docker compose up --build -d
 ```
 
-```bash
-docker compose logs station | grep "API key"
-```
+Then open `http://localhost:8800`. A Station with nobody in it shows the
+**setup screen** (spec J.2.4): pick a username and password and you are the
+**owner** — administrator of every forest, present and future, including
+before the first one exists. The screen also offers to start you with a
+demo forest, an empty one, or nothing at all.
 
-The last command shows the bootstrap `admin` key the first boot mints —
-store it, it is printed exactly once and only its digest is kept. Open
-`http://localhost:8800` for the Studio. Setting `MONKEYLLM_STATION_ADMIN`
-and `MONKEYLLM_STATION_PASSWORD` in `.env` additionally enables the
-console's login form (break-glass account, never stored).
+Setup exists only while the registry holds no credential, and it closes
+permanently the moment it is used. From then on the console shows the
+ordinary sign-in.
+
+**You do not need `MONKEYLLM_STATION_ADMIN`.** Those two variables are a
+break-glass account held in the environment; setting them *replaces* the
+setup screen rather than complementing it, because two doors competing for
+the first identity is a race nobody wants on a public URL. Leave them unset
+unless you specifically want a credential that lives in the environment and
+is rotated by restarting.
 
 ### The first forest on a clean deployment
 
-Spec J.7 lets a deployment reach its *second* forest without shell access:
-creating one through the API requires `admin` on an existing forest, so on
-an empty volume the first forest is born with the engine's own CLI inside
-the container:
+Setup will offer to create it. If you skipped that, the owner creates one
+from *Studio → the empty state*, or over the API — `POST /v1/admin/forests`
+accepts the owner on an empty registry precisely so no deployment needs a
+shell to become usable.
+
+The container CLI remains available for scripted provisioning:
 
 ```bash
 docker compose exec station vine init --forest /forests/handbook --title "Handbook"
@@ -68,8 +77,6 @@ works. From here on, forests are created from *Studio → Overview* or
    catalogue with commentary is [.env.example](../.env.example)):
 
    ```dotenv
-   MONKEYLLM_STATION_ADMIN=jimmy
-   MONKEYLLM_STATION_PASSWORD=something long and unguessable
    MONKEYLLM_STATION_ALLOWED_HOSTS=monkeyllm.dev.example.com
    MONKEYLLM_LLM_ENDPOINT=https://openrouter.ai/api/v1
    MONKEYLLM_LLM_API_KEY=sk-or-...
@@ -79,12 +86,14 @@ works. From here on, forests are created from *Studio → Overview* or
 3. **Domain** — in the *Domains* tab add your domain pointing at service
    `station`, container port `8800`, HTTPS on. Traefik reaches the
    container over `dokploy-network`; no host port is published.
-4. **Deploy** — the first deployment's logs print the bootstrap `admin`
-   API key once. Store it.
-5. **First forest** — same as locally, but through Dokploy's container
-   terminal (*... → Terminal* on the `station` service): run the
-   `vine init` / `station key` commands from
-   [the first-forest section](#the-first-forest-on-a-clean-deployment).
+4. **Deploy**, then open your domain. The setup screen is waiting: create
+   the owner, choose whether to start with a demo forest, and you are in.
+   No container terminal, no key from the logs, no `vine init`.
+
+   Note the ordering — setup is open until somebody uses it, so point the
+   domain at the service and complete it yourself before announcing the URL.
+   The deployment logs still print a bootstrap API key on first boot; it is
+   for scripted access, and it is not needed to reach the console.
 
 Provider keys set this way arrive pre-configured in *Studio → Models*,
 marked "from the environment", and are **never copied into the registry** —
