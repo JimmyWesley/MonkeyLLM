@@ -796,7 +796,7 @@ def build_app(
         rows = [
             row for row in conn.execute(
                 "SELECT id, kind, type, title, summary, tags, parent, coverage, "
-                "body_tokens, payload, payload_type, updated, stale "
+                "body_tokens, payload, payload_type, updated "
                 "FROM nodes ORDER BY id")
             if in_region(row["id"])
         ]
@@ -842,7 +842,12 @@ def build_app(
                 "parent": row["parent"] if row["parent"] in keep else None,
                 "coverage": row["coverage"], "body_tokens": row["body_tokens"],
                 "payload": row["payload"], "payload_type": row["payload_type"],
-                "updated": row["updated"], "stale": bool(row["stale"]),
+                "updated": row["updated"],
+                # `nodes.stale` is deliberately NOT here. In the engine it
+                # means "this node's vector needs re-embedding after a write"
+                # (Part K bookkeeping), not "this node is unhealthy" — and a
+                # field of that name on a map would be read as the second by
+                # everyone who has not read the Catalog.
                 "degree": degree.get(row["id"], 0),
                 "heat": heat.get(row["id"], 0.0),
             })
