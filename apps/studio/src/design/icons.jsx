@@ -146,8 +146,12 @@ export const Star = ({ filled = false, ...p }) => (
 export const PanelLeft = (p) => (
   <S {...p}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9.5 4v16" /></S>
 )
+export const Plug = (p) => (
+  <S {...p}><path d="M9 2.5V7M15 2.5V7" /><path d="M6.5 7h11v3a5.5 5.5 0 01-11 0z" /><path d="M12 15.5V18a3 3 0 01-3 3H6.5" /></S>
+)
 
 export const CONSOLE_ICON = {
   overview: Overview, ask: Ask, explore: Explore, playground: Playground,
   data: Data, ingest: Ingest, models: Models, people: Users, audit: Audit,
+  integrations: Plug,
 }
