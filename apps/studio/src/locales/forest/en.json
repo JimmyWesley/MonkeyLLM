@@ -1,0 +1,14 @@
+{
+  "forest.created": "Forest \"{id}\" is ready. You have full access to it.",
+  "forest.id": "Identifier",
+  "forest.id_hint": "Lowercase letters, digits, \"-\" and \"_\". It becomes the folder name and cannot be changed later.",
+  "forest.new": "New forest",
+  "forest.new_sub": "An empty forest: a master index, the dialect, and its own git history.",
+  "forest.new_title": "Create a forest",
+  "forest.none": "No forest has been granted to this key yet.",
+  "forest.none_admin": "Create your first forest to get started.",
+  "forest.summary": "What it is for",
+  "forest.switch": "Switch forest",
+  "forest.title": "Name",
+  "forest.title_hint": "Shown as the heading of the master index."
+}

@@ -1,0 +1,19 @@
+{
+  "overview.bind_model": "Bind a model",
+  "overview.branches": "Branches",
+  "overview.can": "What you can do here",
+  "overview.cannot": "What you cannot do here",
+  "overview.datasets": "Datasets",
+  "overview.hello": "This forest at a glance",
+  "overview.no_model": "No model is bound to this forest yet, so Ask cannot answer. Everything else works.",
+  "overview.nodes": "Nodes in reach",
+  "overview.roots": "You start from",
+  "overview.scope": "Your scope",
+  "overview.scope_all": "Whole forest",
+  "overview.scope_n": "{n} branch(es)",
+  "overview.start": "Start here",
+  "overview.start_ask": "Ask a question in plain language",
+  "overview.start_explore": "Look around the tree",
+  "overview.start_ingest": "Add your own documents",
+  "overview.sub": "Everything below is what your key can reach — nothing is hidden behind a filter."
+}

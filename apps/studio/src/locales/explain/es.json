@@ -1,0 +1,18 @@
+{
+  "explain.calls": "Llamadas al modelo",
+  "explain.cost": "Coste",
+  "explain.cost_unknown": "Este proveedor no publica precio, así que el coste es desconocido — no es cero.",
+  "explain.entry": "Búsqueda de entrada",
+  "explain.entry_bm25": "BM25",
+  "explain.entry_hybrid": "híbrida (RRF)",
+  "explain.hop_n": "#{n}",
+  "explain.model": "Modelo",
+  "explain.retrieval": "Bosque",
+  "explain.server": "Suma de los pasos",
+  "explain.steps": "Llamadas",
+  "explain.sub": "Cada llamada que hizo la respuesta, y lo que costó cada una.",
+  "explain.title": "Cómo se ejecutó",
+  "explain.tokens_in": "Tokens de entrada",
+  "explain.tokens_out": "Tokens de salida",
+  "explain.transport": "HTTP y JSON"
+}

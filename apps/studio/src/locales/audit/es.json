@@ -1,0 +1,15 @@
+{
+  "audit.commit": "Commit",
+  "audit.filter": "Filtrar por persona",
+  "audit.needs_admin": "Leer el log de auditoría exige la capacidad de admin.",
+  "audit.no_bodies": "Los argumentos se guardan como digest, nunca completos: el log registra acceso, no contenido.",
+  "audit.none": "Nada registrado todavía.",
+  "audit.result": "Resultado",
+  "audit.size": "Tamaño",
+  "audit.sub": "Las lecturas quedan aquí; las escrituras son commits en el git del propio bosque. Ninguna de las dos registra contenido.",
+  "audit.title": "Auditoría",
+  "audit.what": "Llamada",
+  "audit.when": "Cuándo",
+  "audit.where": "Bosque",
+  "audit.who": "Quién"
+}

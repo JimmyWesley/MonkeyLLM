@@ -1,0 +1,5 @@
+{
+  "session.admin": "Administrator",
+  "session.member": "Member",
+  "session.signout": "Sign out"
+}
