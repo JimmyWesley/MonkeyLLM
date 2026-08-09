@@ -50,9 +50,9 @@ async def open_mcp_session(url: str | None, forest: str | None):
     from mcp import ClientSession
 
     if url:
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client
 
-        async with streamablehttp_client(url) as (read, write, _):
+        async with streamable_http_client(url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
@@ -78,7 +78,7 @@ async def call_tool(session, tool: str, args: dict) -> dict:
     error envelope so the model sees the same shape either way."""
     r = await session.call_tool(tool, args)
     text = r.content[0].text if r.content else "{}"
-    if r.isError:
+    if r.is_error:
         return {"error": {"code": "E_SCHEMA", "message": text[:300]}}
     try:
         return json.loads(text)
