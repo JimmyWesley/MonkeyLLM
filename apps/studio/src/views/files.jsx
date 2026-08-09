@@ -554,7 +554,7 @@ function Inspector({ forest, node, meta, onOpen }) {
         {digest.busy ? <Skeleton rows={5} />
           : digest.error ? <ErrorNote error={digest.error} onRetry={digest.reload} />
           : !d ? null
-          : tab === 'passport' ? <Passport d={d} meta={meta} onOpen={onOpen} />
+          : tab === 'passport' ? <Passport d={d} onOpen={onOpen} />
           : tab === 'index' ? <IndexEntry forest={forest} d={d} />
           : <Trails meta={meta} d={d} />}
       </div>
@@ -562,14 +562,11 @@ function Inspector({ forest, node, meta, onOpen }) {
   )
 }
 
-function Passport({ d, meta, onOpen }) {
+function Passport({ d, onOpen }) {
   const { t } = useI18n()
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge tone="accent">{d.type}</Badge>
-        {meta?.stale && <Badge tone="warn">{t('files.stale')}</Badge>}
-      </div>
+      <Badge tone="accent">{d.type}</Badge>
       <div className="nodeid break-all">{d.id}</div>
       <p className="text-[13px] leading-relaxed text-text">{d.summary}</p>
       {!!d.tags?.length && (

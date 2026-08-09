@@ -32,6 +32,11 @@ normative about it is captured here and in the spec.
   sketch showed a review step before planting; what shipped plants and then
   shows the report. Reviewing the Curator's proposal *before* it lands wants
   a two-phase ingest, which is contract, and it is logged as a follow-up.
+- **No `stale` badge.** The sketch listed it as a health warning. In the
+  engine `nodes.stale` means "this node's vector needs re-embedding after a
+  write" (Part K bookkeeping), so every freshly-edited node wore it and it
+  read as damage. The field is not published by `/graph` at all: a name that
+  invites that misreading does not belong on a map.
 - **No Monaco.** The source view is a plain preformatted block. Monaco is an
   editor, and this view is deliberately not one: the editing door is `graft`.
   Shipping a code editor to render read-only text would have been the
