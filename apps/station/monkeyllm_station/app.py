@@ -18,6 +18,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -74,6 +75,12 @@ MAP_MAX = 10000
 # check is a whitelist and not a blacklist of the escapes we thought of.
 FOREST_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 
+# The owner's password governs every forest present and future (J.2.4), and
+# it is set on a screen with no administrator behind it to advise. A floor is
+# the least a deployment can do; anything more opinionated belongs to the
+# operator's own policy, not to the host.
+MIN_OWNER_PASSWORD = 12
+
 # Uploaded documents are a source, not content: they stage under the
 # forest's disposable `_derived/` (gitignored, A.3.1) and become nodes only
 # by going through the same converters and commits as any adopted folder.
@@ -99,6 +106,19 @@ STATUS_BY_CODE = {
 def _envelope(err: VineError, status: int | None = None) -> JSONResponse:
     return JSONResponse(err.to_dict(),
                         status_code=status or STATUS_BY_CODE.get(err.code, 400))
+
+
+def _no_such_endpoint(path: str) -> JSONResponse:
+    """The answer for a path under `/v1` that matches nothing.
+
+    One function rather than one string per caller, because J.2.4 requires a
+    *closed* setup route to be indistinguishable from a path that was never
+    routed — and two copies of a message drift the first time one is edited.
+    `path` is the tail after `/v1`, which is what the catch-all reports.
+    """
+    return _envelope(VineError(
+        E_NOT_FOUND, f"no such endpoint: {path}",
+        hint="Check the method too: several /v1/admin routes are POST-only."))
 
 
 def _unknown_forest(forest: str) -> JSONResponse:
@@ -294,6 +314,11 @@ def build_app(
         return principal, None
 
     def is_admin(principal: str, forest: str | None = None) -> bool:
+        # The owner bit (J.2.4) is authority over every forest present and
+        # future, so it answers before the grants are even read — including
+        # when there are no forests, which is the state it exists for.
+        if registry.is_owner(principal):
+            return True
         grants = registry.grants_of(principal)
         if forest is not None:
             grants = [g for g in grants if g["forest"] == forest]
@@ -306,6 +331,8 @@ def build_app(
         Conflating the two is how a host route ends up returning every
         forest's governance data to whoever administers one of them.
         """
+        if registry.is_owner(principal):
+            return {f["id"] for f in pool.list()["forests"]}
         return {g["forest"] for g in registry.grants_of(principal)
                 if "admin" in g["caps"]}
 
@@ -922,30 +949,58 @@ def build_app(
 
     # -- routes -------------------------------------------------------------
 
+    def setup_open() -> bool:
+        """J.2.4: one door at a time. A deployment that declared an
+        environment super-admin has already chosen its first identity, so the
+        setup route does not exist there — the two must never race for it."""
+        return super_admin is None and registry.setup_available()
+
     async def health(request: Request) -> JSONResponse:
         # `password_login` lets the console decide whether to offer the door
         # at all. It reveals that a door exists, not who may walk through it.
+        # `setup_required` is the same kind of fact: which of the two
+        # pre-identity screens the console must render (J.5.6). Deciding that
+        # locally is how a console ends up offering a sign-in form on a
+        # Station nobody can sign in to.
         return JSONResponse({
             "status": "ok", "mode": pool.mode, "writable": writable,
+            "setup_required": setup_open(),
             "password_login": super_admin is not None or registry.has_any_password(),
         })
+
+    def effective_grants(principal: str) -> list[dict]:
+        """The principal's grants as policy resolves them.
+
+        For everyone this is the grant table. For the owner (J.2.4) there is
+        no grant table to read — the authority is a bit — so the forests the
+        pool currently holds are projected as full-capability grants. Both
+        `/v1/me` and `/v1/forests` read from here, because a console that saw
+        an owner with zero forests would render an empty product for the one
+        principal who may do everything.
+        """
+        if not registry.is_owner(principal):
+            return registry.grants_of(principal)
+        return [{"forest": f["id"], "caps": sorted(CAPS), "allow": [""],
+                 "deny": [], "tables": {}}
+                for f in pool.list()["forests"]]
 
     async def me(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
         if err:
             return err
-        grants = registry.grants_of(principal)
+        grants = effective_grants(principal)
         for g in grants:
             policy = registry.policy_for(principal, g["forest"])
             g["roots"] = policy.roots() if policy else []
         return JSONResponse({"principal": principal, "grants": grants,
-                             "admin": is_admin(principal)})
+                             "admin": is_admin(principal),
+                             "owner": registry.is_owner(principal)})
 
     async def forests(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
         if err:
             return err
-        granted = {g["forest"]: g for g in registry.grants_of(principal)}
+        granted = {g["forest"]: g for g in effective_grants(principal)}
         listed = []
         for f in pool.list()["forests"]:
             if f["id"] not in granted:
@@ -966,10 +1021,58 @@ def build_app(
         administrator of one forest could mint a credential that opens
         another (J.2.2).
         """
+        # The owner administers every forest, so the subset test is trivially
+        # true — and stays true for a target holding forests that do not exist
+        # yet, which `mine` could not express.
+        if registry.is_owner(principal):
+            return True
         theirs = {g["forest"] for g in registry.grants_of(target)}
         mine = {g["forest"] for g in registry.grants_of(principal)
                 if "admin" in g["caps"]}
         return bool(mine) and theirs <= mine
+
+    async def auth_setup(request: Request) -> JSONResponse:
+        """J.2.4: the one unauthenticated route, open until it is used once.
+
+        It is unauthenticated because there is nobody to authenticate, and
+        that is only safe under one condition: the registry holds no
+        credential at all, so there is no privilege here to escalate from.
+        The moment it succeeds the condition is false and the route is gone.
+
+        A closed route answers exactly as an unrouted path does. "Already
+        configured" would publish the deployment's state to anyone who asks,
+        and the answer to "is this Station up for grabs?" is not public.
+        """
+        if not setup_open():
+            return _no_such_endpoint("/auth/setup")
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        if not username or not password:
+            return _envelope(VineError(
+                E_SCHEMA, "username and password are required",
+                hint="The owner is an ordinary principal that carries a bit."))
+        if len(password) < MIN_OWNER_PASSWORD:
+            # The one credential that governs everything should not be able to
+            # be three characters long because nobody said otherwise.
+            return _envelope(VineError(
+                E_SCHEMA, f"password must be at least {MIN_OWNER_PASSWORD} "
+                          "characters"))
+
+        # Racing callers both arrive here; exactly one wins inside the
+        # transaction, and the loser is told the door closed — which by then
+        # is simply true.
+        if not registry.create_owner(username, password,
+                                     str(body.get("email") or "") or None):
+            return _no_such_endpoint("/auth/setup")
+
+        session = registry.open_session(username)
+        return JSONResponse({"key": session["key"], "principal": username,
+                             "expires_at": session["expires_at"],
+                             "admin": True, "owner": True})
 
     async def auth_login(request: Request) -> JSONResponse:
         """Password in, session token out (J.2.1).
@@ -1002,7 +1105,8 @@ def build_app(
         session = registry.open_session(username)
         return JSONResponse({"key": session["key"], "principal": username,
                              "expires_at": session["expires_at"],
-                             "admin": is_admin(username)})
+                             "admin": is_admin(username),
+                             "owner": registry.is_owner(username)})
 
     async def admin_keys(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
@@ -1290,6 +1394,9 @@ def build_app(
             return _envelope(VineError(
                 E_READONLY, "this Station serves read-only forests",
                 hint="Start it with --writable to create forests."), 403)
+        # J.7 as amended in v0.25: `admin` on an existing forest, or the owner
+        # bit — the authority that precedes every forest, and the only one an
+        # empty registry can offer.
         if not is_admin(principal):
             return _envelope(
                 VineError(E_FORBIDDEN, "creating a forest requires the 'admin' "
@@ -1312,9 +1419,23 @@ def build_app(
             return _envelope(VineError(E_SCHEMA, f"'{forest_id}' already exists",
                                        hint="Pick another id."))
 
+        # J.2.4: the first forest may arrive seeded, so an operator who has
+        # just finished setup lands on a console that can answer something.
+        # It is the same `init_forest` either way — the seed is planted
+        # afterwards through the public primitives, adding no second way to
+        # make a forest.
+        seed = str(body.get("seed") or "").strip().lower()
+        if seed not in ("", "demo"):
+            return _envelope(VineError(
+                E_SCHEMA, f"unknown seed: {seed!r}", hint="Omit it, or 'demo'."))
+
         def create():
             from monkeyllm.forest import init_forest
 
+            if seed == "demo":
+                from monkeyllm_station.demo_forest import build_demo
+
+                return build_demo(target, title=title)
             return init_forest(target, title=title,
                                summary=body.get("summary") or None)
 
@@ -1322,6 +1443,13 @@ def build_app(
             info = await in_forest_thread(create)
         except VineError as e:
             return _envelope(e)
+        except Exception as e:
+            # A half-planted seed would leave a forest nobody asked for, so it
+            # is removed rather than reported as a success with a hole in it.
+            shutil.rmtree(target, ignore_errors=True)
+            return _envelope(VineError(
+                E_SCHEMA, f"could not create '{forest_id}': {e}",
+                hint="Nothing was left behind; try again."))
         # A forest nobody can open is a silent failure with a 200 (J.7).
         registry.grant(principal, forest_id, set(CAPS))
         return JSONResponse({"forest": {"id": forest_id, "title": title,
@@ -1635,6 +1763,10 @@ def build_app(
         Route("/v1/me", me),
         Route("/v1/forests", forests),
         Route("/v1/auth/login", auth_login, methods=["POST"]),
+        # Registered unconditionally and gated inside, so it can close without
+        # the route table being rebuilt — and so a closed setup answers with
+        # the same body an unrouted path would (J.2.4).
+        Route("/v1/auth/setup", auth_setup, methods=["POST"]),
         Route("/v1/admin/canopy", admin_canopy, methods=["GET", "POST"]),
         Route("/v1/admin/people", admin_people, methods=["GET", "POST"]),
         Route("/v1/admin/keys", admin_keys, methods=["GET", "POST"]),
@@ -1667,9 +1799,7 @@ def build_app(
     # server — which would hand an HTML 404 (or, for a mistyped path, the
     # console itself) to something expecting JSON.
     async def api_not_found(request: Request) -> JSONResponse:
-        return _envelope(VineError(
-            E_NOT_FOUND, f"no such endpoint: /{request.path_params['rest']}",
-            hint="Check the method too: several /v1/admin routes are POST-only."))
+        return _no_such_endpoint(f"/{request.path_params['rest']}")
 
     routes.append(Route("/v1/{rest:path}", api_not_found,
                         methods=["GET", "POST", "PUT", "PATCH", "DELETE"]))

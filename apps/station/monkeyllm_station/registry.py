@@ -29,7 +29,16 @@ CREATE TABLE IF NOT EXISTS principals (
     -- a salted memory-hard hash rather than a plain digest. NULL means this
     -- principal simply has no password door — never a blank one.
     pw_salt TEXT,
-    pw_hash TEXT
+    pw_hash TEXT,
+    -- J.2.4: the owner bit. `admin` on every forest present AND future,
+    -- including on none — which is the only shape that can create the first
+    -- forest on an empty registry. A property of the principal, never a sum
+    -- of grants, because a grant can be revoked one forest at a time and
+    -- would leave a half-owner behind.
+    owner INTEGER NOT NULL DEFAULT 0,
+    -- Optional contact for the owner (J.2.4). Local only: nothing here is
+    -- ever transmitted, so setup completes on an air-gapped host.
+    email TEXT
 );
 CREATE TABLE IF NOT EXISTS api_keys (
     key_hash     TEXT PRIMARY KEY,
@@ -101,6 +110,18 @@ CREATE TABLE IF NOT EXISTS forest_settings (
 );
 """
 
+# Indexes over columns that MIGRATIONS may still be about to add. Running
+# these inside SCHEMA_SQL would fail on an in-place upgrade, because
+# `CREATE TABLE IF NOT EXISTS` is a no-op there and the column does not
+# exist yet — so they run after the migration instead.
+POST_MIGRATION_SQL = """
+-- J.2.4: exactly one owner, enforced by the database rather than by the
+-- code path that happens to create them. Two concurrent setup calls cannot
+-- both win, whatever the application layer does.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_single_owner
+    ON principals(owner) WHERE owner = 1;
+"""
+
 # `embed` is not a chat model: it builds the Canopy and points the
 # Gauntlet (Part K). Absent, navigation is unchanged.
 ROLES = ("ingest", "answer", "embed")
@@ -113,7 +134,8 @@ MIGRATIONS = {
         "deny": "TEXT NOT NULL DEFAULT '[]'",
         "tables": "TEXT NOT NULL DEFAULT '{}'",
     },
-    "principals": {"pw_salt": "TEXT", "pw_hash": "TEXT"},
+    "principals": {"pw_salt": "TEXT", "pw_hash": "TEXT",
+                   "owner": "INTEGER NOT NULL DEFAULT 0", "email": "TEXT"},
     "api_keys": {
         "prefix": "TEXT",
         "kind": "TEXT NOT NULL DEFAULT 'api'",
@@ -183,6 +205,7 @@ class Registry:
         self._opened_lock = threading.Lock()
         self.conn.executescript(SCHEMA_SQL)
         self._migrate()
+        self.conn.executescript(POST_MIGRATION_SQL)
         self.conn.commit()
         # Keys of environment-declared providers (J.10.1). In memory, for the
         # life of the process, and never written: the registry file is a
@@ -348,6 +371,68 @@ class Registry:
         return bool(self.conn.execute(
             "SELECT 1 FROM principals WHERE pw_hash IS NOT NULL LIMIT 1").fetchone())
 
+    # -- the owner and first-run setup (J.2.4) -------------------------------
+
+    def is_owner(self, principal_id: str) -> bool:
+        row = self.conn.execute("SELECT owner FROM principals WHERE id = ?",
+                                (principal_id,)).fetchone()
+        return bool(row and row["owner"])
+
+    def owner_id(self) -> str | None:
+        row = self.conn.execute(
+            "SELECT id FROM principals WHERE owner = 1").fetchone()
+        return row["id"] if row else None
+
+    def _has_any_credential(self) -> bool:
+        """Any way in that already exists: a password, or a key an operator
+        holds. Sessions do not count — they are the by-product of a login
+        (J.2.1), so a stale one must not be able to keep setup closed."""
+        return bool(self.conn.execute(
+            "SELECT 1 FROM principals WHERE pw_hash IS NOT NULL "
+            "UNION ALL "
+            "SELECT 1 FROM api_keys WHERE kind != 'session' LIMIT 1").fetchone())
+
+    def setup_available(self) -> bool:
+        """J.2.4: setup exists only while the registry holds no credential.
+
+        The owner check is separate and deliberate: clearing every credential
+        must NOT reopen setup once an owner exists, or removing a password
+        would hand the deployment to whoever asked next.
+        """
+        return self.owner_id() is None and not self._has_any_credential()
+
+    def create_owner(self, principal_id: str, password: str,
+                     email: str | None = None) -> bool:
+        """Create the one owner. Returns False if setup was already closed.
+
+        The check and the write are one `BEGIN IMMEDIATE` transaction, so two
+        concurrent first calls produce one owner and one refusal rather than
+        two owners. `idx_single_owner` then makes that structural: even a
+        caller that bypassed this method could not create a second one.
+        """
+        conn = self.conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if not self.setup_available():
+                conn.rollback()
+                return False
+            salt = secrets.token_bytes(16).hex()
+            conn.execute(
+                "INSERT INTO principals (id, kind, created, pw_salt, pw_hash, "
+                "owner, email) VALUES (?,?,?,?,?,1,?)",
+                (principal_id, "user", _now(), salt,
+                 hash_password(password, salt), (email or "").strip() or None))
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # Lost the race, or the id already exists. Both are "somebody got
+            # here first", and both are the same answer to the caller.
+            conn.rollback()
+            return False
+        except Exception:
+            conn.rollback()
+            raise
+
     def has_password(self, principal_id: str) -> bool:
         row = self.conn.execute("SELECT pw_hash FROM principals WHERE id = ?",
                                 (principal_id,)).fetchone()
@@ -409,7 +494,17 @@ class Registry:
         self.conn.commit()
 
     def policy_for(self, principal_id: str, forest: str) -> Policy | None:
-        """Deny-by-default (J.3): no grant means no access."""
+        """Deny-by-default (J.3): no grant means no access.
+
+        The owner (J.2.4) is the one exception, and it is resolved *here*
+        rather than at the call sites, because "every forest present and
+        future" is a statement about policy resolution and there is no grant
+        row to read. Every consumer — primitives, scoping, the console
+        projections — inherits it, so none of them can forget it.
+        """
+        if self.is_owner(principal_id):
+            return Policy(forest=forest, caps=frozenset(CAPS),
+                          allow=("",), deny=(), tables={})
         row = self.conn.execute(
             "SELECT caps, allow, deny, tables FROM grants WHERE principal = ? AND forest = ?",
             (principal_id, forest),
@@ -660,13 +755,25 @@ class Registry:
         return key
 
     def ensure_super_admin(self, principal_id: str, forests: list[str]) -> None:
-        """The environment account (J.2.1): a principal with `admin`
-        everywhere and **no stored credential**.
+        """The environment account (J.2.1): break-glass, **no stored
+        credential**, and the owner bit when the seat is free.
 
         Its password is checked against the environment at login, so nothing
-        here is secret — this only makes sure the identity and its grants
-        exist, and re-runs on every start so a forest added later is covered.
+        here is secret — this only makes sure the identity exists and can
+        govern. Taking the owner bit is what lets it reach a registry with no
+        forest at all; before v0.25 it was granted per forest, and on an empty
+        volume that summed to no authority whatsoever (J.2.4).
+
+        If somebody else already owns the deployment, the bit is not stolen:
+        the account falls back to explicit grants, so break-glass still opens
+        every existing forest without demoting the real owner.
         """
         self.add_principal(principal_id, kind="user")
+        owner = self.owner_id()
+        if owner is None or owner == principal_id:
+            self.conn.execute("UPDATE principals SET owner = 1 WHERE id = ?",
+                              (principal_id,))
+            self.conn.commit()
+            return
         for forest in forests:
             self.grant(principal_id, forest, set(CAPS))
