@@ -1,10 +1,21 @@
 """The Studio ships three complete languages (spec J.5.3, criterion F.20).
 
 "Complete" is a rule, not an intention, so it has to be checkable: these
-tests load the per-language catalogues in `src/locales/{en,pt,es}.json` and
-fail on the first key missing from any of them. A fallback that silently
-renders English would make a missing translation invisible exactly where it
-matters — in the language the operator actually reads.
+tests load the per-namespace catalogues in
+`src/locales/<namespace>/{en,pt,es}.json`, merge each language back into one
+flat dictionary, and fail on the first key missing from any of them. A
+fallback that silently renders English would make a missing translation
+invisible exactly where it matters — in the language the operator actually
+reads.
+
+The namespace split (one folder per first dotted key segment, one file per
+language inside it) exists so a translator working on one console area opens
+one folder instead of a 700-key flat file. That only pays off if it stays
+checkable, so this suite also asserts the two invariants the split depends
+on: every key in a namespace folder actually belongs to that namespace, and
+every namespace folder carries all three language files — a namespace that
+gained a folder but not all three languages is a missing translation hiding
+as a missing file.
 
 The catalogues are plain JSON precisely so this suite (and any translation
 tool) can read them without a JS toolchain — no node dependency in CI.
@@ -27,16 +38,24 @@ LANGS = ("en", "pt", "es")
 KEY = re.compile(r"^[a-z0-9_.]+$")
 
 
+def _namespaces() -> list[Path]:
+    return sorted(p for p in LOCALES.iterdir() if p.is_dir())
+
+
 def _dictionaries() -> dict[str, dict[str, str]]:
-    out: dict[str, dict[str, str]] = {}
-    for lang in LANGS:
-        path = LOCALES / f"{lang}.json"
-        entries = json.loads(path.read_text(encoding="utf-8"))
-        assert isinstance(entries, dict), f"{path.name} must be one flat object"
-        for key, value in entries.items():
-            assert KEY.match(key), f"{lang}: malformed key {key!r}"
-            assert isinstance(value, str), f"{lang}:{key} is not a string"
-        out[lang] = entries
+    out: dict[str, dict[str, str]] = {lang: {} for lang in LANGS}
+    for namespace in _namespaces():
+        for lang in LANGS:
+            path = namespace / f"{lang}.json"
+            if not path.exists():
+                continue
+            entries = json.loads(path.read_text(encoding="utf-8"))
+            assert isinstance(entries, dict), f"{path} must be one flat object"
+            for key, value in entries.items():
+                assert KEY.match(key), f"{namespace.name}/{lang}: malformed key {key!r}"
+                assert isinstance(value, str), f"{namespace.name}/{lang}:{key} is not a string"
+                assert key not in out[lang], f"{lang}: duplicate key {key!r} (in {namespace.name} too)"
+                out[lang][key] = value
     return out
 
 
@@ -86,6 +105,45 @@ def test_every_used_key_is_defined(dicts):
         used |= set(re.findall(r"\bt\('([a-z0-9_.]+)'", path.read_text(encoding="utf-8")))
     undefined = sorted(used - set(dicts["en"]))
     assert not undefined, f"used but never defined: {undefined}"
+
+
+def test_every_key_lives_in_its_own_namespace_folder():
+    """A key in the wrong file is a key nobody will find.
+
+    The namespace split only pays off if the first dotted segment of a key
+    matches the folder it is filed under — otherwise a translator opening
+    `explore/` for an `explore.*` key would never see a stray `graph.*` one
+    sitting there instead.
+    """
+    offenders = []
+    for namespace in _namespaces():
+        prefix = f"{namespace.name}."
+        for lang in LANGS:
+            path = namespace / f"{lang}.json"
+            if not path.exists():
+                continue
+            entries = json.loads(path.read_text(encoding="utf-8"))
+            for key in entries:
+                if not key.startswith(prefix):
+                    offenders.append(f"{namespace.name}/{lang}.json: {key!r}")
+    assert not offenders, f"keys filed under the wrong namespace: {offenders}"
+
+
+def test_every_namespace_has_exactly_the_three_languages():
+    """A namespace folder is either complete or it is a hidden gap.
+
+    A namespace that gained a folder but not all three language files is a
+    missing translation disguised as a missing file — `_dictionaries()`
+    would skip it silently, so this has to be checked on the directory
+    listing itself.
+    """
+    offenders = {}
+    expected = {f"{lang}.json" for lang in LANGS}
+    for namespace in _namespaces():
+        present = {p.name for p in namespace.iterdir()}
+        if present != expected:
+            offenders[namespace.name] = sorted(present)
+    assert not offenders, f"namespace folders not exactly {sorted(expected)}: {offenders}"
 
 
 def test_no_dark_only_colour_classes_in_components():
