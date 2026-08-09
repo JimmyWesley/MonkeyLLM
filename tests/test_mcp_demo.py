@@ -1,4 +1,4 @@
-﻿"""MCP-only demo: a full hunt where the forest is touched ONLY through MCP.
+"""MCP-only demo: a full hunt where the forest is touched ONLY through MCP.
 
 Spawns `vine serve` as a real stdio subprocess and drives it with a scripted
 chat — end-to-end protocol validation without an LLM or network.

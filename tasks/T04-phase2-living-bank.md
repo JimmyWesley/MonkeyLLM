@@ -1,4 +1,4 @@
-﻿# T04 — Phase 2: Living Bank (Gardener, Ranger, dataset writes)
+# T04 — Phase 2: Living Bank (Gardener, Ranger, dataset writes)
 
 status: in-progress (workstream 3 `tend` DONE 2026-06-11 via spec v0.7;
 workstream 5 dataset birth DONE 2026-06-11 via spec v0.8;

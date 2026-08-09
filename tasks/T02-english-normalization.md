@@ -1,4 +1,4 @@
-﻿# T02 — English normalization (PT -> EN)
+# T02 — English normalization (PT -> EN)
 
 status: done (2026-07-02) — src/ + contract vocabulary DONE via spec v0.5;
 normative spec v0.12, roadmap, local-inference translated; remaining PT

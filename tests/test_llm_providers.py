@@ -1,4 +1,4 @@
-﻿"""Provider resolution for the navigator LLM (local / OpenRouter / HF)."""
+"""Provider resolution for the navigator LLM (local / OpenRouter / HF)."""
 
 from __future__ import annotations
 

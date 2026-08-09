@@ -1,4 +1,4 @@
-﻿"""End-to-end agent-loop test with a scripted model (no network, no GPU).
+"""End-to-end agent-loop test with a scripted model (no network, no GPU).
 
 Proves the demo harness machinery: master-index priming, JSON action
 parsing, primitive dispatch, error envelope feedback, session close and
