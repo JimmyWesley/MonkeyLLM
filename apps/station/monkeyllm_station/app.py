@@ -52,6 +52,10 @@ COMPOSITES = {"answer": ("read", "answer"), "curate": ("write", "ingest")}
 # Part G, and the host only adds identity, scope and a staging area.
 HOST_ACTIONS = frozenset({"ingest"})
 SERVED_PRIMITIVES = READ_PRIMITIVES | WRITE_PRIMITIVES | set(COMPOSITES) | HOST_ACTIONS
+# Calls that are several calls (J.10.4). A single primitive already reports
+# its own latency to the caller who invoked it; these do not, because the
+# work happens inside them.
+EXPLAINED = frozenset({"answer", "harvest"})
 
 # A forest id becomes a directory name under the registry root, so it is
 # validated as a NAME before it is ever joined to a path (J.7). Separators
@@ -323,10 +327,20 @@ def build_app(
         except VineError:
             return None
         attach_embedder(vine, forest)
+        # K.3, entry search: set on every call, never left over from the last
+        # one. `False` is both the default and the reset.
+        vine.hybrid_locate = bool(payload.pop("hybrid", False))
+        mark = len(vine.tracer.events)
 
         if name in COMPOSITES or name in HOST_ACTIONS:
             runner = run_composite if name in COMPOSITES else run_ingest
             result = runner(principal, forest, vine, policy, name, payload)
+            if name in EXPLAINED:
+                result = explain(result, vine, mark)
+                if name in COMPOSITES and isinstance(result, dict) and "error" not in result:
+                    billed = cost_of(result, registry.binding(forest, COMPOSITES[name][1]) or {})
+                    if billed:
+                        result["cost"] = billed
             registry.record(
                 principal=principal, forest=forest, primitive=name, args=payload,
                 result="error" if isinstance(result.get("error"), dict) else "ok",
@@ -338,6 +352,8 @@ def build_app(
         root_path = Path(vine.forest.root)
         before = _git(root_path, "rev-parse", "HEAD") if name in WRITE_PRIMITIVES else None
         result = ScopedVine(vine, policy).call(name, **payload)
+        if name in EXPLAINED:
+            result = explain(result, vine, mark)
 
         commit_sha = None
         if name in WRITE_PRIMITIVES and isinstance(result, dict) and "error" not in result:
@@ -352,6 +368,90 @@ def build_app(
             result="error" if (isinstance(result, dict) and "error" in result) else "ok",
             size=len(json.dumps(result, default=str)), commit_sha=commit_sha,
         )
+        return result
+
+    # Per-token prices, as the provider itself states them (J.10). Fetched
+    # once per endpoint and kept for the life of the process: a price list is
+    # not something to re-download on every question, and a stale one is
+    # fixed by the restart that any other configuration change needs anyway.
+    _prices: dict[str, dict] = {}
+
+    def price_of(binding: dict) -> dict | None:
+        endpoint, model = binding.get("endpoint"), binding.get("model")
+        if not endpoint or not model:
+            return None
+        if endpoint not in _prices:
+            from monkeyllm_station import inference
+
+            probed = inference.probe(endpoint, binding.get("api_key"))
+            _prices[endpoint] = {m["id"]: m for m in (probed.get("models") or [])}
+        entry = _prices[endpoint].get(model)
+        if not entry or (entry.get("prompt") is None and entry.get("completion") is None):
+            return None
+        return entry
+
+    def cost_of(result: dict, binding: dict) -> dict | None:
+        """What this answer cost, when the provider states a price.
+
+        Never an estimate: the tokens are the provider's own `usage` and the
+        rates are its own catalogue. A local Ollama publishes neither, and
+        that is reported as "not priced" rather than as free — the same rule
+        the model picker already follows, because silence is not zero.
+        """
+        usage = result.get("usage") or {}
+        if not usage.get("calls"):
+            return None
+        out = {"prompt_tokens": usage.get("prompt", 0),
+               "completion_tokens": usage.get("completion", 0),
+               "calls": usage["calls"], "priced": False}
+        rates = price_of(binding)
+        if rates:
+            prompt_usd = (rates.get("prompt") or 0) * out["prompt_tokens"]
+            completion_usd = (rates.get("completion") or 0) * out["completion_tokens"]
+            out.update(priced=True, prompt_usd=round(prompt_usd, 8),
+                       completion_usd=round(completion_usd, 8),
+                       usd=round(prompt_usd + completion_usd, 8))
+        return out
+
+    def explain(result: dict, vine, mark: int) -> dict:
+        """Attach what the call actually did, step by step (J.10.4).
+
+        A composite is opaque from outside: `answer` is one request and six
+        forest calls plus a provider round trip, and "it took 1.8 s" says
+        nothing about which of those to fix. The engine already times every
+        primitive it runs (Part D), so this is a slice of that trace — the
+        events this call appended — not a second instrumentation.
+
+        Only the shape of the work is reported: the primitive, the node when
+        the primitive takes one, the milliseconds and the tokens it emitted.
+        No arguments and no content, so a trace can never disclose what a
+        scoped response withheld.
+        """
+        if not isinstance(result, dict) or "error" in result:
+            return result
+        steps = [
+            {"step": e["primitive"], "ms": e["elapsed_ms"], "tokens": e["tokens_out"],
+             **({"id": e["id"]} if e["id"] else {})}
+            for e in vine.tracer.events[mark:]
+        ]
+        # A forager's forest calls ARE its hops, in the same order, minus the
+        # entry `locate` it did not choose and minus the ones the policy
+        # refused before they reached the engine. Numbering them here lets
+        # one panel show a step and the decision that caused it.
+        walked = iter([h for h in result.get("hops") or [] if h.get("ok")])
+        nxt = next(walked, None)
+        for step in steps[1:] if result.get("hops") is not None else []:
+            if nxt and step["step"] == nxt["tool"] and step.get("id") == nxt.get("id"):
+                step["hop"] = nxt["n"]
+                nxt = next(walked, None)
+        if result.get("model_ms") is not None:
+            steps.append({"step": "model", "ms": result["model_ms"],
+                          "detail": result.get("model")})
+        result["trace"] = {
+            "steps": steps,
+            "retrieval_ms": round(sum(s["ms"] for s in steps if s["step"] != "model"), 1),
+            "total_ms": round(sum(s["ms"] for s in steps), 1),
+        }
         return result
 
     def run_composite(principal, forest, vine, policy, name, payload) -> dict:
@@ -375,9 +475,17 @@ def build_app(
         scoped = ScopedVine(vine, policy)
         try:
             if name == "answer":
-                return inference.answer(scoped, payload.get("question") or
-                                        payload.get("query") or "",
-                                        binding, k=int(payload.get("k", 3)))
+                question = payload.get("question") or payload.get("query") or ""
+                k = int(payload.get("k", 3))
+                # J.10.5: hops are opt-in and cost one model call each, so the
+                # sweep stays the default. `hops: true` means "use the budget
+                # you would have picked"; a number sets it.
+                hops = payload.get("hops")
+                if hops:
+                    return inference.forage(
+                        scoped, question, binding, k=k,
+                        max_hops=6 if hops is True else int(hops))
+                return inference.answer(scoped, question, binding, k=k)
             return inference.recurate(scoped, payload.get("id"), binding)
         except VineError as e:
             return e.to_dict()
@@ -390,6 +498,12 @@ def build_app(
         Each name is resolved and then checked to still be *under* the
         staging root. Inspecting the string for `..` would miss symlinks and
         absolute paths; comparing the resolved paths cannot.
+
+        An entry carries either `text` (UTF-8 source) or `b64` (the raw
+        bytes). The Gardener's `.docx`/`.xlsx` converters read bytes, so a
+        text-only upload path left them reachable from a shell and from
+        nowhere else — the operator with only a browser is exactly who this
+        surface exists for (J.8).
         """
         staging = root.joinpath(*UPLOAD_DIR)
         staging.mkdir(parents=True, exist_ok=True)
@@ -397,7 +511,7 @@ def build_app(
         for entry in files:
             if not isinstance(entry, dict):
                 raise VineError(E_SCHEMA, "each file must be an object "
-                                          "{name, text}")
+                                          "{name, text|b64}")
             name = str(entry.get("name") or "").strip()
             if not name:
                 raise VineError(E_SCHEMA, "each file needs a name")
@@ -410,7 +524,20 @@ def build_app(
             if not target.is_relative_to(staging.resolve()):
                 raise VineError(E_SCHEMA, f"file name escapes the upload area: {name}")
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(str(entry.get("text") or ""), encoding="utf-8")
+            if entry.get("b64") is not None:
+                import base64
+                import binascii
+
+                try:
+                    data = base64.b64decode(str(entry["b64"]), validate=True)
+                except (binascii.Error, ValueError) as e:
+                    # Writing the undecodable string as bytes would stage a
+                    # file the converter then blames the document for.
+                    raise VineError(E_SCHEMA,
+                                    f"'{name}' is not valid base64: {e}") from None
+                target.write_bytes(data)
+            else:
+                target.write_text(str(entry.get("text") or ""), encoding="utf-8")
             written.append(name)
         return staging, written
 
@@ -476,8 +603,10 @@ def build_app(
             if mode == "upload":
                 files = payload.get("files")
                 if not isinstance(files, list) or not files:
-                    return VineError(E_SCHEMA, "upload needs a non-empty 'files' list",
-                                     hint='Each entry is {"name": "notes.md", "text": "…"}.').to_dict()
+                    return VineError(
+                        E_SCHEMA, "upload needs a non-empty 'files' list",
+                        hint='Each entry is {"name": "notes.md", "text": "…"} '
+                             'or {"name": "report.docx", "b64": "…"}.').to_dict()
                 source, staged = stage_upload(root, files)
 
             curator = inference.curator_from_binding(
@@ -485,12 +614,20 @@ def build_app(
             gardener = Gardener(vine, hooks=discover_hooks() + ([curator] if curator else []))
 
             if mode == "upload" and gardener.config.get("source_root") == \
-                    Path(source).as_posix():
+                    Path(source).resolve().as_posix():
                 # The staging area is stable per forest, so re-sending a
                 # filename means "this document changed". `adopt` would plant a
                 # second node beside the first; the Gardener's update path is
                 # the G.8 hash diff, which is exactly what `sync` runs.
-                mode, report = "sync", gardener.sync(source)
+                #
+                # `dest` is carried through: this is still an upload, and the
+                # operator picked a destination for THESE files. Letting the
+                # config's dest win would file every later batch wherever the
+                # first one went, without saying so. Comparing resolved paths
+                # keeps the flip working when the forest root reaches the
+                # Station through a symlink — otherwise adopt runs twice and
+                # plants a duplicate of every staged document.
+                mode, report = "sync", gardener.sync(source, dest=dest)
             elif mode == "sync":
                 # A targeted path here is relative to the source root a prior
                 # adopt recorded — vetted then, so it needs no admin now.
@@ -505,13 +642,28 @@ def build_app(
             return VineError(E_SCHEMA, f"ingest failed: {e}"[:300]).to_dict()
 
         after = _git(root, "rev-parse", "HEAD")
+        # `curated` is what the model DID, not what the operator configured.
+        # Reading it off the binding made a dead endpoint indistinguishable
+        # from a working one: the Curator falls back silently by design (G.4
+        # rule 6), so every document still planted, with derived summaries,
+        # under a report that said the model wrote them.
+        stats = dict(curator.stats) if curator else None
+        if stats and curator.last_error:
+            stats["error"] = curator.last_error
+        if stats and curator.last_reject:
+            # A model that answers and is rejected every time looks exactly
+            # like one that never answered — same fallback, same output. The
+            # fixes are opposite, so the report has to separate them.
+            stats["rejected_because"] = curator.last_reject
+            stats["last_reply"] = curator.last_reply or ""
+        written = bool(stats and (stats["llm_summaries"] or stats["branch_rollups"]))
         return {
             **report, "mode": mode, "staged": staged,
             "rollup": rollup,
             # A batch is many commits; the Station reports the range instead of
             # amending the last one and claiming the whole ingest (J.8).
             "commit": after or None, "commit_before": before or None,
-            "curated": curator is not None,
+            "curated": written, "bound": curator is not None, "curation": stats,
         }
 
     # -- routes -------------------------------------------------------------

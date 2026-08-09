@@ -212,6 +212,34 @@ def test_the_goal_is_embedded_once_per_hunt_not_once_per_hop(wide):
     v.close()
 
 
+def test_a_look_with_no_frontier_in_it_costs_no_embedding(wide):
+    """`harvest` fetches one field per result with `look(id, fields=[...])`,
+    and the `fields` filter drops the edge lists — so ranking them was a
+    network round trip for output nobody receives. It showed up as ~150 ms
+    on every harvest and every answer."""
+    embedder = FakeEmbedder()
+    calls = {"n": 0}
+    inner = embedder.embed
+
+    def counting(texts):
+        calls["n"] += 1
+        return inner(texts)
+
+    embedder.embed = counting
+    v = _with_canopy(wide, embedder)
+    v.locate("gamma")          # the hunt: goal remembered, not yet embedded
+    calls["n"] = 0
+
+    for _ in range(5):
+        summary = v.look("region/_index", fields=["summary"])
+    assert calls["n"] == 0
+    assert "frontier" not in summary
+
+    v.look("region/_index")    # a real hop still gets the instrument
+    assert calls["n"] == 1
+    v.close()
+
+
 def test_look_ranks_its_edges_before_the_twelve_cap(wide):
     v = _with_canopy(wide, FakeEmbedder())
     v.locate("gamma")

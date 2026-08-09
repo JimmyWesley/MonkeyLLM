@@ -725,7 +725,13 @@ class Gardener:
         return out
 
     def sync(self, source: str | Path | None = None,
-             path: str | None = None) -> dict:
+             path: str | None = None, dest: str | None = None) -> dict:
+        """`dest` overrides the adopted root's destination for files sync
+        meets for the FIRST time. Files that already have a passport keep
+        the branch they were planted in — sync refreshes content, it never
+        moves nodes. Without the override a caller who says where a new
+        document goes is silently overruled by whatever the last adopt
+        recorded."""
         src = Path(source or self.config.get("source_root", "")).resolve()
         if not src.is_dir():
             raise VineError(
@@ -733,7 +739,7 @@ class Gardener:
                 f"sync source is not a directory: {src}",
                 hint="Run adopt first, or pass the source directory explicitly.",
             )
-        dest = self.config.get("dest")
+        dest = dest or self.config.get("dest")
         report = IngestReport()
         passports = self._passports()
 

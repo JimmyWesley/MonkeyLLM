@@ -10,6 +10,7 @@ from monkeyllm.curator import (
     Curator,
     make_candidates,
 )
+from monkeyllm.errors import E_SCHEMA, VineError
 from monkeyllm.models import validate_summary
 
 GOOD = json.dumps({
@@ -47,7 +48,9 @@ class TestCurator:
         assert out["tags"] == ["adopted", "sales", "discounts"]
         assert c.stats == {"llm_summaries": 1, "fallbacks": 0, "retries": 0,
                            "links_proposed": 0, "proposal_fallbacks": 0,
-                           "branch_rollups": 0, "branch_fallbacks": 0}
+                           "branch_rollups": 0, "branch_fallbacks": 0,
+                           "transport_errors": 0, "rejected": 0}
+        assert c.last_error is None and c.last_reject is None
 
     def test_retry_then_accept(self):
         c = Curator(scripted_chat([TOO_LONG, ANTI_PATTERN, GOOD]))
@@ -60,13 +63,55 @@ class TestCurator:
         out = c(dict(DRAFT))
         assert out["summary"] == "Derived fallback summary."  # untouched
         assert c.stats["fallbacks"] == 1 and c.stats["llm_summaries"] == 0
+        # A model that answered and was rejected must not read as one that
+        # never answered: same fallback, opposite fix.
+        assert c.stats["rejected"] == 1 and c.stats["transport_errors"] == 0
+        assert c.last_error is None
+        assert "60 tokens" in c.last_reject
+        assert c.last_reply and "word word" in c.last_reply
+
+    def test_an_empty_reply_is_named_as_such(self):
+        """A thinking model that spends its whole budget reasoning returns
+        content that is empty, not content that lacks JSON — and only the
+        first phrasing points at the fix (raise max_tokens)."""
+        c = Curator(scripted_chat(["", "   ", ""]))
+        c(dict(DRAFT))
+        assert c.stats["rejected"] == 1
+        assert c.last_reject == "the model returned an empty message"
+        assert c.last_reply == ""
+
+    def test_a_rejection_survives_a_later_success(self):
+        """A batch whose last document happened to pass still owes the
+        operator an example of the ones that did not."""
+        c = Curator(scripted_chat([TOO_LONG, TOO_LONG, TOO_LONG, GOOD]))
+        c(dict(DRAFT))
+        c(dict(DRAFT))
+        assert c.stats["llm_summaries"] == 1 and c.stats["rejected"] == 1
+        assert c.last_reject, "the earlier rejection is the only clue left"
 
     def test_transport_error_falls_back(self):
         def chat(messages):
             raise ConnectionError("server down")
 
-        out = Curator(chat)(dict(DRAFT))
+        c = Curator(chat)
+        out = c(dict(DRAFT))
         assert out["summary"] == "Derived fallback summary."
+        # Falling back silently is what makes a dead endpoint look like a
+        # working ingest: the caller has to be able to tell the difference.
+        assert c.stats["transport_errors"] == 1
+        assert "server down" in c.last_error
+
+    def test_the_endpoint_hint_survives_into_last_error(self):
+        """A VineError from the inference client carries the provider's own
+        reply in `hint` — the 401 body, the unknown-model line. That is the
+        part that tells an operator what to fix."""
+        def chat(messages):
+            raise VineError(E_SCHEMA, "inference endpoint 401",
+                            hint='{"error":"invalid api key"}')
+
+        c = Curator(chat)
+        c(dict(DRAFT))
+        assert "401" in c.last_error and "invalid api key" in c.last_error
 
     def test_non_json_reply_retries(self):
         c = Curator(scripted_chat(["I think the summary should be...", GOOD]))

@@ -339,14 +339,22 @@ export function ErrorNote({ error, onRetry }) {
   )
 }
 
-export const Note = ({ children, tone = 'info' }) => (
-  <div className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-[12.5px]
-    ${tone === 'warn' ? 'border-warn/25 bg-warn-soft text-text-2'
-                      : 'border-line bg-surface-2 text-text-2'}`}>
-    <Info size={15} className={`mt-px ${tone === 'warn' ? 'text-warn' : 'text-text-3'}`} />
-    <div className="min-w-0 flex-1 leading-relaxed">{children}</div>
-  </div>
-)
+const NOTE_TONES = {
+  warn: ['border-warn/25 bg-warn-soft text-text-2', 'text-warn'],
+  danger: ['border-danger/25 bg-danger-soft text-text-2', 'text-danger'],
+  info: ['border-line bg-surface-2 text-text-2', 'text-text-3'],
+}
+
+export const Note = ({ children, tone = 'info' }) => {
+  const [box, icon] = NOTE_TONES[tone] || NOTE_TONES.info
+  return (
+    <div className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5
+                     text-[12.5px] ${box}`}>
+      <Info size={15} className={`mt-px ${icon}`} />
+      <div className="min-w-0 flex-1 leading-relaxed">{children}</div>
+    </div>
+  )
+}
 
 export const Spinner = ({ label, size = 14 }) => (
   <span className="inline-flex items-center gap-2 text-[12.5px] text-text-3">

@@ -102,6 +102,19 @@ export const Sparkle = (p) => (
   <S {...p}><path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z" /></S>
 )
 export const Menu = (p) => <S {...p}><path d="M4 7h16M4 12h16M4 17h16" /></S>
+export const Download = (p) => (
+  <S {...p}><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" /></S>
+)
+export const Printer = (p) => (
+  <S {...p}><path d="M7 9V4h10v5M7 19h10v-5H7v5" />
+    <path d="M7 14H5a2 2 0 01-2-2v-3a2 2 0 012-2h14a2 2 0 012 2v3a2 2 0 01-2 2h-2" /></S>
+)
+export const Expand = (p) => (
+  <S {...p}><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" /></S>
+)
+export const Collapse = (p) => (
+  <S {...p}><path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5" /></S>
+)
 export const More = (p) => (
   <S {...p}><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none" />
     <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />

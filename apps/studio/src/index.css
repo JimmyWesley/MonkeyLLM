@@ -145,6 +145,51 @@
     @apply whitespace-pre-wrap break-words font-mono text-[12.5px] leading-relaxed text-text-2;
   }
 
+  /* Rendered markdown. Written as element rules rather than as classes on
+     the nodes because the markup comes from a parser, not from JSX — the
+     styling has to attach to what markdown produces. */
+  .md {
+    @apply text-[14.5px] leading-relaxed text-text;
+  }
+  .md > * + * { @apply mt-3; }
+  .md h1 { @apply mt-5 text-[18px] font-semibold tracking-tight text-text; }
+  .md h2 { @apply mt-5 text-[16px] font-semibold tracking-tight text-text; }
+  .md h3 { @apply mt-4 text-[14.5px] font-semibold text-text; }
+  .md p { @apply text-text; }
+  .md strong { @apply font-semibold text-text; }
+  .md em { @apply italic; }
+  .md a { @apply font-medium text-accent underline underline-offset-2; }
+  .md ul { @apply ml-5 list-disc space-y-1; }
+  .md ol { @apply ml-5 list-decimal space-y-1; }
+  .md li > ul, .md li > ol { @apply mt-1; }
+  .md blockquote {
+    @apply border-l-2 border-accent/40 pl-3 text-text-2;
+  }
+  .md hr { @apply border-line; }
+  .md code {
+    @apply rounded bg-surface-2 px-1 py-0.5 font-mono text-[12.5px] text-text-2;
+  }
+  .md pre {
+    @apply overflow-x-auto rounded-lg border border-line bg-surface-2 p-3;
+  }
+  .md pre code { @apply bg-transparent p-0 text-[12px] leading-relaxed; }
+  /* Tables scroll inside themselves; a wide one must not widen the page. */
+  .md table {
+    @apply block w-full overflow-x-auto border-collapse text-[13px];
+  }
+  .md th {
+    @apply whitespace-nowrap border-b border-line px-2.5 py-1.5 text-left
+           text-[11px] font-semibold uppercase tracking-[0.06em] text-text-3;
+  }
+  .md td {
+    @apply border-b border-line px-2.5 py-1.5 align-top text-text-2;
+  }
+  .md .md-diagram {
+    @apply overflow-x-auto rounded-lg border border-line bg-surface-2 p-3 text-center;
+  }
+  .md .md-diagram svg { @apply mx-auto h-auto max-w-full; }
+  .md .md-diagram-print { display: none; }
+
   .nav-item {
     @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px]
            text-[13.5px] font-medium text-text-2 transition
@@ -165,4 +210,40 @@
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: none; }
   }
+}
+
+/* Saving a PDF is printing, and the browser already owns that pipeline:
+   pagination, hyphenation, embedded fonts, and rasterising the SVG of a
+   diagram. A bundled PDF writer would do all four worse and cost a few
+   hundred kilobytes. So the print stylesheet IS the export: everything but
+   the answer is hidden, and the dark theme is dropped — nobody wants to
+   print a black page. */
+@media print {
+  body { background: #fff !important; }
+  body * { visibility: hidden; }
+  .print-target, .print-target * { visibility: visible; }
+  .print-target {
+    position: absolute; left: 0; top: 0; width: 100%;
+    border: 0 !important; box-shadow: none !important;
+    background: #fff !important;
+  }
+  .print-target, .print-target * { color: #111 !important; }
+  .print-target pre, .print-target code, .print-target .md-diagram,
+  .print-target summary, .print-target li {
+    background: transparent !important; border-color: #d4d4d8 !important;
+  }
+  /* The light twin replaces the on-screen one — but ONLY where a twin was
+     actually drawn, which is dark mode alone. Hiding every `.md-diagram`
+     unconditionally deleted the diagram from every light-mode PDF, which is
+     a worse bug than the one it fixed. The class is put on the original at
+     the moment the twin is created, so the rule cannot outrun the fact.
+     The twin must not inherit the colour override above either: its fills
+     live inside the SVG and would flatten back to black. */
+  .print-target .md-diagram-screen { display: none !important; }
+  .print-target .md-diagram-print { display: block !important; }
+  .print-target .md-diagram-print * { color: revert !important; }
+  .no-print { display: none !important; }
+  /* Page breaks land where a reader would put them. */
+  .md h1, .md h2, .md h3 { break-after: avoid; }
+  .md table, .md pre, .md .md-diagram-print { break-inside: avoid; }
 }
