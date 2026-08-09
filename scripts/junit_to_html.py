@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Render test-results/junit.xml as a self-contained HTML report.
 
 Zero dependencies (stdlib only) — used because this machine's TLS

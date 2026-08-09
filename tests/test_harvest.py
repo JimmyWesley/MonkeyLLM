@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Harvest (spec C.6c): zero-LLM retrieval returns bananas + exact snippets."""
 
 from monkeyllm.harvest import BUDGET_HARVEST, derive_terms, harvest

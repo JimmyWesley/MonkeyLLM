@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* The data grid — the one shape in the vocabulary that behaves like a
  * database client rather than a report: frozen header, frozen row numbers,
  * per-column filters, type-aware alignment and in-place editing.

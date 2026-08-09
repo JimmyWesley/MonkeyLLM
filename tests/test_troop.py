@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Troop orchestrator (spec Part E / T03): scripted monkeys, no LLM needed."""
 
 import json

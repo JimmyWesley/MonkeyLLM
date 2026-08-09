@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Repository-wide invariants about the files themselves, not their content.
 
 These are the defects no unit test sees, because every module under test

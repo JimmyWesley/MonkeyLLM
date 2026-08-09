@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* The frame every console sits in (spec J.5.1).
  *
  * Three groups answering three questions — use it, build it, govern it —

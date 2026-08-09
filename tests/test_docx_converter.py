@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """G.2.1 (spec v0.12): the DOCX built-in converter."""
 
 import pytest

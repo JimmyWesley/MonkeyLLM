@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Map projections (spec J.11, criterion F.25).
 
 `GET /graph` and `GET /trails` hand a caller a whole region at once. That

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Part F criterion 2: plant/graft atomic, git-committed, index-synced."""
 
 import shutil

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Forest registry (spec C.0 / acceptance F.10): one server, N forests."""
 
 import json

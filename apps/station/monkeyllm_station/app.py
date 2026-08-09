@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Jimmy Wesley
+
 """The Station's REST surface (spec J.1), Studio hosting and MCP mount.
 
 Built on Starlette, which already ships as a transitive dependency of `mcp`

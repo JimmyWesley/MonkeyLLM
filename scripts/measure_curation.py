@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """T04 measurement: adopt the dump with LLM curation and score the criterion.
 
 Acceptance (T04 / spec G.4.2): 100 mixed documents ingested end-to-end,

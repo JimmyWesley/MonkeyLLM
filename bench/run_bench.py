@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Monkey Bench v1 — MonkeyLLM × the two mandatory RAG baselines.
 
 Same corpus, same embedder, same LLM, same questions (roadmap fairness rules).

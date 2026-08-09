@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Provider resolution for the navigator LLM (local / OpenRouter / HF)."""
 
 from __future__ import annotations

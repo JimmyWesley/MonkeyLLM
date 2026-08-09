@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Pheromone trails (_derived/trails.db).
 
 Persistent heat (the long-term whisper) plus session-scoped namespaces

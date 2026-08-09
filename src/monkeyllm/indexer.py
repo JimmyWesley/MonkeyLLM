@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Branch (`_index.md`) maintenance (spec A.5).
 
 Entries replicate child summaries VERBATIM; the Vine keeps them in

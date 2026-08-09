@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Jimmy Wesley
+
 /* Inline icons (spec J.5.1: navigation carries an icon per console).
  *
  * Hand-drawn on a 24-grid rather than pulled from a package: the set is

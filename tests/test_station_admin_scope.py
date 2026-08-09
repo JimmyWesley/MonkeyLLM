@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Per-forest administration (spec J.3.2, criterion F.22).
 
 Two different questions, easily conflated, and conflating them was the bug:

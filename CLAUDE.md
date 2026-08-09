@@ -20,6 +20,16 @@ There are no Portuguese exceptions — all content (node IDs, titles, summaries,
 bodies, tags, question sets, system prompts, generator literals) is English.
 Forests are never edited in place — change the generator and rebuild.
 
+## Licensing
+
+Two licenses (see `LICENSING.md`): **Apache-2.0** for the engine and
+everything around it, **AGPL-3.0-only** for the host (`apps/station/`,
+`apps/studio/`). Every new source file carries an SPDX header naming the
+license of the tree it lives in. Apache-2.0 is one-way compatible with
+AGPL, so the direction is load-bearing: the host may import the engine, and
+`src/monkeyllm/` **must never import from `apps/`** — that is now a legal
+boundary, not only the Part J "privileged client" design rule.
+
 ## Layout
 
 - `src/monkeyllm/` — the `monkeyllm` package, `vine` CLI. `vine.py`

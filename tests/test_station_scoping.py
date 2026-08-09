@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The leak suite (spec F.18): prefix scoping across every primitive.
 
 The load-bearing test here is `test_no_primitive_leaks_any_out_of_scope_id`,

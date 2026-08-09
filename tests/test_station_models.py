@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Per-forest inference (spec J.10): providers, role bindings, and the
 model-backed composites.
 

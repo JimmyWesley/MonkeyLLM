@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Build the Phase 0 test forest (forests/forest-fixture/).
 
 Deterministic: ~90+ nodes, 12 branches, 1 SQLite dataset, cross-links

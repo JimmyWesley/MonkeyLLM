@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Jimmy Wesley
+
 """Policy and ScopedVine — the single enforcement seam (spec J.3).
 
 Every Station surface reaches a forest through `ScopedVine` and nothing

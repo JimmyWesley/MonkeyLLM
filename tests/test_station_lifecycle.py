@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """Forest lifecycle and the ingest surface (spec J.7/J.8, criterion F.20).
 
 Two host additions to Part G and A.5, and both are only worth having if

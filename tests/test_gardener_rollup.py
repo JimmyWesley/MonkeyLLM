@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """G.4.4 (spec v0.13): branch rollup — bottom-up branch summaries."""
 
 import json

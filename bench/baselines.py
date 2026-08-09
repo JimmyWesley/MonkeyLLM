@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """The two mandatory baselines (roadmap, Fase 1):
 
   (a) rag_topk  — classic top-k RAG: embed the question, stuff the top-k

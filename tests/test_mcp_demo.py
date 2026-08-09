@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Jimmy Wesley
+
 """MCP-only demo: a full hunt where the forest is touched ONLY through MCP.
 
 Spawns `vine serve` as a real stdio subprocess and drives it with a scripted
