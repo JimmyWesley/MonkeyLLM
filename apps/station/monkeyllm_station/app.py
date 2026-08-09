@@ -331,8 +331,14 @@ def build_app(
             return None
         try:
             vine = pool.get(forest)
-        except VineError:
-            return None
+        except VineError as e:
+            # Past the policy check the forest's existence is no longer a
+            # secret from this caller — they hold a grant on it and
+            # `GET /v1/forests` already lists it. Laundering the real reason
+            # into "unknown forest" here sent operators hunting for a naming
+            # mistake that was not there: the usual cause is `E_LOCKED`, a
+            # writer lock left behind by a Station that did not shut down.
+            return e.to_dict()
         attach_embedder(vine, forest)
         # K.3, entry search: set on every call, never left over from the last
         # one. `False` is both the default and the reset.
@@ -721,8 +727,8 @@ def build_app(
                 hint=f"This principal holds: {sorted(policy.caps)}.").to_dict()
         try:
             vine = pool.get(forest)
-        except VineError:
-            return None
+        except VineError as e:
+            return e.to_dict()   # see run_primitive: not an existence question
 
         try:
             limit = max(1, min(int(params.get("limit") or MAP_LIMIT), MAP_MAX))
