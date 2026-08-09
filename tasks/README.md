@@ -1,4 +1,4 @@
-﻿# Tasks
+# Tasks
 
 Backlog of pending work, one file per task: `T<NN>-<slug>.md`.
 

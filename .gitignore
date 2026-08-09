@@ -13,9 +13,14 @@ test-results/
 forests/*
 !forests/scripts/
 
-# Local inference artifacts (downloaded by scripts/setup_models.py)
-models/
-bin/
+# Local inference artifacts (downloaded by scripts/setup_models.py, which
+# writes to ROOT/models and ROOT/bin). Anchored to the repository root on
+# purpose: unanchored, `models/` also matched
+# `apps/studio/src/locales/models/`, so the Models console's 38 translations
+# lived on every developer's disk and in no clone — the suite read the
+# working tree and passed while a fresh checkout rendered raw keys.
+/models/
+/bin/
 *.gguf
 bench/_artifacts/
 ideias/
