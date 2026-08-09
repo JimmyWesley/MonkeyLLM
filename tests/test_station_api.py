@@ -22,6 +22,8 @@ STATION = Path(__file__).resolve().parents[1] / "apps" / "station"
 if str(STATION) not in sys.path:
     sys.path.insert(0, str(STATION))
 
+from monkeyllm.errors import E_LOCKED
+
 FOREST = "forest-fixture"
 
 
@@ -265,3 +267,42 @@ def test_unknown_capability_is_rejected(station):
     _, registry = station
     with pytest.raises(ValueError):
         registry.grant("dave", FOREST, {"read", "superuser"})
+
+
+def test_a_stale_lock_is_not_reported_as_an_unknown_forest(station, station_root):
+    """A grant already tells the caller the forest exists (J.3).
+
+    `_unknown_forest` exists so an ungranted principal cannot enumerate the
+    registry. Past the policy check that reasoning no longer applies, and
+    returning it anyway sent operators hunting for a naming mistake that was
+    not there — the usual cause is a writer lock left behind by a Station
+    that did not shut down, which says `E_LOCKED` and means "try again", not
+    "you typed the wrong name".
+    """
+    client, registry = station
+    headers = _key(registry, caps=("read",))
+
+    lock = station_root / FOREST / ".vine.lock"
+    lock.write_text("999999", encoding="utf-8")
+    try:
+        # The pool may already hold this forest open from an earlier test, so
+        # the lock only bites on a fresh acquisition; ask for a forest the
+        # pool has not opened yet by closing what it has.
+        client.app.state.pool.close()
+        r = client.post(f"/v1/forests/{FOREST}/look", json={"id": "_index"},
+                        headers=headers)
+        assert r.status_code == 409, r.text
+        assert r.json()["error"]["code"] == E_LOCKED
+    finally:
+        lock.unlink(missing_ok=True)
+        client.app.state.pool.close()
+
+
+def test_an_ungranted_forest_stays_an_unknown_forest(station):
+    """The oracle guard the test above must not have weakened."""
+    client, registry = station
+    headers = _key(registry, caps=("read",))
+    r = client.post("/v1/forests/no-such-forest/look", json={"id": "_index"},
+                    headers=headers)
+    assert r.status_code == 404
+    assert "unknown forest" in r.json()["error"]["message"]
