@@ -1,7 +1,6 @@
 {
   "files.as_page": "Rendered as a page",
   "files.body_stored": "Body, as stored",
-  "files.db_columns": "Columns",
   "files.db_guard": "read-only SELECT · capped · timed out at 2s",
   "files.db_needs_query": "Reading a dataset needs the query capability.",
   "files.db_no_rows": "No rows.",

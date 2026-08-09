@@ -1,5 +1,4 @@
 {
-  "forest.created": "A floresta \"{id}\" está pronta. Você tem acesso total a ela.",
   "forest.id": "Identificador",
   "forest.id_hint": "Letras minúsculas, dígitos, \"-\" e \"_\". Vira o nome da pasta e não pode mudar depois.",
   "forest.new": "Nova floresta",

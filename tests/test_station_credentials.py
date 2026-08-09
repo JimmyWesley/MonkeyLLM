@@ -312,3 +312,59 @@ def test_password_setting_obeys_the_same_rule(station):
                     json={"principal": "wide", "password": "x"}, headers=partial)
     assert r.status_code == 403
     assert registry.has_password("wide") is False
+
+
+def test_registry_survives_two_threads(tmp_path):
+    """The Station touches the registry from two threads by design (J.1).
+
+    The event loop authenticates every request; the forest worker writes the
+    audit record after the call has run. Sharing one `sqlite3.Connection`
+    between them shares its transaction state, so one thread's `commit()`
+    lands inside the other's open transaction and the loser raises "cannot
+    commit - no transaction is active" — a 500 for the caller and a silently
+    dropped audit row.
+
+    This test hammers both paths at once because the defect is intermittent:
+    a sequential suite never reproduces it, and the console does, under an
+    operator simply clicking through consoles.
+    """
+    import threading
+
+    from monkeyllm_station.registry import Registry
+
+    registry = Registry(tmp_path / "race.db")
+    key = registry.issue_key("alice")
+    registry.grant("alice", "forest", {"read"})
+
+    failures: list[str] = []
+    ROUNDS = 200
+
+    def authenticating() -> None:
+        for _ in range(ROUNDS):
+            try:
+                assert registry.authenticate(key) == "alice"
+            except Exception as e:      # noqa: BLE001 - the point is to catch any
+                failures.append(f"authenticate: {e}")
+
+    def auditing() -> None:
+        for _ in range(ROUNDS):
+            try:
+                registry.record(principal="alice", forest="forest",
+                                primitive="look", args={}, result="ok", size=1)
+            except Exception as e:      # noqa: BLE001
+                failures.append(f"record: {e}")
+
+    threads = [threading.Thread(target=authenticating),
+               threading.Thread(target=auditing),
+               threading.Thread(target=authenticating),
+               threading.Thread(target=auditing)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not failures, f"{len(failures)} concurrent failure(s): {failures[:3]}"
+    # Every audit row was written, not merely attempted: a dropped commit
+    # loses the record without raising anywhere the caller can see.
+    assert len(registry.audit(limit=10_000)) == ROUNDS * 2
+    registry.close()

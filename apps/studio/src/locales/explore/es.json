@@ -4,7 +4,6 @@
   "explore.degree": "Senderos",
   "explore.edges": "Senderos desde aquí",
   "explore.edges_hint": "Solo aparecen senderos cuyo otro extremo está dentro de tu alcance.",
-  "explore.find": "Encuentra un punto de entrada",
   "explore.find_ph": "Busca en títulos, etiquetas y resúmenes…",
   "explore.heat": "Calor",
   "explore.leaf": "Una hoja: nada debajo y ningún sendero de salida dentro de tu alcance.",
@@ -13,7 +12,6 @@
   "explore.mode_tree": "Árbol",
   "explore.no_hits": "Nada coincidió dentro de tu alcance.",
   "explore.read": "Leer el contenido",
-  "explore.title": "Explorar",
   "explore.tokens": "Tamaño del cuerpo",
   "explore.tree": "Árbol",
   "explore.updated": "Actualizado"

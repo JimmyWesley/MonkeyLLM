@@ -4,7 +4,6 @@
   "explore.degree": "Trilhas",
   "explore.edges": "Trilhas a partir daqui",
   "explore.edges_hint": "Só aparecem trilhas cuja outra ponta está dentro do seu escopo.",
-  "explore.find": "Ache um ponto de entrada",
   "explore.find_ph": "Busque em títulos, tags e resumos…",
   "explore.heat": "Calor",
   "explore.leaf": "Uma folha: nada abaixo dela e nenhuma trilha de saída dentro do seu escopo.",
@@ -13,7 +12,6 @@
   "explore.mode_tree": "Árvore",
   "explore.no_hits": "Nada correspondeu dentro do seu escopo.",
   "explore.read": "Ler o conteúdo",
-  "explore.title": "Explorar",
   "explore.tokens": "Tamanho do corpo",
   "explore.tree": "Árvore",
   "explore.updated": "Atualizado"

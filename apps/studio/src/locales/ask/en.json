@@ -2,7 +2,6 @@
   "ask.answer": "Answer",
   "ask.collapse": "Bring the panel back",
   "ask.depth": "How much to read",
-  "ask.depth_hint": "More nodes means a better-grounded answer and a slower, costlier call.",
   "ask.download_md": "Download .md",
   "ask.download_pdf": "Save as PDF",
   "ask.evidence_hint": "Every id below was actually read to produce this answer. Click one to open it.",

@@ -36,11 +36,20 @@ LOCALES = STUDIO / "locales"
 LANGS = ("en", "pt", "es")
 
 KEY_RE = re.compile(r"^[a-z0-9]+(?:\.[a-z0-9_]+)+$")
-# `t('some.key')` — the literal calls. Template calls (`t(\`nav.${k}\`)`) are
-# deliberately not matched: they are real and legitimate, and pretending to
-# resolve them is how an "unused key" report starts lying.
-LITERAL_USE = re.compile(r"\bt\('([a-z0-9_.]+)'")
-TEMPLATE_USE = re.compile(r"\bt\(`([a-z0-9_.]+)\$\{")
+
+# Any key-shaped string literal, NOT just the ones sitting immediately after
+# `t(`. Keys reach the function by more routes than a direct call: through a
+# ternary (`t(wide ? 'ask.collapse' : 'ask.expand')`), through an array the
+# component maps over (`['ask.ex1', 'ask.ex2'].map(k => t(k))`), through a
+# tuple table (`[['rows', 'ask.hop_rows'], …]`). A pattern anchored on `t('`
+# misses every one of them and reports live keys as dead.
+#
+# The bias is deliberate. This set decides what is *safe to delete*, so a
+# false "used" costs a stale string and a false "unused" costs a broken
+# interface — the errors are not symmetric and the rule leans accordingly.
+LITERAL_USE = re.compile(r"""['"`]([a-z0-9]+(?:\.[a-z0-9_]+)+)['"`]""")
+# `t(`nav.${key}`)` and friends: the prefix is all that is knowable.
+TEMPLATE_USE = re.compile(r"`([a-z0-9_.]+)\$\{")
 
 
 def namespaces() -> list[str]:
@@ -71,17 +80,31 @@ def catalogue(lang: str) -> dict[str, str]:
     return out
 
 
-def used_keys() -> tuple[set[str], set[str]]:
-    """(literal keys, template prefixes) across every component."""
-    literal: set[str] = set()
+def used_keys() -> tuple[set[str], set[str], set[str]]:
+    """What the components refer to, under two opposite biases.
+
+    Returns `(mentioned, called, prefixes)`:
+
+    * `mentioned` — every key-shaped literal anywhere in a component. Used to
+      decide what is safe to DELETE, so it errs towards "in use": a key
+      reached through an array or a ternary is still a key in use.
+    * `called` — only literals whose namespace exists. Used to decide what is
+      MISSING, so it errs towards silence: `stroke-width="1.4"` is a
+      key-shaped string and is not a translation.
+    * `prefixes` — the knowable half of a template call.
+    """
+    known = set(namespaces())
+    mentioned: set[str] = set()
     prefixes: set[str] = set()
     for path in STUDIO.rglob("*.jsx"):
         if path.name == "i18n.jsx":
             continue
         text = path.read_text(encoding="utf-8")
-        literal |= set(LITERAL_USE.findall(text))
+        mentioned |= set(LITERAL_USE.findall(text))
         prefixes |= set(TEMPLATE_USE.findall(text))
-    return literal, prefixes
+    called = {k for k in mentioned if k.split(".", 1)[0] in known}
+    prefixes = {p for p in prefixes if p.split(".", 1)[0] in known}
+    return mentioned, called, prefixes
 
 
 # -- commands ---------------------------------------------------------------
@@ -98,10 +121,15 @@ def cmd_map(_args) -> int:
         if path.name == "i18n.jsx":
             continue
         text = path.read_text(encoding="utf-8")
+        known = set(namespaces())
         for key in LITERAL_USE.findall(text):
-            readers[key.split(".", 1)[0]].add(path.relative_to(STUDIO).as_posix())
+            ns = key.split(".", 1)[0]
+            if ns in known:
+                readers[ns].add(path.relative_to(STUDIO).as_posix())
         for prefix in TEMPLATE_USE.findall(text):
-            readers[prefix.rstrip(".")].add(path.relative_to(STUDIO).as_posix())
+            ns = prefix.split(".", 1)[0]
+            if ns in known:
+                readers[ns].add(path.relative_to(STUDIO).as_posix())
 
     width = max(len(ns) for ns in namespaces())
     print(f"{'namespace':<{width}}  keys  read by")
@@ -219,15 +247,15 @@ def cmd_check(_args) -> int:
                 problems += 1
                 print(f"{ns}/{lang}.json: keys belonging elsewhere: {stray[:8]}")
 
-    literal, prefixes = used_keys()
-    undefined = sorted(literal - reference)
+    mentioned, called, prefixes = used_keys()
+    undefined = sorted(called - reference)
     if undefined:
         problems += 1
         print(f"used in components but never defined: {undefined[:8]}")
 
     unused = sorted(
         k for k in reference
-        if k not in literal and not any(k.startswith(p) for p in prefixes))
+        if k not in mentioned and not any(k.startswith(p) for p in prefixes))
     if unused:
         print(f"\npossibly unused ({len(unused)}) — template calls make this a "
               f"hint, not a verdict:\n  {', '.join(unused[:12])}"
