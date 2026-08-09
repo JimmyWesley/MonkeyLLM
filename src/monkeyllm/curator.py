@@ -30,9 +30,10 @@ import os
 import re
 from typing import Callable
 
+from monkeyllm.dialect import SUMMARY_MAX_TOKENS
 from monkeyllm.errors import E_SCHEMA, VineError
-from monkeyllm.models import validate_summary
-from monkeyllm.tokens import estimate_tokens
+from monkeyllm.models import fit_summary, validate_summary
+from monkeyllm.tokens import CHARS_PER_TOKEN, estimate_tokens
 
 MAX_ATTEMPTS = 3
 CONTENT_BUDGET_TOKENS = 1500  # how much of the body the model sees
@@ -43,12 +44,18 @@ PROPOSAL_CONFIDENCE = 0.3   # the C.8 ladder's bottom rung — Part H's scope
 CANDIDATE_LIMIT = 8
 NOTE_MAX_CHARS = 120
 REPLY_KEPT_CHARS = 400  # enough of a rejected reply to see what went wrong
+# The A.4 ceiling as the model can actually measure it. "60 tokens" is a
+# number no model counts reliably; characters it can approximate. Derived
+# from the estimator so the two can never drift apart.
+SUMMARY_MAX_CHARS = SUMMARY_MAX_TOKENS * CHARS_PER_TOKEN
 
 SYSTEM_PROMPT = """\
 You write frontmatter summaries for nodes of a knowledge forest. An agent
 will decide from the summary alone whether the node matters — the summary
 is the SCENT. Rules (normative, spec A.4):
-- 1 to 3 sentences, at most 60 tokens total. Shorter is better.
+- 1 to 3 sentences, AT MOST {max_chars} CHARACTERS in total — count the
+  characters, this is a hard limit and long summaries are rejected.
+  Shorter is better.
 - Sentence 1: WHAT it is (category + subject).
 - Sentence 2: the key content — concrete numbers, names, time scope.
 - Dated content (events, reports, meetings, releases, deadlines): the date
@@ -64,15 +71,20 @@ is the SCENT. Rules (normative, spec A.4):
 Reply with ONE JSON object only, no prose around it:
 {{"summary": "...", "tags": ["...", "..."]}}"""
 
-RETRY_PROMPT = ("Your previous summary was rejected: {error}. "
-                "Rewrite it following the rules strictly. JSON only.")
+RETRY_PROMPT = ("Your previous summary was rejected: {error}. Rewrite it "
+                "following the rules strictly and keep the summary under "
+                "{max_chars} characters. JSON only.")
 
+# `.replace` rather than `.format`: this prompt ends with a literal JSON
+# object, and escaping those braces to satisfy the formatter would make the
+# example the model copies harder to read than the rule it illustrates.
 BRANCH_PROMPT = """\
 You summarize a REGION (branch) of a knowledge forest. Below are the entry
 lines of its children — sub-branches and notes, each already summarized.
 Write the branch's summary: the SCENT an agent reads to decide whether to
 descend here. Rules (normative, spec A.4/A.5):
-- 1 to 3 sentences, at most 60 tokens total. Shorter is better.
+- 1 to 3 sentences, AT MOST {max_chars} CHARACTERS in total — count the
+  characters, this is a hard limit. Shorter is better.
 - Say WHAT lives here: themes, concrete names, time scope visible in the
   entries. Synthesize the region — do not enumerate every child.
 - If the entries make it visible, add where to go for what is NOT here.
@@ -80,7 +92,7 @@ descend here. Rules (normative, spec A.4/A.5):
   groups" — go straight to the substance.
 - Write in the SAME LANGUAGE as the entries.
 Reply with ONE JSON object only, no prose around it:
-{"summary": "..."}"""
+{"summary": "..."}""".replace("{max_chars}", str(SUMMARY_MAX_CHARS))
 
 PROPOSE_PROMPT = """\
 You connect nodes of a knowledge forest. Below is a NEW node and a closed
@@ -136,6 +148,31 @@ def _extract_json(text: str) -> dict | None:
         return None
 
 
+# `"summary": "…` up to wherever the reply stopped. The closing quote is
+# deliberately optional.
+_SUMMARY_FIELD = re.compile(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)', re.DOTALL)
+
+
+def _salvage(text: str) -> dict | None:
+    """Recover the summary from a reply that was cut off mid-JSON.
+
+    `max_tokens` truncates the message, not the sentence the model meant to
+    write: the summary is usually complete and only the closing brace is
+    missing. Rejecting that as "no JSON" spends three model calls to arrive
+    at the deterministic fallback, over a reply that was already good. What
+    comes back here is still put through `validate_summary` like any other —
+    this widens what can be READ, never what is accepted.
+    """
+    m = _SUMMARY_FIELD.search(text)
+    if not m:
+        return None
+    try:  # json.loads unescapes \n, \uXXXX and friends
+        summary = json.loads(f'"{m.group(1)}"')
+    except json.JSONDecodeError:
+        return None
+    return {"summary": summary, "tags": []} if isinstance(summary, str) else None
+
+
 class Curator:
     """An `on_curate` hook (G.4.3) that fills summaries via the LLM (G.4.2)."""
 
@@ -148,11 +185,12 @@ class Curator:
             if directives.strip() else ""
         )
         self.system = SYSTEM_PROMPT.format(max_tags=MAX_TAGS,
+                                           max_chars=SUMMARY_MAX_CHARS,
                                            directives=directives_block)
         self.stats = {"llm_summaries": 0, "fallbacks": 0, "retries": 0,
                       "links_proposed": 0, "proposal_fallbacks": 0,
                       "branch_rollups": 0, "branch_fallbacks": 0,
-                      "transport_errors": 0, "rejected": 0}
+                      "transport_errors": 0, "rejected": 0, "repaired": 0}
         # Two different silences, and they need two different fixes.
         # `last_error`: the endpoint never answered (key, URL, model name).
         # `last_reject` + `last_reply`: it answered, and the answer failed
@@ -267,7 +305,14 @@ class Curator:
 
     def _validated(self, messages: list[dict]) -> tuple[str, list[str]] | None:
         """Validate-and-retry loop shared by banana (_ask) and branch
-        (branch_summary) summaries."""
+        (branch_summary) summaries.
+
+        Exhausting the retries is not the end: an over-long summary is
+        trimmed to the budget rather than discarded (G.4.2). The model's
+        words, cut to fit, beat the first-sentences heuristic every time —
+        and the operator paid for them already.
+        """
+        overlong: tuple[str, list] | None = None
         for attempt in range(MAX_ATTEMPTS):
             try:
                 reply = self.chat(messages)
@@ -281,7 +326,7 @@ class Curator:
                 # budget reasoning, and it needs a different fix.
                 error = "the model returned an empty message"
             else:
-                obj = _extract_json(reply)
+                obj = _extract_json(reply) or _salvage(reply)
                 summary = (obj or {}).get("summary", "")
                 if not isinstance(summary, str) or not summary.strip():
                     error = "no summary found in the JSON reply"
@@ -290,6 +335,8 @@ class Curator:
                         validate_summary(summary.strip())
                     except VineError as e:
                         error = e.message
+                        if "exceeds" in e.message:
+                            overlong = (summary.strip(), (obj or {}).get("tags"))
             if error is None:
                 # The last rejection is NOT cleared here: a batch where the
                 # last document happened to succeed still owes the operator
@@ -303,7 +350,14 @@ class Curator:
             self.last_reply = reply.strip()[:REPLY_KEPT_CHARS]
             messages.append({"role": "assistant", "content": reply})
             messages.append({"role": "user",
-                             "content": RETRY_PROMPT.format(error=error)})
+                             "content": RETRY_PROMPT.format(
+                                 error=error, max_chars=SUMMARY_MAX_CHARS)})
+
+        if overlong is not None:
+            trimmed = fit_summary(overlong[0])
+            if trimmed is not None:
+                self.stats["repaired"] += 1
+                return trimmed, self._clean_tags(overlong[1])
         self.stats["rejected"] += 1
         return None
 

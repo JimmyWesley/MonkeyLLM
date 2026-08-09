@@ -332,6 +332,7 @@ function Report({ report, goto }) {
             n: stats.llm_summaries || 0, regions: stats.branch_rollups || 0,
           })}
           {stats.fallbacks > 0 && ` ${t('ingest.curated_partial', { n: stats.fallbacks })}`}
+          {stats.repaired > 0 && ` ${t('ingest.curated_trimmed', { n: stats.repaired })}`}
         </Note>
       ) : !report.bound ? (
         <Note tone="warn">{t('ingest.uncurated')}</Note>
