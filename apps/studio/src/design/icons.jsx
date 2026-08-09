@@ -52,6 +52,22 @@ export const Plus = (p) => <S {...p}><path d="M12 5v14M5 12h14" /></S>
 export const Search = (p) => <S {...p}><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></S>
 export const ChevronDown = (p) => <S {...p}><path d="M6 9.5l6 6 6-6" /></S>
 export const ChevronRight = (p) => <S {...p}><path d="M9.5 6l6 6-6 6" /></S>
+export const ChevronLeft = (p) => <S {...p}><path d="M14.5 6l-6 6 6 6" /></S>
+export const Save = (p) => (
+  <S {...p}><path d="M5 4.5h11l3.5 3.5v11.5a1 1 0 01-1 1H5a1 1 0 01-1-1v-14a1 1 0 011-1z" />
+    <path d="M8 4.5v5h7v-5M8 19.5v-5h8v5" /></S>
+)
+export const Undo = (p) => (
+  <S {...p}><path d="M4 9h11a4.5 4.5 0 010 9h-6" /><path d="M8 5L4 9l4 4" /></S>
+)
+export const Grid = (p) => (
+  <S {...p}><rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+    <path d="M3.5 9.5h17M9.5 9.5v10" /></S>
+)
+export const Columns = (p) => (
+  <S {...p}><rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+    <path d="M9.5 4.5v15M15 4.5v15" /></S>
+)
 export const Sun = (p) => (
   <S {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8L6 18M18 6l1.8-1.8" /></S>
 )
