@@ -294,6 +294,148 @@ def test_readonly_station_refuses_before_staging_anything(readonly_station):
     assert not (root / "nope").exists()
 
 
+def _bind_ingest(registry, endpoint, model="some-model", name="p"):
+    registry.put_provider(name, endpoint, "sk-test")
+    registry.bind_model(FOREST, "ingest", name, model)
+
+
+def test_a_silent_ingest_model_is_reported_as_silent(station):
+    """The Curator falls back on any transport failure and never blocks
+    (G.4 rule 6) — so a wrong key or a dead endpoint plants exactly what no
+    model at all would plant. Reporting `curated` off the binding made those
+    two states identical on screen, which is how an ingest looks like it
+    worked while the model was never called."""
+    client, registry, _ = station
+    head = _key(registry, ["read", "ingest"])
+    _bind_ingest(registry, "http://127.0.0.1:9/v1")  # discard port: nothing listens
+
+    r = client.post(f"/v1/forests/{FOREST}/ingest",
+                    json={"mode": "upload", "files": DOCS, "dest": "uploads"},
+                    headers=head)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["planted"], "a dead model must not stop the ingest"
+    assert body["bound"] is True
+    assert body["curated"] is False, "nothing was curated, so nothing may claim it was"
+    assert body["curation"]["llm_summaries"] == 0
+    assert body["curation"]["transport_errors"] > 0
+    assert body["curation"]["error"], "the operator needs to know what failed"
+
+
+def test_a_model_that_answers_badly_is_not_reported_as_unreachable(
+        station, monkeypatch):
+    """The failure the operator actually hits: the endpoint is fine, the
+    model replies, and nothing it says survives A.4 validation. Reporting
+    that as 'it never answered' sends them to debug the network."""
+    client, registry, _ = station
+    head = _key(registry, ["read", "ingest"])
+    _bind_ingest(registry, "http://127.0.0.1:9/v1", model="thinker")
+
+    from monkeyllm_station import inference
+
+    def fake_chat_from_binding(binding, *, timeout=180.0):
+        # A reasoning model that spent its whole budget thinking.
+        return (lambda messages: ""), binding["model"]
+
+    monkeypatch.setattr(inference, "chat_from_binding", fake_chat_from_binding)
+
+    r = client.post(f"/v1/forests/{FOREST}/ingest",
+                    json={"mode": "upload", "files": DOCS, "dest": "uploads"},
+                    headers=head)
+    assert r.status_code == 200, r.text
+    stats = r.json()["curation"]
+    assert r.json()["curated"] is False and r.json()["bound"] is True
+    assert stats["transport_errors"] == 0, "the endpoint answered every time"
+    assert "error" not in stats, "there was no connection problem to report"
+    assert stats["rejected"] > 0 and stats["retries"] > 0
+    assert stats["rejected_because"] == "the model returned an empty message"
+    assert stats["last_reply"] == ""
+
+
+def test_a_working_ingest_model_reports_what_it_wrote(station, monkeypatch):
+    client, registry, _ = station
+    head = _key(registry, ["read", "ingest"])
+    _bind_ingest(registry, "http://127.0.0.1:9/v1")
+
+    import json as _json
+
+    from monkeyllm_station import inference
+
+    def fake_chat_from_binding(binding, *, timeout=180.0):
+        def chat(messages):
+            return _json.dumps({"summary": "Onboarding facts: the laptop "
+                                           "request form lives on the intranet.",
+                                "tags": ["onboarding"]})
+        return chat, binding["model"]
+
+    monkeypatch.setattr(inference, "chat_from_binding", fake_chat_from_binding)
+
+    r = client.post(f"/v1/forests/{FOREST}/ingest",
+                    json={"mode": "upload", "files": DOCS, "dest": "uploads"},
+                    headers=head)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["curated"] is True and body["bound"] is True
+    assert body["curation"]["llm_summaries"] == len(DOCS)
+    assert body["curation"]["transport_errors"] == 0
+    assert "error" not in body["curation"]
+
+
+def test_a_later_upload_lands_where_the_operator_said(station):
+    """The second upload of a batch flips to `sync` because the staging area
+    is stable — but it is still an upload, and the operator picked a
+    destination for THESE files. Taking the first batch's dest from config
+    filed every later document in the wrong branch, silently."""
+    client, registry, _ = station
+    head = _key(registry, ["read", "ingest"])
+
+    first = client.post(f"/v1/forests/{FOREST}/ingest", headers=head, json={
+        "mode": "upload", "dest": "uploads",
+        "files": [{"name": "first.md", "text": "# First\n\nAlpha fact.\n"}]})
+    assert first.json()["planted"] == ["uploads/first"]
+
+    second = client.post(f"/v1/forests/{FOREST}/ingest", headers=head, json={
+        "mode": "upload", "dest": "projects",
+        "files": [{"name": "second.md", "text": "# Second\n\nBeta fact.\n"}]})
+    assert second.status_code == 200, second.text
+    assert second.json()["planted"] == ["projects/second"]
+
+    # A re-send of a known name still updates in place rather than moving it.
+    third = client.post(f"/v1/forests/{FOREST}/ingest", headers=head, json={
+        "mode": "upload", "dest": "people",
+        "files": [{"name": "first.md", "text": "# First\n\nAlpha fact, revised.\n"}]})
+    assert third.json()["planted"] == []
+    assert third.json()["updated"] == ["uploads/first"]
+
+
+def test_upload_accepts_bytes_so_binary_converters_are_reachable(station):
+    """`.docx`/`.xlsx` converters read bytes (G.2). A text-only upload path
+    left them usable from a shell and from nowhere else — which is the
+    opposite of who the Station's ingest surface is for."""
+    import base64
+
+    client, registry, root = station
+    head = _key(registry, ["read", "ingest"])
+    raw = b"PK\x03\x04 not really a docx"
+
+    r = client.post(f"/v1/forests/{FOREST}/ingest", headers=head, json={
+        "mode": "upload", "dest": "uploads",
+        "files": [{"name": "report.docx", "b64": base64.b64encode(raw).decode()}]})
+    assert r.status_code == 200, r.text
+    staged = root / FOREST / "_derived" / "uploads" / "report.docx"
+    assert staged.read_bytes() == raw, "the bytes must survive the round trip"
+
+
+def test_upload_refuses_undecodable_bytes(station):
+    client, registry, _ = station
+    head = _key(registry, ["read", "ingest"])
+    r = client.post(f"/v1/forests/{FOREST}/ingest", headers=head, json={
+        "mode": "upload", "dest": "uploads",
+        "files": [{"name": "report.docx", "b64": "not base64 at all!!"}]})
+    assert r.status_code == 400
+    assert "base64" in r.json()["error"]["message"]
+
+
 def test_ingest_is_audited(station):
     client, registry, _ = station
     head = _key(registry, ["read", "ingest", "admin"])

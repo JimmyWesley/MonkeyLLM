@@ -15,6 +15,12 @@ It NEVER blocks the pipeline: any failure (bad JSON, invalid summary after
 retries, transport error) falls back to the deterministic derived summary
 and is counted in `stats` — the >= 95% acceptance criterion is measured,
 not assumed.
+
+Never blocking is not the same as never telling. A bound model that never
+answers produces exactly the output of no model at all, so the failure has
+to leave a trace the caller can read: `stats["transport_errors"]` counts
+them and `last_error` keeps the most recent one. Without that, a wrong key
+or a typo in the model name is indistinguishable from a working ingest.
 """
 
 from __future__ import annotations
@@ -36,6 +42,7 @@ MAX_PROPOSALS = 3
 PROPOSAL_CONFIDENCE = 0.3   # the C.8 ladder's bottom rung — Part H's scope
 CANDIDATE_LIMIT = 8
 NOTE_MAX_CHARS = 120
+REPLY_KEPT_CHARS = 400  # enough of a rejected reply to see what went wrong
 
 SYSTEM_PROMPT = """\
 You write frontmatter summaries for nodes of a knowledge forest. An agent
@@ -144,7 +151,16 @@ class Curator:
                                            directives=directives_block)
         self.stats = {"llm_summaries": 0, "fallbacks": 0, "retries": 0,
                       "links_proposed": 0, "proposal_fallbacks": 0,
-                      "branch_rollups": 0, "branch_fallbacks": 0}
+                      "branch_rollups": 0, "branch_fallbacks": 0,
+                      "transport_errors": 0, "rejected": 0}
+        # Two different silences, and they need two different fixes.
+        # `last_error`: the endpoint never answered (key, URL, model name).
+        # `last_reject` + `last_reply`: it answered, and the answer failed
+        # the A.4 contract every time — which is a prompt, budget or model
+        # problem, not a connectivity one.
+        self.last_error: str | None = None
+        self.last_reject: str | None = None
+        self.last_reply: str | None = None
 
     def __call__(self, draft: dict) -> dict:
         body = draft.get("body")
@@ -189,8 +205,9 @@ class Curator:
                                        node=node_block, candidates=cand_block)
         try:
             reply = self.chat([{"role": "user", "content": prompt}])
-        except Exception:
+        except Exception as e:
             self.stats["proposal_fallbacks"] += 1  # never blocks the plant
+            self._record(e)
             return
         picks = (_extract_json(reply) or {}).get("related")
         if not isinstance(picks, list):
@@ -254,25 +271,50 @@ class Curator:
         for attempt in range(MAX_ATTEMPTS):
             try:
                 reply = self.chat(messages)
-            except Exception:
+            except Exception as e:
+                self._record(e)
                 return None  # transport problems: fall back, never block
-            obj = _extract_json(reply)
-            summary = (obj or {}).get("summary", "")
             error = None
-            if not isinstance(summary, str) or not summary.strip():
-                error = "no summary found in the JSON reply"
+            if not reply.strip():
+                # Distinct from "no JSON here": an empty message is the
+                # signature of a thinking model that spent its whole token
+                # budget reasoning, and it needs a different fix.
+                error = "the model returned an empty message"
             else:
-                try:
-                    validate_summary(summary.strip())
-                except VineError as e:
-                    error = e.message
+                obj = _extract_json(reply)
+                summary = (obj or {}).get("summary", "")
+                if not isinstance(summary, str) or not summary.strip():
+                    error = "no summary found in the JSON reply"
+                else:
+                    try:
+                        validate_summary(summary.strip())
+                    except VineError as e:
+                        error = e.message
             if error is None:
+                # The last rejection is NOT cleared here: a batch where the
+                # last document happened to succeed still owes the operator
+                # an example of the ones that did not.
                 return summary.strip(), self._clean_tags((obj or {}).get("tags"))
             self.stats["retries"] += 1
+            # Kept, not just counted. "The model answered and I threw all of
+            # it away" is the state an operator cannot debug: the rejection
+            # reason names the rule, the reply shows what broke it.
+            self.last_reject = error
+            self.last_reply = reply.strip()[:REPLY_KEPT_CHARS]
             messages.append({"role": "assistant", "content": reply})
             messages.append({"role": "user",
                              "content": RETRY_PROMPT.format(error=error)})
+        self.stats["rejected"] += 1
         return None
+
+    def _record(self, exc: Exception) -> None:
+        """Keep why the model stayed silent. A `VineError` carries the
+        endpoint's own reply in `hint` — the 401 body, the unknown-model
+        line — which is the part that tells an operator what to fix."""
+        self.stats["transport_errors"] += 1
+        detail = getattr(exc, "hint", None)
+        self.last_error = (f"{exc}: {detail}" if detail else str(exc))[:300] \
+            or exc.__class__.__name__
 
     @staticmethod
     def _clean_tags(tags) -> list[str]:

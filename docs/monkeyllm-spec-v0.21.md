@@ -2335,8 +2335,8 @@ dangling binding would fail at the worst possible moment.
 Two host composites, neither a primitive (the engine gains nothing):
 
 - **`answer(question, k)`** — runs the scoped `harvest`, hands the result
-  to the forest's `answer` model, and returns `{answer, model, evidence,
-  harvest}`. Requires the `read` capability.
+  to the forest's `answer` model, and returns `{answer, model, model_ms,
+  evidence, harvest, trace}` (J.10.4). Requires the `read` capability.
 - **`curate(id)`** — re-summarises one node through the `ingest` model
   under the A.4 scent rules (validate-and-retry), returning the proposed
   summary rather than writing it. Requires the `write` capability, because
@@ -2352,7 +2352,97 @@ question, not an implementation shortcut.
 *Known boundary (informative):* `answer` reads text. Facts that live only
 inside a `type:dataset` payload are reached with `query`, so a question
 whose answer is an aggregate over rows will be honestly refused rather
-than guessed. A tool-calling answer loop is the natural follow-up.
+than guessed — unless the model is given the primitives and allowed to run
+`query` itself, which is J.10.5.
+
+### J.10.5 The answer that navigates
+
+`answer`'s default is a sweep: `harvest`, one model call, done. Cheap,
+predictable — and blind to anything not reachable from the entry list. It
+is retrieval-augmented generation with a forest underneath, and it uses
+none of what the forest is for.
+
+`answer` therefore accepts **`hops`**: with it, the model holds the read
+primitives and decides where to go until it can answer. This is the loop
+criterion F.5 already measures offline; J.10.5 is that loop as a hosted
+composite.
+
+- **Opt-in, always.** One model call per hop against one for the sweep, so
+  the default MUST remain the sweep. `hops: true` means the host's own
+  budget; a number sets it. The budget MUST be bounded.
+- **Read-only, by whitelist, not by capability.** The loop offers `locate`,
+  `sniff`, `look`, `move`, `pick`, `scan`, `query` and nothing else. The
+  policy would already refuse a write to a principal without the capability
+  — but a principal who *has* `write` asked a question, and a loop that
+  could `plant` would turn a question into an edit.
+- **Every call goes through `ScopedVine`**, exactly as a client's would.
+  The loop is a client with no privileges of its own; J.10.3's invariant is
+  unchanged, not re-argued.
+- **A spent budget still answers.** Running out MUST force one closing turn
+  over what was already read, rather than discarding the hunt — the tokens
+  are spent either way.
+- **Evidence is what was opened.** Cited ids that the loop never read MUST
+  NOT be returned as evidence: that is a claim about the forest rather than
+  a reading of it.
+
+The response carries `hops` alongside the `trace` of J.10.4, so the path and
+its cost are both visible. A hop MUST report more than its tool name: the
+arguments the model chose, one number for what came back (results, rows,
+tokens, or the refusal code), and **two clocks** — the forest call and the
+model turn that decided to make it. "sniff, sniff, locate" and "sniff → 0,
+sniff → 0, locate → 5" are the same list of verbs and opposite stories, and
+one combined duration would hide which half a slow hunt is spending.
+
+The arguments appear here and **not** in the `trace`, deliberately: the
+trace is the technical record and reports shape only (J.10.4), while a hop's
+arguments are the model's own choices, derived from the caller's own
+question, over results the scope already filtered.
+
+Steps in the `trace` that a hop caused SHOULD carry that hop's number, so a
+console can show a timing and the decision behind it in one place. The entry
+`locate` is not a hop — the forager did not choose it.
+
+**And it carries what it read.** The sweep can show the material because
+`harvest` returns it in one bundle; a forager has a walk instead, so the
+same evidence MUST be assembled from the hops and returned in the same
+shape (`read`): `pick` bodies and sections, `sniff` snippets with their
+section and line, `query` rows. A `look` is a digest and is not material —
+naming a summary an excerpt would blur the one distinction this reporting
+exists to make. A console MUST render both the same way, because "what was
+this answer built from" is the same question in both modes.
+
+### J.10.4 Explaining a composite
+
+A composite is opaque from the outside: `answer` is one request, several
+forest calls and a provider round trip, and a single elapsed number cannot
+say which of them to fix. The usual suspicion — "the forest is slow" — is
+almost always wrong, and there is no way to find that out from a total.
+
+Calls that are several calls (`answer`, `harvest`) MUST therefore return a
+`trace`: the ordered steps the call performed, each with its primitive, its
+elapsed milliseconds, the tokens it emitted and — only for primitives that
+take one — the node id; plus `retrieval_ms`, `total_ms`, and the provider
+round trip as a `model` step. Consoles that answer questions MUST show it.
+
+The engine already times every primitive it runs (Part D), so this is a
+slice of that trace and not a second instrumentation: the events the call
+appended, and nothing else.
+
+**A trace reports shape, never content.** No arguments, no queries, no
+snippets — a step names what ran and what it cost. Node ids appear only for
+primitives the caller's own policy already admitted, since scoping happens
+before the call the trace is describing; a trace therefore cannot disclose
+what a scoped response withheld.
+
+**What it cost, when the provider says so.** A composite that calls a model
+MUST report the tokens the provider itself metered (`usage`) and, when that
+provider publishes rates, the money: `cost: {prompt_tokens,
+completion_tokens, calls, priced, usd}`. Two rules make it trustworthy.
+Counting tokens locally is an estimate of somebody else's meter and MUST
+NOT be substituted for it. And a provider that publishes no rate — a local
+Ollama, a llama.cpp — MUST be reported as **unpriced**, never as free:
+`priced: false` with no `usd`, because rendering silence as $0.00 is a
+claim about money made from the absence of one.
 
 ### J.11 Out of scope for Part J
 
@@ -2461,6 +2551,18 @@ Consoles that expose navigation (the Playground) and the answering
 composite (`answer`) MUST surface that switch, so an operator can compare
 the two orders on their own corpus rather than trusting a table measured on
 somebody else's.
+
+**The entry-search switch is a different switch.** `answer` composes
+`harvest`, which is `locate` + `sniff` and never hops, so a *Gauntlet*
+control on an answering console would change nothing — and a control that
+changes nothing is worse than no control. What does change an answer is
+K.1's other consumer: whether the vector layer is fused into entry search.
+Calls that perform entry search (`locate`, `harvest`, `answer`) MUST
+therefore accept an optional `hybrid` boolean, **defaulting to false on
+every call**, for the same reason the opt-out exists: the published
+degradation (R@1 1.00 → 0.40) has to be reproducible on the operator's own
+corpus. It MUST NOT be sticky — a request that omits it is a BM25 request,
+whatever the previous request asked for.
 
 *Deployment note (informative):* whether the Gauntlet is available at all
 is a property of the forest's configuration, not of the caller's identity.

@@ -10,6 +10,11 @@ import { Metric, NeedsCapability, has, rootsOf } from './shared.jsx'
 
 /* The budgets are the engine's, restated here only so the number an operator
  * sees while tuning is the number the primitive actually enforces (C.6). */
+/** Where entry search runs, and therefore where the RRF switch means
+ *  something. `look`/`move` never call `locate`; offering it there would be
+ *  a control with no wire behind it. */
+const ENTRY_OPS = ['locate', 'harvest', 'answer']
+
 const OPS = [
   { key: 'locate', budget: 800, fields: ['query', 'k'] },
   { key: 'sniff', budget: 800, fields: ['terms', 'k'] },
@@ -26,6 +31,9 @@ export default function Playground({ forest, grant }) {
   // K.3: the claim is a navigation gain, so it has to be measurable
   // against itself — same corpus, same session, one click apart.
   const [gauntlet, setGauntlet] = useState(true)
+  // K.1: off by default, because measurement says fusing the dense layer
+  // into an already-correct BM25 moves the right node off rank 1.
+  const [hybrid, setHybrid] = useState(false)
   const [state, setState] = useState({})
 
   if (!has(grant, 'read')) {
@@ -45,6 +53,9 @@ export default function Playground({ forest, grant }) {
     if (spec.fields.includes('k')) out.k = Number(form.k) || 5
     if (spec.fields.includes('id')) out.id = form.id || root
     if (['look', 'move'].includes(op) && !gauntlet) out.gauntlet = false
+    // The other dense switch, and a different one: this fuses the vector
+    // layer into ENTRY search (K.1). Sent only where entry search happens.
+    if (ENTRY_OPS.includes(op) && hybrid) out.hybrid = true
     return out
   }
 
@@ -108,6 +119,12 @@ export default function Playground({ forest, grant }) {
               <div className="mr-auto">
                 <Toggle checked={gauntlet} onChange={setGauntlet}
                         label={t('gauntlet.toggle')} hint={t('gauntlet.toggle_hint')} />
+              </div>
+            )}
+            {ENTRY_OPS.includes(op) && (
+              <div className="mr-auto">
+                <Toggle checked={hybrid} onChange={setHybrid}
+                        label={t('ask.hybrid')} hint={t('ask.hybrid_hint')} />
               </div>
             )}
             <button className="btn btn-primary" disabled={state.busy}>

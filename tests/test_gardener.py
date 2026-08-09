@@ -148,6 +148,32 @@ class TestSync:
         assert not [i for i in lint_forest(Forest(vine.forest.root))
                     if "payload drift" in i.message]
 
+    def test_sync_dest_overrides_the_adopted_destination(self, garden, source_tree):
+        """A caller that says where a NEW file goes must not be overruled by
+        whatever the last adopt recorded — while files that already have a
+        passport keep their branch, because sync refreshes content and never
+        moves nodes."""
+        g, vine, _ = garden
+        g.adopt(source_tree, dest="archive")
+        assert vine.forest.exists("archive/notes/overview")
+
+        (source_tree / "notes" / "fresh.md").write_text(
+            "# Fresh\n\nA note added after the first adopt.", encoding="utf-8")
+        (source_tree / "notes" / "overview.md").write_text(
+            OVERVIEW_MD + "\n## Update\n\nFleet expanded to 900 sensors.\n",
+            encoding="utf-8")
+
+        report = g.sync(source_tree, dest="inbox")
+        assert report["planted"] == ["inbox/notes/fresh"]
+        assert report["updated"] == ["archive/notes/overview"]
+
+    def test_sync_without_dest_still_follows_the_config(self, garden, source_tree):
+        g, _, _ = garden
+        g.adopt(source_tree, dest="archive")
+        (source_tree / "notes" / "fresh.md").write_text("# Fresh\n\nText.",
+                                                        encoding="utf-8")
+        assert g.sync(source_tree)["planted"] == ["archive/notes/fresh"]
+
     def test_sync_with_no_changes_is_idempotent(self, garden, source_tree):
         g, _, root = garden
         g.adopt(source_tree)

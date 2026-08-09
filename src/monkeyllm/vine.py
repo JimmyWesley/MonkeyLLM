@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import inspect
 import json
 import re
 import sqlite3
@@ -176,11 +177,18 @@ def _sniff_body(body: str, folded_terms: list[str]) -> tuple[list[dict], set[int
 
 
 def _traced(fn):
+    # Only primitives whose first argument IS a node id may report one.
+    # `locate("payroll")` passes a query string positionally, and recording
+    # that as `id` filed a search term where every reader expects a node —
+    # harmless to Part D's metrics (a query never matches an answer node),
+    # but a lie to anything that displays a trace.
+    takes_id = list(inspect.signature(fn).parameters)[1:2] == ["id"]
+
     def wrapper(self: "Vine", *args, **kwargs):
         t0 = time.perf_counter()
         result = fn(self, *args, **kwargs)
         elapsed = (time.perf_counter() - t0) * 1000
-        node_id = kwargs.get("id") or (args[0] if args else None)
+        node_id = kwargs.get("id") or (args[0] if takes_id and args else None)
         self.tracer.record(
             fn.__name__,
             node_id if isinstance(node_id, str) else None,
@@ -232,7 +240,10 @@ class Vine:
         # Measurement (Part K changelog) showed fusing a dense ranker into
         # an already-correct BM25 *degrades* it — so the dense layer being
         # available must not imply using it here.
-        self._hybrid_locate = hybrid_locate
+        # Public and writable for the same reason `embedder` is (J.0): a host
+        # offering the per-call switch K.3 requires must be able to flip it
+        # without forking the pool. Off is the default and stays the default.
+        self.hybrid_locate = hybrid_locate
         self._goal: list[float] | None = None
         self._goal_text: str | None = None
 
@@ -256,7 +267,7 @@ class Vine:
     @property
     def hybrid(self) -> bool:
         """RRF fusion in `locate`. Off unless asked for, on purpose."""
-        return self._hybrid_locate and self.dense_ready
+        return self.hybrid_locate and self.dense_ready
 
     @property
     def canopy_status(self) -> dict:
@@ -508,7 +519,17 @@ class Vine:
         _defer_heat_pop = edges_out + edges_in
         # Part K: condition the frontier BEFORE the cap, which is the whole
         # point — reordering after the cut cannot recover what the cut hid.
-        goal = self._goal_for(toward, gauntlet)
+        #
+        # But not when the caller asked for fields that contain no frontier:
+        # the `fields` filter below would drop the order anyway, and the goal
+        # is embedded lazily, so ranking a discarded list meant a network
+        # round trip for nothing. `harvest` does exactly that — one
+        # `look(id, fields=["summary"])` per result — and it was charging
+        # every harvest and every answer ~150 ms of embedding for output no
+        # caller ever sees.
+        wants_frontier = not fields or bool(
+            {"edges_out", "edges_in", "frontier"} & set(fields))
+        goal = self._goal_for(toward, gauntlet) if wants_frontier else None
         if goal is not None:
             self._rank_frontier(edges_out, goal[0],
                                 id_of=lambda e: e["target"],
