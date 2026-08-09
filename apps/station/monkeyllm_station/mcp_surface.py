@@ -47,7 +47,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive):
     request dies on "Task group is not initialized".
     """
     try:
-        from mcp.server.fastmcp import FastMCP
+        from mcp.server.mcpserver import MCPServer
     except ImportError:  # pragma: no cover - mcp is an engine dependency
         return None, None
 
@@ -68,11 +68,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive):
         allowed_origins=[f"http://{h}" for h in hosts] + [f"https://{h}" for h in hosts],
     )
 
-    # streamable_http_path="/" because this app gets mounted under /mcp by the
-    # caller; leaving the default would serve it at /mcp/mcp.
-    mcp = FastMCP("monkeyllm-station", instructions=INSTRUCTIONS,
-                  stateless_http=True, json_response=True,
-                  streamable_http_path="/", transport_security=security)
+    mcp = MCPServer("monkeyllm-station", instructions=INSTRUCTIONS)
 
     async def call(forest: str, name: str, **kwargs) -> dict:
         principal = PRINCIPAL.get()
@@ -186,7 +182,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive):
         return await call(forest, "ingest", mode=mode, files=files,
                           path=path, dest=dest)
 
-    inner = mcp.streamable_http_app()
+    # Transport options belong to the app factory in mcp 2.x, not the
+    # constructor. streamable_http_path="/" because this app gets mounted
+    # under /mcp by the caller; leaving the default would serve it at /mcp/mcp.
+    inner = mcp.streamable_http_app(
+        streamable_http_path="/", stateless_http=True, json_response=True,
+        transport_security=security,
+    )
 
     class Authenticated:
         """Resolves the key once per request and publishes the principal."""

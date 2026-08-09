@@ -13,9 +13,10 @@ Two serving modes (spec C.0):
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from monkeyllm.errors import E_NOT_FOUND, E_SCHEMA, VineError
 from monkeyllm.vine import Vine
@@ -94,20 +95,28 @@ class ForestPool:
 def build_server(
     forest_root: str | Path | None = None,
     writable: bool = True,
-    host: str | None = None,
-    port: int | None = None,
     root: str | Path | None = None,
-) -> FastMCP:
+) -> MCPServer:
+    # host/port are transport options in mcp 2.x: they go to run(), not here.
+    #
+    # mcp 2.x runs sync tools on arbitrary worker threads (anyio.to_thread;
+    # 1.x ran them inline on the event loop), and a SQLite connection belongs
+    # to the thread that opened it — a guarantee the engine keeps. So every
+    # forest touch — open, call, close — is confined to one dedicated thread,
+    # the same discipline the Station host applies (spec Part J).
+    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vine")
+
+    def in_vine_thread(fn):
+        return worker.submit(fn).result()
+
     if root is not None:
-        pool = ForestPool(root=Path(root), writable=writable)
+        pool = in_vine_thread(lambda: ForestPool(root=Path(root), writable=writable))
     else:
         single = Path(forest_root or os.environ.get(FOREST_ENV, "."))
-        pool = ForestPool(single=single, writable=writable)
+        pool = in_vine_thread(lambda: ForestPool(single=single, writable=writable))
 
-    settings = {k: v for k, v in (("host", host), ("port", port)) if v is not None}
-    mcp = FastMCP(
+    mcp = MCPServer(
         "vine",
-        **settings,
         instructions=(
             "MonkeyLLM forest navigation. Two ways in: harvest(query) for "
             "one-shot retrieval (ranked evidence + snippets, you reason over "
@@ -125,15 +134,16 @@ def build_server(
 
     def guarded(method: str, forest: str | None, /, *args, **kwargs):
         try:
-            vine = pool.get(forest)
-            return getattr(vine, method)(*args, **kwargs)
+            return in_vine_thread(
+                lambda: getattr(pool.get(forest), method)(*args, **kwargs)
+            )
         except VineError as e:
             return e.to_dict()
 
     @mcp.tool()
     def forests() -> dict:
         """List the forests this server can navigate (spec C.0)."""
-        return pool.list()
+        return in_vine_thread(pool.list)
 
     @mcp.tool()
     def harvest(query: str, terms: list[str] | None = None, k: int = 3,
@@ -145,7 +155,9 @@ def build_server(
         from monkeyllm.harvest import harvest as _harvest
 
         try:
-            return _harvest(pool.get(forest), query, terms=terms, k=k)
+            return in_vine_thread(
+                lambda: _harvest(pool.get(forest), query, terms=terms, k=k)
+            )
         except VineError as e:
             return e.to_dict()
 
@@ -215,6 +227,11 @@ def build_server(
         """Close the hunt: reinforces heat on the winning trail and returns metrics."""
         return guarded("close_session", forest, success, answer_nodes)
 
-    mcp._pool = pool  # for tests / lifecycle
-    mcp._vine = pool._vines.get(pool.default) if pool.default else None
+    def close() -> None:
+        """Close every Vine on the thread that opened them, then the thread."""
+        in_vine_thread(pool.close)
+        worker.shutdown(wait=True)
+
+    mcp._pool = pool  # for tests
+    mcp._close = close  # lifecycle: the one way to shut the server's forests
     return mcp
