@@ -14,6 +14,12 @@ RUN npm run build
 # --- Station ---------------------------------------------------------------
 FROM python:3.12-slim
 
+# Writes are git commits inside the forest (spec A.3/C.7): gitops shells out
+# to the git binary, so a writable Station cannot run without it.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Engine first: it changes least, so the layer caches well.
@@ -23,7 +29,10 @@ RUN pip install --no-cache-dir .
 
 COPY apps/station/pyproject.toml ./apps/station/
 COPY apps/station/monkeyllm_station/ ./apps/station/monkeyllm_station/
-RUN pip install --no-cache-dir ./apps/station
+# Editable on purpose: the Station locates the Studio bundle relative to its
+# own source tree (app.py's STUDIO_DIST), so the package must run from
+# /app/apps/station for /app/apps/studio/dist to be found.
+RUN pip install --no-cache-dir -e ./apps/station
 
 # The Station serves this directory as static files and nothing else.
 COPY --from=studio /studio/dist ./apps/studio/dist
