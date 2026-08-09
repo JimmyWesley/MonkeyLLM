@@ -1,4 +1,4 @@
-status: done (2026-08-09 — spec v0.22 first, then code; full suite green and verified against a live Station. One acceptance criterion is partial and carried to T10.1: the Write tab plants then reports, rather than reviewing first)
+status: done (2026-08-09 — spec v0.22 first, then code; full suite green and verified against a live Station. The last partial criterion, review before planting, was closed by T10.1 on the same day)
 
 # T10 — Studio Forest Views: graph mode, files mode, governed editing, Write tab
 
@@ -56,11 +56,10 @@ item 11 (trails dashboard) along the way. The Data console is untouched.
       throughout.
 - [x] No Studio code path writes a file directly: every mutation is a
       `graft`/`tend`/`plant` commit stamped with the principal.
-- [~] Write tab: link proposals only ever target catalog-offered candidates
-      (cap 3, conf 0.3) — inherited from the pipeline, so it holds. **Review
-      before planting does NOT hold:** what shipped plants the node and then
-      shows the report. Reviewing the Curator's proposal first needs a
-      two-phase ingest, which is contract; see the follow-up below.
+- [x] Write tab: link proposals only ever target catalog-offered candidates
+      (cap 3, conf 0.3) — inherited from the pipeline, so it holds. Review
+      before planting now holds too, closed by **T10.1** (spec v0.24 J.8.1):
+      composing stages and returns the draft, and a second call accepts it.
 - [x] Data console behavior unchanged; i18n test green; `api.js` remains the
       only `fetch` caller.
 
@@ -95,12 +94,10 @@ what `graft` replaces atomically; the inspector has three tabs, not four (a
 Git tab would have needed a history endpoint nobody had asked for); HTML
 renders at body level, since there is no file-serving endpoint by design.
 
-**Follow-up — review before planting (T10.1).** The Write tab publishes and
-then reports. To review the Curator's passport and its edge proposals *first*,
-J.8 needs a two-phase shape: one call that stages and returns the proposal,
-a second that accepts it. That is contract, so it needs a spec bump before
-code. Until then the honest description of the tab is "publish, then see what
-the Curator made of it" — and the console says exactly that.
+**Follow-up — review before planting: closed by T10.1** (2026-08-09, spec
+v0.24 J.8.1). Composing now stages, and the accepting call pins the approved
+passport as an `on_curate` hook so the plant and the commit stay the ones
+every adopted file gets. See `tasks/T10.1-compose-review.md`.
 
 **Not a follow-up after all:** this task's branch hit `mcp` 2.0 having removed `mcp.server.fastmcp`, and flagged the unbounded `mcp>=1.2` pin as a
 defect. `develop` had already fixed it forward — the MCP surface is migrated

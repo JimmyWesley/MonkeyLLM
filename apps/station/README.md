@@ -150,6 +150,18 @@ the Station's filesystem access, not the caller's, so `ingest` alone would
 quietly become arbitrary read access to the container. `upload` needs no
 such privilege because the caller supplies the bytes.
 
+`compose` takes two calls (J.8.1). Send `stage: true` and the whole pipeline
+runs — converter, curation, closed-candidate proposals — and stops at the
+plant, returning the draft it *would* have planted, each proposed link named
+by the title of what it points at. Send that draft back as `draft` and it is
+accepted: the approved passport enters as an `on_curate` hook, so the plant
+and the commit are the ones every adopted file gets, and the model is not
+asked to curate the document twice. A returned draft is a client payload, so
+every field is re-validated — summary re-clipped to the A.4 budget, tags
+re-cleaned, and each link re-checked against G.4.2.1 (`related-to` only,
+existing and in-scope targets, never a branch, capped at three, and pinned at
+confidence 0.3 whoever kept it).
+
 Uploads stage under the forest's `_derived/uploads/` — outside git, one
 stable directory per forest, so re-sending a filename is an *update* (the
 G.8 hash diff) rather than a second node beside the first.
@@ -344,9 +356,8 @@ weaken that. A worker per forest is the scale-out step.
 
 | Missing | Where it goes |
 |---|---|
-| Curation review queue for the 0.3-confidence edge proposals | T09 |
+| Curation review queue for the 0.3-confidence proposals a *batch* ingest made (a composed post reviews before it lands, J.8.1) | T04 |
 | Binary uploads (`.docx`, `.xlsx`) — today they take the folder-mirror route | T09 |
-| Curation review before a composed post is planted (today it lands, then is reviewable) | T10 follow-up |
 | OIDC/SSO, per-token quotas, rate limits | T07 Phase C |
 | `answer` over datasets (a tool-calling loop; today it honestly refuses aggregate questions) | J.10 follow-up |
 | Per-node ACLs finer than the branch prefix | out of scope (J.12) |
