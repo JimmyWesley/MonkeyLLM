@@ -1,0 +1,20 @@
+{
+  "explore.children": "Inside this branch",
+  "explore.coverage": "Coverage",
+  "explore.degree": "Trails",
+  "explore.edges": "Trails from here",
+  "explore.edges_hint": "Only trails whose other end is within your scope are listed.",
+  "explore.find": "Find an entry point",
+  "explore.find_ph": "Search titles, tags and summaries…",
+  "explore.heat": "Heat",
+  "explore.leaf": "A leaf: nothing below it and no trails out within your scope.",
+  "explore.mode_files": "Files",
+  "explore.mode_graph": "Graph",
+  "explore.mode_tree": "Tree",
+  "explore.no_hits": "Nothing matched inside your scope.",
+  "explore.read": "Read the body",
+  "explore.title": "Explore",
+  "explore.tokens": "Body size",
+  "explore.tree": "Tree",
+  "explore.updated": "Updated"
+}

@@ -1,0 +1,19 @@
+{
+  "overview.bind_model": "Enlazar un modelo",
+  "overview.branches": "Ramas",
+  "overview.can": "Lo que puedes hacer aquí",
+  "overview.cannot": "Lo que no puedes hacer aquí",
+  "overview.datasets": "Datasets",
+  "overview.hello": "Este bosque de un vistazo",
+  "overview.no_model": "No hay ningún modelo enlazado a este bosque, así que Preguntar aún no responde. Lo demás funciona.",
+  "overview.nodes": "Nodos a tu alcance",
+  "overview.roots": "Empiezas en",
+  "overview.scope": "Tu alcance",
+  "overview.scope_all": "Bosque entero",
+  "overview.scope_n": "{n} rama(s)",
+  "overview.start": "Empieza por aquí",
+  "overview.start_ask": "Haz una pregunta en lenguaje natural",
+  "overview.start_explore": "Echa un vistazo al árbol",
+  "overview.start_ingest": "Añade tus propios documentos",
+  "overview.sub": "Todo lo de abajo es lo que tu clave alcanza — nada está oculto detrás de un filtro."
+}

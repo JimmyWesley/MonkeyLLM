@@ -1,0 +1,14 @@
+{
+  "role.analyst": "Analista",
+  "role.analyst_desc": "Lê e roda SQL somente leitura sobre os datasets.",
+  "role.curator": "Curador",
+  "role.curator_desc": "Tudo que um editor faz, mais carregar documentos novos.",
+  "role.custom": "Personalizado",
+  "role.custom_desc": "Um conjunto de capacidades escolhido à mão.",
+  "role.editor": "Editor",
+  "role.editor_desc": "Lê e consulta, e pode criar e editar nós e linhas de dataset.",
+  "role.owner": "Dono",
+  "role.owner_desc": "Controle total, incluindo dar acesso a outras pessoas.",
+  "role.reader": "Leitor",
+  "role.reader_desc": "Lê o que você escolher. Mais nada."
+}

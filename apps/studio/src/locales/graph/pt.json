@@ -1,0 +1,16 @@
+{
+  "graph.empty": "Nada para desenhar",
+  "graph.empty_hint": "Nenhum nó dentro do seu escopo foi indexado ainda.",
+  "graph.heat": "Calor",
+  "graph.hint": "Arraste um nó, role para dar zoom, clique para selecionar",
+  "graph.legend_heat": "feromônio",
+  "graph.legend_proposal": "proposta, ainda não promovida",
+  "graph.legend_shortcut": "atalho que uma caçada descobriu",
+  "graph.legend_trail": "trilha curada",
+  "graph.open_in_files": "Abrir em Arquivos",
+  "graph.proposals": "Propostas",
+  "graph.reorganize": "Reorganizar",
+  "graph.structure": "Estrutura",
+  "graph.tip_stats": "{degree} trilhas · calor {heat}",
+  "graph.truncated": "Mostrando apenas os nós mais conectados"
+}

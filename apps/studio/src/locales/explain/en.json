@@ -1,0 +1,18 @@
+{
+  "explain.calls": "Model calls",
+  "explain.cost": "Cost",
+  "explain.cost_unknown": "This provider publishes no price, so the cost is unknown — not zero.",
+  "explain.entry": "Entry search",
+  "explain.entry_bm25": "BM25",
+  "explain.entry_hybrid": "hybrid (RRF)",
+  "explain.hop_n": "#{n}",
+  "explain.model": "Model",
+  "explain.retrieval": "Forest",
+  "explain.server": "Sum of the steps",
+  "explain.steps": "Calls",
+  "explain.sub": "Every call the answer made, and what each one cost.",
+  "explain.title": "How this ran",
+  "explain.tokens_in": "Tokens in",
+  "explain.tokens_out": "Tokens out",
+  "explain.transport": "HTTP and JSON"
+}

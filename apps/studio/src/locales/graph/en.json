@@ -1,0 +1,16 @@
+{
+  "graph.empty": "Nothing to draw",
+  "graph.empty_hint": "No node inside your scope has been indexed yet.",
+  "graph.heat": "Heat",
+  "graph.hint": "Drag a node, scroll to zoom, click to select",
+  "graph.legend_heat": "pheromone",
+  "graph.legend_proposal": "proposal, not yet promoted",
+  "graph.legend_shortcut": "shortcut a hunt discovered",
+  "graph.legend_trail": "curated trail",
+  "graph.open_in_files": "Open in Files",
+  "graph.proposals": "Proposals",
+  "graph.reorganize": "Reorganize",
+  "graph.structure": "Structure",
+  "graph.tip_stats": "{degree} trails · heat {heat}",
+  "graph.truncated": "Showing the most connected nodes only"
+}

@@ -1,0 +1,15 @@
+{
+  "audit.commit": "Commit",
+  "audit.filter": "Filter by person",
+  "audit.needs_admin": "Reading the audit log needs the admin capability.",
+  "audit.no_bodies": "Arguments are stored as a digest, never in full: the log records access, not content.",
+  "audit.none": "Nothing recorded yet.",
+  "audit.result": "Result",
+  "audit.size": "Size",
+  "audit.sub": "Reads are recorded here; writes are commits in the forest’s own git history. Neither records content.",
+  "audit.title": "Audit",
+  "audit.what": "Call",
+  "audit.when": "When",
+  "audit.where": "Forest",
+  "audit.who": "Who"
+}
