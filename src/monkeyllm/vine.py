@@ -366,6 +366,24 @@ class Vine:
 
     # -- lifecycle ---------------------------------------------------------
 
+    def warm(self) -> None:
+        """Pay the first call's start-up cost before there is a first call.
+
+        Opening a forest is not free and neither is the first query through
+        it — measured on a fresh process, `locate` costs several times what
+        it costs from the second call on, all of it SQLite waking up. That
+        is a fact about the process, not about the forest, and a caller who
+        happens to be first should not be shown it as the cost of the call.
+
+        Storage only, and never a primitive: a warm-up that went through
+        `locate` would append a trace event and deposit heat, so the server
+        would be forging the pheromone the Ranger later reads as evidence of
+        where people went (Part D, Part H). Bodies are not touched either —
+        that is the whole corpus off disk, which is a different trade.
+        """
+        self.catalog.warm()
+        self.trails.warm()
+
     def close(self) -> None:
         if self._lock:
             self._lock.release()

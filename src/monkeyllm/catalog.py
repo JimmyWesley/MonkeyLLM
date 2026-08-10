@@ -14,7 +14,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from monkeyllm.forest import Forest
+from monkeyllm.forest import Forest, tune_derived
 from monkeyllm.parser import ParsedNode
 
 SCHEMA_SQL = """
@@ -67,6 +67,7 @@ class Catalog:
         self.db_path = forest.derived_dir / "catalog.db"
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
+        tune_derived(self.conn)
         self.conn.executescript(SCHEMA_SQL)
         # A catalog written before link-level confidence was indexed is a
         # valid catalog: it is derived, so the column is added in place and
@@ -80,6 +81,31 @@ class Catalog:
 
     def close(self) -> None:
         self.conn.close()
+
+    def warm(self) -> None:
+        """Fault in the pages a search will want, without being a search.
+
+        The first `locate` of a process is several times slower than every
+        one after it, and none of that is the corpus: it is SQLite opening
+        the FTS index, faulting b-tree pages off disk and compiling the
+        ranking statement. A caller should not pay for the process having
+        just started, so it is paid here instead.
+
+        The probe term is taken from the corpus rather than written down,
+        which is what keeps this forest-agnostic: a hardcoded word would be
+        vocabulary in the engine, and would match nothing in a forest that
+        does not speak that language. Read-only throughout — a warm-up that
+        wrote would be inventing traffic.
+        """
+        self.conn.execute("SELECT count(*) FROM nodes").fetchone()
+        self.conn.execute("SELECT count(*) FROM edges").fetchone()
+        row = self.conn.execute(
+            "SELECT title FROM nodes WHERE title != '' LIMIT 1").fetchone()
+        # Through `fts_search`, not around it: the point is to compile and
+        # run the statement `locate` runs, not a cheaper cousin of it.
+        term = next((t for t in (row["title"] or "").split() if t), None) if row else None
+        if term:
+            self.fts_search(term, limit=1)
 
     # -- write -------------------------------------------------------------
 

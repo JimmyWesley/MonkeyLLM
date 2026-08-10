@@ -42,6 +42,7 @@ class ForestPool:
             p = Path(single).resolve()
             self.default = p.name
             self._vines[self.default] = Vine(p, writable=writable)
+            self._vines[self.default].warm()
 
     @property
     def mode(self) -> str:
@@ -86,8 +87,35 @@ class ForestPool:
                 hint="Use the forests() tool to list servable forests.",
             )
         # first touch: Vine auto-indexes when the catalog is empty
-        self._vines[forest] = Vine(target, writable=self.writable)
-        return self._vines[forest]
+        vine = Vine(target, writable=self.writable)
+        # Whoever opened it pays the wake-up, so nobody's *call* does.
+        vine.warm()
+        self._vines[forest] = vine
+        return vine
+
+    def warm_all(self) -> dict:
+        """Open and warm every servable forest, best effort.
+
+        Opening is where the cost is — a few milliseconds and a few MB of
+        resident memory per forest — and it happens either way; this only
+        decides who waits for it. A host that serves a console does it at
+        boot so the first visitor is not the one measuring cold SQLite.
+
+        Best effort, always: a forest that will not open (a writer lock left
+        behind, a corrupt catalog) is reported and skipped. A server that
+        refused to start because one forest out of forty was busy would be
+        trading every forest's availability for one forest's warmth.
+        """
+        opened, skipped = [], {}
+        for entry in self.list()["forests"]:
+            if entry["id"] in self._vines:
+                continue
+            try:
+                self.get(entry["id"])
+                opened.append(entry["id"])
+            except Exception as e:                       # noqa: BLE001
+                skipped[entry["id"]] = str(e)
+        return {"warmed": opened, "skipped": skipped}
 
     def close(self) -> None:
         for vine in self._vines.values():

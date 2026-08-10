@@ -71,6 +71,32 @@ _SCHEMA_BODY = """# Forest dialect
 _GITIGNORE = "_derived/\n.vine.lock\n*.db\n*.sqlite\n_assets/\n"
 
 
+def tune_derived(conn) -> None:
+    """Journal settings for a database in `_derived/`.
+
+    Every read primitive deposits pheromone (Part D/E.2), so every read is
+    also a commit — and in the default rollback mode that is a journal
+    created, fsynced and deleted, per call. WAL makes it an append, and
+    `synchronous=NORMAL` stops fsyncing each one.
+
+    The durability that buys is durability this data does not need: the
+    files are the source of truth and `_derived/` is disposable by
+    definition. A crash costs the last few heat deposits, which evaporate on
+    a schedule anyway (H.1), and at worst a `reindex`, which is the
+    documented repair. Corruption is not on the table — WAL is
+    crash-safe; what is lost is the tail.
+
+    Best effort: a filesystem that cannot do WAL (a network mount, no shared
+    memory) keeps the mode it had and keeps working. Failing to open a
+    forest because it could not be made faster would be the wrong trade.
+    """
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
 def init_forest(root: str | os.PathLike, title: str, summary: str | None = None) -> dict:
     """Bootstrap an empty, valid forest: A.5 master index, default dialect,
     A.3.1 .gitignore, embedded git repo with the initial commit.

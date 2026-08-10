@@ -15,6 +15,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from monkeyllm.forest import tune_derived
+
 PERSISTENT_SCOPE = ""
 
 SCHEMA_SQL = """
@@ -33,11 +35,21 @@ class Trails:
         derived_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = derived_dir / "trails.db"
         self.conn = sqlite3.connect(self.db_path)
+        tune_derived(self.conn)
         self.conn.executescript(SCHEMA_SQL)
         self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
+
+    def warm(self) -> None:
+        """Fault in the heat table without depositing any.
+
+        Read-only on purpose: heat is a memory of where callers actually
+        went, and a warm-up that wrote to it would be the server inventing
+        traffic that never happened.
+        """
+        self.conn.execute("SELECT count(*) FROM heat WHERE scope = ''").fetchone()
 
     def add_heat(self, node_ids: list[str], amount: float = 0.1, scope: str = PERSISTENT_SCOPE) -> None:
         now = time.time()
