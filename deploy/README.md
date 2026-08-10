@@ -138,9 +138,25 @@ MONKEYLLM_LLM_ENDPOINT=http://llm:8090/v1
 MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1
 ```
 
-On Dokploy, if the UI cannot pass `--profile`, delete the `profiles:` lines
-in the compose file to always run the sidecars. They run on CPU by default;
-leave the embedder off to keep `locate` on its BM25-only Phase 0 contract.
+On Dokploy there is no `--profile` flag to pass: the UI runs a plain
+`docker compose up`, which starts every service **except** the profiled
+ones — so a deploy that shows only `station` is the profiles working as
+designed, not a failed sidecar. Turn them on by adding this to the
+Environment tab, which Compose reads on its own:
+
+```dotenv
+COMPOSE_PROFILES=local-embed        # or: local-llm,local-embed
+```
+
+Deleting the `profiles:` lines from the compose file has the same effect
+and is the fallback if the variable does not take. Either way the sidecar
+is only half the job — the Station reads `MONKEYLLM_EMBED_ENDPOINT` at
+startup, so it needs the variable above **and** a restart before `locate`
+goes hybrid. The first start is slow and quiet while it pulls the GGUF
+into the `models` volume; `docker compose logs embed` shows the progress.
+
+They run on CPU by default; leave the embedder off to keep `locate` on its
+BM25-only Phase 0 contract.
 
 ## Read-only Station
 

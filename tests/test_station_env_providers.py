@@ -256,3 +256,34 @@ def test_undeclaring_hands_the_row_back_instead_of_deleting_it(station):
     assert provider["has_key"] is False
     assert registry.binding(FOREST, "answer")["provider"] == "openrouter.ai"
     assert registry.binding(FOREST, "answer")["api_key"] is None
+
+
+# -- when the connection test itself is what is broken ---------------------
+
+
+def test_a_probe_that_cannot_run_still_answers(station, monkeypatch):
+    """`httpx` missing from the image made the Test button raise inside the
+    handler, so the card said "could not reach it" and the operator went
+    looking at their key. A probe that cannot run is a failed probe with a
+    reason, never a 500 — the reason is the only thing that points at the
+    real fault."""
+    client, _, _, head = station
+    monkeypatch.setitem(sys.modules, "httpx", None)  # as if it were not installed
+
+    r = client.post("/v1/admin/providers/test",
+                    json={"name": "openrouter.ai"}, headers=head)
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert "httpx" in body["error"]
+
+
+def test_the_host_declares_what_it_imports():
+    """The probe worked on every developer machine and on none of the
+    deployments, because `httpx` was a `dev` extra and `mcp` brings `httpx2`
+    — a different distribution. A dependency the host imports at runtime
+    belongs in `dependencies`, or the image is the only place it is missing."""
+    text = (STATION / "pyproject.toml").read_text(encoding="utf-8")
+    runtime = text.split("dependencies = [", 1)[1].split("]", 1)[0]
+    assert "httpx>=" in runtime
