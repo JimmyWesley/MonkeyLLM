@@ -67,6 +67,14 @@ services:
       MONKEYLLM_EMBED_PROVIDER: ${MONKEYLLM_EMBED_PROVIDER:-}
       # S3-compatible endpoint for remote payloads (MinIO/R2, spec G.9).
       MONKEYLLM_S3_ENDPOINT: ${MONKEYLLM_S3_ENDPOINT:-}
+      # Directories this Station may mirror on a caller's behalf (J.8.2).
+      # EMPTY BY DEFAULT, and empty means none: uploading documents through
+      # the console always works, "mirror a host folder" does not until an
+      # operator says which folder. Point it at the mount below (or at your
+      # own bind mount) to turn that mode on:
+      #   MONKEYLLM_INGEST_ROOTS=/data
+      # Never name /forests here — the Station drops it and says so.
+      MONKEYLLM_INGEST_ROOTS: ${MONKEYLLM_INGEST_ROOTS:-}
     volumes:
       # The forest registry: every forest, its markdown, its embedded git
       # history, its dataset .db payloads and its _derived/ caches.
@@ -79,6 +87,12 @@ services:
       # local-embed services below download into this volume, and it keeps
       # multi-GB files out of the image and alive across updates.
       - models:/models
+      # Documents to mirror, and the container's working directory (J.6):
+      # a path bug that resolves to "here" lands in an empty volume instead
+      # of in the image's own source tree. Swap it for a bind mount of your
+      # documents folder — `./documents:/data` — and set
+      # MONKEYLLM_INGEST_ROOTS=/data above to let the console read it.
+      - documents:/data
     restart: unless-stopped
     healthcheck:
       # python:3.12-slim ships no curl; urllib is already there.
@@ -126,6 +140,7 @@ volumes:
   forests:
   registry:
   models:
+  documents:
 
 # One network for everything, so `station` reaches `embed` by service name.
 # Both fields are interpolated for one reason: a managed host (Dokploy, Coolify)

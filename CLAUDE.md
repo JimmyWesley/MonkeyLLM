@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.25.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.26.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -95,6 +95,14 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   auto-generates `## Query manual`, and commits only the `.md`. No `ALTER`
   for agents; `tend` stays DML-only forever. Initial `rows` at birth are
   loaded parameterized (v0.9 rule 7) — never as SQL text.
+- **Ingest sources are contained (spec G.3/G.8/J.8.2, v0.26)**: an absent
+  source is `E_SCHEMA`, never the working directory; a source may not be,
+  contain or sit inside the forest (only `_derived/` is exempt, for upload
+  staging); a directory carrying `_index.md` is pruned from every walk; a
+  targeted `sync` path is contained **after** resolution. On the host,
+  `MONKEYLLM_INGEST_ROOTS` is an allow-list that is **empty by default and
+  empty means none** — `admin` says who may ask, the roots say what exists
+  to be asked for, and the registry root is never one of them.
 - **Gardener (spec Part G) extends edges only**: converters (config command
   hooks > `monkeyllm.converters` entry points > built-ins) and `on_curate`
   hooks. Primitives' semantics/budgets/guards are NOT extensible; UIs and

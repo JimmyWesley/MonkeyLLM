@@ -114,6 +114,11 @@ export const api = {
     request('/v1/admin/snapshots',
             { method: 'POST', body: { forest, with_payloads: withPayloads } }),
 
+  // What a refresh would re-read (J.8): the recorded source root, whether
+  // this Station may still read it, and whether it reads host paths at all.
+  ingestStatus: (forest) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/ingest`),
+
   bindings: (forest) =>
     request(`/v1/admin/models?forest=${encodeURIComponent(forest)}`),
   bindModel: (body) => request('/v1/admin/models', { method: 'POST', body }),

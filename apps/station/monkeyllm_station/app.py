@@ -20,6 +20,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
@@ -200,6 +201,71 @@ def super_admin_from_env() -> tuple[str, str] | None:
     return (user, password) if user and password else None
 
 
+INGEST_ROOTS_ENV = "MONKEYLLM_INGEST_ROOTS"
+
+
+def ingest_roots_from_env() -> list[Path]:
+    """The directories this Station will read on a caller's behalf (J.8.2).
+
+    Absent means NONE, and that is the point. `upload` and `compose` carry
+    their own bytes and keep working; every host path is refused. A control
+    that has to be switched on is off wherever nobody knew to look for it,
+    and the deployment that most needs this boundary is run by the operator
+    who never read the spec.
+    """
+    raw = os.environ.get(INGEST_ROOTS_ENV, "")
+    return [Path(p).expanduser().resolve()
+            for p in raw.split(os.pathsep) if p.strip()]
+
+
+class IngestRoots:
+    """J.8.2 gate: resolve first, then compare — `..` and symlinks are the
+    escape, so a decision made on the string is a decision about the wrong
+    path."""
+
+    def __init__(self, roots: list[Path], registry_root: Path):
+        self.registry_root = registry_root.expanduser().resolve()
+        missing = [r for r in roots if not r.is_dir()]
+        if missing:
+            # A mistyped mount is a boot-time fact. Discovering it months
+            # later, from an ingest that refuses a path the operator can see
+            # in their own compose file, is the expensive way to learn it.
+            raise ValueError(
+                f"{INGEST_ROOTS_ENV} names directories that do not exist: "
+                f"{', '.join(str(m) for m in missing)}")
+        # The registry root is never an ingest root, listed or not, and
+        # neither is any ancestor of it: one forest reading the volume that
+        # holds every forest is the tenant boundary failing in the only
+        # direction that counts. Silently dropping it beats refusing to
+        # boot — the Station still serves, and the ingest that would have
+        # crossed the boundary is the only thing that stops working.
+        self.roots = [r for r in roots if not self._holds_registry(r)]
+        self.rejected = [r for r in roots if self._holds_registry(r)]
+
+    def _holds_registry(self, root: Path) -> bool:
+        return self.registry_root == root or self.registry_root.is_relative_to(root)
+
+    def check(self, path: str | Path) -> VineError | None:
+        """None when `path` may be read; the error to return otherwise."""
+        if not self.roots:
+            return VineError(
+                E_FORBIDDEN,
+                "this Station reads no host paths",
+                hint=f"Set {INGEST_ROOTS_ENV} to the directories it may "
+                     f"ingest from, or use mode 'upload' to send the "
+                     f"documents themselves.")
+        try:
+            target = Path(path).expanduser().resolve()
+        except (OSError, RuntimeError):  # symlink loops, unresolvable drives
+            return VineError(E_SCHEMA, f"unusable source path: {path}")
+        if any(target == r or target.is_relative_to(r) for r in self.roots):
+            return None
+        return VineError(
+            E_FORBIDDEN, f"'{path}' is outside this Station's ingest roots",
+            hint=f"Allowed: {[str(r) for r in self.roots]}. Widen "
+                 f"{INGEST_ROOTS_ENV} to add one.")
+
+
 # The variables this project already documents (`.env.example`) — the same
 # ones the CLI, the bench and the measurement scripts read. A deployment that
 # has already configured them has said everything the console's provider form
@@ -268,6 +334,11 @@ def build_app(
     mcp: bool = True,
 ) -> Starlette:
     pool = ForestPool(root=Path(root), writable=writable)
+    ingest_roots = IngestRoots(ingest_roots_from_env(), Path(root))
+    if ingest_roots.rejected:
+        print(f"station: refusing {INGEST_ROOTS_ENV} entries that contain the "
+              f"forest registry: {[str(r) for r in ingest_roots.rejected]}",
+              file=sys.stderr)
     registry = Registry(registry_path)
     registry.adopt_env_providers(providers_from_env())
     super_admin = super_admin_from_env()
@@ -684,14 +755,33 @@ def build_app(
                      "exists; creating one at the root touches the master index.",
             ).to_dict()
 
+        # `path` means two different things and only one of them is a host
+        # path. For `adopt` it names a directory on the Station's filesystem;
+        # for `sync` it is a file *relative to* the source root a prior adopt
+        # recorded, which G.8 contains. Reading them through one variable is
+        # how a relative path ends up being measured against absolute roots.
+        if mode == "sync":
+            source = payload.get("source") or None
+        else:
+            source = payload.get("path") or payload.get("source") or None
+
         # Naming a host path spends the Station's filesystem authority, not the
         # caller's, so it needs 'admin' on top of 'ingest' — otherwise a content
-        # capability would read anything the container can see.
-        source = payload.get("path") or payload.get("source") or None
-        if source and not policy.grants("admin"):
+        # capability would read anything the container can see. A targeted sync
+        # keeps the same requirement here: J.8 exempts it, and being stricter
+        # than the spec costs an operator one capability they already hold.
+        if (source or payload.get("path")) and not policy.grants("admin"):
             return VineError(
                 E_FORBIDDEN, "reading a host path requires the 'admin' capability",
                 hint="Use mode 'upload' to send the documents themselves.").to_dict()
+        # J.8.2: the capability answered who may ask; the roots answer what
+        # exists to be asked for. Both, or the host's whole filesystem sits
+        # one grant away — and in a self-hosted deployment the operator holds
+        # that grant by construction.
+        if source:
+            denied = ingest_roots.check(source)
+            if denied is not None:
+                return denied.to_dict()
 
         root = Path(vine.forest.root)
         before = _git(root, "rev-parse", "HEAD")
@@ -738,9 +828,21 @@ def build_app(
                 mode, report = "sync", gardener.sync(source, dest=dest)
             elif mode == "sync":
                 # A targeted path here is relative to the source root a prior
-                # adopt recorded — vetted then, so it needs no admin now.
-                report = gardener.sync(source if payload.get("source") else None,
-                                       path=payload.get("path"))
+                # adopt recorded — vetted then, and contained by G.8 now.
+                if source is None:
+                    # The recorded root was inside the roots when it was
+                    # adopted; it need not be inside them today. Re-checking
+                    # is what makes narrowing the list take effect on the
+                    # forests that were already pointed somewhere. A forest
+                    # with nothing recorded falls through to the Gardener,
+                    # which refuses it as E_SCHEMA rather than inventing a
+                    # directory (G.3).
+                    recorded = str(gardener.config.get("source_root") or "").strip()
+                    if recorded:
+                        denied = ingest_roots.check(recorded)
+                        if denied is not None:
+                            return denied.to_dict()
+                report = gardener.sync(source, path=payload.get("path"))
             else:
                 report = gardener.adopt(source, dest=dest)
             rollup = gardener.rollup(curator) if (curator and not stage) else None
@@ -782,6 +884,42 @@ def build_app(
             "commit": None if stage else (after or None),
             "commit_before": before or None,
             "curated": written, "bound": curator is not None, "curation": stats,
+        }
+
+    def run_ingest_status(principal: str, forest: str):
+        """What a refresh would re-read, before anyone asks for one (J.8).
+
+        `sync` is the one ingest call whose reach comes from configuration
+        rather than from the request, so it is the one the operator cannot
+        see. A console that offers it without this is offering a button
+        whose scope is invisible — which is how v0.25 shipped, and how a
+        forest ingested the Station's own source tree.
+        """
+        from monkeyllm.gardener import Gardener
+
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            return None
+        if not policy.grants("ingest"):
+            return VineError(E_FORBIDDEN, "ingest requires the 'ingest' capability",
+                             hint=f"This principal holds: {sorted(policy.caps)}."
+                             ).to_dict()
+        try:
+            vine = pool.get(forest)
+        except VineError as e:
+            return e.to_dict()   # see run_primitive: not an existence question
+        # Built fresh rather than read off a cached Forest attribute: an
+        # adopt that just recorded a root must be visible to the next call,
+        # and this is the same loader the Gardener itself uses.
+        recorded = str(Gardener(vine, hooks=[]).config.get("source_root") or "").strip()
+        return {
+            "source": recorded or None,
+            # Both halves matter and they fail for different reasons: no
+            # source at all, or a source this Station may no longer read
+            # because the roots were narrowed under it.
+            "can_sync": bool(recorded) and ingest_roots.check(recorded) is None,
+            # Whether "mirror a host folder" is worth offering at all.
+            "host_paths": bool(ingest_roots.roots),
         }
 
     # -- map projections (J.11) ---------------------------------------------
@@ -1616,6 +1754,16 @@ def build_app(
             return err
         forest = request.path_params["forest"]
         kind = request.path_params["kind"]
+        if kind == "ingest":
+            # The GET beside the POST: what a refresh would re-read (J.8).
+            result = await in_forest_thread(
+                lambda: run_ingest_status(principal, forest))
+            if result is None:
+                return _unknown_forest(forest)
+            if isinstance(result.get("error"), dict):
+                code = result["error"].get("code", E_SCHEMA)
+                return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+            return JSONResponse(result)
         if kind not in MAP_KINDS:
             return _envelope(VineError(
                 E_NOT_FOUND, f"no such endpoint: {kind}",
@@ -1813,5 +1961,6 @@ def build_app(
     app = Starlette(routes=routes, lifespan=lifespan)
     app.state.pool = pool
     app.state.registry = registry
+    app.state.ingest_roots = ingest_roots
     app.state.run_primitive = run_primitive
     return app

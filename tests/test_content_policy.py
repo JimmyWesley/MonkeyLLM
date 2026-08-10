@@ -205,3 +205,34 @@ class TestTargetedSync:
         os.utime(f, None)
         report = g.sync(src, path="docs/other.md")
         assert report["updated"] == ["docs/other"]
+
+
+class TestReferenceContainment:
+    """G.7: a reference body lives under the adopted source root. `pick` is a
+    read primitive — it must not become a file reader for the whole host."""
+
+    def test_source_path_cannot_escape_the_source_root(self, tmp_path):
+        root = make_forest(tmp_path, "content: reference\n")
+        src = make_source(tmp_path)
+        secret = tmp_path / "secret.txt"
+        secret.write_text("BOOTSTRAP_KEY=hunter2", encoding="utf-8")
+
+        vine = Vine(root, writable=True)
+        try:
+            Gardener(vine, hooks=[]).adopt(src)
+            # `source_path` is ordinary frontmatter (models.py keeps
+            # extra="allow" for the Gardener's own G.1 fields), so anything
+            # that can plant can aim it. Aiming it outside must not read.
+            vine.plant({
+                "id": "docs/decoy", "parent": "docs/_index", "type": "note",
+                "title": "Decoy",
+                "summary": "A planted node whose reference body points at a "
+                           "file outside the adopted source root entirely.",
+                "body": "placeholder", "content": "reference",
+                "source_path": os.path.relpath(secret, src)})
+            with pytest.raises(VineError) as e:
+                vine.pick("docs/decoy")
+            assert e.value.code == E_NOT_FOUND
+            assert "hunter2" not in str(e.value.hint or "")
+        finally:
+            vine.close()

@@ -225,9 +225,25 @@ def test_naming_a_host_path_needs_admin(station, tmp_path):
     assert hit["results"] == []
 
 
-def test_admin_may_adopt_a_host_path(station, tmp_path):
-    client, registry, _ = station
-    src = tmp_path / "handbook"
+@pytest.fixture()
+def ingest_station(tmp_path, monkeypatch):
+    """A Station that has been told which directory it may read (J.8.2).
+
+    The env var is set before the app is built on purpose: the roots are a
+    boot-time property, so a test that patched it afterwards would be
+    testing something the deployment cannot do.
+    """
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    monkeypatch.setenv("MONKEYLLM_INGEST_ROOTS", str(inbox))
+    client, registry, root = _station(tmp_path)
+    with client:
+        yield client, registry, root, inbox
+
+
+def test_admin_may_adopt_a_host_path_inside_the_ingest_roots(ingest_station):
+    client, registry, _, inbox = ingest_station
+    src = inbox / "handbook"
     src.mkdir()
     (src / "policy.md").write_text("# Policy\n\nExpenses are filed monthly.\n")
 
@@ -237,6 +253,138 @@ def test_admin_may_adopt_a_host_path(station, tmp_path):
                     headers=head)
     assert r.status_code == 200, r.text
     assert len(r.json()["planted"]) == 1
+
+
+class TestIngestRoots:
+    """J.8.2 / F.29: the capability says who may ask, the roots say what
+    exists to be asked for."""
+
+    def test_unconfigured_station_reads_no_host_path(self, station, tmp_path):
+        client, registry, _ = station
+        src = tmp_path / "handbook"
+        src.mkdir()
+        (src / "policy.md").write_text("# Policy\n\nMonthly.\n", encoding="utf-8")
+
+        head = _key(registry, ["read", "ingest", "admin"])
+        r = client.post(f"/v1/forests/{FOREST}/ingest",
+                        json={"mode": "adopt", "path": str(src)}, headers=head)
+        assert r.status_code == 403, r.text
+        # The operator who DID mean to mirror a folder learns the one thing
+        # they need from the refusal itself.
+        assert "MONKEYLLM_INGEST_ROOTS" in r.json()["error"]["hint"]
+
+    def test_upload_still_works_with_no_roots(self, station):
+        """Deny-by-default must not mean a Station that cannot ingest: the
+        modes that carry their own bytes are untouched."""
+        client, registry, _ = station
+        head = _key(registry, ["read", "ingest"])
+        r = client.post(
+            f"/v1/forests/{FOREST}/ingest",
+            json={"mode": "upload", "dest": "uploads",
+                  "files": [{"name": "n.md", "text": "# N\n\nA fact.\n"}]},
+            headers=head)
+        assert r.status_code == 200, r.text
+        assert len(r.json()["planted"]) == 1
+
+    def test_path_outside_the_roots_is_refused(self, ingest_station, tmp_path):
+        client, registry, _, _ = ingest_station
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        (outside / "x.md").write_text("# X\n\nBody.\n", encoding="utf-8")
+
+        head = _key(registry, ["read", "ingest", "admin"])
+        r = client.post(f"/v1/forests/{FOREST}/ingest",
+                        json={"mode": "adopt", "path": str(outside)}, headers=head)
+        assert r.status_code == 403, r.text
+        assert "outside this Station's ingest roots" in r.json()["error"]["message"]
+
+    def test_traversal_out_of_a_root_is_refused(self, ingest_station, tmp_path):
+        """The check is made after resolution, so `..` is collapsed first —
+        a lexical comparison would accept this."""
+        client, registry, _, inbox = ingest_station
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        (outside / "x.md").write_text("# X\n\nBody.\n", encoding="utf-8")
+
+        head = _key(registry, ["read", "ingest", "admin"])
+        r = client.post(f"/v1/forests/{FOREST}/ingest",
+                        json={"mode": "adopt", "path": f"{inbox}/../elsewhere"},
+                        headers=head)
+        assert r.status_code == 403, r.text
+
+    def test_a_root_holding_the_registry_is_dropped(self, tmp_path, monkeypatch):
+        """One forest reading the volume that holds every forest is the
+        tenant boundary failing in the direction that counts."""
+        from monkeyllm_station.app import IngestRoots
+
+        root = tmp_path / "registry"
+        root.mkdir()
+        gate = IngestRoots([tmp_path, root], root)
+        assert gate.roots == []
+        assert sorted(gate.rejected) == sorted([tmp_path.resolve(), root.resolve()])
+        assert gate.check(tmp_path) is not None
+
+    def test_a_missing_root_is_a_boot_error(self, tmp_path):
+        from monkeyllm_station.app import IngestRoots
+
+        with pytest.raises(ValueError) as e:
+            IngestRoots([tmp_path / "nope"], tmp_path / "registry")
+        assert "MONKEYLLM_INGEST_ROOTS" in str(e.value)
+
+
+class TestSyncHasASource:
+    """G.3 / F.29: the refresh of a forest that never adopted reads nothing."""
+
+    def test_bare_sync_without_an_adopted_source_is_refused(self, station):
+        client, registry, root = station
+        head = _key(registry, ["read", "ingest", "admin"])
+        r = client.post(f"/v1/forests/{FOREST}/ingest",
+                        json={"mode": "sync"}, headers=head)
+        assert r.status_code == 400, r.text
+        assert "no adopted source" in r.json()["error"]["message"]
+        # and it recorded nothing on the way out
+        assert not (root / FOREST / "_meta" / "gardener.yaml").exists()
+
+    def test_targeted_sync_cannot_leave_the_source_root(self, ingest_station,
+                                                        tmp_path):
+        client, registry, _, inbox = ingest_station
+        src = inbox / "docs"
+        src.mkdir()
+        (src / "a.md").write_text("# A\n\nAdopted body.\n", encoding="utf-8")
+        (tmp_path / "secret.md").write_text("# S\n\nhunter2\n", encoding="utf-8")
+
+        head = _key(registry, ["read", "ingest", "admin"])
+        assert client.post(f"/v1/forests/{FOREST}/ingest",
+                           json={"mode": "adopt", "path": str(src), "dest": "docs"},
+                           headers=head).status_code == 200
+
+        r = client.post(f"/v1/forests/{FOREST}/ingest",
+                        json={"mode": "sync", "path": "../../secret.md"},
+                        headers=head)
+        assert r.status_code == 400, r.text
+        assert "leaves the source root" in r.json()["error"]["message"]
+
+    def test_narrowing_the_roots_stops_a_recorded_sync(self, ingest_station,
+                                                       tmp_path, monkeypatch):
+        """The recorded root was vetted when it was adopted; it need not be
+        allowed today, and narrowing the list has to take effect."""
+        from monkeyllm_station.app import IngestRoots
+
+        client, registry, root, inbox = ingest_station
+        src = inbox / "docs"
+        src.mkdir()
+        (src / "a.md").write_text("# A\n\nAdopted body.\n", encoding="utf-8")
+        head = _key(registry, ["read", "ingest", "admin"])
+        assert client.post(f"/v1/forests/{FOREST}/ingest",
+                           json={"mode": "adopt", "path": str(src), "dest": "docs"},
+                           headers=head).status_code == 200
+
+        narrowed = tmp_path / "other-inbox"
+        narrowed.mkdir()
+        client.app.state.ingest_roots.roots = IngestRoots([narrowed], root).roots
+        r = client.post(f"/v1/forests/{FOREST}/ingest",
+                        json={"mode": "sync"}, headers=head)
+        assert r.status_code == 403, r.text
 
 
 @pytest.mark.parametrize("name", ["../outside.md", "/etc/passwd", "a/../../up.md"])
@@ -496,3 +644,35 @@ def test_ingest_is_audited(station):
     ingest = [e for e in entries if e["primitive"] == "ingest"]
     assert ingest and ingest[0]["result"] == "ok"
     assert ingest[0]["commit_sha"], "the resulting head is the batch's record"
+
+
+class TestIngestStatus:
+    """J.8: a refresh names what it will re-read, or is not offered."""
+
+    def test_a_fresh_forest_reports_nothing_to_refresh(self, station):
+        client, registry, _ = station
+        head = _key(registry, ["read", "ingest"])
+        r = client.get(f"/v1/forests/{FOREST}/ingest", headers=head)
+        assert r.status_code == 200, r.text
+        assert r.json() == {"source": None, "can_sync": False, "host_paths": False}
+
+    def test_it_names_the_source_after_an_adopt(self, ingest_station):
+        client, registry, _, inbox = ingest_station
+        src = inbox / "docs"
+        src.mkdir()
+        (src / "a.md").write_text("# A\n\nAdopted body.\n", encoding="utf-8")
+
+        head = _key(registry, ["read", "ingest", "admin"])
+        assert client.post(f"/v1/forests/{FOREST}/ingest",
+                           json={"mode": "adopt", "path": str(src), "dest": "docs"},
+                           headers=head).status_code == 200
+
+        body = client.get(f"/v1/forests/{FOREST}/ingest", headers=head).json()
+        assert body["source"] == src.resolve().as_posix()
+        assert body["can_sync"] is True and body["host_paths"] is True
+
+    def test_it_needs_the_ingest_capability(self, station):
+        client, registry, _ = station
+        head = _key(registry, ["read"])
+        r = client.get(f"/v1/forests/{FOREST}/ingest", headers=head)
+        assert r.status_code == 403, r.text

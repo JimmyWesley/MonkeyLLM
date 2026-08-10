@@ -58,5 +58,9 @@
   "ingest.unchanged": "Sin cambios",
   "ingest.uncurated": "No hay modelo de ingesta enlazado, así que los resúmenes se derivaron del propio texto. Funciona — enlazar uno los mejora.",
   "ingest.unsupported": "Omitidos, sin conversor",
-  "ingest.updated": "Actualizados"
+  "ingest.updated": "Actualizados",
+  "ingest.sync_source": "Volverá a leer esta carpeta:",
+  "ingest.sync_none": "Este bosque nunca espejó una carpeta, así que no hay nada que actualizar. Envía archivos, o espeja una carpeta primero.",
+  "ingest.sync_blocked": "La carpeta espejada ya no es una que esta Station pueda leer. Un operador tiene que ampliar MONKEYLLM_INGEST_ROOTS, o espejar una carpeta que esté dentro.",
+  "ingest.no_host_paths": "Esta Station no lee carpetas del host. Envía tus archivos por aquí, o pide a un operador que defina MONKEYLLM_INGEST_ROOTS."
 }

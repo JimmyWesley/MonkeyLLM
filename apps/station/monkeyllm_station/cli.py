@@ -76,7 +76,14 @@ def main(argv: list[str] | None = None) -> int:
     if not root.is_dir():
         print(f"station: forest root does not exist: {root}", file=sys.stderr)
         return 2
-    app = build_app(root=root, registry_path=args.registry, writable=args.writable)
+    try:
+        app = build_app(root=root, registry_path=args.registry,
+                        writable=args.writable)
+    except ValueError as e:
+        # A mistyped ingest root (J.8.2) is a configuration fact, and the
+        # operator is standing right here reading the log.
+        print(f"station: {e}", file=sys.stderr)
+        return 2
     forests = [f["id"] for f in app.state.pool.list()["forests"]]
     key = app.state.registry.bootstrap_admin(forests)
     if key:

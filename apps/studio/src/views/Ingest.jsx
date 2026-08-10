@@ -106,6 +106,14 @@ export default function Ingest({ forest, grant, goto }) {
     : bindings.busy ? undefined
     : (bindings.data || []).find((b) => b.role === 'ingest') || null
 
+  /* J.8: a refresh reads a directory the request never names — it comes
+     from what a past adopt recorded. So the console asks what that is and
+     shows it, because a button whose reach is invisible is not consent.
+     Re-asked after every run: an adopt is exactly what changes the answer. */
+  const ingestState = useAsync(() => api.ingestStatus(forest),
+                               [forest, state.report])
+  const status = ingestState.data || {}
+
   if (!has(grant, 'ingest')) {
     return <NeedsCapability message={t('ingest.needs_cap')} hint={t('cap.ingest')} />
   }
@@ -214,7 +222,13 @@ export default function Ingest({ forest, grant, goto }) {
   const composed = (composer?.getText() || '').trim()
   const ready = mode === 'upload' ? files.length > 0
     : mode === 'adopt' ? Boolean(path)
-    : mode === 'compose' ? Boolean(title.trim() && composed) : true
+    : mode === 'compose' ? Boolean(title.trim() && composed)
+    // J.8: a forest with no recorded source has nothing to refresh, and one
+    // whose source left this Station's ingest roots cannot be refreshed from
+    // here. Both are refused by the API; the button says so before the click
+    // rather than after it. `busy` keeps it disabled until the answer lands,
+    // so the enabled state is never a guess.
+    : Boolean(status.can_sync)
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
@@ -223,11 +237,21 @@ export default function Ingest({ forest, grant, goto }) {
           <Tabs value={mode} onChange={(m) => { setMode(m); setState({}) }} options={[
             { value: 'upload', label: t('ingest.mode_upload') },
             { value: 'compose', label: t('ingest.mode_compose') },
-            ...(has(grant, 'admin') ? [{ value: 'adopt', label: t('ingest.mode_adopt') }] : []),
+            // Mirroring needs the capability AND a Station configured to read
+            // host folders at all (J.8.2). Offering a tab whose every submit
+            // is refused teaches the operator nothing about why.
+            ...(has(grant, 'admin') && status.host_paths !== false
+              ? [{ value: 'adopt', label: t('ingest.mode_adopt') }] : []),
             { value: 'sync', label: t('ingest.mode_sync') },
           ]} />
 
           <form onSubmit={submit} className="mt-4 space-y-4">
+            {/* The mirror tab is gone for an admin only because this Station
+                was never told which folders it may read (J.8.2). Silence
+                would read as "the feature is missing". */}
+            {mode === 'upload' && has(grant, 'admin') && status.host_paths === false && (
+              <Note>{t('ingest.no_host_paths')}</Note>
+            )}
             {mode === 'upload' && (
               <>
                 <div
@@ -329,7 +353,22 @@ export default function Ingest({ forest, grant, goto }) {
             )}
 
             {mode === 'sync' ? (
-              <Note>{t('ingest.sync_hint')}</Note>
+              <div className="space-y-2">
+                <Note>{t('ingest.sync_hint')}</Note>
+                {/* The whole point of J.8's amendment: name the directory. */}
+                {status.source && (
+                  <Note>
+                    {t('ingest.sync_source')}{' '}
+                    <code className="font-mono">{status.source}</code>
+                  </Note>
+                )}
+                {!ingestState.busy && !status.source && (
+                  <Note tone="warn">{t('ingest.sync_none')}</Note>
+                )}
+                {!ingestState.busy && status.source && !status.can_sync && (
+                  <Note tone="warn">{t('ingest.sync_blocked')}</Note>
+                )}
+              </div>
             ) : (
               <Select label={t('ingest.dest')} value={dest} hint={t('ingest.dest_hint')}
                       onChange={(e) => setDest(e.target.value)}>

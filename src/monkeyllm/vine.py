@@ -748,6 +748,18 @@ class Vine:
             root = self.forest.gardener_source_root()
             sp = node.frontmatter.get("source_path")
             f = (root / str(sp)) if root and sp else None
+            if f is not None and not f.resolve().is_relative_to(root.resolve()):
+                # G.7: a reference body lives UNDER the adopted source root.
+                # `source_path` is ordinary frontmatter (models.py allows
+                # extras), so a planted `../../` would otherwise turn a read
+                # primitive into arbitrary host reads with the Vine's
+                # authority — reported as if the node owned the file.
+                raise VineError(
+                    E_NOT_FOUND,
+                    f"reference body unreachable for {node.id}",
+                    hint="source_path leaves the adopted source root. The map "
+                         "(locate/look/scan) keeps working.",
+                )
             if f is None or not f.is_file():
                 raise VineError(
                     E_NOT_FOUND,

@@ -58,5 +58,9 @@
   "ingest.unchanged": "Sem mudança",
   "ingest.uncurated": "Nenhum modelo de ingestão está ligado, então os resumos foram derivados do próprio texto. Funciona — ligar um deixa melhor.",
   "ingest.unsupported": "Ignorados, sem conversor",
-  "ingest.updated": "Atualizados"
+  "ingest.updated": "Atualizados",
+  "ingest.sync_source": "Vai reler esta pasta:",
+  "ingest.sync_none": "Esta floresta nunca espelhou uma pasta, então não há o que atualizar. Envie arquivos, ou espelhe uma pasta primeiro.",
+  "ingest.sync_blocked": "A pasta espelhada não é mais uma que esta Station pode ler. Um operador precisa ampliar MONKEYLLM_INGEST_ROOTS, ou espelhar uma pasta que esteja dentro dela.",
+  "ingest.no_host_paths": "Esta Station não lê pastas do host. Envie seus arquivos por aqui, ou peça a um operador para definir MONKEYLLM_INGEST_ROOTS."
 }

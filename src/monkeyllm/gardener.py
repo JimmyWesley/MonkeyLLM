@@ -19,6 +19,7 @@ import csv
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import shlex
 import sqlite3
@@ -40,6 +41,7 @@ from monkeyllm.tokens import estimate_tokens
 from monkeyllm.vine import Vine
 
 GARDENER_CONFIG = "gardener.yaml"  # lives in _meta/ (not a node: non-.md)
+FOREST_MARKER = "_index.md"  # A.5: what makes a directory a forest root
 DEFAULT_IGNORES = (".git", ".svn", ".hg", "__pycache__", "node_modules",
                    "_derived", "_assets")
 DEFAULT_IGNORE_GLOBS = ("~$*", "*.tmp", "*.lock", ".DS_Store", "Thumbs.db")
@@ -489,10 +491,67 @@ class Gardener:
         return any(path.match(g) for g in globs)
 
     def _walk(self, src: Path) -> list[Path]:
-        return sorted(
-            p for p in src.rglob("*")
-            if p.is_file() and not self._ignored(p.relative_to(src))
-        )
+        """Every ingestable file under `src`, forests excluded.
+
+        A forest met inside the tree is pruned whole: its passports are
+        somebody's curated nodes, not documents to convert, and a source
+        that happens to sit above a registry would otherwise hand every
+        forest under it to this one — across the tenant boundary, in a
+        single call.
+        """
+        out: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(src):
+            here = Path(dirpath)
+            rel_dir = here.relative_to(src)
+            if here != src and (here / FOREST_MARKER).is_file():
+                dirnames[:] = []
+                continue
+            # Pruning the directory beats filtering its files one by one:
+            # os.walk does not descend into what it is not given.
+            dirnames[:] = [d for d in dirnames if not self._ignored(rel_dir / d)]
+            for name in filenames:
+                if not self._ignored(rel_dir / name):
+                    out.append(here / name)
+        return sorted(out)
+
+    def _resolve_source(self, source: str | Path | None,
+                        *, recorded: bool = False) -> Path:
+        """The one place a host path becomes an ingest root (G.3).
+
+        Every caller passes through here, so the two ways a walk can escape
+        its forest are closed once: an empty source (which `Path("")`
+        resolves to the process's working directory — the Station's own
+        install tree, or whatever a shell happened to be sitting in), and a
+        source that contains the forest, which walks the registry beside it.
+        """
+        raw = str(source or "").strip()
+        if not raw and recorded:
+            raw = str(self.config.get("source_root") or "").strip()
+        if not raw:
+            # Never fall back to the working directory: the caller asked to
+            # ingest "the usual place" and this forest has no usual place.
+            raise VineError(
+                E_SCHEMA, "this forest has no adopted source to sync",
+                hint="Adopt a directory first, or pass the source explicitly.")
+        src = Path(raw).resolve()
+        if not src.is_dir():
+            raise VineError(
+                E_SCHEMA, f"source is not a directory: {src}",
+                hint="Adopt a directory first, or pass the source explicitly.")
+        root = self.forest.root.resolve()
+        if root == src or root.is_relative_to(src):
+            raise VineError(
+                E_SCHEMA, f"source contains the forest itself: {src}",
+                hint="Ingest reads a source tree into a forest; a source at "
+                     "or above the forest root would ingest the forest, and "
+                     "every other forest beside it.")
+        if src.is_relative_to(root) and not src.is_relative_to(root / "_derived"):
+            # `_derived/` is the exception on purpose: the Station's upload
+            # staging lives there, and it is explicitly not forest content.
+            raise VineError(
+                E_SCHEMA, f"source is inside the forest: {src}",
+                hint="A forest's own nodes are not a source to re-ingest.")
+        return src
 
     def _converter_for(self, path: Path):
         ext = path.suffix.lower()
@@ -619,9 +678,7 @@ class Gardener:
     # -- adopt (G.3) ---------------------------------------------------------
 
     def adopt(self, source: str | Path, dest: str | None = None) -> dict:
-        src = Path(source).resolve()
-        if not src.is_dir():
-            raise VineError(E_SCHEMA, f"source is not a directory: {src}")
+        src = self._resolve_source(source)
         report = IngestReport()
         for f in self._walk(src):
             self._ingest_file(src, f, dest, report)
@@ -772,20 +829,24 @@ class Gardener:
         moves nodes. Without the override a caller who says where a new
         document goes is silently overruled by whatever the last adopt
         recorded."""
-        src = Path(source or self.config.get("source_root", "")).resolve()
-        if not src.is_dir():
-            raise VineError(
-                E_SCHEMA,
-                f"sync source is not a directory: {src}",
-                hint="Run adopt first, or pass the source directory explicitly.",
-            )
+        src = self._resolve_source(source, recorded=True)
         dest = dest or self.config.get("dest")
         report = IngestReport()
         passports = self._passports()
 
         if path:  # G.8 targeted sync: one file, the event-trigger building block
-            rel = Path(path).as_posix()
-            f = src / rel
+            # `path` is source-root-relative and MUST stay there. `relative_to`
+            # is lexical, so `../../x` survives the join and comes back out as
+            # a "relative" path — the file would be read, slugified into a
+            # `node/` branch and planted. Resolving first is what makes the
+            # containment real: it collapses `..` and follows symlinks.
+            f = (src / Path(path)).resolve()
+            if Path(path).is_absolute() or not f.is_relative_to(src):
+                raise VineError(
+                    E_SCHEMA, f"sync path leaves the source root: {path}",
+                    hint="A targeted sync names a path relative to the "
+                         "adopted source root.")
+            rel = f.relative_to(src).as_posix()
             if f.is_file():
                 self._sync_one(src, f, rel, passports, dest, report)
             elif rel in passports:

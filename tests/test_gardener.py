@@ -9,6 +9,7 @@ import textwrap
 
 import pytest
 
+from monkeyllm.errors import E_SCHEMA, VineError
 from monkeyllm.forest import Forest, init_forest
 from monkeyllm.gardener import Gardener, derive_summary
 from monkeyllm.lint import lint_forest
@@ -238,3 +239,51 @@ class TestCuration:
         s = derive_summary("# T\n\n" + "word " * 500, "T")
         from monkeyllm.tokens import estimate_tokens
         assert estimate_tokens(s) <= 60 and s.endswith("…")
+
+
+class TestSourceContainment:
+    """G.3: an ingest root is a directory somebody named, never one the
+    process happened to be standing in, and never a forest."""
+
+    def test_sync_without_an_adopted_source_refuses(self, garden, tmp_path,
+                                                    monkeypatch):
+        g, _, _ = garden
+        # The reported incident: a forest that never adopted anything, a
+        # bare `sync`, and `Path("")` resolving to the server's own install
+        # tree — which then arrived in the forest as documents.
+        decoy = tmp_path / "cwd"
+        decoy.mkdir()
+        (decoy / "secret.md").write_text("# Server source\n\nnot a document",
+                                         encoding="utf-8")
+        monkeypatch.chdir(decoy)
+
+        with pytest.raises(VineError) as e:
+            g.sync()
+        assert e.value.code == E_SCHEMA
+        assert "no adopted source" in e.value.message
+
+    def test_source_above_the_forest_refuses(self, garden, tmp_path):
+        g, _, root = garden
+        with pytest.raises(VineError) as e:
+            g.adopt(root.parent)
+        assert "contains the forest" in e.value.message
+
+    def test_source_is_the_forest_refuses(self, garden):
+        g, _, root = garden
+        with pytest.raises(VineError) as e:
+            g.adopt(root)
+        assert "contains the forest" in e.value.message
+
+    def test_a_forest_inside_the_source_is_pruned(self, garden, source_tree):
+        """The cross-forest leak: a neighbour forest under the adopted tree
+        is skipped whole, passports and all."""
+        g, vine, _ = garden
+        neighbour = source_tree / "notes" / "other-forest"
+        init_forest(neighbour, title="Someone Else's Forest")
+        (neighbour / "private.md").write_text("# Private\n\nnot yours",
+                                              encoding="utf-8")
+
+        report = g.adopt(source_tree)
+        planted = " ".join(report["planted"] + report["branches"])
+        assert "other-forest" not in planted
+        assert not vine.forest.exists("notes/other-forest/private")

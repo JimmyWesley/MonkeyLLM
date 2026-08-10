@@ -45,10 +45,20 @@ COPY apps/studio/LICENSE ./apps/studio/
 # /forests  the forest registry
 # /registry the host registry: principals, keys, grants, provider secrets —
 #           never inside a forest, and worth backing up with the snapshots
+# /data     documents to ingest, when the operator mounts any. Empty by
+#           default and read only if MONKEYLLM_INGEST_ROOTS names it (J.8.2).
 VOLUME ["/forests", "/registry"]
+RUN mkdir -p /data
 EXPOSE 8800
 
 ENV MONKEYLLM_STATION_ROOT=/forests \
     MONKEYLLM_STATION_REGISTRY=/registry/station.db
+
+# J.6: the process must not stand in its own install tree. /app is where the
+# engine, the host and the Studio bundle live, and a path bug that resolves
+# to "here" should land somewhere empty rather than in the product's source
+# — which is exactly how v0.25 ingested itself. The install stays at /app;
+# only the working directory moves.
+WORKDIR /data
 
 CMD ["station", "serve", "--host", "0.0.0.0", "--port", "8800"]

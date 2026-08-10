@@ -58,5 +58,9 @@
   "ingest.unchanged": "Unchanged",
   "ingest.uncurated": "No ingest model is bound, so summaries were derived from the text itself. That works — binding one makes them better.",
   "ingest.unsupported": "Skipped, no converter",
-  "ingest.updated": "Updated"
+  "ingest.updated": "Updated",
+  "ingest.sync_source": "Will re-read this folder:",
+  "ingest.sync_none": "This forest has never mirrored a folder, so there is nothing to refresh. Send files, or mirror a folder first.",
+  "ingest.sync_blocked": "The mirrored folder is no longer one this Station may read. An operator has to widen MONKEYLLM_INGEST_ROOTS, or mirror a folder that is inside it.",
+  "ingest.no_host_paths": "This Station reads no host folders. Send your files here instead, or have an operator set MONKEYLLM_INGEST_ROOTS."
 }
