@@ -11,16 +11,22 @@ requires-python = ">=3.11"
 # direction is the legal one (Apache-2.0 is one-way compatible with AGPL);
 # see LICENSING.md at the repository root.
 license = { text = "AGPL-3.0-only" }
-# starlette and uvicorn already ship with `mcp`, so the host adds no new
-# runtime dependency (spec J.6: one image, no external database).
+# starlette and uvicorn already ship with `mcp` (spec J.6: one image, no
+# external database). `httpx` does NOT: mcp 2.x depends on `httpx2`, a
+# different distribution under a different import name. Every provider probe
+# and model call in `inference.py` imports `httpx` unconditionally, so it is
+# a runtime dependency of the host and has to be declared here — leaving it
+# to the `dev` extra made Studio -> Models work on a developer's machine and
+# raise ModuleNotFoundError inside the image.
 dependencies = [
     "monkeyllm",
     "starlette>=0.37",
     "uvicorn>=0.29",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27"]
+dev = ["pytest>=8.0"]
 
 [project.scripts]
 station = "monkeyllm_station.cli:main"

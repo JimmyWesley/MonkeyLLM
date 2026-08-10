@@ -70,22 +70,37 @@ works. From here on, forests are created from *Studio → Overview* or
 
 ## Dokploy
 
+There is **one compose file** and it is the same one you run on a laptop
+([`docker-compose.yml`](../docker-compose.yml)). Everything that differs
+between the two lives in variables, so a deployment cannot drift away from
+the file that gets tested.
+
 1. **Create the service** — in your Dokploy project: *Create Service →
-   Compose*, pick this repository and branch, and set **Compose Path** to
-   `./deploy/docker-compose.dokploy.yml`.
+   Compose*, pick this repository and branch, and leave **Compose Path** at
+   `./docker-compose.yml`.
 2. **Environment** — in the *Environment* tab, set what you use (the full
    catalogue with commentary is [.env.example](../.env.example)):
 
    ```dotenv
+   # The two that make it a deployment: join the network Traefik lives on.
+   STATION_NETWORK=dokploy-network
+   STATION_NETWORK_EXTERNAL=true
+
    MONKEYLLM_STATION_ALLOWED_HOSTS=monkeyllm.dev.example.com
    MONKEYLLM_LLM_ENDPOINT=https://openrouter.ai/api/v1
    MONKEYLLM_LLM_API_KEY=sk-or-...
    MONKEYLLM_LLM_MODEL=google/gemma-3-12b-it
    ```
 
+   Without those first two the containers come up on a private network of
+   their own and Traefik has nothing to route to — the deploy succeeds and
+   the domain answers 502, which is the one failure here that does not
+   explain itself.
+
 3. **Domain** — in the *Domains* tab add your domain pointing at service
-   `station`, container port `8800`, HTTPS on. Traefik reaches the
-   container over `dokploy-network`; no host port is published.
+   `station`, container port `8800`, HTTPS on. Traefik reaches the container
+   over `dokploy-network`. The host port stays bound to loopback, so the
+   Station is never answering in the clear on the public IP.
 4. **Deploy**, then open your domain. The setup screen is waiting: create
    the owner, choose whether to start with a demo forest, and you are in.
    No container terminal, no key from the logs, no `vine init`.
@@ -138,9 +153,25 @@ MONKEYLLM_LLM_ENDPOINT=http://llm:8090/v1
 MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1
 ```
 
-On Dokploy, if the UI cannot pass `--profile`, delete the `profiles:` lines
-in the compose file to always run the sidecars. They run on CPU by default;
-leave the embedder off to keep `locate` on its BM25-only Phase 0 contract.
+On Dokploy there is no `--profile` flag to pass: the UI runs a plain
+`docker compose up`, which starts every service **except** the profiled
+ones — so a deploy that shows only `station` is the profiles working as
+designed, not a failed sidecar. Turn them on by adding this to the
+Environment tab, which Compose reads on its own:
+
+```dotenv
+COMPOSE_PROFILES=local-embed        # or: local-llm,local-embed
+```
+
+Deleting the `profiles:` lines from the compose file has the same effect
+and is the fallback if the variable does not take. Either way the sidecar
+is only half the job — the Station reads `MONKEYLLM_EMBED_ENDPOINT` at
+startup, so it needs the variable above **and** a restart before `locate`
+goes hybrid. The first start is slow and quiet while it pulls the GGUF
+into the `models` volume; `docker compose logs embed` shows the progress.
+
+They run on CPU by default; leave the embedder off to keep `locate` on its
+BM25-only Phase 0 contract.
 
 ## Read-only Station
 
