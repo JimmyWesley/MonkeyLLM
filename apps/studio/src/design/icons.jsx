@@ -121,6 +121,11 @@ export const Sparkle = (p) => (
   <S {...p}><path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z" /></S>
 )
 export const Menu = (p) => <S {...p}><path d="M4 7h16M4 12h16M4 17h16" /></S>
+// A clock and not a list: the runs of J.5.9 are ordered by when they were
+// asked, and that is the only handle anybody has on which one they want.
+export const Clock = (p) => (
+  <S {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></S>
+)
 export const Download = (p) => (
   <S {...p}><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" /></S>
 )

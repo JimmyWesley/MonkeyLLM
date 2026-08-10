@@ -9,7 +9,7 @@
  * people who did not choose these words.
  */
 import { useEffect, useRef, useState } from 'react'
-import { api, clearKey } from '../api.js'
+import { api, signOut } from '../api.js'
 import { hrefFor, linkTo } from '../router.js'
 import { useI18n, LANGUAGES } from '../i18n.jsx'
 import { useTheme } from '../theme.jsx'
@@ -486,7 +486,7 @@ function Footer({ session, collapsed, onExpand }) {
           {session.me.principal.slice(0, 2)}
         </span>
         <button className="btn btn-sm btn-ghost !px-2" title={t('session.signout')}
-                onClick={() => { clearKey(); location.reload() }}>
+                onClick={() => signOut().finally(() => location.reload())}>
           <LogOut size={15} />
         </button>
       </div>
@@ -535,7 +535,7 @@ function Footer({ session, collapsed, onExpand }) {
           </span>
         </span>
         <button className="btn btn-sm btn-ghost" title={t('session.signout')}
-                onClick={() => { clearKey(); location.reload() }}>
+                onClick={() => signOut().finally(() => location.reload())}>
           <LogOut size={15} />
         </button>
       </div>

@@ -5,11 +5,25 @@
 // side-channel (spec J.5): every call carries the operator's own key, so
 // whatever Studio can show, an API client with that key could fetch too.
 
+import { dropEverything } from './history.js'
+
 const KEY_STORAGE = 'monkeyllm.station.key'
 
 export const getKey = () => localStorage.getItem(KEY_STORAGE) || ''
 export const setKey = (k) => localStorage.setItem(KEY_STORAGE, k)
 export const clearKey = () => localStorage.removeItem(KEY_STORAGE)
+
+/** Leaving takes the kept runs with it (J.5.9).
+ *
+ *  Deliberately not inside `clearKey`: that also runs when a boot fails,
+ *  and a Station briefly unreachable would then discard an operator's whole
+ *  history as if they had signed out. Signing out is the deliberate act, so
+ *  it is the one that drops the bodies. Resolves before the caller reloads
+ *  — a delete cut off mid-transaction is a delete that did not happen. */
+export const signOut = () => {
+  clearKey()
+  return dropEverything().catch(() => {})
+}
 
 export class ApiError extends Error {
   constructor(message, { code, hint, status } = {}) {

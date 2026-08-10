@@ -3,13 +3,16 @@
 
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
+import {
+  MAX_RUNS, clearRuns, exportRuns, listRuns, loadRun, saveRun,
+} from '../history.js'
 import { useI18n } from '../i18n.jsx'
 import {
-  Badge, Card, Empty, ErrorNote, Note, Segmented, Spinner, Toggle,
+  Badge, Card, Empty, ErrorNote, Modal, Note, Segmented, Spinner, Toggle,
 } from '../design/ui.jsx'
 import { Markdown } from '../design/markdown.jsx'
 import {
-  Ask as AskIcon, Collapse, Download, Expand, Printer, Sparkle,
+  Ask as AskIcon, Clock, Collapse, Download, Expand, Printer, Sparkle, Trash,
 } from '../design/icons.jsx'
 import { Metric, NeedsCapability, fmtMs, has, nodeLink, useAsync } from './shared.jsx'
 
@@ -18,8 +21,8 @@ import { Metric, NeedsCapability, fmtMs, has, nodeLink, useAsync } from './share
  * Retrieval is scoped and deterministic and happens first; only then does the
  * forest's bound model read what was found (J.10.3). The evidence list is not
  * decoration — it is the set of nodes that were actually read. */
-export default function Ask({ forest, grant, goto }) {
-  const { t } = useI18n()
+export default function Ask({ forest, grant, me, goto }) {
+  const { t, lang } = useI18n()
   const [question, setQuestion] = useState('')
   const [k, setK] = useState(3)
   const [busy, setBusy] = useState(false)
@@ -30,6 +33,11 @@ export default function Ask({ forest, grant, goto }) {
   // against one for the sweep.
   const [hops, setHops] = useState(false)
   const [wide, setWide] = useState(false)
+  // The runs kept in this browser (J.5.9), and which of them — if any — is
+  // what the answer panel is currently showing.
+  const [history, setHistory] = useState(false)
+  const [restored, setRestored] = useState(null)
+  const principal = me?.principal || ''
 
   const admin = has(grant, 'admin')
   // Only an admin can read index health, and only an admin has any business
@@ -46,23 +54,57 @@ export default function Ask({ forest, grant, goto }) {
     const q = (text ?? question).trim()
     if (!q) return
     setQuestion(q)
-    setBusy(true); setError(null); setResult(null)
+    setBusy(true); setError(null); setResult(null); setRestored(null)
+    // Kept beside the answer because they are half of what a comparison
+    // needs: the same question at `k=2` and at `k=6` are two runs, and a
+    // record that dropped them would show two answers and no reason.
+    const params = {
+      k, ...(hybrid ? { hybrid: true } : {}), ...(hops ? { hops: true } : {}),
+    }
     const t0 = performance.now()
     try {
-      const { data, timing } = await api.timedCall(forest, 'answer', {
-        question: q, k,
-        ...(hybrid ? { hybrid: true } : {}),
-        ...(hops ? { hops: true } : {}),
-      })
-      setResult({ ...data, timing, ms: Math.round(performance.now() - t0) })
+      const { data, timing } = await api.timedCall(forest, 'answer', { question: q, ...params })
+      const run = { ...data, timing, ms: Math.round(performance.now() - t0) }
+      setResult(run)
+      // Fire and forget, and deliberately outside the try's failure path: a
+      // browser that cannot keep a run (private window, refused quota) has
+      // not failed the ask, and J.5.9 says it must not be told it has.
+      saveRun({ principal, forest, question: q, params, result: run }).catch(() => {})
     } catch (err) { setError(err) } finally { setBusy(false) }
+  }
+
+  /** Reading a run back reads a record: no call leaves the browser (J.5.9).
+   *
+   *  The parameters go back exactly as they were sent, so "ask again" asks
+   *  the same question rather than a similar one — a comparison between a
+   *  saved `k=6` run and a fresh `k=3` one is not a comparison. */
+  async function restore(id) {
+    const run = await loadRun(id)
+    if (!run) return
+    setHistory(false); setError(null); setBusy(false)
+    setQuestion(run.question)
+    setK(run.params?.k ?? 3)
+    setHybrid(!!run.params?.hybrid)
+    setHops(!!run.params?.hops)
+    setResult(run.result)
+    setRestored({ ts: run.ts, model: run.result?.model })
   }
 
   const noModel = error?.code === 'E_SCHEMA' && /no model is bound/i.test(error.message)
 
   return (
     <div className="space-y-4">
-      <Card title={t('ask.title')} subtitle={t('ask.sub')} icon={AskIcon}>
+      {/* A clock and not a menu: the history of J.5.9 is opened, never
+          linked to, so it is a control on the console rather than a place
+          the address bar can name. */}
+      <Card title={t('ask.title')} subtitle={t('ask.sub')} icon={AskIcon}
+            actions={
+              <button type="button" className="btn btn-sm btn-ghost !px-2"
+                      title={t('ask.history_title')} aria-label={t('ask.history_title')}
+                      onClick={() => setHistory(true)}>
+                <Clock size={15} />
+              </button>
+            }>
         <form onSubmit={(e) => { e.preventDefault(); ask() }} className="space-y-3">
           <textarea
             className="field min-h-[92px] resize-y text-[14px] leading-relaxed"
@@ -135,6 +177,28 @@ export default function Ask({ forest, grant, goto }) {
               </Note>
             </div>
           )}
+        </Card>
+      )}
+
+      {/* A saved answer that looked live would be the whole feature working
+          backwards: the model may have been rebound since, and telling the
+          two apart is the reason the run was kept (J.5.9). */}
+      {restored && result && (
+        <Card>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <Badge tone="warn"><Clock size={12} /> {t('ask.restored')}</Badge>
+            <span className="text-[12px] text-text-2">
+              {when(restored.ts, lang)}
+              {restored.model && <> · <span className="font-mono">{restored.model}</span></>}
+            </span>
+            <span className="w-full text-[12px] leading-relaxed text-text-3 sm:w-auto">
+              {t('ask.restored_hint')}
+            </span>
+            <button type="button" className="btn btn-sm btn-primary sm:ml-auto"
+                    disabled={busy} onClick={() => ask()}>
+              <Sparkle size={14} /> {t('ask.run_again')}
+            </button>
+          </div>
         </Card>
       )}
 
@@ -226,6 +290,9 @@ export default function Ask({ forest, grant, goto }) {
         </div>
       )}
 
+      <History open={history} onClose={() => setHistory(false)}
+               principal={principal} forest={forest} onPick={restore} />
+
       <Note>{t('ask.limits')}</Note>
       {/* No Gauntlet switch here on purpose: `answer` composes `harvest`,
           which is entry search — locate + sniff, no `look`, no `move`, no
@@ -262,6 +329,169 @@ function downloadMarkdown(result, question, forest) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'answer'}.md`
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
+/** When a run was made, in the reader's own locale.
+ *
+ *  Absolute, never "3 hours ago": these are compared with each other and
+ *  with things that happened at a particular time — an ingest, a model
+ *  rebound — and a relative clock turns every one of those comparisons into
+ *  arithmetic the reader has to do. */
+function when(ts, lang) {
+  const d = new Date(ts)
+  return `${d.toLocaleDateString(lang)} · ${d.toLocaleTimeString(lang, {
+    hour: '2-digit', minute: '2-digit',
+  })}`
+}
+
+const DAY = 86400000
+
+function dayLabel(ts, lang, t) {
+  const now = new Date()
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  if (ts >= midnight) return t('ask.history_today')
+  if (ts >= midnight - DAY) return t('ask.history_yesterday')
+  return new Date(ts).toLocaleDateString(lang, {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
+}
+
+const fmtBytes = (n) => (n >= 1024 * 1024
+  ? `${(n / 1024 / 1024).toFixed(1)} MB`
+  : `${Math.max(1, Math.round(n / 1024))} KB`)
+
+/** The runs already made on this forest (J.5.9).
+ *
+ *  Grouped by day, and deliberately not by "session": a browser cannot
+ *  observe a session — a reload, a second tab and a laptop reopened the next
+ *  morning are indistinguishable to it — so grouping by one would be
+ *  grouping by something the console invented. The day is real.
+ *
+ *  Nothing in this panel calls the Station. The list, the restore and the
+ *  export all read the browser's own store, which is the whole point: these
+ *  answers exist here and nowhere else.
+ */
+function History({ open, onClose, principal, forest, onPick }) {
+  const { t, lang } = useI18n()
+  const [state, setState] = useState(null)
+  const [confirming, setConfirming] = useState(false)
+
+  useEffect(() => {
+    if (!open) return undefined
+    setConfirming(false)
+    setState(null)
+    let live = true
+    listRuns(principal, forest).then((s) => { if (live) setState(s) })
+    return () => { live = false }
+  }, [open, principal, forest])
+
+  const runs = state?.runs || []
+  const groups = []
+  for (const run of runs) {
+    const label = dayLabel(run.ts, lang, t)
+    const last = groups[groups.length - 1]
+    if (last && last.label === label) last.runs.push(run)
+    else groups.push({ label, runs: [run] })
+  }
+
+  async function discard() {
+    await clearRuns(principal, forest)
+    setState({ ok: true, runs: [], bytes: 0 })
+    setConfirming(false)
+  }
+
+  /** The one thing that ever moves a run off this machine, and it moves
+   *  because somebody asked (J.5.9). Whole records — the answers with their
+   *  material — because a history exported without them is a list of
+   *  questions. */
+  async function download() {
+    const data = await exportRuns(principal, forest)
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${forest}-runs.json`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} wide
+           title={t('ask.history_title')} subtitle={t('ask.history_local')}
+           footer={runs.length > 0 && (
+             <>
+               {/* The bound, said out loud. A store that dropped its far end
+                   in silence would let a partial history read as a complete
+                   one (J.5.9). */}
+               <span className="mr-auto text-left text-[11.5px] leading-relaxed text-text-3">
+                 {t('ask.history_holding', {
+                   n: runs.length, size: fmtBytes(state?.bytes || 0),
+                 })}
+                 <br />
+                 {t('ask.history_bound', { n: MAX_RUNS })}
+               </span>
+               <button type="button" className="btn btn-sm" onClick={download}>
+                 <Download size={14} /> {t('ask.history_export')}
+               </button>
+               <button type="button" className={`btn btn-sm ${confirming ? 'btn-danger' : ''}`}
+                       onClick={() => (confirming ? discard() : setConfirming(true))}>
+                 <Trash size={14} />
+                 {confirming ? t('ask.history_clear_confirm') : t('ask.history_clear')}
+               </button>
+             </>
+           )}>
+      {state === null ? <Spinner label={t('common.loading')} />
+        : !state.ok ? <Note tone="warn">{t('ask.history_unavailable')}</Note>
+        : !runs.length ? (
+          <Empty icon={Clock} title={t('ask.history_none')}>{t('ask.history_empty')}</Empty>
+        ) : (
+          <div className="max-h-[60vh] space-y-4 overflow-y-auto">
+            {groups.map((group) => (
+              <div key={group.label}>
+                <div className="label">{group.label}</div>
+                <ul className="space-y-1.5">
+                  {group.runs.map((run) => (
+                    <li key={run.id}>
+                      <button type="button" onClick={() => onPick(run.id)}
+                              className="w-full rounded-lg border border-line bg-surface
+                                         px-3 py-2 text-left transition
+                                         hover:border-accent/40">
+                        <span className="block truncate text-[13px] font-medium text-text">
+                          {run.question}
+                        </span>
+                        <span className="mt-1 flex flex-wrap items-baseline gap-x-2
+                                         gap-y-1 text-[11px] text-text-3">
+                          <span className="tabular-nums">
+                            {new Date(run.ts).toLocaleTimeString(lang, {
+                              hour: '2-digit', minute: '2-digit',
+                            })}
+                          </span>
+                          {/* What was sent, not what it produced: two runs of
+                              one question differ by these. */}
+                          <span className="font-mono">
+                            {t('ask.history_depth', { k: run.params?.k ?? '—' })}
+                          </span>
+                          {run.params?.hops && <Badge>{t('ask.history_hops')}</Badge>}
+                          {run.params?.hybrid && <Badge>{t('ask.history_hybrid')}</Badge>}
+                          {run.model && <span className="font-mono">{run.model}</span>}
+                          {/* No stopwatch on the row: the client's round trip
+                              is not the cost of the call (J.10.6), and the
+                              three clocks that are live in the panel the run
+                              restores into. */}
+                          <span className="ml-auto tabular-nums">
+                            {t('common.evidence')}: {run.evidence}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+    </Modal>
+  )
 }
 
 /** While the answer is being made.
