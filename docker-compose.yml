@@ -19,6 +19,11 @@
 # then set in .env:
 #   MONKEYLLM_LLM_ENDPOINT=http://llm:8090/v1
 #   MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1
+#
+# This is also the deployment file — a managed host (Dokploy, Coolify, plain
+# Traefik) needs three variables and no second copy of any of this; see
+# deploy/README.md. Everything that differs between a laptop and a VPS is a
+# variable, so nothing can drift between the two.
 
 services:
   station:
@@ -26,8 +31,13 @@ services:
       context: .
       dockerfile: apps/station/Dockerfile
     image: monkeyllm-station
+    # Loopback by default. On a laptop that is exactly what you want, and on
+    # a VPS it is the difference between a console reachable over TLS and an
+    # API answering in the clear on the public IP — a reverse proxy reaches
+    # the container over the docker network, never over the host port. Open
+    # it with STATION_BIND=0.0.0.0 when you actually want it on the LAN.
     ports:
-      - "${STATION_PORT:-8800}:8800"
+      - "${STATION_BIND:-127.0.0.1}:${STATION_PORT:-8800}:8800"
     # --writable accepts plant/graft/tend, ingest and forest creation.
     # Remove the flag for a read-only Station (reads always work).
     command: ["station", "serve", "--host", "0.0.0.0", "--port", "8800", "--writable"]
@@ -94,7 +104,7 @@ services:
 #    volumes:
 #      - models:/models
 #    ports:
-#      - "${LLM_PORT:-8090}:8090"
+#      - "${STATION_BIND:-127.0.0.1}:${LLM_PORT:-8090}:8090"
 #    restart: unless-stopped
 
   # -- Optional: local embedder (Canopy vector layer), profile `local-embed`
@@ -109,10 +119,21 @@ services:
     volumes:
       - models:/models
     ports:
-      - "${EMBED_PORT:-8091}:8091"
+      - "${STATION_BIND:-127.0.0.1}:${EMBED_PORT:-8091}:8091"
     restart: unless-stopped
 
 volumes:
   forests:
   registry:
   models:
+
+# One network for everything, so `station` reaches `embed` by service name.
+# Both fields are interpolated for one reason: a managed host (Dokploy, Coolify)
+# routes to containers over a proxy network it created itself, and joining it
+# is all that separates a deployment from a laptop. Setting the two variables
+# below is the whole difference — there is no second compose file to keep in
+# sync with this one, and nothing about the deployment lives outside git.
+networks:
+  default:
+    name: ${STATION_NETWORK:-monkeyllm}
+    external: ${STATION_NETWORK_EXTERNAL:-false}

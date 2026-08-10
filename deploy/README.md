@@ -70,22 +70,37 @@ works. From here on, forests are created from *Studio → Overview* or
 
 ## Dokploy
 
+There is **one compose file** and it is the same one you run on a laptop
+([`docker-compose.yml`](../docker-compose.yml)). Everything that differs
+between the two lives in variables, so a deployment cannot drift away from
+the file that gets tested.
+
 1. **Create the service** — in your Dokploy project: *Create Service →
-   Compose*, pick this repository and branch, and set **Compose Path** to
-   `./deploy/docker-compose.dokploy.yml`.
+   Compose*, pick this repository and branch, and leave **Compose Path** at
+   `./docker-compose.yml`.
 2. **Environment** — in the *Environment* tab, set what you use (the full
    catalogue with commentary is [.env.example](../.env.example)):
 
    ```dotenv
+   # The two that make it a deployment: join the network Traefik lives on.
+   STATION_NETWORK=dokploy-network
+   STATION_NETWORK_EXTERNAL=true
+
    MONKEYLLM_STATION_ALLOWED_HOSTS=monkeyllm.dev.example.com
    MONKEYLLM_LLM_ENDPOINT=https://openrouter.ai/api/v1
    MONKEYLLM_LLM_API_KEY=sk-or-...
    MONKEYLLM_LLM_MODEL=google/gemma-3-12b-it
    ```
 
+   Without those first two the containers come up on a private network of
+   their own and Traefik has nothing to route to — the deploy succeeds and
+   the domain answers 502, which is the one failure here that does not
+   explain itself.
+
 3. **Domain** — in the *Domains* tab add your domain pointing at service
-   `station`, container port `8800`, HTTPS on. Traefik reaches the
-   container over `dokploy-network`; no host port is published.
+   `station`, container port `8800`, HTTPS on. Traefik reaches the container
+   over `dokploy-network`. The host port stays bound to loopback, so the
+   Station is never answering in the clear on the public IP.
 4. **Deploy**, then open your domain. The setup screen is waiting: create
    the owner, choose whether to start with a demo forest, and you are in.
    No container terminal, no key from the logs, no `vine init`.
