@@ -209,7 +209,7 @@ export function Shell({ session, forest, setForest, view, setView, onForestCreat
                            border-line bg-bg/85 px-3 py-2.5 backdrop-blur lg:hidden">
           <button className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                   onClick={() => setOpen(true)} aria-label={t('nav.menu')}>
-            <img src="/logo.png" className="h-8 w-8 shrink-0" alt="MonkeyLLM" />
+            <img src="/logo.png" className="h-10 w-10 shrink-0" alt="MonkeyLLM" />
             <span className="min-w-0 flex-1 leading-tight">
               <span className="block truncate text-[13.5px] font-semibold tracking-tight text-text">
                 {t('app.name')} <span className="font-normal text-text-3">{t('app.studio')}</span>
@@ -301,7 +301,7 @@ function ForestSwitcher({ session, forest, setForest, onCreated, collapsed,
           control moves to the footer, where there is room for it. */}
       {!collapsed && (
         <div className="mb-2 flex items-center gap-2 px-1.5 pt-1">
-          <img src="/logo.png" className="h-6 w-6 shrink-0" alt="MonkeyLLM" />
+          <img src="/logo.png" className="h-9 w-9 shrink-0" alt="MonkeyLLM" />
           <span className="flex-1 truncate text-[13.5px] font-semibold tracking-tight text-text">
             {t('app.name')} <span className="font-normal text-text-3">{t('app.studio')}</span>
           </span>
@@ -321,10 +321,10 @@ function ForestSwitcher({ session, forest, setForest, onCreated, collapsed,
 
       <div className="relative">
         {collapsed ? (
-          <button className="mx-auto grid h-9 w-9 place-items-center transition hover:opacity-80"
+          <button className="mx-auto grid h-10 w-10 place-items-center transition hover:opacity-80"
                   title={current?.id || t('forest.switch')}
                   onClick={() => setOpen((v) => !v)}>
-            <img src="/logo.png" className="h-9 w-9" alt="MonkeyLLM" />
+            <img src="/logo.png" className="h-10 w-10" alt="MonkeyLLM" />
           </button>
         ) : (
         <button className="flex w-full items-center gap-2 rounded-lg border border-line

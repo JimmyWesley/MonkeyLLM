@@ -115,10 +115,12 @@ def _signature(primitive: str):
     return None if fn is None else inspect.signature(fn)
 
 
-def test_there_are_call_sites_to_check():
-    """A refactor that renames `call` would otherwise make this suite pass by
-    finding nothing at all."""
-    assert len(_sites()) >= 3
+def test_the_write_primitives_are_actually_covered():
+    """A refactor that renamed `call`, or a scanner that quietly matched
+    nothing, would otherwise make this suite pass by checking zero sites."""
+    checked = {p for _, p, _, _ in _sites() if _signature(p) is not None}
+    assert {"plant", "graft", "tend"} <= checked, (
+        f"the console's write calls are not being checked; found {checked}")
 
 
 def test_every_console_call_names_arguments_the_primitive_has():
@@ -126,7 +128,9 @@ def test_every_console_call_names_arguments_the_primitive_has():
     for path, primitive, keys, _ in _sites():
         sig = _signature(primitive)
         if sig is None:
-            offenders.append(f"{path.name}: unknown primitive {primitive!r}")
+            # A composite (`answer`) or a host action (`ingest`) — dispatched
+            # from a payload dict, not from a signature, so there is nothing
+            # here to compare against. J.10/J.8 own those contracts.
             continue
         allowed = {p for p in sig.parameters if p != "self"}
         extra = [k for k in keys if k not in allowed]
