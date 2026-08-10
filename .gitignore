@@ -24,3 +24,8 @@ forests/*
 *.gguf
 bench/_artifacts/
 ideias/
+
+# Logo generation scripts
+scripts/remove_bg.py
+scripts/make_dark_logo.py
+scripts/make_rounded_icon.py

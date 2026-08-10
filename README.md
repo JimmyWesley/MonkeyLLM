@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="docs/logo.png" alt="MonkeyLLM Logo" width="120"/>
+</div>
+
 # MonkeyLLM
 
 A knowledge forest navigable by a small language model: markdown nodes with
