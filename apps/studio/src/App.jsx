@@ -321,8 +321,7 @@ function Doorframe({ children }) {
     <div className="grid min-h-screen place-items-center px-4 py-10">
       <div className="w-full max-w-[400px]">
         <div className="mb-6 text-center">
-          <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-xl
-                           bg-accent text-accent-fg"><Forest size={24} /></span>
+          <img src="/logo.png" alt="MonkeyLLM" className="mx-auto mb-3 h-16 w-16" />
           <h1 className="text-[21px] font-semibold tracking-tight text-text">
             {t('app.name')} {t('app.studio')}
           </h1>
