@@ -9,6 +9,7 @@
  * is how a design system stops being one.
  */
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Alert, Check, ChevronDown, Copy, Info, Refresh, Search, X } from './icons.jsx'
 
 export function Card({ title, subtitle, actions, icon: Icon, children,
@@ -428,7 +429,14 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose])
   if (!open) return null
-  return (
+  // Rendered into `document.body`, not where it was written. `position:
+  // fixed` resolves against the nearest ancestor carrying a transform, and
+  // the sidebar is one — it slides in and out on `translate-y`. A dialog
+  // opened from the forest picker therefore centred itself inside a 248px
+  // rail, title wrapping mid-word, instead of over the page. A portal makes
+  // the dialog independent of wherever it happens to be mounted, which is
+  // the only fix that also covers the transform somebody adds next year.
+  return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto
                     bg-black/40 p-4 backdrop-blur-[2px]"
          onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -450,8 +458,8 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
           </footer>
         )}
       </div>
-    </div>
-  )
+    </div>,
+    document.body)
 }
 
 /** Monospace payload viewer — request bodies, SQL, node bodies. */
