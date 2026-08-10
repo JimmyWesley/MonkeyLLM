@@ -9,7 +9,9 @@ import {
   Toggle,
 } from '../design/ui.jsx'
 import { Play, Playground as Beaker } from '../design/icons.jsx'
-import { Metric, NeedsCapability, fmtMs, has, rootsOf } from './shared.jsx'
+import {
+  Metric, NeedsCapability, fmtMs, has, rootsOf, useForestTree,
+} from './shared.jsx'
 
 /* The budgets are the engine's, restated here only so the number an operator
  * sees while tuning is the number the primitive actually enforces (C.6). */
@@ -17,6 +19,10 @@ import { Metric, NeedsCapability, fmtMs, has, rootsOf } from './shared.jsx'
  *  something. `look`/`move` never call `locate`; offering it there would be
  *  a control with no wire behind it. */
 const ENTRY_OPS = ['locate', 'harvest', 'answer']
+/** The calls that look for something, and are therefore the ones where "in
+ *  how large a corpus" is part of the answer. `look`/`move` are handed the
+ *  node; saying what else exists would describe work they did not do. */
+const SEARCH_OPS = ['locate', 'sniff', 'harvest', 'answer']
 
 const OPS = [
   { key: 'locate', budget: 800, fields: ['query', 'k'] },
@@ -40,22 +46,29 @@ const OPS = [
  *  reads as a claim rather than a measurement. Naming the gap is what makes
  *  the small number believable.
  */
-function Aside({ timing, wall, bytes }) {
-  const { t } = useI18n()
+function Aside({ timing, wall, bytes, rate }) {
+  const { t, lang } = useI18n()
   // Never negative: the header is measured inside the span the client is
   // timing — but a stopwatch read across a suspended tab is not.
   const net = Math.max(0, wall - timing.vine - timing.host - (timing.model || 0))
   return (
     <p className="mb-3 text-[11px] leading-relaxed text-text-3">
+      {/* Spelled out, never as `/s`. Rendered as "7.407/s" the number was
+          read as seven-point-four seconds — by the person who wrote the
+          engine, which settles whether a visitor would manage it. And
+          "the engine does", not "the server serves": this rate comes off
+          the engine clock alone, and a request also crosses a network. */}
+      {rate != null && `${t('playground.rate', { n: rate.toLocaleString(lang) })} `}
       {t('playground.aside', {
-        host: fmtMs(timing.host), net: fmtMs(net), bytes,
+        host: fmtMs(timing.host), net: fmtMs(net),
+        bytes: bytes?.toLocaleString(lang),
       })}
     </p>
   )
 }
 
 export default function Playground({ forest, grant }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [op, setOp] = useState('locate')
   const [form, setForm] = useState({ query: '', terms: '', k: 5, id: '' })
   // K.3: the claim is a navigation gain, so it has to be measurable
@@ -65,6 +78,11 @@ export default function Playground({ forest, grant }) {
   // into an already-correct BM25 moves the right node off rank 1.
   const [hybrid, setHybrid] = useState(false)
   const [state, setState] = useState({})
+  // How large the haystack was — above the early return, because a hook
+  // behind a condition is a hook that changes count between renders.
+  // Counted over what this key can actually reach, so a scoped grant is
+  // never told the size of the whole forest.
+  const tree = useForestTree(forest, grant, api.call, { skip: !has(grant, 'read') })
 
   if (!has(grant, 'read')) {
     return <NeedsCapability message={t('access.needs_admin')} hint={t('cap.read')} />
@@ -118,6 +136,14 @@ export default function Playground({ forest, grant }) {
   // this panel exists to stop.
   const rate = state.timing && !state.timing.model && state.timing.vine > 0
     ? Math.round(1000 / state.timing.vine)
+    : null
+  // The size of the haystack is what makes the milliseconds mean something:
+  // "0.135 ms" is a fact, "0.135 ms across 82 nodes" is the claim. And
+  // unlike a rate derived from one sample, it does not move between clicks.
+  // Branches count — `locate` searches their metadata like any other node's,
+  // and on the test forest the top hit for most queries IS one.
+  const haystack = SEARCH_OPS.includes(op) && tree.data
+    ? `${tree.data.nodes + tree.data.branches.length}${tree.data.partial ? '+' : ''}`
     : null
   const origin = window.location.origin
 
@@ -195,18 +221,24 @@ export default function Playground({ forest, grant }) {
                   describe the call. Without the header there is no engine
                   figure to lead with, so the old number stays — under its
                   own, honest name. */}
-              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className={`mb-3 grid grid-cols-2 gap-2 ${
+                haystack ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
                 <Metric tone="accent"
                         label={t(state.timing ? 'playground.engine' : 'playground.latency')}
                         value={fmtMs(state.timing ? state.timing.vine : state.ms)} />
-                {rate != null
-                  ? <Metric tone="accent" label={t('playground.throughput')}
-                            value={`${rate.toLocaleString()}/s`} />
-                  : <Metric label="bytes" value={bytes} />}
+                {/* Not a rate: a rate off one sample swung twentyfold
+                    between clicks, and it was read as seconds. This is the
+                    haystack, it is the same number every time, and it is
+                    what the reader is actually judging. `look`/`move` are
+                    handed their node, so there is no haystack to report and
+                    the tile is not there rather than empty. */}
+                {haystack && <Metric label={t('playground.corpus')}
+                                     value={t('playground.nodes', { n: haystack })} />}
                 <Metric label={t('playground.returned')} value={rows ?? '—'} />
                 <Metric label={t('playground.budget')} value={spec.budget ?? '—'} />
               </div>
-              {state.timing && <Aside timing={state.timing} wall={state.ms} bytes={bytes} />}
+              {state.timing && <Aside timing={state.timing} wall={state.ms}
+                                      bytes={bytes} rate={rate} />}
               {state.data.truncated && <Note tone="warn">{t('common.truncated')}</Note>}
               <div className="mt-3">
                 <Code max="26rem">{JSON.stringify(state.data, null, 2)}</Code>
