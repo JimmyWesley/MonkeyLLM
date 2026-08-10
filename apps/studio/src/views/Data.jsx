@@ -24,7 +24,7 @@ import {
   Spinner, Table, Tabs, Td,
 } from '../design/ui.jsx'
 import {
-  ChevronLeft, ChevronRight, Columns, Data as DataIcon, Download,
+  ChevronLeft, ChevronRight, Code2, Columns, Data as DataIcon, Download,
   Grid as GridIcon, Play, Plus, Refresh, Save,
 } from '../design/icons.jsx'
 import { Grid, TypedInput, fieldKind, isComplete } from '../design/grid.jsx'
@@ -545,9 +545,9 @@ export default function Data({ forest, grant }) {
                 </>}>
             <div className="px-5 pt-1">
               <Tabs value={tab} onChange={setTab} options={[
-                { value: 'rows', label: t('data.tab_rows') },
-                { value: 'structure', label: t('data.tab_structure') },
-                { value: 'sql', label: t('data.tab_sql') },
+                { value: 'rows', label: t('data.tab_rows'), icon: GridIcon },
+                { value: 'structure', label: t('data.tab_structure'), icon: Columns },
+                { value: 'sql', label: t('data.tab_sql'), icon: Code2 },
               ]} />
             </div>
 

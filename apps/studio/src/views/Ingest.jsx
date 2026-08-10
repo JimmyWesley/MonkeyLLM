@@ -13,7 +13,9 @@ import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, Empty, ErrorNote, Field, Note, Select, Spinner, Tabs,
 } from '../design/ui.jsx'
-import { File, Ingest as Upload, Pencil, Plus, Refresh, X } from '../design/icons.jsx'
+import {
+  File, Files, Ingest as Upload, Pencil, Plus, Refresh, X,
+} from '../design/icons.jsx'
 import {
   NeedsCapability, NewBranch, branchOf, has, nodeLink, useAsync, useForestTree,
 } from './shared.jsx'
@@ -242,14 +244,14 @@ export default function Ingest({ forest, grant, goto }) {
       <div className="min-w-0 space-y-4">
         <Card title={t('ingest.title')} subtitle={t('ingest.sub')} icon={Upload}>
           <Tabs value={mode} onChange={(m) => { setMode(m); setState({}) }} options={[
-            { value: 'upload', label: t('ingest.mode_upload') },
-            { value: 'compose', label: t('ingest.mode_compose') },
+            { value: 'upload', label: t('ingest.mode_upload'), icon: Upload },
+            { value: 'compose', label: t('ingest.mode_compose'), icon: Pencil },
             // Mirroring needs the capability AND a Station configured to read
             // host folders at all (J.8.2). Offering a tab whose every submit
             // is refused teaches the operator nothing about why.
             ...(has(grant, 'admin') && status.host_paths !== false
-              ? [{ value: 'adopt', label: t('ingest.mode_adopt') }] : []),
-            { value: 'sync', label: t('ingest.mode_sync') },
+              ? [{ value: 'adopt', label: t('ingest.mode_adopt'), icon: Files }] : []),
+            { value: 'sync', label: t('ingest.mode_sync'), icon: Refresh },
           ]} />
 
           <form onSubmit={submit} className="mt-4 space-y-4">

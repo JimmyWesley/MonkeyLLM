@@ -78,8 +78,8 @@ export default function People({ forest, grant, me }) {
         bodyClass="p-0">
         <div className="px-5 pt-3">
           <Tabs value={tab} onChange={setTab} options={[
-            { value: 'people', label: t('people.tab_people') },
-            { value: 'tokens', label: t('people.tab_tokens') },
+            { value: 'people', label: t('people.tab_people'), icon: Users },
+            { value: 'tokens', label: t('people.tab_tokens'), icon: Key },
           ]} />
         </div>
         <div className="p-5">
