@@ -6,7 +6,11 @@
     <title>MonkeyLLM Studio</title>
     <meta name="description" content="Console for a governed MonkeyLLM forest." />
     <meta name="color-scheme" content="light dark" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f7d58' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2.5L6.5 11h3L5 17.5h14L14.5 11h3z'/%3E%3Cpath d='M12 17.5v4'/%3E%3C/svg%3E" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon-32x32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2f7d58" />
     <script>
       /* Theme before first paint: React mounting is one frame too late, and
          that frame is a white flash for anyone who chose dark. */
@@ -18,6 +22,11 @@
           document.documentElement.dataset.theme = dark ? 'dark' : 'light'
         } catch (e) { /* private mode: the default in the attribute stands */ }
       })()
+    </script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js')
+      }
     </script>
   </head>
   <body>

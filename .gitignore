@@ -29,3 +29,4 @@ ideias/
 scripts/remove_bg.py
 scripts/make_dark_logo.py
 scripts/make_rounded_icon.py
+scripts/gen_icons.py
