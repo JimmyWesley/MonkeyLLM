@@ -15,11 +15,76 @@ import os
 import sys
 from pathlib import Path
 
-from monkeyllm_station.app import build_app
+from monkeyllm_station.app import build_app, super_admin_from_env
 from monkeyllm_station.registry import Registry
 
 DEFAULT_ROOT = os.environ.get("MONKEYLLM_STATION_ROOT", "/forests")
 DEFAULT_REGISTRY = os.environ.get("MONKEYLLM_STATION_REGISTRY", "/registry/station.db")
+
+# A platform UI (Dokploy, Coolify, a compose file somebody inherited) has an
+# environment table and often no argv field at all, so the opt-in of J.2.5
+# has to be reachable from both.
+BOOTSTRAP_ENV = "MONKEYLLM_STATION_BOOTSTRAP_KEY"
+
+
+def wants_bootstrap_key(argv_flag: bool) -> bool:
+    return argv_flag or os.environ.get(BOOTSTRAP_ENV, "").strip().lower() in {
+        "1", "true", "yes", "on"}
+
+
+def console_url(host: str, port: int) -> str:
+    """What to type into a browser — never what the socket binds to.
+
+    A container binds 0.0.0.0 because it must; printing that back is an
+    address nobody can open, and the first instruction a product gives
+    should not be one the reader has to correct.
+    """
+    shown = "localhost" if host in ("0.0.0.0", "::", "") else host
+    return f"http://{shown}:{port}"
+
+
+def first_run_lines(*, url: str, super_admin: str | None,
+                    setup_open: bool, key: str | None) -> list[str]:
+    """What the terminal says to somebody who cannot sign in yet (J.2.5).
+
+    Nobody meets this product in a browser; they meet it watching a compose
+    log scroll, and the console that would explain itself is behind the door
+    they are trying to open. Hence three states, one instruction each — and
+    silence afterwards, because a restart that reports the deployment's
+    authentication state to whatever collects its logs is a disclosure with
+    no reader who needed it.
+    """
+    if key:
+        return [
+            "first run — minted the bootstrap key you asked for.",
+            "",
+            f"  console:   {url}",
+            "  principal: admin — owner, so it governs every forest, "
+            "including the first one it creates",
+            f"  API key:   {key}",
+            "",
+            "store it now: only its digest is kept.",
+            "this spent the first-run window — the setup screen is closed.",
+        ]
+    if super_admin:
+        # The password is not echoed: the operator set it, and every log
+        # aggregator downstream did not need a copy of it (J.2.5).
+        return [
+            "first run — this Station takes its administrator from the environment.",
+            f"  console: {url}",
+            f"  sign in as '{super_admin}', with the password in "
+            "MONKEYLLM_STATION_PASSWORD.",
+        ]
+    if setup_open:
+        return [
+            "first run — nobody owns this Station yet.",
+            f"  open {url} and create the owner account.",
+            "  the first person to open it becomes the owner, so do not",
+            "  leave a publicly reachable Station sitting on this screen.",
+            "  no browser? restart with --bootstrap-key to get an API key",
+            f"  instead (or set {BOOTSTRAP_ENV}=1).",
+        ]
+    return []
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,6 +105,12 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--writable", action="store_true",
                          help="accept writes: plant/graft/tend and ingest "
                               "(off by default; reads always work)")
+    p_serve.add_argument("--bootstrap-key", action="store_true",
+                         help="on a Station nobody owns yet, mint the first "
+                              "API key and print it instead of opening the "
+                              "setup screen (J.2.5) — for a deployment with "
+                              "no browser. Never mints on a registry that "
+                              "already has a way in.")
 
     p_key = sub.add_parser("key", parents=[common],
                            help="mint an API key and grant a forest")
@@ -84,12 +155,22 @@ def main(argv: list[str] | None = None) -> int:
         # operator is standing right here reading the log.
         print(f"station: {e}", file=sys.stderr)
         return 2
-    forests = [f["id"] for f in app.state.pool.list()["forests"]]
-    key = app.state.registry.bootstrap_admin(forests)
-    if key:
-        print(f"station: bootstrapped principal 'admin' with full caps on "
-              f"{len(forests)} forest(s)\nstation: API key: {key}\n"
-              f"station: store it now — only its digest is kept.")
+    # Starting a server is not an act of administration (J.2.5): the registry
+    # is exactly as authoritative after this line as before it, unless the
+    # operator asked otherwise on the command line.
+    registry = app.state.registry
+    key = None
+    if wants_bootstrap_key(args.bootstrap_key):
+        key = registry.mint_bootstrap_key()
+        if key is None:
+            print("station: --bootstrap-key: nothing to mint — this registry "
+                  "already has a way in. Use `station key`, or the People "
+                  "console, from an account that is already inside.",
+                  file=sys.stderr)
+    for line in first_run_lines(url=console_url(args.host, args.port),
+                                super_admin=(super_admin_from_env() or (None,))[0],
+                                setup_open=registry.setup_available(), key=key):
+        print(f"station: {line}" if line else "station:", flush=True)
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 

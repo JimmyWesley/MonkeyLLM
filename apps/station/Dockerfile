@@ -51,7 +51,12 @@ VOLUME ["/forests", "/registry"]
 RUN mkdir -p /data
 EXPOSE 8800
 
-ENV MONKEYLLM_STATION_ROOT=/forests \
+# J.6: the first-run announcement (J.2.5) reaches the operator through this
+# channel and no other. Python block-buffers stdout when it is a pipe — which
+# it always is under Docker — so without this the one message that says how to
+# get in waits for 8 KiB that a healthy Station never writes.
+ENV PYTHONUNBUFFERED=1 \
+    MONKEYLLM_STATION_ROOT=/forests \
     MONKEYLLM_STATION_REGISTRY=/registry/station.db
 
 # J.6: the process must not stand in its own install tree. /app is where the

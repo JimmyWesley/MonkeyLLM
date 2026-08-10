@@ -743,15 +743,46 @@ class Registry:
 
     # -- bootstrap ----------------------------------------------------------
 
-    def bootstrap_admin(self, forests: list[str], principal_id: str = "admin") -> str | None:
-        """First-run convenience: if no key exists, mint one with full caps on
-        every forest in the registry. Returns the plaintext key, or None when
-        the registry is already populated."""
-        if self.conn.execute("SELECT 1 FROM api_keys LIMIT 1").fetchone():
-            return None
-        key = self.issue_key(principal_id, label="bootstrap")
-        for forest in forests:
-            self.grant(principal_id, forest, set(CAPS))
+    def mint_bootstrap_key(self, principal_id: str = "admin") -> str | None:
+        """J.2.5: the first key, minted only when an operator asks for it.
+
+        Returns the plaintext key, or None when there was no window to spend.
+        A registry that already holds a credential — or an owner — has a way
+        in already, and MUST NOT grow a second full-authority one by being
+        restarted with a flag; that is what `station key` and the People
+        console are for, and both require somebody who is already inside.
+
+        The principal takes the **owner bit**, for J.2.4's reason: authority
+        that has to create the first forest cannot be derived from a forest.
+        Until v0.28 this minted a key granted per forest, which on a fresh
+        volume summed to no authority at all — the v0.25 deadlock, still
+        open in the one door nobody had walked through.
+
+        Check and write are one `BEGIN IMMEDIATE`, as in `create_owner`:
+        this spends the very same one-shot window the setup route does, so
+        it is held to the same atomicity.
+        """
+        conn = self.conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if not self.setup_available():
+                conn.rollback()
+                return None
+            key = f"mk_{secrets.token_urlsafe(32)}"
+            conn.execute(
+                "INSERT OR IGNORE INTO principals (id, kind, created) "
+                "VALUES (?,?,?)", (principal_id, "user", _now()))
+            conn.execute("UPDATE principals SET owner = 1 WHERE id = ?",
+                         (principal_id,))
+            conn.execute(
+                "INSERT INTO api_keys (key_hash, principal, label, created, "
+                "prefix, kind) VALUES (?,?,?,?,?,?)",
+                (hash_key(key), principal_id, "bootstrap", _now(),
+                 key[:9], "api"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         return key
 
     def ensure_super_admin(self, principal_id: str, forests: list[str]) -> None:

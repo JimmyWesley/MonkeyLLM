@@ -107,8 +107,13 @@ the file that gets tested.
 
    Note the ordering — setup is open until somebody uses it, so point the
    domain at the service and complete it yourself before announcing the URL.
-   The deployment logs still print a bootstrap API key on first boot; it is
-   for scripted access, and it is not needed to reach the console.
+   The deploy log says as much on first boot: it prints the console URL and
+   nothing else, because starting a Station mints no credential (J.2.5).
+   If you would rather have a key than a browser — scripted access, an MCP
+   client, no domain yet — set `MONKEYLLM_STATION_BOOTSTRAP_KEY=1` for the
+   first boot and the log carries the key instead. It is shown once, it
+   carries full authority, and it closes the setup screen: the two are one
+   window, and whichever you use spends it.
 
 Provider keys set this way arrive pre-configured in *Studio → Models*,
 marked "from the environment", and are **never copied into the registry** —

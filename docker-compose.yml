@@ -8,8 +8,13 @@
 #
 #   cp .env.example .env      # optional but recommended — fill in what you use
 #   docker compose up --build -d
-#   docker compose logs station | grep "API key"   # first boot mints the
-#                                                  # bootstrap admin key ONCE
+#   docker compose logs station   # the first boot says how to get in (J.2.5)
+#
+# Nobody owns a fresh Station, so that log points at http://localhost:8800,
+# where the first person to arrive creates the owner. Nothing is minted by
+# starting: on a headless box, add --bootstrap-key to the command below (or
+# MONKEYLLM_STATION_BOOTSTRAP_KEY=1) and the first API key is printed once
+# instead.
 #
 # Everything worth keeping lives in the named volumes below, so the
 # container can crash, be rebuilt or be updated without losing data.
@@ -48,6 +53,9 @@ services:
       # no password door, only API keys. Never stored, rotated by restart.
       MONKEYLLM_STATION_ADMIN: ${MONKEYLLM_STATION_ADMIN:-}
       MONKEYLLM_STATION_PASSWORD: ${MONKEYLLM_STATION_PASSWORD:-}
+      # J.2.5: ask the first boot for an API key instead of the setup
+      # screen. Off unless you set it; see .env.example.
+      MONKEYLLM_STATION_BOOTSTRAP_KEY: ${MONKEYLLM_STATION_BOOTSTRAP_KEY:-}
       # Hosts the MCP surface answers to. If you change STATION_PORT or
       # serve through a proxy, add that host:port here (or `*` to skip the
       # check — every request still carries an API key).

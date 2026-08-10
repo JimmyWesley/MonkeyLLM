@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.27.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.28.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -95,6 +95,14 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   auto-generates `## Query manual`, and commits only the `.md`. No `ALTER`
   for agents; `tend` stays DML-only forever. Initial `rows` at birth are
   loaded parameterized (v0.9 rule 7) — never as SQL text.
+- **Starting a Station mints nothing (spec J.2.5, v0.28)**: the registry is
+  as authoritative after boot as before it, so J.2.4's setup window survives
+  to be used. The first-run banner names the open door (setup URL / env
+  username — never the env password) and says nothing on later restarts.
+  `--bootstrap-key` (or `MONKEYLLM_STATION_BOOTSTRAP_KEY=1`) is the opt-in
+  for a browserless deployment: mints **into that same window only**, with
+  the owner bit, and thereby closes it. Never grant a first credential per
+  forest — an empty volume has none, which is the v0.25 deadlock.
 - **The console shapes the forest through `plant` (spec J.5.7, v0.27)**:
   branch creation in Studio composes ONE `plant` call — the id lives under
   the chosen parent, the parent-index entry and the commit are the engine's.

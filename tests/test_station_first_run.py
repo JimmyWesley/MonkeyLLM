@@ -234,3 +234,144 @@ def test_an_unknown_seed_is_refused_rather_than_silently_ignored(station):
                            json={"id": "x", "title": "X", "seed": "bogus"})
     assert refused.status_code == 400
     assert "bogus" in refused.json()["error"]["message"]
+
+
+# -- J.2.5 the first-run announcement (F.31) --------------------------------
+
+
+@pytest.fixture()
+def serve(tmp_path, monkeypatch, capsys):
+    """Run `station serve` for real, minus the socket.
+
+    The boot itself is what J.2.5 constrains — "starting mints nothing" is a
+    claim about the startup path, not about a helper — so these tests drive
+    the CLI and read the registry it leaves behind. Only `uvicorn.run` is
+    replaced, and it hands back the very app that would have been served.
+    """
+    import uvicorn
+
+    from monkeyllm_station import cli
+
+    for name in ("MONKEYLLM_STATION_ADMIN", "MONKEYLLM_STATION_PASSWORD",
+                 "MONKEYLLM_STATION_BOOTSTRAP_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    root = tmp_path / "forests"
+    root.mkdir()
+    served = {}
+    monkeypatch.setattr(uvicorn, "run",
+                        lambda app, **kw: served.__setitem__("app", app))
+
+    def run(*extra):
+        capsys.readouterr()          # each boot is read on its own terms
+        cli.main(["serve", "--root", str(root), "--registry",
+                  str(tmp_path / "station.db"), "--host", "0.0.0.0",
+                  "--port", "8800", "--writable", *extra])
+        return capsys.readouterr(), served["app"]
+
+    return run
+
+
+def test_starting_a_station_acquires_no_credential(serve):
+    """The registry is exactly as authoritative after boot as before it.
+
+    Until v0.28 `serve` minted itself an `admin` key here, which closed the
+    setup route before the first request — so J.2.4's screen could not
+    appear in the shipped image at all.
+    """
+    boot, app = serve()
+    client = TestClient(app)
+
+    assert client.get("/v1/health").json()["setup_required"] is True
+    assert client.post("/v1/auth/setup", json=OWNER).status_code == 200
+    assert "mk_" not in boot.out, "a boot that prints a secret is a boot that minted one"
+
+
+def test_the_announcement_says_where_to_go(serve):
+    boot, _ = serve()
+
+    # The address a person can open, not the one the socket binds to.
+    assert "http://localhost:8800" in boot.out
+    assert "0.0.0.0" not in boot.out
+    assert "owner" in boot.out and "--bootstrap-key" in boot.out
+
+
+def test_the_bootstrap_key_can_do_what_it_was_minted_for(serve):
+    """F.31: the first credential must be able to create the first forest.
+
+    A key granted per forest cannot, on a volume that holds none — that was
+    the v0.25 deadlock, still open in this door until v0.28.
+    """
+    boot, app = serve("--bootstrap-key")
+    key = next(word for word in boot.out.split() if word.startswith("mk_"))
+    headers = {"Authorization": f"Bearer {key}"}
+    client = TestClient(app)
+
+    assert client.get("/v1/me", headers=headers).json()["owner"] is True
+    assert client.post("/v1/admin/forests", headers=headers,
+                       json={"id": "first", "title": "First"}).status_code == 200
+
+
+def test_the_bootstrap_key_spends_the_same_window_the_screen_would(serve):
+    """Two doors onto one first identity, and never both open (J.2.4)."""
+    boot, app = serve("--bootstrap-key")
+    client = TestClient(app)
+
+    assert client.get("/v1/health").json()["setup_required"] is False
+    assert client.post("/v1/auth/setup", json=OWNER).status_code == 404
+    assert "setup screen is closed" in boot.out
+
+
+def test_a_second_boot_with_the_flag_mints_nothing(serve):
+    """A running deployment MUST NOT grow full authority from a restart."""
+    first, _ = serve("--bootstrap-key")
+    second, app = serve("--bootstrap-key")
+
+    assert "mk_" in first.out and "mk_" not in second.out
+    assert "nothing to mint" in second.err
+    assert TestClient(app).get("/v1/health").json()["setup_required"] is False
+
+
+def test_a_later_restart_says_nothing_at_all(serve):
+    """Silence is the third state: a startup that reports the deployment's
+    authentication state to whatever collects its logs is a disclosure with
+    no reader who needed it."""
+    serve("--bootstrap-key")
+    assert serve()[0].out == ""
+
+
+def test_the_environment_password_is_never_echoed(serve, monkeypatch):
+    monkeypatch.setenv("MONKEYLLM_STATION_ADMIN", "jimmy")
+    monkeypatch.setenv("MONKEYLLM_STATION_PASSWORD", "break-glass-password")
+
+    boot, _ = serve()
+
+    assert "jimmy" in boot.out and "MONKEYLLM_STATION_PASSWORD" in boot.out
+    assert "break-glass-password" not in boot.out
+
+
+def test_a_declared_identity_is_not_bootstrapped_over(serve, monkeypatch):
+    """The environment super-admin already owns the seat (J.2.1), so the
+    flag has nothing to open and must not mint a second way in."""
+    monkeypatch.setenv("MONKEYLLM_STATION_ADMIN", "jimmy")
+    monkeypatch.setenv("MONKEYLLM_STATION_PASSWORD", "break-glass-password")
+
+    boot, _ = serve("--bootstrap-key")
+
+    assert "mk_" not in boot.out
+
+
+def test_the_flag_is_reachable_from_the_environment(serve, monkeypatch):
+    """A platform UI has an environment table and often no argv field."""
+    monkeypatch.setenv("MONKEYLLM_STATION_BOOTSTRAP_KEY", "1")
+
+    assert "mk_" in serve()[0].out
+
+
+def test_the_opt_in_defaults_to_off(monkeypatch):
+    from monkeyllm_station.cli import wants_bootstrap_key
+
+    for value in ("", "0", "false", "no", "off"):
+        monkeypatch.setenv("MONKEYLLM_STATION_BOOTSTRAP_KEY", value)
+        assert wants_bootstrap_key(False) is False
+    monkeypatch.delenv("MONKEYLLM_STATION_BOOTSTRAP_KEY")
+    assert wants_bootstrap_key(False) is False
