@@ -8,13 +8,14 @@ import Placeholder from '@tiptap/extension-placeholder'
 import TurndownService from 'turndown'
 
 import { api } from '../api.js'
+import { useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, Empty, ErrorNote, Field, Note, Select, Spinner, Tabs,
 } from '../design/ui.jsx'
 import { File, Ingest as Upload, Pencil, Plus, Refresh, X } from '../design/icons.jsx'
 import {
-  NeedsCapability, NewBranch, branchOf, has, useAsync, useForestTree,
+  NeedsCapability, NewBranch, branchOf, has, nodeLink, useAsync, useForestTree,
 } from './shared.jsx'
 
 /* What the Gardener's built-in converters read (G.2). Text goes up as text;
@@ -71,7 +72,12 @@ const turndown = new TurndownService({
 
 export default function Ingest({ forest, grant, goto }) {
   const { t } = useI18n()
-  const [mode, setMode] = useState('upload')
+  // The tab is in the address; what is staged in it is not. Files, a draft
+  // and a destination are work in progress, and a reload has already lost
+  // them — an address that claimed otherwise would be worse than one that
+  // does not mention them.
+  const [mode, setMode] = useRouteState('mode', 'upload',
+                                        { allow: ['upload', 'adopt', 'compose'] })
   const [title, setTitle] = useState('')
   const [files, setFiles] = useState([])
   const [dest, setDest] = useState('')
@@ -411,7 +417,7 @@ export default function Ingest({ forest, grant, goto }) {
                        onPublish={publish}
                        onDiscard={() => setState({})} />
         )}
-        {state.report && <Report report={state.report} goto={goto} />}
+        {state.report && <Report report={state.report} forest={forest} />}
         {!state.busy && !state.error && !state.report && !state.review && (
           <Card><Empty icon={Upload}>{t('ingest.empty')}</Empty></Card>
         )}
@@ -611,7 +617,7 @@ function ReviewDraft({ review, onPublish, onDiscard }) {
   )
 }
 
-function Report({ report, goto }) {
+function Report({ report, forest }) {
   const { t } = useI18n()
   const groups = [
     ['ingest.planted', report.planted, 'accent'],
@@ -690,10 +696,10 @@ function Report({ report, goto }) {
                     {key === 'ingest.errors' || key === 'ingest.unsupported' ? (
                       <span className="badge font-mono">{String(item)}</span>
                     ) : (
-                      <button className="badge font-mono hover:border-accent/40 hover:text-accent"
-                              onClick={() => goto('explore', String(item))}>
+                      <a className="badge font-mono hover:border-accent/40 hover:text-accent"
+                         {...nodeLink(forest, String(item))}>
                         {String(item)}
-                      </button>
+                      </a>
                     )}
                   </li>
                 ))}

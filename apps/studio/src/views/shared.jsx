@@ -4,10 +4,19 @@
 /* Small pieces every console needs, in one place so nine views cannot drift
  * into nine subtly different ideas of "loading" or "you may not do this". */
 import { useCallback, useEffect, useState } from 'react'
+import { hrefFor, linkTo } from '../router.js'
 import { Card, Empty, ErrorNote, Field, Modal, Select, TextArea } from '../design/ui.jsx'
 import { Access, Plus } from '../design/icons.jsx'
 
 export const ALL_CAPS = ['read', 'query', 'write', 'tend', 'ingest', 'admin']
+
+/** Props for an anchor that opens a node in Explore (J.5.8).
+ *
+ *  A node is an address, so every reference to one — a citation, an ingest
+ *  result, a root — is a link that can be opened in a new tab and pasted
+ *  into a message. Spread onto an `<a>`; the plain click stays in-page. */
+export const nodeLink = (forest, id, view = 'explore') =>
+  linkTo(hrefFor(forest, view, { node: id }))
 
 export const capsOf = (grant) => grant?.caps || []
 export const has = (grant, cap) =>

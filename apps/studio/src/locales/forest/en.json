@@ -9,5 +9,7 @@
   "forest.summary": "What it is for",
   "forest.switch": "Switch forest",
   "forest.title": "Name",
-  "forest.title_hint": "Shown as the heading of the master index."
+  "forest.title_hint": "Shown as the heading of the master index.",
+  "forest.unknown": "This forest is not available to you.",
+  "forest.unknown_hint": "The address names \"{id}\", which is not on this Station or has not been granted to your key. Nothing was opened in its place — pick one of yours below."
 }

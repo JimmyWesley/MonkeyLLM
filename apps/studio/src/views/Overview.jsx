@@ -7,7 +7,9 @@ import { Card, Note, Skeleton, Stat } from '../design/ui.jsx'
 import {
   Ask, Data, Explore, Forest, Ingest, Models, Overview as Grid,
 } from '../design/icons.jsx'
-import { ALL_CAPS, capsOf, has, rootsOf, useAsync, useForestTree } from './shared.jsx'
+import {
+  ALL_CAPS, capsOf, has, nodeLink, rootsOf, useAsync, useForestTree,
+} from './shared.jsx'
 
 /** The landing answer to "what is this and what may I do here".
  *
@@ -79,10 +81,10 @@ export default function Overview({ forest, grant, me, goto }) {
             <div className="label">{t('overview.roots')}</div>
             <div className="flex flex-wrap gap-1.5">
               {rootsOf(grant).map((r) => (
-                <button key={r} className="badge hover:border-accent/40 hover:text-accent"
-                        onClick={() => goto('explore', r)}>
+                <a key={r} className="badge hover:border-accent/40 hover:text-accent"
+                   {...nodeLink(forest, r)}>
                   <span className="font-mono">{r}</span>
-                </button>
+                </a>
               ))}
             </div>
           </div>

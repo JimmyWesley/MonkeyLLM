@@ -11,7 +11,7 @@ import { Markdown } from '../design/markdown.jsx'
 import {
   Ask as AskIcon, Collapse, Download, Expand, Printer, Sparkle,
 } from '../design/icons.jsx'
-import { Metric, NeedsCapability, fmtMs, has, useAsync } from './shared.jsx'
+import { Metric, NeedsCapability, fmtMs, has, nodeLink, useAsync } from './shared.jsx'
 
 /** The console that needs no explanation, which is why it is the landing one.
  *
@@ -171,10 +171,10 @@ export default function Ask({ forest, grant, goto }) {
                       const src = (result.sources || []).find((s) => s.id === id)
                       return (
                         <li key={id}>
-                          <button className="w-full rounded-lg border border-line bg-surface
-                                             px-2.5 py-2 text-left transition
-                                             hover:border-accent/40"
-                                  onClick={() => goto('explore', id)}>
+                          <a className="block w-full rounded-lg border border-line bg-surface
+                                        px-2.5 py-2 text-left transition
+                                        hover:border-accent/40"
+                             {...nodeLink(forest, id)}>
                             <span className="flex flex-wrap items-baseline gap-x-2">
                               <span className="font-mono text-[12px] text-accent">{id}</span>
                               {src?.type && (
@@ -188,7 +188,7 @@ export default function Ask({ forest, grant, goto }) {
                                 {src.summary}
                               </span>
                             )}
-                          </button>
+                          </a>
                         </li>
                       )
                     })}

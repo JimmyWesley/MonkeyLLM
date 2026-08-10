@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { api, clearKey } from '../api.js'
+import { hrefFor, linkTo } from '../router.js'
 import { useI18n, LANGUAGES } from '../i18n.jsx'
 import { useTheme } from '../theme.jsx'
 import { Badge, ErrorNote, Field, Modal } from '../design/ui.jsx'
@@ -102,7 +103,15 @@ function useDesktop() {
   return is
 }
 
-export function Shell({ session, forest, setForest, view, setView, onForestCreated,
+/** Every destination is a real anchor (J.5.8): open in a new tab, copy link
+ *  and middle click work, and the status bar says where an entry goes. The
+ *  selection travels between consoles — moving from Explore to Data is the
+ *  same forest and, as far as anything is concerned, the same node. */
+function consoleLink(forest, key, node) {
+  return forest ? linkTo(hrefFor(forest, key, node ? { node } : {})) : {}
+}
+
+export function Shell({ session, forest, view, node, onForestCreated,
                         grant, children }) {
   const { t } = useI18n()
   const visible = consolesFor(grant)
@@ -145,7 +154,7 @@ export function Shell({ session, forest, setForest, view, setView, onForestCreat
                          ${open ? 'translate-y-0' : 'translate-y-full'}`}>
         <div className="mx-auto mt-2.5 h-1 w-10 shrink-0 rounded-full bg-line-strong lg:hidden" />
 
-        <ForestSwitcher session={session} forest={forest} setForest={setForest}
+        <ForestSwitcher session={session} forest={forest} view={view}
                         onCreated={onForestCreated} collapsed={collapsed}
                         onCollapse={() => collapse(!collapsed)}
                         onClose={() => setOpen(false)} />
@@ -166,16 +175,16 @@ export function Shell({ session, forest, setForest, view, setView, onForestCreat
                   const full = !pinned && pins.length >= TABS
                   return (
                     <li key={c.key} className="flex items-center gap-1">
-                      <button
+                      <a
                         className={`nav-item flex-1 ${collapsed ? 'lg:justify-center lg:px-0' : ''}`}
                         title={collapsed ? t(`nav.${c.key}`) : t(`nav.${c.key}.blurb`)}
                         aria-current={view === c.key ? 'page' : undefined}
-                        onClick={() => setView(c.key)}>
+                        {...consoleLink(forest, c.key, node)}>
                         <Icon size={17} />
                         <span className={collapsed ? 'lg:hidden' : ''}>
                           {t(`nav.${c.key}`)}
                         </span>
-                      </button>
+                      </a>
                       <button type="button" onClick={() => togglePin(c.key)}
                               disabled={full} aria-pressed={pinned}
                               title={full ? t('nav.pin_full', { n: TABS })
@@ -237,7 +246,7 @@ export function Shell({ session, forest, setForest, view, setView, onForestCreat
           {children}
         </main>
 
-        <TabBar pins={pins} view={view} setView={setView}
+        <TabBar pins={pins} view={view} forest={forest} node={node}
                 onMore={() => setOpen(true)} moreOpen={open} />
       </div>
     </div>
@@ -251,7 +260,7 @@ export function Shell({ session, forest, setForest, view, setView, onForestCreat
  *  last slot and never moves — whatever the operator pinned, the way back to
  *  everything else is in the same place.
  */
-function TabBar({ pins, view, setView, onMore, moreOpen }) {
+function TabBar({ pins, view, forest, node, onMore, moreOpen }) {
   const { t } = useI18n()
   const tab = (active) => `flex flex-1 flex-col items-center gap-1 px-1 py-2
                            text-[10px] font-medium transition
@@ -263,12 +272,12 @@ function TabBar({ pins, view, setView, onMore, moreOpen }) {
       {pins.map((key) => {
         const Icon = CONSOLE_ICON[key]
         return (
-          <button key={key} className={tab(view === key && !moreOpen)}
-                  aria-current={view === key ? 'page' : undefined}
-                  onClick={() => setView(key)}>
+          <a key={key} className={tab(view === key && !moreOpen)}
+             aria-current={view === key ? 'page' : undefined}
+             {...consoleLink(forest, key, node)}>
             <Icon size={19} />
             <span className="w-full truncate">{t(`nav.${key}`)}</span>
-          </button>
+          </a>
         )
       })}
       <button className={tab(moreOpen)} onClick={onMore} aria-expanded={moreOpen}>
@@ -279,7 +288,7 @@ function TabBar({ pins, view, setView, onMore, moreOpen }) {
   )
 }
 
-function ForestSwitcher({ session, forest, setForest, onCreated, collapsed,
+function ForestSwitcher({ session, forest, view, onCreated, collapsed,
                          onCollapse, onClose }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
@@ -292,7 +301,11 @@ function ForestSwitcher({ session, forest, setForest, onCreated, collapsed,
     return () => document.removeEventListener('mousedown', away)
   }, [])
 
+  // The id in the address, whether or not it names a forest this key can
+  // reach: an address into a forest without a grant is answered by saying so
+  // (J.5.8), and the switcher naming a different one would contradict it.
   const current = session.forests.find((f) => f.id === forest)
+  const label = current?.id || forest
 
   return (
     <div className="border-b border-line p-2.5" ref={box}>
@@ -322,7 +335,7 @@ function ForestSwitcher({ session, forest, setForest, onCreated, collapsed,
       <div className="relative">
         {collapsed ? (
           <button className="mx-auto grid h-10 w-10 place-items-center transition hover:opacity-80"
-                  title={current?.id || t('forest.switch')}
+                  title={label || t('forest.switch')}
                   onClick={() => setOpen((v) => !v)}>
             <img src="/logo.png" className="h-10 w-10" alt="MonkeyLLM" />
           </button>
@@ -332,7 +345,7 @@ function ForestSwitcher({ session, forest, setForest, onCreated, collapsed,
                 onClick={() => setOpen((v) => !v)}>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-medium text-text">
-              {current?.id || t('forest.none')}
+              {label || t('forest.none')}
             </span>
             <span className="block truncate text-[11px] text-text-3">
               {current
@@ -353,17 +366,23 @@ function ForestSwitcher({ session, forest, setForest, onCreated, collapsed,
                            rounded-lg border border-line bg-surface shadow-pop
                            ${collapsed ? 'lg:left-0 lg:right-auto' : 'left-0 right-0'}`}>
             <ul className="max-h-64 overflow-y-auto py-1">
-              {session.forests.map((f) => (
-                <li key={f.id}>
-                  <button className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left
-                                      text-[13px] transition hover:bg-surface-2
-                                      ${f.id === forest ? 'text-accent' : 'text-text-2'}`}
-                          onClick={() => { setForest(f.id); setOpen(false) }}>
-                    <Forest size={14} />
-                    <span className="truncate">{f.id}</span>
-                  </button>
-                </li>
-              ))}
+              {/* The console travels; the selection does not. A node id
+                  addresses one forest (A.2), so carrying it across would open
+                  the new forest on a node it does not contain. */}
+              {session.forests.map((f) => {
+                const to = linkTo(hrefFor(f.id, view || 'overview'))
+                return (
+                  <li key={f.id}>
+                    <a className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left
+                                   text-[13px] transition hover:bg-surface-2
+                                   ${f.id === forest ? 'text-accent' : 'text-text-2'}`}
+                       {...to} onClick={(e) => { setOpen(false); to.onClick(e) }}>
+                      <Forest size={14} />
+                      <span className="truncate">{f.id}</span>
+                    </a>
+                  </li>
+                )
+              })}
             </ul>
             {session.me.admin && (
               <button className="flex w-full items-center gap-2 border-t border-line

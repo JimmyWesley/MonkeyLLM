@@ -9,5 +9,7 @@
   "forest.summary": "Para qué sirve",
   "forest.switch": "Cambiar de bosque",
   "forest.title": "Nombre",
-  "forest.title_hint": "Aparece como título del índice maestro."
+  "forest.title_hint": "Aparece como título del índice maestro.",
+  "forest.unknown": "Este bosque no está disponible para ti.",
+  "forest.unknown_hint": "La dirección apunta a \"{id}\", que no existe en esta Station o no se ha concedido a tu clave. No se abrió nada en su lugar — elige uno de los tuyos abajo."
 }

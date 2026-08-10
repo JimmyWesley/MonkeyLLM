@@ -29,6 +29,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
+from starlette.datastructures import Headers
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
@@ -92,6 +94,38 @@ UPLOAD_DIR = ("_derived", "uploads")
 # The Studio is a React/Vite build: static files only, no server rendering,
 # so it stays a plain REST client with no privileged side-channel (J.5).
 STUDIO_DIST = Path(__file__).resolve().parents[2] / "studio" / "dist"
+
+
+class StudioFiles(StaticFiles):
+    """The build, plus the console's own addresses (J.5.8).
+
+    Studio's URLs are real paths — `/f/{forest}/explore` — so a reload, a
+    bookmark or a shared link arrives here as a GET of a path that has no
+    file behind it. Answering 404 is what made the console lose the place
+    on F5: the application that could have read the address never loaded.
+
+    Only for **document** requests. A request that accepts HTML is a browser
+    asking for a page; a script, a stylesheet or a `fetch` is not, and
+    handing those the shell would serve an HTML body under a JavaScript MIME
+    type — a failure that surfaces later, elsewhere, and unrecognisably.
+    A missing asset stays a missing asset.
+    """
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            accept = Headers(scope=scope).get("accept", "")
+            if "text/html" not in accept:
+                raise
+            shell = await super().get_response("index.html", scope)
+            # The shell names one build's hashed assets, so a cached copy
+            # asks a later deployment for files it no longer has. The assets
+            # themselves are content-addressed and may be cached forever.
+            shell.headers["Cache-Control"] = "no-cache"
+            return shell
 
 STATUS_BY_CODE = {
     E_NOT_FOUND: 404,
@@ -2049,9 +2083,13 @@ def build_app(
 
     # Last: the SPA catch-all must not shadow the API routes above it.
     if (STUDIO_DIST / "index.html").is_file():
-        routes.append(Mount("/", app=StaticFiles(directory=STUDIO_DIST, html=True)))
+        routes.append(Mount("/", app=StudioFiles(directory=STUDIO_DIST, html=True)))
     else:
+        # Every console address, not just the root: a Station with no build
+        # should answer a deep link with the reason it has nothing to serve
+        # rather than with a bare 404 that reads like a broken route.
         routes.append(Route("/", studio_missing))
+        routes.append(Route("/{rest:path}", studio_missing))
 
     app = Starlette(routes=routes, lifespan=lifespan)
     app.state.pool = pool

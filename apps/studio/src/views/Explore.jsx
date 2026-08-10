@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
+import { useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, Code, Empty, ErrorNote, Skeleton, Spinner,
@@ -31,7 +32,11 @@ import NodeEditor from './editor.jsx'
  */
 export default function Explore({ forest, grant, node, setNode }) {
   const { t } = useI18n()
-  const [mode, setMode] = useState('tree')
+  // In the address, with the selection (J.5.8): "look at this node on the
+  // graph" is a link, and a reload lands on the same view of the same node
+  // rather than back at the tree.
+  const [mode, setMode] = useRouteState('mode', 'tree',
+                                        { allow: ['tree', 'graph', 'files'] })
   const [editing, setEditing] = useState(null)
 
   const roots = rootsOf(grant)

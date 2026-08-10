@@ -9,5 +9,7 @@
   "forest.summary": "Para que serve",
   "forest.switch": "Trocar de floresta",
   "forest.title": "Nome",
-  "forest.title_hint": "Aparece como título do índice mestre."
+  "forest.title_hint": "Aparece como título do índice mestre.",
+  "forest.unknown": "Esta floresta não está disponível para você.",
+  "forest.unknown_hint": "O endereço aponta para \"{id}\", que não existe nesta Station ou não foi concedida à sua chave. Nada foi aberto no lugar dela — escolha uma das suas abaixo."
 }

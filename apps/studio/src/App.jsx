@@ -5,6 +5,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, getKey, setKey, clearKey, ApiError } from './api.js'
 import { useI18n } from './i18n.jsx'
 import { useTheme } from './theme.jsx'
+import {
+  hrefFor, lastPlace, linkTo, navigate, parse, rememberPlace, useUrl,
+} from './router.js'
 import { Card, ErrorNote, Field, Note, Spinner, Tabs } from './design/ui.jsx'
 import { Forest, Globe, Moon, Sun } from './design/icons.jsx'
 import { Shell, consolesFor } from './components/Shell.jsx'
@@ -31,14 +34,15 @@ export default function App() {
   const { t } = useI18n()
   const [session, setSession] = useState(null)   // {me, forests}
   const [booting, setBooting] = useState(true)
-  const [forest, setForest] = useState(null)
-  const [view, setView] = useState('ask')
-  const [node, setNode] = useState(null)
+  // Where the console is (J.5.8). Read from the address on every render, so
+  // there is no second copy of it to disagree with the address bar.
+  const here = useUrl()
+  const { forest, view, params } = parse(here)
+  const node = params.get('node') || null
 
-  const boot = useCallback(async (prefer) => {
+  const boot = useCallback(async () => {
     const [me, list] = await Promise.all([api.me(), api.forests()])
     setSession({ me, forests: list.forests })
-    setForest((f) => prefer || f || list.forests[0]?.id || null)
     return list
   }, [])
 
@@ -46,6 +50,39 @@ export default function App() {
     if (!getKey()) { setBooting(false); return }
     boot().catch(() => clearKey()).finally(() => setBooting(false))
   }, [boot])
+
+  const ids = session?.forests.map((f) => f.id) || []
+  const known = ids.includes(forest)
+  const grant = session?.me.grants?.find((g) => g.forest === forest) || null
+
+  // Capabilities are per forest, so switching forests can take the current
+  // console away — and an address can name one this grant never had. Either
+  // way the console MOVES rather than quietly rendering something else: the
+  // address is what the operator can see, so it must not describe a page
+  // that is not on screen (J.5.8).
+  const visible = consolesFor(grant)
+  const landing = (visible.find((c) => c.key === 'ask') || visible[0])?.key || 'overview'
+  const servable = known && visible.some((c) => c.key === view)
+
+  useEffect(() => {
+    if (!session || !ids.length) return
+    if (!forest) {
+      // A bare `/`. The remembered place is a starting point and nothing
+      // more: it never overrides an address, and a forest that has left the
+      // principal's grants is not a place to go back to.
+      const place = lastPlace()
+      const start = ids.includes(place.forest) ? place.forest : ids[0]
+      navigate(hrefFor(start, place.view || 'ask'), { replace: true })
+      return
+    }
+    if (!known) return                       // said, not swapped (J.5.8)
+    if (!servable) {
+      navigate(hrefFor(forest, landing, Object.fromEntries(params)), { replace: true })
+      return
+    }
+    rememberPlace(forest, view)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, here])
 
   if (booting) {
     return (
@@ -56,22 +93,17 @@ export default function App() {
   }
   if (!session) return <Doorway onIn={boot} />
 
-  const grant = session.me.grants?.find((g) => g.forest === forest) || null
+  const setNode = (id) => navigate(
+    hrefFor(forest, view, { ...Object.fromEntries(params), node: id || '' }))
+  const goto = (next, id) => navigate(
+    hrefFor(forest, next, { node: id || node || '' }))
 
-  // Capabilities are per forest, so switching forests can take the current
-  // console away. Falling back keeps the app on something real instead of
-  // rendering a console this grant cannot use.
-  const visible = consolesFor(grant)
-  const current = visible.some((c) => c.key === view) ? view
-    : (visible.find((c) => c.key === 'ask') || visible[0])?.key || 'overview'
-  const View = VIEWS[current] || Overview
-  const goto = (next, id) => { if (id) setNode(id); setView(next) }
+  const View = VIEWS[view] || Overview
 
   return (
-    <Shell session={session} forest={forest} setForest={(f) => { setForest(f); setNode(null) }}
-           view={current} setView={setView} grant={grant}
-           onForestCreated={(id) => boot(id)}>
-      {!forest ? (
+    <Shell session={session} forest={forest} view={view || landing} node={node} grant={grant}
+           onForestCreated={(id) => boot().then(() => navigate(hrefFor(id, landing)))}>
+      {!ids.length ? (
         <Card>
           <div className="py-6 text-center">
             <span className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl
@@ -82,11 +114,46 @@ export default function App() {
             )}
           </div>
         </Card>
+      ) : forest && !known ? (
+        <NoSuchForest id={forest} forests={session.forests} landing={landing} />
+      ) : !servable ? (
+        // Resolving in the effect above: one frame, not a screen.
+        <Spinner label={t('common.loading')} size={18} />
       ) : (
-        <View key={`${forest}:${current}`} forest={forest} grant={grant} me={session.me}
+        <View key={`${forest}:${view}`} forest={forest} grant={grant} me={session.me}
               node={node} setNode={setNode} goto={goto} />
       )}
     </Shell>
+  )
+}
+
+/** An address naming a forest this principal has no grant on (J.5.8).
+ *
+ *  Said, never swapped. Sending them to a forest they *can* see would answer
+ *  a link to a specific place with a different place and no explanation —
+ *  which is how somebody comes to believe they are reading a forest they are
+ *  not. The forests they do have are the way on, as links.
+ */
+function NoSuchForest({ id, forests, landing }) {
+  const { t } = useI18n()
+  return (
+    <Card>
+      <div className="py-6 text-center">
+        <span className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl
+                         bg-surface-2 text-text-3"><Forest size={20} /></span>
+        <p className="text-[13.5px] font-medium text-text">{t('forest.unknown')}</p>
+        <p className="mx-auto mt-1 max-w-[46ch] text-[12.5px] text-text-3">
+          {t('forest.unknown_hint', { id })}
+        </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          {forests.map((f) => (
+            <a key={f.id} className="btn btn-sm" {...linkTo(hrefFor(f.id, landing))}>
+              <Forest size={13} /> {f.id}
+            </a>
+          ))}
+        </div>
+      </div>
+    </Card>
   )
 }
 

@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from 'react'
 import { api } from '../api.js'
+import { useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, CheckList, Code, CopyButton, Empty, ErrorNote, Field, Modal,
@@ -48,7 +49,8 @@ const uniform = (grants = []) =>
 
 export default function People({ forest, grant, me }) {
   const { t } = useI18n()
-  const [tab, setTab] = useState('people')
+  const [tab, setTab] = useRouteState('tab', 'people',
+                                      { allow: ['people', 'tokens'] })
   const [editing, setEditing] = useState(null)   // principal id or '' for new
   const [secret, setSecret] = useState(null)
 

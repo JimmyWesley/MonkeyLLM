@@ -17,6 +17,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
+import { useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, Code, CopyButton, Empty, ErrorNote, Modal, Note, Skeleton,
@@ -213,9 +214,13 @@ function compile(table, columns, draft) {
 
 export default function Data({ forest, grant }) {
   const { t } = useI18n()
-  const [id, setId] = useState('')
-  const [table, setTable] = useState('')
-  const [tab, setTab] = useState('rows')
+  // What is being looked at goes in the address (J.5.8) — the dataset, the
+  // table, the tab. How far into it does not: paging, sorting and filtering
+  // are how a table is read, not which table it is.
+  const [id, setId] = useRouteState('dataset', '', { push: true })
+  const [table, setTable] = useRouteState('table', '', { push: true })
+  const [tab, setTab] = useRouteState('tab', 'rows',
+                                      { allow: ['rows', 'structure', 'sql'] })
   const [page, setPage] = useState(0)
   const [size, setSize] = useState(100)
   const [sort, setSort] = useState(null)          // {col, dir}
@@ -283,11 +288,19 @@ export default function Data({ forest, grant }) {
   // Keep the selection real across reloads without resetting it on every one:
   // a `tend` refreshes the counts and must not throw the operator back to the
   // first table.
+  //
+  // A table named by the address and no longer in the dataset is corrected
+  // here rather than left describing a page that is not there — by
+  // replacement, because nobody navigated to it (J.5.8).
   useEffect(() => {
-    const names = (meta.data?.tables || []).map((x) => x.name)
-    if (!names.length) { setTable(''); return }
+    // Before the dataset has answered there is nothing to correct against,
+    // and correcting anyway would drop the table the address arrived with.
+    if (!meta.data) return
+    const names = (meta.data.tables || []).map((x) => x.name)
+    if (!names.length) { setTable('', { push: false }); return }
     if (!names.includes(table)) {
-      setTable(names[0]); setPage(0); setSort(null); setFilters({})
+      setTable(names[0], { push: false })
+      setPage(0); setSort(null); setFilters({})
       setDraft(EMPTY_DRAFT)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

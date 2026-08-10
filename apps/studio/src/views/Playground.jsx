@@ -3,6 +3,7 @@
 
 import { useState } from 'react'
 import { api } from '../api.js'
+import { useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, Code, CopyButton, Empty, ErrorNote, Field, Note, Spinner, Tabs,
@@ -69,7 +70,11 @@ function Aside({ timing, wall, bytes, rate }) {
 
 export default function Playground({ forest, grant }) {
   const { t, lang } = useI18n()
-  const [op, setOp] = useState('locate')
+  // Which primitive is being demonstrated is the page; what it answered is
+  // not. The address restores the form, never the call (J.5.8) — `answer`
+  // spends a model call and no reload asked for one.
+  const [op, setOp] = useRouteState('op', 'locate',
+                                    { allow: OPS.map((o) => o.key) })
   const [form, setForm] = useState({ query: '', terms: '', k: 5, id: '' })
   // K.3: the claim is a navigation gain, so it has to be measurable
   // against itself — same corpus, same session, one click apart.
