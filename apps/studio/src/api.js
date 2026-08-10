@@ -32,7 +32,10 @@ async function request(path, { method = 'GET', body } = {}) {
   const payload = await res.json().catch(() => ({}))
   if (!res.ok) {
     const err = payload?.error || {}
-    throw new ApiError(err.message || res.statusText, {
+    // HTTP/2 carries no reason phrase, so `statusText` is empty behind any
+    // modern proxy: a failure with no envelope rendered as a blank message
+    // and read as "no reason given" rather than as a server error.
+    throw new ApiError(err.message || res.statusText || `HTTP ${res.status}`, {
       code: err.code, hint: err.hint, status: res.status,
     })
   }

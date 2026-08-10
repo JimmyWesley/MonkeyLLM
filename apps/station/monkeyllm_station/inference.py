@@ -115,14 +115,18 @@ def probe(endpoint: str, api_key: str | None) -> dict:
     a local Ollama or llama.cpp states none, and silence is reported as
     silence rather than as zero.
     """
-    import httpx
-
     try:
+        import httpx
+
         r = httpx.get(f"{endpoint.rstrip('/')}/models",
                       headers={"Authorization": f"Bearer {api_key or 'no-key'}"},
                       timeout=20.0)
     except Exception as e:
-        return {"ok": False, "error": str(e)[:200]}
+        # The import belongs inside the guard: a probe that cannot run is a
+        # failed probe, and answering `{ok: false}` names the reason on the
+        # card. Escaping as a 500 told the operator only that the provider
+        # was unreachable, which pointed the search at their key.
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:200]}
     if r.status_code >= 400:
         return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
     try:
