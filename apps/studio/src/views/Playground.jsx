@@ -9,7 +9,9 @@ import {
   Badge, Card, Code, CopyButton, Empty, ErrorNote, Field, Note, Spinner, Tabs,
   Toggle,
 } from '../design/ui.jsx'
-import { Play, Playground as Beaker } from '../design/icons.jsx'
+import {
+  Ask, Compass, Download, Eye, Files, Play, Playground as Beaker, Search,
+} from '../design/icons.jsx'
 import {
   Metric, NeedsCapability, fmtMs, has, rootsOf, useForestTree,
 } from './shared.jsx'
@@ -26,12 +28,12 @@ const ENTRY_OPS = ['locate', 'harvest', 'answer']
 const SEARCH_OPS = ['locate', 'sniff', 'harvest', 'answer']
 
 const OPS = [
-  { key: 'locate', budget: 800, fields: ['query', 'k'] },
-  { key: 'sniff', budget: 800, fields: ['terms', 'k'] },
-  { key: 'harvest', budget: 4000, fields: ['query', 'terms', 'k'] },
-  { key: 'look', budget: 500, fields: ['id'] },
-  { key: 'move', budget: 600, fields: ['id'] },
-  { key: 'answer', budget: null, fields: ['query', 'k'] },
+  { key: 'locate', budget: 800, fields: ['query', 'k'], icon: Search },
+  { key: 'sniff', budget: 800, fields: ['terms', 'k'], icon: Files },
+  { key: 'harvest', budget: 4000, fields: ['query', 'terms', 'k'], icon: Download },
+  { key: 'look', budget: 500, fields: ['id'], icon: Eye },
+  { key: 'move', budget: 600, fields: ['id'], icon: Compass },
+  { key: 'answer', budget: null, fields: ['query', 'k'], icon: Ask },
 ]
 
 /** Everything that was not the call (J.10.6).
@@ -161,7 +163,7 @@ export default function Playground({ forest, grant }) {
     <div className="space-y-4">
       <Card title={t('playground.title')} subtitle={t('playground.sub')} icon={Beaker}>
         <Tabs value={op} onChange={(next) => { setOp(next); setState({}) }}
-              options={OPS.map((o) => ({ value: o.key, label: o.key }))} />
+              options={OPS.map((o) => ({ value: o.key, label: o.key, icon: o.icon }))} />
 
         <p className="mt-3 text-[12.5px] text-text-3">{t(`playground.${op}`)}</p>
 
