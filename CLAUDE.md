@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.29.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.30.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -124,6 +124,18 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   SQLite connection belongs to its opening thread, and since boot warming
   the pool is rarely empty — code that reached for the pool directly used to
   get away with it because there was nothing open yet.
+- **The address is where the console is (spec J.5.8, v0.30)**:
+  `/f/{forest}/{console}` with the selection in the query (`node`, `mode`,
+  `dataset`, `table`, `tab`). Studio keeps **no second copy** of it — `App`
+  reads `router.js`, never `useState` — because the address bar is the copy
+  the operator can see. Moving pushes, adjusting replaces, rendering never
+  writes. A forest the key has no grant on is **said, not swapped**: the
+  console that silently opens a different forest is how somebody comes to
+  believe they are reading one they are not. The address restores a page,
+  never a call — no reload may spend a model call or a commit. On the host,
+  a GET that matches no route and no file is answered with the shell **only
+  when it accepts HTML**: a missing asset must stay a 404, or the browser
+  gets an HTML body under a JavaScript MIME type.
 - **The console shapes the forest through `plant` (spec J.5.7, v0.27)**:
   branch creation in Studio composes ONE `plant` call — the id lives under
   the chosen parent, the parent-index entry and the commit are the engine's.
