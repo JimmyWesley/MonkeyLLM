@@ -105,6 +105,13 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--writable", action="store_true",
                          help="accept writes: plant/graft/tend and ingest "
                               "(off by default; reads always work)")
+    p_serve.add_argument("--no-warm", action="store_true",
+                         help="do not open every forest at boot (J.6.1). "
+                              "Warming costs one open per forest — a few "
+                              "milliseconds and a few MB resident each — and "
+                              "buys a first call that is not measuring cold "
+                              "SQLite. Turn it off for a registry with more "
+                              "forests than you want held open at once.")
     p_serve.add_argument("--bootstrap-key", action="store_true",
                          help="on a Station nobody owns yet, mint the first "
                               "API key and print it instead of opening the "
@@ -149,7 +156,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         app = build_app(root=root, registry_path=args.registry,
-                        writable=args.writable)
+                        writable=args.writable,
+                        # Only ever an override: absent, the environment
+                        # decides, so a compose file does not have to add a
+                        # command line to change one default.
+                        warm=False if args.no_warm else None)
     except ValueError as e:
         # A mistyped ingest root (J.8.2) is a configuration fact, and the
         # operator is standing right here reading the log.

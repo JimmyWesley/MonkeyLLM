@@ -53,6 +53,17 @@ def station(station_root, tmp_path):
         yield client, app.state.registry
 
 
+def _close_pool(client):
+    """Close every open vine, in the thread that opened them.
+
+    A SQLite connection belongs to its thread and the Station confines every
+    forest touch to one; `state.forest_worker` is that thread, and it is how
+    anything outside a request gets in there.
+    """
+    state = client.app.state
+    state.forest_worker.submit(state.pool.close).result()
+
+
 def _key(registry, caps=("read",), forest=FOREST, principal="alice"):
     key = registry.issue_key(principal)
     registry.grant(principal, forest, set(caps))
@@ -285,20 +296,22 @@ def test_a_stale_lock_is_not_reported_as_an_unknown_forest(station, station_root
     client, registry = station
     headers = _key(registry, caps=("read",))
 
+    # Boot warming (J.6.1) leaves this forest open and holding its own lock,
+    # and releasing that lock deletes the file — so the pool is emptied first
+    # and the leftover written after, which is the situation being described:
+    # a forest nobody has open, with a lock somebody left behind. Closing goes
+    # through the forest thread, where those SQLite connections live.
+    _close_pool(client)
     lock = station_root / FOREST / ".vine.lock"
     lock.write_text("999999", encoding="utf-8")
     try:
-        # The pool may already hold this forest open from an earlier test, so
-        # the lock only bites on a fresh acquisition; ask for a forest the
-        # pool has not opened yet by closing what it has.
-        client.app.state.pool.close()
         r = client.post(f"/v1/forests/{FOREST}/look", json={"id": "_index"},
                         headers=headers)
         assert r.status_code == 409, r.text
         assert r.json()["error"]["code"] == E_LOCKED
     finally:
         lock.unlink(missing_ok=True)
-        client.app.state.pool.close()
+        _close_pool(client)
 
 
 def test_an_ungranted_forest_stays_an_unknown_forest(station):

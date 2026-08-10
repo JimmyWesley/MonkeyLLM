@@ -216,6 +216,22 @@ def super_admin_from_env() -> tuple[str, str] | None:
     return (user, password) if user and password else None
 
 
+WARM_ENV = "MONKEYLLM_STATION_WARM"
+
+
+def warm_from_env() -> bool:
+    """Whether boot opens every forest (J.6.1). Default on.
+
+    The inverse of the usual rule for a switch: this one is off only where
+    somebody decided it should be, because leaving it off costs the first
+    caller of every forest and nobody sees the bill. The cost of on is
+    resident memory proportional to the number of forests, which is the one
+    reason to turn it off and the reason it can be.
+    """
+    raw = os.environ.get(WARM_ENV, "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
 INGEST_ROOTS_ENV = "MONKEYLLM_INGEST_ROOTS"
 
 
@@ -347,8 +363,15 @@ def build_app(
     registry_path: str | Path,
     writable: bool = True,
     mcp: bool = True,
+    warm: bool | None = None,
 ) -> Starlette:
     pool = ForestPool(root=Path(root), writable=writable)
+    # On by default: a console is judged on the speed of its first call, and
+    # the cost is one open per forest, which the registry pays anyway. Off is
+    # for the registry big enough that holding every forest open at once is
+    # the wrong trade — the explicit argument wins over the environment,
+    # because a deployment that passes one has already decided.
+    warm_forests = warm if warm is not None else warm_from_env()
     ingest_roots = IngestRoots(ingest_roots_from_env(), Path(root))
     if ingest_roots.rejected:
         print(f"station: refusing {INGEST_ROOTS_ENV} entries that contain the "
@@ -379,6 +402,12 @@ def build_app(
         async with AsyncExitStack() as stack:
             if mcp_lifespan is not None:
                 await stack.enter_async_context(mcp_lifespan())
+            # J.6.1: the first visitor should not be the one who measures a
+            # cold process. Opening costs a few MB per forest and happens
+            # either way — this only moves who waits for it, from whoever
+            # arrives first to the boot nobody is watching.
+            if warm_forests:
+                _app.state.warmed = await in_forest_thread(pool.warm_all)
             try:
                 yield
             finally:
@@ -2029,4 +2058,9 @@ def build_app(
     app.state.registry = registry
     app.state.ingest_roots = ingest_roots
     app.state.run_primitive = run_primitive
+    # Exposing the pool without the one thread it may be touched from was an
+    # invitation to break its own invariant: a SQLite connection belongs to
+    # the thread that opened it, and since boot warming the pool is rarely
+    # empty. Anything reaching for `state.pool` submits through here.
+    app.state.forest_worker = worker
     return app
