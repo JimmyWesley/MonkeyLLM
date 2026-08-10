@@ -201,14 +201,19 @@ export function NewBranch({ forest, parents, parent, onParent, open, onClose,
     setState({ busy: true })
     try {
       const title = name.trim()
+      // The primitive's argument is `node` — the request body is the call's
+      // keyword arguments, so a flat passport reaches `plant(id=..., ...)`
+      // and fails as an unexpected keyword. C.7 takes one object.
       await call(forest, 'plant', {
-        id,
-        type: 'branch',
-        parent: parent || '_index',
-        title,
-        summary: summary.trim(),
-        source: 'manual',
-        body: INDEX_BODY(title, summary.trim()),
+        node: {
+          id,
+          type: 'branch',
+          parent: parent || '_index',
+          title,
+          summary: summary.trim(),
+          source: 'manual',
+          body: INDEX_BODY(title, summary.trim()),
+        },
       })
       setName(''); setSummary(''); setState({})
       onCreated?.(id)
