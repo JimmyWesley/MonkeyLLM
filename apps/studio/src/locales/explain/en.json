@@ -6,6 +6,7 @@
   "explain.entry_bm25": "BM25",
   "explain.entry_hybrid": "hybrid (RRF)",
   "explain.hop_n": "#{n}",
+  "explain.host": "Host (policy, audit, JSON)",
   "explain.model": "Model",
   "explain.retrieval": "Forest",
   "explain.server": "Sum of the steps",
@@ -14,5 +15,5 @@
   "explain.title": "How this ran",
   "explain.tokens_in": "Tokens in",
   "explain.tokens_out": "Tokens out",
-  "explain.transport": "HTTP and JSON"
+  "explain.transport": "Network"
 }

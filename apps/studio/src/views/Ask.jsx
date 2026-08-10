@@ -11,7 +11,7 @@ import { Markdown } from '../design/markdown.jsx'
 import {
   Ask as AskIcon, Collapse, Download, Expand, Printer, Sparkle,
 } from '../design/icons.jsx'
-import { Metric, NeedsCapability, has, useAsync } from './shared.jsx'
+import { Metric, NeedsCapability, fmtMs, has, useAsync } from './shared.jsx'
 
 /** The console that needs no explanation, which is why it is the landing one.
  *
@@ -49,12 +49,12 @@ export default function Ask({ forest, grant, goto }) {
     setBusy(true); setError(null); setResult(null)
     const t0 = performance.now()
     try {
-      const r = await api.call(forest, 'answer', {
+      const { data, timing } = await api.timedCall(forest, 'answer', {
         question: q, k,
         ...(hybrid ? { hybrid: true } : {}),
         ...(hops ? { hops: true } : {}),
       })
-      setResult({ ...r, ms: Math.round(performance.now() - t0) })
+      setResult({ ...data, timing, ms: Math.round(performance.now() - t0) })
     } catch (err) { setError(err) } finally { setBusy(false) }
   }
 
@@ -222,7 +222,7 @@ export default function Ask({ forest, grant, goto }) {
           </Card>
 
           <Explain trace={result.trace} wall={result.ms} hybrid={hybrid}
-                   cost={result.cost} />
+                   cost={result.cost} timing={result.timing} />
         </div>
       )}
 
@@ -507,14 +507,20 @@ function Path({ hops }) {
  *  usual suspicion — "the forest is slow" — is almost always wrong: the
  *  retrieval half runs in single-digit milliseconds and the model does not.
  */
-function Explain({ trace, wall, hybrid, cost }) {
+function Explain({ trace, wall, hybrid, cost, timing }) {
   const { t } = useI18n()
   if (!trace?.steps?.length) return null
 
   const worst = Math.max(...trace.steps.map((s) => s.ms), 1)
-  // The gap between the client's stopwatch and the server's own sum: HTTP,
-  // JSON, the network. Named rather than hidden, so the columns add up.
-  const overhead = wall != null ? Math.max(0, Math.round(wall - trace.total_ms)) : null
+  // The gap between the client's stopwatch and the host's own span: TLS, the
+  // network, HTTP framing, JSON, this render. Named rather than hidden, so
+  // the columns add up. J.10.6's header makes the host's share a measured
+  // number instead of a lump in the remainder — without it, the sum of the
+  // steps is the best the console can subtract.
+  const served = timing
+    ? timing.vine + (timing.model || 0) + timing.host
+    : trace.total_ms
+  const overhead = wall != null ? Math.max(0, wall - served) : null
 
   return (
     <Card title={t('explain.title')} subtitle={t('explain.sub')}>
@@ -559,7 +565,8 @@ function Explain({ trace, wall, hybrid, cost }) {
       <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[11.5px]">
         <Row label={t('explain.steps')} value={trace.steps.length} />
         <Row label={t('explain.server')} value={`${trace.total_ms} ms`} />
-        {overhead != null && <Row label={t('explain.transport')} value={`${overhead} ms`} />}
+        {timing && <Row label={t('explain.host')} value={fmtMs(timing.host)} />}
+        {overhead != null && <Row label={t('explain.transport')} value={fmtMs(overhead)} />}
         <Row label={t('explain.entry')}
              value={t(hybrid ? 'explain.entry_hybrid' : 'explain.entry_bm25')} />
       </dl>

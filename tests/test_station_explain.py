@@ -1,17 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Jimmy Wesley
 
-"""Explaining a composite (spec J.10.4) and the entry-search switch (K.3).
+"""Explaining a call (spec J.10.4, J.10.6) and the entry-search switch (K.3).
 
-Two things an operator cannot get from a total: *which* call was slow, and
-whether the dense layer helped or hurt on **their** corpus. Both are here
-because both are claims the project makes in public and must be checkable
-from the console rather than taken on trust.
+Three things an operator cannot get from a total: *which* call was slow,
+whether the dense layer helped or hurt on **their** corpus, and — over a
+network — whether the milliseconds were the forest at all. All three are
+here because all three are claims the project makes in public and must be
+checkable from the console rather than taken on trust.
 """
 
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -119,6 +121,123 @@ def test_a_failed_call_is_not_dressed_up_as_a_trace(station):
     r = client.post(f"/v1/forests/{FOREST}/harvest", json={"query": ""}, headers=head)
     body = r.json()
     assert "trace" not in body or "error" not in body
+
+
+# -- the host's own clocks (J.10.6, F.32) -----------------------------------
+
+
+def _clocks(response) -> dict:
+    """`Server-Timing: vine;dur=0.2, host;dur=0.1` as a dict of floats."""
+    raw = response.headers.get("Server-Timing")
+    assert raw, "no Server-Timing header"
+    out = {}
+    for part in raw.split(","):
+        name, sep, dur = part.strip().partition(";dur=")
+        assert sep, f"not a duration: {part!r}"
+        out[name] = float(dur)
+    return out
+
+
+@pytest.mark.parametrize("primitive,body", [
+    ("locate", {"query": QUESTION}),
+    ("sniff", {"terms": ["architecture"]}),
+    ("look", {"id": "_index"}),
+    ("move", {"id": "_index"}),
+    ("harvest", {"query": QUESTION}),
+])
+def test_every_primitive_reports_the_engines_own_clock(station, primitive, body):
+    """A caller over HTTP times TLS, the network, HTTP framing and its own
+    render. Without the host saying so, 0.2 ms of `locate` behind 28 ms of
+    internet is indistinguishable from 28 ms of `locate` — opposite facts
+    about this product that look identical from outside."""
+    client, _, head = station
+    r = client.post(f"/v1/forests/{FOREST}/{primitive}", json=body, headers=head)
+    assert r.status_code == 200, r.text
+
+    clocks = _clocks(r)
+    assert set(clocks) == {"vine", "host"}   # no provider ran
+    assert clocks["vine"] > 0
+    assert clocks["host"] >= 0
+
+
+def test_the_engine_figure_is_the_tracers_and_not_a_second_stopwatch(station):
+    """Part D has timed every primitive since Phase 0. A host that started
+    its own clock would eventually disagree with the trace beside it."""
+    client, pool, head = station
+    _call(client, head, "locate", query=QUESTION)     # open the vine
+    tracer = pool.get(FOREST).tracer
+
+    mark = len(tracer.events)
+    r = client.post(f"/v1/forests/{FOREST}/harvest",
+                    json={"query": QUESTION}, headers=head)
+    appended = sum(e["elapsed_ms"] for e in tracer.events[mark:])
+    assert _clocks(r)["vine"] == pytest.approx(appended, abs=0.001)
+
+
+def test_the_three_clocks_account_for_the_whole_span(station):
+    """So a client that subtracts them from its own stopwatch is left with
+    transport and nothing else. A remainder that quietly held some of the
+    host would be the same lie in a smaller font."""
+    client, _, head = station
+    started = time.perf_counter()
+    r = client.post(f"/v1/forests/{FOREST}/answer",
+                    json={"question": QUESTION}, headers=head)
+    span = (time.perf_counter() - started) * 1000
+
+    clocks = _clocks(r)
+    assert set(clocks) == {"vine", "model", "host"}   # a provider did run
+    assert sum(clocks.values()) <= span
+
+
+def test_a_body_pays_nothing_for_the_consoles_instruments(station):
+    """A response body is the agent's context window and it is budgeted in
+    tokens. A diagnostic added to it would be charged to every agent that
+    never reads it — and appended after the budget was enforced, to the
+    budget it would then break."""
+    client, _, head = station
+    body = _call(client, head, "locate", query=QUESTION)
+    assert set(body) <= {"results", "truncated"}
+    assert not any(k in body for k in ("trace", "timing", "server_timing"))
+
+
+def test_a_refusal_is_timed_too(station):
+    """A route that timed only its successes would answer "which forests
+    exist?" by staying silent."""
+    client, _, head = station
+
+    missing = client.post(f"/v1/forests/{FOREST}/look",
+                          json={"id": "nowhere/at-all"}, headers=head)
+    assert missing.status_code == 404
+    assert set(_clocks(missing)) == {"vine", "host"}
+
+    # No forest, so no engine to have spent anything — reported as zero
+    # rather than omitted, which would itself be the signal.
+    unknown = client.post("/v1/forests/no-such-forest/locate",
+                          json={"query": "x"}, headers=head)
+    assert unknown.status_code == 404
+    assert _clocks(unknown)["vine"] == 0
+
+
+def test_a_timing_reports_shape_and_nothing_else(station):
+    """Like a trace: three durations, no ids, no arguments, no counts. A
+    header that could carry more would be a second, unscoped channel."""
+    client, _, head = station
+    r = client.post(f"/v1/forests/{FOREST}/locate",
+                    json={"query": QUESTION}, headers=head)
+
+    raw = r.headers["Server-Timing"]
+    assert QUESTION not in raw and FOREST not in raw
+    assert set(_clocks(r)) <= {"vine", "model", "host"}
+
+
+def test_an_unauthenticated_request_is_not_timed(station):
+    """It never reached a forest, so there is nothing to report and no
+    reason to confirm the route exists with a measurement."""
+    client, _, _ = station
+    r = client.post(f"/v1/forests/{FOREST}/locate", json={"query": QUESTION},
+                    headers={"Authorization": "Bearer not-a-key"})
+    assert r.status_code == 401
+    assert "Server-Timing" not in r.headers
 
 
 # -- answering about a dataset without its rows -----------------------------

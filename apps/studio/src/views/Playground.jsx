@@ -9,7 +9,7 @@ import {
   Toggle,
 } from '../design/ui.jsx'
 import { Play, Playground as Beaker } from '../design/icons.jsx'
-import { Metric, NeedsCapability, has, rootsOf } from './shared.jsx'
+import { Metric, NeedsCapability, fmtMs, has, rootsOf } from './shared.jsx'
 
 /* The budgets are the engine's, restated here only so the number an operator
  * sees while tuning is the number the primitive actually enforces (C.6). */
@@ -26,6 +26,33 @@ const OPS = [
   { key: 'move', budget: 600, fields: ['id'] },
   { key: 'answer', budget: null, fields: ['query', 'k'] },
 ]
+
+/** Everything that was not the call (J.10.6).
+ *
+ *  One quiet line, deliberately. What a visitor is here to judge is the
+ *  engine: how long it takes this thing to find something. The rest of the
+ *  span is their own network and whatever host they pointed at — a fact
+ *  about somebody's infrastructure, not about the product, and giving it
+ *  the same weight as the engine would be reporting the wrong subject.
+ *
+ *  It is not dropped either. The panel says 0.6 ms while the click felt
+ *  instant-but-not-that-instant, and a number with no account of the gap
+ *  reads as a claim rather than a measurement. Naming the gap is what makes
+ *  the small number believable.
+ */
+function Aside({ timing, wall, bytes }) {
+  const { t } = useI18n()
+  // Never negative: the header is measured inside the span the client is
+  // timing — but a stopwatch read across a suspended tab is not.
+  const net = Math.max(0, wall - timing.vine - timing.host - (timing.model || 0))
+  return (
+    <p className="mb-3 text-[11px] leading-relaxed text-text-3">
+      {t('playground.aside', {
+        host: fmtMs(timing.host), net: fmtMs(net), bytes,
+      })}
+    </p>
+  )
+}
 
 export default function Playground({ forest, grant }) {
   const { t } = useI18n()
@@ -68,10 +95,12 @@ export default function Playground({ forest, grant }) {
     setState({ busy: true, body })
     const t0 = performance.now()
     try {
-      const data = await api.call(forest, op, body)
-      setState({ busy: false, body, data, ms: Math.round(performance.now() - t0) })
+      // J.10.6: the host's own clocks come back beside the body, so the
+      // number this panel leads with is the call and not the internet.
+      const { data, timing } = await api.timedCall(forest, op, body)
+      setState({ busy: false, body, data, timing, ms: performance.now() - t0 })
     } catch (error) {
-      setState({ busy: false, body, error, ms: Math.round(performance.now() - t0) })
+      setState({ busy: false, body, error, ms: performance.now() - t0 })
     }
   }
 
@@ -80,6 +109,16 @@ export default function Playground({ forest, grant }) {
        || state.data.evidence || []).length
     : null
   const bytes = state.data ? JSON.stringify(state.data).length : null
+  // What the engine figure means in the unit a reader actually feels. Not a
+  // projection: the Station serialises every forest call onto one worker
+  // thread (J.0), so the inverse of the engine's own time IS the rate this
+  // deployment sustains on this corpus, back to back. Never shown where a
+  // provider ran — the rate of an `answer` is the model's, not the forest's,
+  // and putting a retrieval number on it would be the same misattribution
+  // this panel exists to stop.
+  const rate = state.timing && !state.timing.model && state.timing.vine > 0
+    ? Math.round(1000 / state.timing.vine)
+    : null
   const origin = window.location.origin
 
   const curl = `curl -X POST ${origin}/v1/forests/${forest}/${op} \\
@@ -140,17 +179,34 @@ export default function Playground({ forest, grant }) {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
         <Card title={t('common.response')}
-              actions={state.ms != null && <Badge>{t('common.elapsed', { ms: state.ms })}</Badge>}>
+              /* No round-trip badge once the host reports its own clock: it
+                 was the largest number on the panel and the one that says
+                 least about the product. It moves to the aside, named. */
+              actions={state.ms != null && !state.timing
+                && <Badge>{t('common.elapsed', { ms: Math.round(state.ms) })}</Badge>}>
           {state.busy ? <Spinner label={t('common.working')} />
             : state.error ? <ErrorNote error={state.error} />
             : state.data ? (
             <>
+              {/* The headline is the engine, never the round trip (J.10.6).
+                  A Station reached over the internet answers a 0.2 ms
+                  `locate` in ~30 ms of wall clock, and a panel that printed
+                  the 30 was describing somebody's network while claiming to
+                  describe the call. Without the header there is no engine
+                  figure to lead with, so the old number stays — under its
+                  own, honest name. */}
               <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Metric label={t('playground.latency')} value={`${state.ms} ms`} tone="accent" />
+                <Metric tone="accent"
+                        label={t(state.timing ? 'playground.engine' : 'playground.latency')}
+                        value={fmtMs(state.timing ? state.timing.vine : state.ms)} />
+                {rate != null
+                  ? <Metric tone="accent" label={t('playground.throughput')}
+                            value={`${rate.toLocaleString()}/s`} />
+                  : <Metric label="bytes" value={bytes} />}
                 <Metric label={t('playground.returned')} value={rows ?? '—'} />
                 <Metric label={t('playground.budget')} value={spec.budget ?? '—'} />
-                <Metric label="bytes" value={bytes} />
               </div>
+              {state.timing && <Aside timing={state.timing} wall={state.ms} bytes={bytes} />}
               {state.data.truncated && <Note tone="warn">{t('common.truncated')}</Note>}
               <div className="mt-3">
                 <Code max="26rem">{JSON.stringify(state.data, null, 2)}</Code>

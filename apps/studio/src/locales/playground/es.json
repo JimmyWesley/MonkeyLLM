@@ -1,9 +1,11 @@
 {
   "playground.answer": "answer — recuperación más el modelo enlazado",
+  "playground.aside": "Fuera del motor: host {host}, red y transporte {net} — infraestructura, no la llamada. Respuesta: {bytes} bytes.",
   "playground.budget": "Presupuesto de tokens",
   "playground.curl": "Llámalo desde fuera",
   "playground.curl_hint": "Misma ruta, misma clave, mismas reglas que reciben tus aplicaciones.",
   "playground.empty": "Ejecuta una llamada para ver qué vuelve.",
+  "playground.engine": "Bosque",
   "playground.harvest": "harvest — recuperación de una sola pasada, con fragmentos",
   "playground.k": "Resultados",
   "playground.latency": "Ida y vuelta",
@@ -20,5 +22,6 @@
   "playground.sub": "Las mismas llamadas que hace un agente, con los mismos presupuestos. Nada aquí es una simulación.",
   "playground.terms": "Términos",
   "playground.terms_hint": "Palabras literales separadas por comas. Sin expresiones regulares.",
+  "playground.throughput": "Rendimiento",
   "playground.title": "Playground"
 }

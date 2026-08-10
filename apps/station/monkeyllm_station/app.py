@@ -21,6 +21,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
@@ -107,6 +108,20 @@ STATUS_BY_CODE = {
 def _envelope(err: VineError, status: int | None = None) -> JSONResponse:
     return JSONResponse(err.to_dict(),
                         status_code=status or STATUS_BY_CODE.get(err.code, 400))
+
+
+def _server_timing(clocks: dict) -> str:
+    """The host's own clocks as the standard header (J.10.6).
+
+    A body is the agent's context window and it is budgeted in tokens, so
+    the console's instruments travel outside it: the header costs the
+    response nothing and a browser's network panel already draws it.
+
+    Shape only, like a trace — three durations, no ids, no counts — so a
+    timing can never say more than the response it rides on.
+    """
+    return ", ".join(f"{name};dur={clocks[name]}"
+                     for name in ("vine", "model", "host") if name in clocks)
 
 
 def _no_such_endpoint(path: str) -> JSONResponse:
@@ -431,8 +446,44 @@ def build_app(
             _embedders[key] = inference.embedder_from_binding(binding)
         vine.embedder = _embedders[key]
 
-    def run_primitive(principal: str, forest: str, name: str, payload: dict):
-        """Executed on the forest thread: resolve, scope, call, attribute."""
+    def run_primitive(principal: str, forest: str, name: str, payload: dict,
+                      clocks: dict | None = None):
+        """Executed on the forest thread: resolve, scope, call, attribute.
+
+        `clocks`, when a caller supplies one, is filled with the three
+        durations of J.10.6: the engine, the provider round trip when there
+        was one, and whatever is left of the host's span — policy, the audit
+        record, serialisation, the thread hop. An out-parameter rather than a
+        second return value, because the MCP surface calls this too and has
+        no header to carry them: a timing is the console's channel, never the
+        agent's.
+
+        The engine figure is read off the tracer, so it is the same slice
+        J.10.4 already reports and not a second instrumentation.
+        """
+        span = time.perf_counter()
+        sample: dict = {}
+        try:
+            return dispatch(principal, forest, name, payload, sample)
+        finally:
+            if clocks is not None:
+                tracer, mark = sample.get("tracer"), sample.get("mark", 0)
+                engine = float(sum(e["elapsed_ms"] for e in tracer.events[mark:])
+                               if tracer is not None else 0.0)
+                model = sample.get("model")
+                clocks["vine"] = round(engine, 3)
+                if model is not None:
+                    clocks["model"] = round(model, 3)
+                # The remainder, floored at zero: three clocks that add up to
+                # the span, so subtracting them from a client's stopwatch
+                # leaves transport and nothing else.
+                clocks["host"] = round(max(0.0, (time.perf_counter() - span) * 1000
+                                           - engine - (model or 0.0)), 3)
+
+    def dispatch(principal: str, forest: str, name: str, payload: dict,
+                 sample: dict):
+        """The call itself. `sample` is where it leaves what it alone knows:
+        the tracer to read the engine's clock off, and the provider's."""
         policy = registry.policy_for(principal, forest)
         if policy is None:
             return None
@@ -451,10 +502,16 @@ def build_app(
         # one. `False` is both the default and the reset.
         vine.hybrid_locate = bool(payload.pop("hybrid", False))
         mark = len(vine.tracer.events)
+        # Where the engine's own clock starts for this call (J.10.6). Read
+        # after the fact rather than accumulated here, so there is still only
+        # one instrumentation and it is Part D's.
+        sample.update(tracer=vine.tracer, mark=mark)
 
         if name in COMPOSITES or name in HOST_ACTIONS:
             runner = run_composite if name in COMPOSITES else run_ingest
             result = runner(principal, forest, vine, policy, name, payload)
+            if isinstance(result, dict):
+                sample["model"] = result.get("model_ms")
             if name in EXPLAINED:
                 result = explain(result, vine, mark)
                 if name in COMPOSITES and isinstance(result, dict) and "error" not in result:
@@ -1614,15 +1671,24 @@ def build_app(
         if not isinstance(payload, dict):
             return _envelope(VineError(E_SCHEMA, "body must be a JSON object"))
 
+        # J.10.6: what the call cost, in a header rather than in the body.
+        # Emitted for refusals too — how long a 403 took is not a fact about
+        # the forest behind it, and a route that timed only its successes
+        # would say which forests exist by staying silent.
+        clocks: dict = {}
         result = await in_forest_thread(
-            lambda: run_primitive(principal, forest, name, payload)
+            lambda: run_primitive(principal, forest, name, payload, clocks)
         )
+        timing = _server_timing(clocks)
         if result is None:
-            return _unknown_forest(forest)
+            response = _unknown_forest(forest)
+            response.headers["Server-Timing"] = timing
+            return response
         if isinstance(result.get("error"), dict):
             code = result["error"].get("code", E_SCHEMA)
-            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
-        return JSONResponse(result)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400),
+                                headers={"Server-Timing": timing})
+        return JSONResponse(result, headers={"Server-Timing": timing})
 
     # -- governance (J.5's console needs a surface, not a side-channel) ------
 

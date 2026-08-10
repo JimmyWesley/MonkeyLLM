@@ -20,7 +20,26 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body } = {}) {
+/** The host's own clocks, off `Server-Timing` (J.10.6).
+ *
+ *  Returns null when the header is absent — an older Station, or a proxy
+ *  that dropped it. A console that then reports its own stopwatch as the
+ *  cost of the call would be making the exact claim J.10.6 forbids, so the
+ *  callers treat null as "the engine figure is unknown", never as zero. */
+function serverTiming(res) {
+  const raw = res.headers.get('Server-Timing')
+  if (!raw) return null
+  const out = {}
+  for (const part of raw.split(',')) {
+    const [name, ...params] = part.trim().split(';')
+    const dur = params.map((p) => p.trim())
+      .find((p) => p.startsWith('dur='))?.slice(4)
+    if (dur !== undefined && Number.isFinite(Number(dur))) out[name.trim()] = Number(dur)
+  }
+  return Object.keys(out).length ? out : null
+}
+
+async function request(path, { method = 'GET', body, timing = false } = {}) {
   const res = await fetch(path, {
     method,
     headers: {
@@ -39,7 +58,11 @@ async function request(path, { method = 'GET', body } = {}) {
       code: err.code, hint: err.hint, status: res.status,
     })
   }
-  return payload
+  // Deliberately a separate return shape rather than a field grafted onto
+  // the payload: the Playground prints the response verbatim, and a console
+  // that invented a key would be showing the caller something no API client
+  // receives.
+  return timing ? { data: payload, timing: serverTiming(res) } : payload
 }
 
 export const api = {
@@ -51,6 +74,13 @@ export const api = {
   call: (forest, primitive, payload = {}) =>
     request(`/v1/forests/${encodeURIComponent(forest)}/${primitive}`,
             { method: 'POST', body: payload }),
+
+  // The same call, with the host's clocks alongside it (J.10.6): resolves to
+  // `{data, timing}`. For the two consoles that report latency — everywhere
+  // else the numbers are instruments nobody asked for.
+  timedCall: (forest, primitive, payload = {}) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/${primitive}`,
+            { method: 'POST', body: payload, timing: true }),
 
   // Map projections (J.11): a region in one call rather than one call per
   // node. Read-only, scoped exactly like the primitives, and derived — a

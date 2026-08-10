@@ -1,9 +1,11 @@
 {
   "playground.answer": "answer — retrieval plus the bound model",
+  "playground.aside": "Outside the engine: host {host}, network and transport {net} — infrastructure, not the call. Response: {bytes} bytes.",
   "playground.budget": "Token budget",
   "playground.curl": "Call it from outside",
   "playground.curl_hint": "Same route, same key, same rules your applications get.",
   "playground.empty": "Run a call to see what comes back.",
+  "playground.engine": "Forest",
   "playground.harvest": "harvest — one-shot retrieval with snippets",
   "playground.k": "Results",
   "playground.latency": "Round trip",
@@ -20,5 +22,6 @@
   "playground.sub": "The same calls an agent makes, with the same budgets. Nothing here is a simulation.",
   "playground.terms": "Terms",
   "playground.terms_hint": "Literal words, comma separated. No regular expressions.",
+  "playground.throughput": "Throughput",
   "playground.title": "Playground"
 }

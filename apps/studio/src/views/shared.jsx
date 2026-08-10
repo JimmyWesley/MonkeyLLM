@@ -72,6 +72,18 @@ export function useCrumbs(id, grant) {
   return out.filter((c) => c !== id && (whole || allow.some((a) => c.startsWith(a))))
 }
 
+/** A duration, at the precision that duration actually has.
+ *
+ *  Sub-millisecond is the whole claim of this project, so it is not rounded
+ *  away: `locate` at 0.226 ms and `locate` at "0 ms" are the same call
+ *  described as a measurement and as a rounding artefact. Above 10 ms the
+ *  decimals are noise and go. */
+export const fmtMs = (n) =>
+  !Number.isFinite(n) ? '—'
+    : n < 1 ? `${Number(n.toFixed(3))} ms`
+    : n < 10 ? `${Number(n.toFixed(2))} ms`
+    : `${Math.round(n)} ms`
+
 export function Metric({ label, value, tone }) {
   return (
     <div className="rounded-lg border border-line bg-surface-2 px-3 py-2">

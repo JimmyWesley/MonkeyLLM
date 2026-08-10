@@ -6,6 +6,7 @@
   "explain.entry_bm25": "BM25",
   "explain.entry_hybrid": "híbrida (RRF)",
   "explain.hop_n": "#{n}",
+  "explain.host": "Host (política, auditoría, JSON)",
   "explain.model": "Modelo",
   "explain.retrieval": "Bosque",
   "explain.server": "Suma de los pasos",
@@ -14,5 +15,5 @@
   "explain.title": "Cómo se ejecutó",
   "explain.tokens_in": "Tokens de entrada",
   "explain.tokens_out": "Tokens de salida",
-  "explain.transport": "HTTP y JSON"
+  "explain.transport": "Red"
 }
