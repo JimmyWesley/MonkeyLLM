@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.28.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.29.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -103,6 +103,27 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   for a browserless deployment: mints **into that same window only**, with
   the owner bit, and thereby closes it. Never grant a first credential per
   forest — an empty volume has none, which is the v0.25 deadlock.
+- **Latency is reported by the host, never by the client (spec J.10.6,
+  v0.29)**: every primitive response carries `Server-Timing: vine, host[,
+  model]` — a **header**, because the body is the agent's context window and
+  it is token-budgeted, so console instruments must never be added to it.
+  `vine` is read off the Part D tracer (never a second stopwatch), the three
+  clocks account for the whole host span, and a console MUST lead with the
+  engine figure: over a network a 0.2 ms `locate` looks like 29 ms, and a
+  panel that prints the 29 is describing the internet.
+- **Nobody's first call pays for the process (spec J.6.1 + C.6.1, v0.29)**:
+  `_derived/` databases open in **WAL + `synchronous=NORMAL`** (every read
+  primitive deposits pheromone, so every read is also a commit; the files
+  are the truth and `reindex` is the repair, so the durability given up was
+  never owed). `Vine.warm()` faults those pages in through **storage only,
+  never a primitive** — warming through `locate` would forge the heat the
+  Ranger reads as evidence. A Station opens and warms every forest at boot
+  (`--no-warm` / `MONKEYLLM_STATION_WARM=0` for registries too big to hold
+  open), best effort: one locked forest never stops the others.
+- **`app.state.pool` is only touchable from `app.state.forest_worker`**: a
+  SQLite connection belongs to its opening thread, and since boot warming
+  the pool is rarely empty — code that reached for the pool directly used to
+  get away with it because there was nothing open yet.
 - **The console shapes the forest through `plant` (spec J.5.7, v0.27)**:
   branch creation in Studio composes ONE `plant` call — the id lives under
   the chosen parent, the parent-index entry and the commit are the engine's.
