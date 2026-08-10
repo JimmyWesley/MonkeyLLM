@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.26.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.27.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -95,6 +95,11 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   auto-generates `## Query manual`, and commits only the `.md`. No `ALTER`
   for agents; `tend` stays DML-only forever. Initial `rows` at birth are
   loaded parameterized (v0.9 rule 7) — never as SQL text.
+- **The console shapes the forest through `plant` (spec J.5.7, v0.27)**:
+  branch creation in Studio composes ONE `plant` call — the id lives under
+  the chosen parent, the parent-index entry and the commit are the engine's.
+  Ids are never typed (they are immutable) and there is no move/rename/
+  delete: no primitive relocates a node, so misplacement is permanent.
 - **Ingest sources are contained (spec G.3/G.8/J.8.2, v0.26)**: an absent
   source is `E_SCHEMA`, never the working directory; a source may not be,
   contain or sit inside the forest (only `_derived/` is exempt, for upload

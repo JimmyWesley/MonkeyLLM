@@ -676,3 +676,88 @@ class TestIngestStatus:
         head = _key(registry, ["read"])
         r = client.get(f"/v1/forests/{FOREST}/ingest", headers=head)
         assert r.status_code == 403, r.text
+
+
+class TestBranchCreation:
+    """J.5.7 / F.30: the console shapes the forest through `plant` and
+    nothing else, so these are the engine's guarantees seen from the wire."""
+
+    def _branch(self, client, head, *, id, parent, title, summary):
+        return client.post(
+            f"/v1/forests/{FOREST}/plant",
+            json={"node": {"id": id, "parent": parent, "type": "branch",
+                           "title": title, "summary": summary,
+                           "source": "manual",
+                           "body": f"# {title}\n\n> {summary}\n\n"
+                                   "## Sub-branches\n\n## Direct bananas\n\n"
+                                   "## Cross trails\n"}},
+            headers=head)
+
+    def test_a_branch_is_planted_and_the_parent_index_gains_one_entry(self, station):
+        client, registry, root = station
+        head = _key(registry, ["read", "write"])
+        r = self._branch(client, head, id="contracts/_index", parent="_index",
+                         title="Contracts",
+                         summary="Signed client contracts by year, with their "
+                                 "amendments and termination notices.")
+        assert r.status_code == 200, r.text
+        assert r.json()["commit"], "a branch is a commit like any other write"
+
+        look = client.post(f"/v1/forests/{FOREST}/look",
+                           json={"id": "contracts/_index"}, headers=head).json()
+        assert look["type"] == "branch"
+
+        # The entry is the engine's work, not the console's — the point of
+        # going through `plant` rather than writing files.
+        master = (root / FOREST / "_index.md").read_text(encoding="utf-8")
+        assert master.count("[[contracts/_index]]") == 1
+        assert "## Sub-branches" in master
+
+    def test_a_duplicate_id_is_refused(self, station):
+        client, registry, _ = station
+        head = _key(registry, ["read", "write"])
+        args = dict(id="contracts/_index", parent="_index", title="Contracts",
+                    summary="Signed client contracts by year, with amendments.")
+        assert self._branch(client, head, **args).status_code == 200
+        again = self._branch(client, head, **args)
+        assert again.status_code == 400, again.text
+        assert "already exists" in again.json()["error"]["message"]
+
+    def test_a_summary_that_breaks_a4_is_refused_not_truncated(self, station):
+        client, registry, _ = station
+        head = _key(registry, ["read", "write"])
+        r = self._branch(client, head, id="wide/_index", parent="_index",
+                         title="Wide", summary="word " * 200)
+        assert r.status_code == 400, r.text
+        assert "summary" in r.json()["error"]["message"]
+
+    def test_an_id_that_does_not_live_under_its_parent_is_refused(self, station):
+        """The console composes the id from the chosen parent, so this is the
+        engine catching a client that got it wrong."""
+        client, registry, _ = station
+        head = _key(registry, ["read", "write"])
+        r = self._branch(client, head, id="elsewhere/_index", parent="people/_index",
+                         title="Elsewhere",
+                         summary="A branch whose id does not sit under the "
+                                 "parent it names.")
+        assert r.status_code == 400, r.text
+
+    def test_a_scoped_principal_cannot_create_at_the_root(self, station):
+        """Creating a top-level branch grafts an entry into the master index —
+        a node a scoped principal may not even read."""
+        client, registry, _ = station
+        head = _key(registry, ["read", "write"], principal="bob", allow=("people/",))
+        r = self._branch(client, head, id="contracts/_index", parent="_index",
+                         title="Contracts",
+                         summary="Signed client contracts by year, with amendments.")
+        assert r.status_code == 403, r.text
+        assert r.json()["error"]["code"] == "E_FORBIDDEN"
+
+    def test_a_scoped_principal_creates_inside_its_own_grant(self, station):
+        client, registry, _ = station
+        head = _key(registry, ["read", "write"], principal="bob", allow=("people/",))
+        r = self._branch(client, head, id="people/contractors/_index",
+                         parent="people/_index", title="Contractors",
+                         summary="External contractors, their agreements and "
+                                 "the teams they report into.")
+        assert r.status_code == 200, r.text

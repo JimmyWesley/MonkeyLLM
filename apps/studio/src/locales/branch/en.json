@@ -1,0 +1,17 @@
+{
+  "branch.new": "New branch",
+  "branch.new_sub": "A branch is a folder in the forest: it holds documents and other branches, and its summary is how a search knows what is inside.",
+  "branch.parent": "Inside",
+  "branch.parent_hint": "The branch it goes under. Only branches you can reach are listed.",
+  "branch.root": "Forest root",
+  "branch.name": "Name",
+  "branch.name_placeholder": "Contracts",
+  "branch.name_hint": "Letters and digits. It becomes the folder name.",
+  "branch.will_be": "Will be created as {id} — permanently. Ids never change.",
+  "branch.summary": "What lives here",
+  "branch.summary_placeholder": "Signed client contracts, by year, with their amendments and termination notices.",
+  "branch.summary_hint": "One to three sentences ({n}/60 tokens). Every later search reads this to decide whether to come in.",
+  "branch.summary_long": "Too long — the forest keeps summaries under 60 tokens.",
+  "branch.create": "Create branch",
+  "branch.creating": "Creating"
+}

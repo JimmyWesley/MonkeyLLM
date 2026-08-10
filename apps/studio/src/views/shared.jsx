@@ -4,8 +4,8 @@
 /* Small pieces every console needs, in one place so nine views cannot drift
  * into nine subtly different ideas of "loading" or "you may not do this". */
 import { useCallback, useEffect, useState } from 'react'
-import { Card, Empty } from '../design/ui.jsx'
-import { Access } from '../design/icons.jsx'
+import { Card, Empty, ErrorNote, Field, Modal, Select, TextArea } from '../design/ui.jsx'
+import { Access, Plus } from '../design/icons.jsx'
 
 export const ALL_CAPS = ['read', 'query', 'write', 'tend', 'ingest', 'admin']
 
@@ -136,4 +136,122 @@ export function useForestTree(forest, grant, call, { skip = false } = {}) {
       partial,
     }
   }, [forest, grant], { skip: skip || !forest })
+}
+
+/* ── Shaping the forest (J.5.7) ──────────────────────────────────────────
+ *
+ * A.5 gives a new forest one branch. `adopt` makes more, but only by
+ * mirroring a folder tree, so a forest whose documents arrive by upload had
+ * nowhere to put them but the root — permanently. This is the missing
+ * branch-maker, and it is deliberately thin: it composes one `plant` call.
+ * Everything that makes a branch a branch — the id living under its parent,
+ * the entry grafted into the parent's `## Sub-branches`, the commit, the
+ * audit row — is the engine's, exactly as it is for an agent. */
+
+/** A name as the path segment it becomes. Mirrors the Gardener's `slugify`
+ *  closely enough that a folder and a hand-made branch of the same name
+ *  land on the same id — an operator who mirrors `Contracts` later should
+ *  not get `contracts` beside `Contracts`. */
+export function slugOf(name) {
+  return (name || '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')  // strip diacritics
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63)
+}
+
+/** The id a branch would get under `parent` (`_index` = forest root). */
+export function branchIdFor(parent, name) {
+  const slug = slugOf(name)
+  if (!slug) return null
+  const under = branchOf(parent || '_index')
+  return under ? `${under}/${slug}/_index` : `${slug}/_index`
+}
+
+/** The A.5 skeleton, so a new branch reads like every other one from the
+ *  first moment instead of growing headings when something lands in it. */
+const INDEX_BODY = (title, summary) =>
+  `# ${title}\n\n> ${summary}\n\n## Sub-branches\n\n## Direct bananas\n\n` +
+  '## Cross trails\n'
+
+/**
+ * The create-a-branch dialog, shared by Explore and the Ingest destination
+ * picker so the two cannot drift into two different ideas of a branch.
+ *
+ * `onCreated(id)` receives the new branch id — the picker uses it to select
+ * what it just made, so the ingest that prompted the branch continues
+ * without a second trip through another console.
+ */
+export function NewBranch({ forest, parents, parent, onParent, open, onClose,
+                            onCreated, call, t }) {
+  const [name, setName] = useState('')
+  const [summary, setSummary] = useState('')
+  const [state, setState] = useState({})
+
+  const id = branchIdFor(parent, name)
+  // The engine owns the A.4 verdict (J.5.7); this is the budget shown while
+  // typing, never a second rule. Over-budget still submits and is still
+  // refused by the engine, so the two can never disagree about the answer.
+  const tokens = Math.ceil((summary.trim().split(/\s+/).filter(Boolean).length) * 1.3)
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!id) return
+    setState({ busy: true })
+    try {
+      const title = name.trim()
+      await call(forest, 'plant', {
+        id,
+        type: 'branch',
+        parent: parent || '_index',
+        title,
+        summary: summary.trim(),
+        source: 'manual',
+        body: INDEX_BODY(title, summary.trim()),
+      })
+      setName(''); setSummary(''); setState({})
+      onCreated?.(id)
+      onClose?.()
+    } catch (error) { setState({ busy: false, error }) }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={t('branch.new')}
+           subtitle={t('branch.new_sub')}>
+      <form onSubmit={submit} className="space-y-4">
+        <Select label={t('branch.parent')} value={parent || '_index'}
+                hint={t('branch.parent_hint')}
+                onChange={(e) => onParent?.(e.target.value)}>
+          {(parents || []).map((p) => (
+            <option key={p.id} value={p.id}>{branchOf(p.id) || t('branch.root')}</option>
+          ))}
+        </Select>
+
+        <Field label={t('branch.name')} value={name} required autoFocus
+               placeholder={t('branch.name_placeholder')}
+               onChange={(e) => setName(e.target.value)}
+               hint={id ? t('branch.will_be', { id })
+                        : t('branch.name_hint')} />
+
+        <Field as={TextArea} label={t('branch.summary')} value={summary} required
+               rows={3} placeholder={t('branch.summary_placeholder')}
+               onChange={(e) => setSummary(e.target.value)}
+               hint={t('branch.summary_hint', { n: tokens })}
+               error={tokens > 60 ? t('branch.summary_long') : undefined} />
+
+        {state.error && <ErrorNote error={state.error} />}
+
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn" onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button className="btn btn-primary" disabled={!id || !summary.trim() || state.busy}>
+            <Plus size={14} />
+            {state.busy ? t('branch.creating') : t('branch.create')}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
 }

@@ -1,0 +1,17 @@
+{
+  "branch.new": "Novo galho",
+  "branch.new_sub": "Um galho é uma pasta da floresta: guarda documentos e outros galhos, e o resumo dele é como uma busca sabe o que tem lá dentro.",
+  "branch.parent": "Dentro de",
+  "branch.parent_hint": "O galho onde ele entra. Só aparecem os galhos que você alcança.",
+  "branch.root": "Raiz da floresta",
+  "branch.name": "Nome",
+  "branch.name_placeholder": "Contratos",
+  "branch.name_hint": "Letras e números. Vira o nome da pasta.",
+  "branch.will_be": "Vai ser criado como {id} — e para sempre. Ids nunca mudam.",
+  "branch.summary": "O que vive aqui",
+  "branch.summary_placeholder": "Contratos assinados de clientes, por ano, com aditivos e avisos de rescisão.",
+  "branch.summary_hint": "De uma a três frases ({n}/60 tokens). Toda busca futura lê isto para decidir se entra.",
+  "branch.summary_long": "Longo demais — a floresta mantém resumos abaixo de 60 tokens.",
+  "branch.create": "Criar galho",
+  "branch.creating": "Criando"
+}

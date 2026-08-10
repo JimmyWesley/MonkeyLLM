@@ -12,9 +12,9 @@ import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, Empty, ErrorNote, Field, Note, Select, Spinner, Tabs,
 } from '../design/ui.jsx'
-import { File, Ingest as Upload, Pencil, Refresh, X } from '../design/icons.jsx'
+import { File, Ingest as Upload, Pencil, Plus, Refresh, X } from '../design/icons.jsx'
 import {
-  NeedsCapability, branchOf, has, useAsync, useForestTree,
+  NeedsCapability, NewBranch, branchOf, has, useAsync, useForestTree,
 } from './shared.jsx'
 
 /* What the Gardener's built-in converters read (G.2). Text goes up as text;
@@ -80,6 +80,7 @@ export default function Ingest({ forest, grant, goto }) {
   const [skipped, setSkipped] = useState([])
   const [reading, setReading] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [makingBranch, setMakingBranch] = useState(false)
   const picker = useRef(null)
   const folderPicker = useRef(null)
   const staging = useRef(0)
@@ -370,14 +371,26 @@ export default function Ingest({ forest, grant, goto }) {
                 )}
               </div>
             ) : (
-              <Select label={t('ingest.dest')} value={dest} hint={t('ingest.dest_hint')}
-                      onChange={(e) => setDest(e.target.value)}>
-                <option value="">{t('ingest.dest_root')}</option>
-                {(tree.data?.branches || []).map((b) => {
-                  const name = branchOf(b.id)
-                  return name ? <option key={b.id} value={name}>{name}</option> : null
-                })}
-              </Select>
+              <div className="space-y-1.5">
+                <Select label={t('ingest.dest')} value={dest} hint={t('ingest.dest_hint')}
+                        onChange={(e) => setDest(e.target.value)}>
+                  <option value="">{t('ingest.dest_root')}</option>
+                  {(tree.data?.branches || []).map((b) => {
+                    const name = branchOf(b.id)
+                    return name ? <option key={b.id} value={name}>{name}</option> : null
+                  })}
+                </Select>
+                {/* J.5.7: "where do these go?" is exactly when the missing
+                    branch is noticed, so it can be made from here — and the
+                    picker selects what it just made, so this ingest carries
+                    on instead of sending the operator to another console. */}
+                {has(grant, 'write') && (
+                  <button type="button" className="btn btn-sm"
+                          onClick={() => setMakingBranch(true)}>
+                    <Plus size={13} /> {t('branch.new')}
+                  </button>
+                )}
+              </div>
             )}
 
             <div className="flex justify-end">
@@ -427,6 +440,16 @@ export default function Ingest({ forest, grant, goto }) {
             ) : null}
         </Card>
       </div>
+
+      <NewBranch
+        forest={forest} call={api.call} t={t}
+        open={makingBranch} onClose={() => setMakingBranch(false)}
+        parents={[{ id: '_index' }, ...(tree.data?.branches || [])]}
+        parent={dest ? `${dest}/_index` : '_index'}
+        onParent={(id) => setDest(branchOf(id))}
+        // Selecting what was just made is the whole point of creating it
+        // from here (J.5.7): the ingest that prompted the branch continues.
+        onCreated={(id) => { setDest(branchOf(id)); tree.reload() }} />
     </div>
   )
 }

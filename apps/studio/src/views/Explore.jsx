@@ -8,11 +8,11 @@ import {
   Badge, Card, Code, Empty, ErrorNote, Skeleton, Spinner,
 } from '../design/ui.jsx'
 import {
-  ChevronRight, Explore as Tree, File, Files, Graph, Link, Pencil, Search,
+  ChevronRight, Explore as Tree, File, Files, Graph, Link, Pencil, Plus, Search,
 } from '../design/icons.jsx'
 import {
-  Metric, NeedsCapability, branchOf, has, rootsOf, useAsync, useCrumbs,
-  useForestTree,
+  Metric, NeedsCapability, NewBranch, branchOf, has, rootsOf, useAsync,
+  useCrumbs, useForestTree,
 } from './shared.jsx'
 import ForestGraph from './graph.jsx'
 import ForestFiles from './files.jsx'
@@ -110,6 +110,10 @@ function BrowseAndSearch({ forest, grant, current, setNode }) {
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState(null)
   const [searching, setSearching] = useState(false)
+  // J.5.7: the tree is where the shape of the forest is visible, so it is
+  // where an operator notices the branch that should exist and does not.
+  const [makingBranch, setMakingBranch] = useState(false)
+  const [branchParent, setBranchParent] = useState('_index')
 
   const tree = useForestTree(forest, grant, api.call)
   const digest = useAsync(() => api.call(forest, 'look', { id: current }),
@@ -173,7 +177,19 @@ function BrowseAndSearch({ forest, grant, current, setNode }) {
               )}
             </Card>
           ) : (
-            <Card title={t('explore.tree')} icon={Tree} bodyClass="p-2">
+            <Card title={t('explore.tree')} icon={Tree} bodyClass="p-2"
+                  actions={has(grant, 'write') ? (
+                    <button type="button" className="btn btn-sm"
+                            onClick={() => {
+                              // Whatever branch is open is the parent worth
+                              // offering first; the dialog can still change it.
+                              setBranchParent(
+                                current?.endsWith('_index') ? current : '_index')
+                              setMakingBranch(true)
+                            }}>
+                      <Plus size={13} /> {t('branch.new')}
+                    </button>
+                  ) : null}>
               {tree.busy ? <div className="p-3"><Skeleton rows={5} /></div>
                 : tree.error ? <div className="p-3"><ErrorNote error={tree.error} /></div> : (
                 <ul className="space-y-0.5">
@@ -201,6 +217,15 @@ function BrowseAndSearch({ forest, grant, current, setNode }) {
         <NodeDetail forest={forest} grant={grant} id={current} digest={digest}
                     setNode={setNode} />
       </div>
+
+      <NewBranch
+        forest={forest} call={api.call} t={t}
+        open={makingBranch} onClose={() => setMakingBranch(false)}
+        parents={[{ id: '_index' }, ...(tree.data?.branches || [])]}
+        parent={branchParent} onParent={setBranchParent}
+        // Opening what was just made: the operator asked for this branch to
+        // exist, so the tree moves to it rather than leaving them to find it.
+        onCreated={(id) => { tree.reload(); setNode(id) }} />
     </div>
   )
 }

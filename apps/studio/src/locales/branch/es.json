@@ -1,0 +1,17 @@
+{
+  "branch.new": "Nueva rama",
+  "branch.new_sub": "Una rama es una carpeta del bosque: guarda documentos y otras ramas, y su resumen es como una búsqueda sabe qué hay dentro.",
+  "branch.parent": "Dentro de",
+  "branch.parent_hint": "La rama donde entra. Solo se listan las ramas que puedes alcanzar.",
+  "branch.root": "Raíz del bosque",
+  "branch.name": "Nombre",
+  "branch.name_placeholder": "Contratos",
+  "branch.name_hint": "Letras y dígitos. Se convierte en el nombre de la carpeta.",
+  "branch.will_be": "Se creará como {id} — para siempre. Los ids nunca cambian.",
+  "branch.summary": "Qué vive aquí",
+  "branch.summary_placeholder": "Contratos firmados de clientes, por año, con sus anexos y avisos de rescisión.",
+  "branch.summary_hint": "De una a tres frases ({n}/60 tokens). Cada búsqueda futura lee esto para decidir si entra.",
+  "branch.summary_long": "Demasiado largo — el bosque mantiene los resúmenes bajo 60 tokens.",
+  "branch.create": "Crear rama",
+  "branch.creating": "Creando"
+}
