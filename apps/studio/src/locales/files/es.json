@@ -17,7 +17,7 @@
   "files.heat_persistent": "Calor persistente",
   "files.index_derived": "Las entradas de índice son derivadas. Nunca se editan a mano.",
   "files.index_hint": "Su entrada en {parent}, sincronizada en cada escritura:",
-  "files.index_missing": "Aún sin entrada — reindexe para reconstruirla.",
+  "files.index_missing": "Aún sin entrada reindexe para reconstruirla.",
   "files.index_root": "Este es el índice maestro: nada lo lista.",
   "files.mode_read": "Lectura",
   "files.mode_source": "Fuente",

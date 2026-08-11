@@ -26,7 +26,7 @@
   "nav.people": "Acessos",
   "nav.people.blurb": "Quem existe, o que pode ver, como entra",
   "nav.pin": "Fixar na barra",
-  "nav.pin_full": "A barra comporta {n} — tire um antes.",
+  "nav.pin_full": "A barra comporta {n} tire um antes.",
   "nav.pin_hint": "A estrela fixa o atalho na barra de baixo.",
   "nav.playground": "Playground",
   "nav.playground.blurb": "Veja exatamente o que um agente vê, chamada a chamada",

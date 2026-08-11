@@ -11,11 +11,11 @@
   "tokens.new_password": "Nova senha",
   "tokens.none": "Nenhum token emitido ainda.",
   "tokens.none_hint": "Emita um acima para deixar uma aplicação, um agente ou um script alcançar esta floresta.",
-  "tokens.once": "Copie agora — só o digest é guardado, então esta é a única vez que ele aparece.",
+  "tokens.once": "Copie agora só o digest é guardado, então esta é a única vez que ele aparece.",
   "tokens.prefix": "Começa com",
   "tokens.revoke": "Revogar agora",
   "tokens.revoked": "Revogado",
-  "tokens.sub": "Toda chave que alcança esta Station pela API — para que serve, quando morre e quando foi usada pela última vez.",
+  "tokens.sub": "Toda chave que alcança esta Station pela API para que serve, quando morre e quando foi usada pela última vez.",
   "tokens.title": "Tokens emitidos",
   "tokens.unused": "nunca usado"
 }

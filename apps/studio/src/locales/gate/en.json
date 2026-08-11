@@ -2,7 +2,7 @@
   "gate.connect": "Connect",
   "gate.connecting": "Connecting…",
   "gate.key": "API key",
-  "gate.key_hint": "The Station keeps only its digest — this key is never stored server-side.",
+  "gate.key_hint": "The Station keeps only its digest this key is never stored server-side.",
   "gate.password": "Password",
   "gate.password_hint": "The super-administrator is configured in the Station environment; other people are given one under Tokens.",
   "gate.rejected": "That key was not accepted.",

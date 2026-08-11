@@ -7,11 +7,11 @@
   "branch.name": "Nome",
   "branch.name_placeholder": "Contratos",
   "branch.name_hint": "Letras e números. Vira o nome da pasta.",
-  "branch.will_be": "Vai ser criado como {id} — e para sempre. Ids nunca mudam.",
+  "branch.will_be": "Vai ser criado como {id} e para sempre. Ids nunca mudam.",
   "branch.summary": "O que vive aqui",
   "branch.summary_placeholder": "Contratos assinados de clientes, por ano, com aditivos e avisos de rescisão.",
   "branch.summary_hint": "De uma a três frases ({n}/60 tokens). Toda busca futura lê isto para decidir se entra.",
-  "branch.summary_long": "Longo demais — a floresta mantém resumos abaixo de 60 tokens.",
+  "branch.summary_long": "Longo demais a floresta mantém resumos abaixo de 60 tokens.",
   "branch.create": "Criar galho",
   "branch.creating": "Criando"
 }

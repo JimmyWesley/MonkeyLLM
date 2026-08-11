@@ -17,7 +17,7 @@
   "files.heat_persistent": "Persistent heat",
   "files.index_derived": "Index entries are derived. They are never edited by hand.",
   "files.index_hint": "Its entry in {parent}, kept in sync on every write:",
-  "files.index_missing": "No entry yet — reindex to rebuild it.",
+  "files.index_missing": "No entry yet reindex to rebuild it.",
   "files.index_root": "This is the master index: nothing lists it.",
   "files.mode_read": "Reading",
   "files.mode_source": "Source",

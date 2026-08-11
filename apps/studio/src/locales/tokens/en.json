@@ -11,11 +11,11 @@
   "tokens.new_password": "New password",
   "tokens.none": "No token issued yet.",
   "tokens.none_hint": "Issue one above to let an application, an agent or a script reach this forest.",
-  "tokens.once": "Copy it now — only its digest is stored, so this is the only time it is shown.",
+  "tokens.once": "Copy it now only its digest is stored, so this is the only time it is shown.",
   "tokens.prefix": "Starts with",
   "tokens.revoke": "Revoke now",
   "tokens.revoked": "Revoked",
-  "tokens.sub": "Every key that can reach this Station through the API — with what it is for, when it dies, and when it was last used.",
+  "tokens.sub": "Every key that can reach this Station through the API with what it is for, when it dies, and when it was last used.",
   "tokens.title": "Issued tokens",
   "tokens.unused": "never used"
 }

@@ -1,7 +1,7 @@
 {
   "explain.calls": "Llamadas al modelo",
   "explain.cost": "Coste",
-  "explain.cost_unknown": "Este proveedor no publica precio, así que el coste es desconocido — no es cero.",
+  "explain.cost_unknown": "Este proveedor no publica precio, así que el coste es desconocido no es cero.",
   "explain.entry": "Búsqueda de entrada",
   "explain.entry_bm25": "BM25",
   "explain.entry_hybrid": "híbrida (RRF)",

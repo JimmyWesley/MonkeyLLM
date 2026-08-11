@@ -2,7 +2,7 @@
   "gate.connect": "Conectar",
   "gate.connecting": "Conectando…",
   "gate.key": "Clave de API",
-  "gate.key_hint": "La Station guarda solo el digest — esta clave nunca se almacena en el servidor.",
+  "gate.key_hint": "La Station guarda solo el digest esta clave nunca se almacena en el servidor.",
   "gate.password": "Contraseña",
   "gate.password_hint": "El superadministrador se configura en el entorno de la Station; a las demás personas se les asigna una en Tokens.",
   "gate.rejected": "Esa clave no fue aceptada.",

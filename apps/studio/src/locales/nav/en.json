@@ -26,7 +26,7 @@
   "nav.people": "Access",
   "nav.people.blurb": "Who exists, what they may see, how they sign in",
   "nav.pin": "Pin to the bar",
-  "nav.pin_full": "The bar holds {n} — remove one first.",
+  "nav.pin_full": "The bar holds {n} remove one first.",
   "nav.pin_hint": "The star pins a shortcut to the bar below.",
   "nav.playground": "Playground",
   "nav.playground.blurb": "See exactly what an agent sees, call by call",

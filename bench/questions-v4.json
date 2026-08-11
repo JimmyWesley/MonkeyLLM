@@ -116,7 +116,7 @@
   },
   {
     "id": "v4-08",
-    "question": "Fiona Brown closed several deals in 2026 — with which clients?",
+    "question": "Fiona Brown closed several deals in 2026 with which clients?",
     "expected_nodes": [
       "events/contracts/2026-03-deal-sunfield-energy",
       "events/contracts/2026-04-deal-windgrid-energy",
