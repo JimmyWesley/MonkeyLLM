@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n.jsx'
 import { Badge, Card, CopyButton, Note, Table, Td } from '../design/ui.jsx'
+import { Highlighted } from '../design/highlight.jsx'
 import {
   Download, File, Key, Link, Monitor, Playground, Plug,
 } from '../design/icons.jsx'
@@ -102,7 +103,9 @@ const Mono = ({ children }) => (
   </code>
 )
 
-function CodeBlock({ title, code }) {
+/** `lang` defaults to the title because most blocks here are titled with the
+ *  language they hold; the ones titled with a translated sentence name it. */
+function CodeBlock({ title, code, lang = title }) {
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-surface-2">
       <div className="flex items-center justify-between gap-3 border-b border-line
@@ -111,7 +114,9 @@ function CodeBlock({ title, code }) {
         <CopyButton value={code} />
       </div>
       <pre className="overflow-x-auto p-3 font-mono text-[12px] leading-relaxed
-                      text-text-2">{code}</pre>
+                      text-text-2">
+        <Highlighted text={code} lang={lang} />
+      </pre>
     </div>
   )
 }
@@ -256,7 +261,8 @@ MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1`} />
         <Section id="mcp" title={t('integrations.mcp.title')}
                  sub={t('integrations.mcp.sub')}>
           <P>{t('integrations.mcp.p1')}</P>
-          <CodeBlock title={t('integrations.mcp.endpoint')} code={`${origin}/mcp/
+          <CodeBlock title={t('integrations.mcp.endpoint')} lang="bash"
+                     code={`${origin}/mcp/
 Authorization: Bearer mk_…`} />
           <Note>{t('integrations.mcp.first_call')}</Note>
           <H>{t('integrations.mcp.client_claude')}</H>
@@ -305,15 +311,15 @@ Authorization: Bearer mk_…`} />
   -d '{"username": "admin", "password": "…"}'`} />
           <H>{t('integrations.api.pattern')}</H>
           <P>{t('integrations.api.pattern_p')}</P>
-          <CodeBlock title={t('integrations.api.ex_answer')}
+          <CodeBlock title={t('integrations.api.ex_answer')} lang="bash"
                      code={`curl -sX POST ${origin}/v1/forests/handbook/answer \\
   -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
   -d '{"question": "what is our expense policy?"}'`} />
-          <CodeBlock title={t('integrations.api.ex_harvest')}
+          <CodeBlock title={t('integrations.api.ex_harvest')} lang="bash"
                      code={`curl -sX POST ${origin}/v1/forests/handbook/harvest \\
   -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
   -d '{"query": "expense policy", "terms": ["receipt"], "k": 3}'`} />
-          <CodeBlock title={t('integrations.api.ex_ingest')}
+          <CodeBlock title={t('integrations.api.ex_ingest')} lang="bash"
                      code={`curl -sX POST ${origin}/v1/forests/handbook/ingest \\
   -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
   -d '{"mode": "upload", "dest": "policies",

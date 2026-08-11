@@ -465,13 +465,14 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
     document.body)
 }
 
-/** Monospace payload viewer — request bodies, SQL, node bodies. `lang`
- *  ('json' | 'sql') tokenizes `children` through programmer mode when it's
- *  on; omit it (or leave the mode off) and this renders exactly as before. */
+/** Monospace payload viewer — request bodies, SQL, node bodies. `lang` names
+ *  the grammar ('json' | 'sql' | 'bash' | 'yaml' | 'markdown' | 'env'); leave
+ *  it off and the content is sniffed, so a block nobody labelled still
+ *  arrives coloured rather than flat. */
 export const Code = ({ children, className = '', max = '20rem', lang = null }) => (
   <pre className={`overflow-auto rounded-lg border border-line bg-surface-2 p-3
                    prose-body ${className}`} style={{ maxHeight: max }}>
-    {lang && typeof children === 'string'
+    {typeof children === 'string'
       ? <Highlighted text={children} lang={lang} />
       : children}
   </pre>

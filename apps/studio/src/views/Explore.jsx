@@ -291,7 +291,7 @@ function NodeDetail({ forest, grant, id, digest, setNode }) {
             <div className="label">{t('common.body')}</div>
             {body === 'loading' ? <Spinner label={t('common.loading')} />
               : body.error ? <ErrorNote error={body.error} />
-              : <Code max="28rem">{body.body}</Code>}
+              : <Code max="28rem" lang="markdown">{body.body}</Code>}
           </div>
         )}
       </Card>

@@ -261,7 +261,7 @@ export default function Playground({ forest, grant }) {
 
           <Card title={t('playground.curl')} subtitle={t('playground.curl_hint')}
                 actions={<CopyButton value={curl} />}>
-            <Code max="14rem">{curl}</Code>
+            <Code max="14rem" lang="bash">{curl}</Code>
             <div className="mt-3">
               <Note>{t('playground.mcp_hint', { url: `${origin}/mcp/` })}</Note>
             </div>

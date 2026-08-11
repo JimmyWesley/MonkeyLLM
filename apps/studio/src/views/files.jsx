@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { Markdown } from '../design/markdown.jsx'
+import { Highlighted } from '../design/highlight.jsx'
 import {
   Badge, Card, Empty, ErrorNote, Skeleton, Spinner,
 } from '../design/ui.jsx'
@@ -289,13 +290,15 @@ function NodeBody({ forest, id, mode, digest, onNavigate }) {
         <div>
           <div className="label">{t('files.passport')}</div>
           <p className="mb-1.5 text-[11.5px] text-text-3">{t('files.passport_hint')}</p>
-          <pre className="source-view">{passportYaml(d)}</pre>
+          <pre className="source-view">
+            <Highlighted text={passportYaml(d)} lang="yaml" />
+          </pre>
         </div>
         <div>
           <div className="label">{t('files.body_stored')}</div>
           {body.error ? <ErrorNote error={body.error} />
             : outlineOnly ? <OutlineOnly outline={body.data.outline} />
-            : <pre className="source-view">{text}</pre>}
+            : <pre className="source-view"><Highlighted text={text} lang="markdown" /></pre>}
         </div>
       </div>
     )
@@ -622,7 +625,9 @@ function IndexEntry({ forest, d }) {
     <div className="space-y-2.5">
       <p className="text-[12px] text-text-3">{t('files.index_hint', { parent })}</p>
       <pre className="source-view">
-        {entry ? `- [[${entry.id}]] — ${entry.summary}` : t('files.index_missing')}
+        <Highlighted lang="markdown"
+                     text={entry ? `- [[${entry.id}]] — ${entry.summary}`
+                                 : t('files.index_missing')} />
       </pre>
       <p className="text-[11.5px] text-text-3">{t('files.index_derived')}</p>
     </div>

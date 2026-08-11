@@ -22,6 +22,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 import { useTheme } from '../theme.jsx'
+import { highlightHtml } from './highlight.jsx'
 
 /** Links in generated text point outward. `noopener` is not optional on a
  *  target that the page did not author. */
@@ -52,7 +53,10 @@ export function Markdown({ children, className = '' }) {
         const i = sources.current.push(text) - 1
         return `<div class="md-diagram" data-diagram="${i}"></div>`
       }
-      return `<pre><code>${escapeHtml(text)}</code></pre>`
+      // Coloured here rather than after mount: the tokenizer escapes what it
+      // emits and the whole string still goes through the sanitiser below,
+      // so the fence gains spans without gaining a second trust boundary.
+      return `<pre><code>${highlightHtml(text, lang)}</code></pre>`
     }
     const parsed = marked.parse(String(children ?? ''), {
       renderer, gfm: true, breaks: true,
