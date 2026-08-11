@@ -53,6 +53,9 @@ def station(explain_root, tmp_path, monkeypatch):
     registry.grant("root", FOREST, {"admin", "read", "query"})
     registry.put_provider("p", "http://stub/v1", None)
     registry.bind_model(FOREST, "answer", "p", "stub-model")
+    # These tests predate the answer store (J.10.7) and assert what a fresh
+    # provider run reports; the store has its own suite.
+    registry.set_setting(FOREST, "answer_cache", {"enabled": False})
     with TestClient(app) as client:
         yield client, app.state.pool, {"Authorization": f"Bearer {key}"}
 
@@ -227,7 +230,7 @@ def test_a_timing_reports_shape_and_nothing_else(station):
 
     raw = r.headers["Server-Timing"]
     assert QUESTION not in raw and FOREST not in raw
-    assert set(_clocks(r)) <= {"vine", "model", "host"}
+    assert set(_clocks(r)) <= {"vine", "model", "cache", "host"}
 
 
 def test_an_unauthenticated_request_is_not_timed(station):
@@ -269,6 +272,7 @@ def test_a_dataset_in_the_bundle_is_flagged_as_not_readable_from_prose(
     registry.grant("root", FOREST, {"read", "query"})
     registry.put_provider("p", "http://stub/v1", None)
     registry.bind_model(FOREST, "answer", "p", "stub-model")
+    registry.set_setting(FOREST, "answer_cache", {"enabled": False})
     head = {"Authorization": f"Bearer {key}"}
 
     with TestClient(app) as client:

@@ -1,5 +1,8 @@
 {
   "ask.answer": "Answer",
+  "ask.cache": "Answer store",
+  "ask.cache_hint": "A question already answered on this unchanged forest is served from the store — instantly, and without paying the model again. Off, this ask buys a fresh run and replaces the stored one.",
+  "ask.cached": "From the store",
   "ask.collapse": "Bring the panel back",
   "ask.depth": "How much to read",
   "ask.download_md": "Download .md",

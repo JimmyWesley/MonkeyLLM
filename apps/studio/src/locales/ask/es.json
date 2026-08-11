@@ -1,5 +1,8 @@
 {
   "ask.answer": "Respuesta",
+  "ask.cache": "Banco de respuestas",
+  "ask.cache_hint": "Una pregunta ya respondida sobre este bosque sin cambios se sirve del banco — al instante, sin pagar el modelo otra vez. Apagado, esta pregunta compra una respuesta nueva y reemplaza la guardada.",
+  "ask.cached": "Del banco",
   "ask.collapse": "Trazer o painel de volta",
   "ask.depth": "Cuánto leer",
   "ask.download_md": "Baixar .md",

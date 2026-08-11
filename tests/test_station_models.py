@@ -41,6 +41,9 @@ def station(models_root, tmp_path):
     from monkeyllm_station.app import build_app
 
     app = build_app(root=models_root, registry_path=tmp_path / "station.db", mcp=False)
+    # Binding tests assert what a fresh provider run returns; the answer
+    # store (J.10.7) has its own suite.
+    app.state.registry.set_setting(FOREST, "answer_cache", {"enabled": False})
     with TestClient(app) as client:
         yield client, app.state.registry
 

@@ -32,6 +32,11 @@ export default function Ask({ forest, grant, me, goto }) {
   // J.10.5. Off by default because it is not free: one model call per hop
   // against one for the sweep.
   const [hops, setHops] = useState(false)
+  // J.10.7. On by default because it is free: a repeat of a question on an
+  // unchanged forest is served from the store. Off sends `cache: false`,
+  // which buys a fresh run and replaces the stored one — the with-and-
+  // without comparison the runs history exists to read side by side.
+  const [cache, setCache] = useState(true)
   const [wide, setWide] = useState(false)
   // The runs kept in this browser (J.5.9), and which of them — if any — is
   // what the answer panel is currently showing.
@@ -60,6 +65,7 @@ export default function Ask({ forest, grant, me, goto }) {
     // record that dropped them would show two answers and no reason.
     const params = {
       k, ...(hybrid ? { hybrid: true } : {}), ...(hops ? { hops: true } : {}),
+      ...(cache ? {} : { cache: false }),
     }
     const t0 = performance.now()
     try {
@@ -86,6 +92,7 @@ export default function Ask({ forest, grant, me, goto }) {
     setK(run.params?.k ?? 3)
     setHybrid(!!run.params?.hybrid)
     setHops(!!run.params?.hops)
+    setCache(run.params?.cache !== false)
     setResult(run.result)
     setRestored({ ts: run.ts, model: run.result?.model })
   }
@@ -142,6 +149,8 @@ export default function Ask({ forest, grant, me, goto }) {
               <Toggle checked={hybrid} onChange={setHybrid}
                       label={t('ask.hybrid')} hint={t('ask.hybrid_hint')} />
             )}
+            <Toggle checked={cache} onChange={setCache}
+                    label={t('ask.cache')} hint={t('ask.cache_hint')} />
           </div>
         </form>
 
@@ -207,6 +216,14 @@ export default function Ask({ forest, grant, me, goto }) {
           <Card className="print-target" title={t('ask.answer')} icon={Sparkle}
                 actions={<>
                   <Badge tone="accent">{result.model}</Badge>
+                  {/* A hit is a record served, and it says so (J.10.7): the
+                      badge names the store, and its tooltip the time the
+                      answer was actually bought. */}
+                  {result.cached && (
+                    <span title={result.cached_at ? when(result.cached_at, lang) : undefined}>
+                      <Badge tone="warn">{t('ask.cached')}</Badge>
+                    </span>
+                  )}
                   <Badge>{t('common.elapsed', { ms: result.ms })}</Badge>
                   {/* Reading is the point; the instruments can wait. Widening
                       moves the panel below instead of hiding it. */}

@@ -177,4 +177,10 @@ export const api = {
   bindings: (forest) =>
     request(`/v1/admin/models?forest=${encodeURIComponent(forest)}`),
   bindModel: (body) => request('/v1/admin/models', { method: 'POST', body }),
+
+  // The answer store (J.10.7): its per-forest switches and its economy.
+  // One POST both updates settings and, with `clear: true`, empties it.
+  answerCache: (forest) =>
+    request(`/v1/admin/cache?forest=${encodeURIComponent(forest)}`),
+  setAnswerCache: (body) => request('/v1/admin/cache', { method: 'POST', body }),
 }

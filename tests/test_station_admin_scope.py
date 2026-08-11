@@ -90,6 +90,7 @@ def test_the_route_table_is_what_we_think_it_is(station):
     _, _, app = station
     assert _admin_routes(app) == [
         ("/v1/admin/audit", "GET"),
+        ("/v1/admin/cache", "GET"), ("/v1/admin/cache", "POST"),
         ("/v1/admin/canopy", "GET"), ("/v1/admin/canopy", "POST"),
         ("/v1/admin/forests", "POST"),
         ("/v1/admin/grant", "POST"),

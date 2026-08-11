@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import secrets
@@ -49,9 +50,12 @@ from monkeyllm.errors import (
     VineError,
 )
 from monkeyllm.server import ForestPool
+from monkeyllm_station import answer_store
 from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
 from monkeyllm_station.registry import Registry
+
+log = logging.getLogger("monkeyllm_station")
 
 READ_PRIMITIVES = frozenset(
     {"locate", "look", "move", "pick", "scan", "sniff", "harvest", "query"}
@@ -174,11 +178,13 @@ def _server_timing(clocks: dict) -> str:
     the console's instruments travel outside it: the header costs the
     response nothing and a browser's network panel already draws it.
 
-    Shape only, like a trace — three durations, no ids, no counts — so a
-    timing can never say more than the response it rides on.
+    Shape only, like a trace — durations, no ids, no counts — so a timing
+    can never say more than the response it rides on. `cache` appears only
+    when the answer store was consulted (J.10.7); on a hit `model` is
+    absent, because no provider ran.
     """
     return ", ".join(f"{name};dur={clocks[name]}"
-                     for name in ("vine", "model", "host") if name in clocks)
+                     for name in ("vine", "model", "cache", "host") if name in clocks)
 
 
 def _no_such_endpoint(path: str) -> JSONResponse:
@@ -701,14 +707,18 @@ def build_app(
                 engine = float(sum(e["elapsed_ms"] for e in tracer.events[mark:])
                                if tracer is not None else 0.0)
                 model = sample.get("model")
+                store_ms = sample.get("cache")
                 clocks["vine"] = round(engine, 3)
                 if model is not None:
                     clocks["model"] = round(model, 3)
-                # The remainder, floored at zero: three clocks that add up to
-                # the span, so subtracting them from a client's stopwatch
+                if store_ms is not None:
+                    clocks["cache"] = round(store_ms, 3)
+                # The remainder, floored at zero: the clocks present add up
+                # to the span, so subtracting them from a client's stopwatch
                 # leaves transport and nothing else.
                 clocks["host"] = round(max(0.0, (time.perf_counter() - span) * 1000
-                                           - engine - (model or 0.0)), 3)
+                                           - engine - (model or 0.0)
+                                           - (store_ms or 0.0)), 3)
 
     def dispatch(principal: str, forest: str, name: str, payload: dict,
                  sample: dict):
@@ -738,24 +748,39 @@ def build_app(
         sample.update(tracer=vine.tracer, mark=mark)
 
         if name in COMPOSITES or name in HOST_ACTIONS:
-            runner = run_composite if name in COMPOSITES else run_ingest
-            result = runner(principal, forest, vine, policy, name, payload)
+            if name in COMPOSITES:
+                result = run_composite(principal, forest, vine, policy, name,
+                                       payload, sample)
+            else:
+                result = run_ingest(principal, forest, vine, policy, name, payload)
             if isinstance(result, dict) and "_prepared" in result:
                 # J.9: an accepted batch. The audit row waits for the job to
                 # finish — the ingest is the fact being recorded, and it has
                 # not happened yet.
                 return result
-            if isinstance(result, dict):
+            # A hit is a record served, not a call made (J.10.7): its stored
+            # trace, usage and cost describe the run that produced it, so
+            # nothing here may re-explain, re-bill, or clock a provider that
+            # did not run.
+            hit = isinstance(result, dict) and result.get("cached")
+            if isinstance(result, dict) and not hit:
                 sample["model"] = result.get("model_ms")
-            if name in EXPLAINED:
+            if name in EXPLAINED and not hit:
                 result = explain(result, vine, mark)
                 if name in COMPOSITES and isinstance(result, dict) and "error" not in result:
                     billed = cost_of(result, registry.binding(forest, COMPOSITES[name][1]) or {})
                     if billed:
                         result["cost"] = billed
+            if not hit:
+                # The deposit happens after the trace and the cost are
+                # attached, so the entry is the response exactly as served.
+                store_answer(sample, result)
+            digest = sample.get("cache_hit")
             registry.record(
-                principal=principal, forest=forest, primitive=name, args=payload,
-                result="error" if isinstance(result.get("error"), dict) else "ok",
+                principal=principal, forest=forest, primitive=name,
+                args={**payload, "cache_key": digest} if digest else payload,
+                result="cache" if hit
+                else ("error" if isinstance(result.get("error"), dict) else "ok"),
                 size=len(json.dumps(result, default=str)),
                 commit_sha=result.get("commit"),
             )
@@ -866,11 +891,102 @@ def build_app(
         }
         return result
 
-    def run_composite(principal, forest, vine, policy, name, payload) -> dict:
+    # The answer store's per-forest switches (J.10.7). `ttl_hours` is
+    # hygiene, never correctness — the key already invalidates — so its
+    # default is off; the bound is a stated cap, because a silent unbounded
+    # store is C.6's sin in yet another costume.
+    CACHE_DEFAULTS = {"enabled": True, "max_entries": 500, "ttl_hours": None}
+
+    def cache_settings(forest: str) -> dict:
+        cfg = dict(CACHE_DEFAULTS)
+        stored = registry.setting(forest, "answer_cache", None)
+        if isinstance(stored, dict):
+            cfg.update({key: stored[key] for key in CACHE_DEFAULTS if key in stored})
+        return cfg
+
+    def consult_answer_store(sample, forest, vine, policy, binding, payload,
+                             question, k, budget):
+        """The J.10.7 lookup — reached only past the policy and the binding,
+        so nobody the forest refuses can be answered by its store, and an
+        entry is only ever shared inside one scope (the scope is in the key).
+
+        Returns the served record on a hit. On a miss — or a `cache: false`
+        bypass, which skips the read and later replaces the entry — it arms
+        the deposit in `sample` and returns None.
+        """
+        cfg = cache_settings(forest)
+        if sample is None or not cfg["enabled"]:
+            return None
+        from monkeyllm.harvest import derive_terms
+
+        t0 = time.perf_counter()
+        head = _git(Path(vine.forest.root), "rev-parse", "HEAD")
+        key = answer_store.build_key(
+            question=question, terms=derive_terms(question), k=k, hops=budget,
+            hybrid=bool(getattr(vine, "hybrid_locate", False)),
+            binding=binding, policy=policy, head=head)
+        store = answer_store.AnswerStore(Path(vine.forest.root))
+        sample["cache_store"] = {"store": store, "key": key,
+                                 "question": question,
+                                 "bound": cfg["max_entries"]}
+        entry = None
+        if payload.get("cache", True) is not False:
+            entry = store.get(key, ttl_hours=cfg["ttl_hours"])
+        if entry is None:
+            sample["cache"] = sample.get("cache", 0.0) \
+                + (time.perf_counter() - t0) * 1000
+            return None
+        result = json.loads(entry["response"])
+        result["cached"] = True
+        result["cached_at"] = entry["created"]
+        # A hit is still a use of the forest: the entry's trail is heated
+        # through the trails store — storage, never a primitive (J.6.1's
+        # warming rule in mirror) — so the Ranger keeps seeing the nodes
+        # behind the most-asked questions as the hot paths they are, and no
+        # tracer event claims a call ran when none did.
+        trail = [t for t in json.loads(entry["trail"] or "[]")
+                 if isinstance(t, str)]
+        if trail:
+            vine.trails.add_heat(trail)
+        store.touch(key, priced=bool(entry["priced"]), usd=entry["usd"])
+        digest = key[:answer_store.DIGEST_CHARS]
+        sample["cache_hit"] = digest
+        sample["cache"] = sample.get("cache", 0.0) \
+            + (time.perf_counter() - t0) * 1000
+        log.info("answer served from the store: forest=%s key=%s", forest, digest)
+        return result
+
+    def store_answer(sample: dict, result) -> None:
+        """The miss path's deposit (J.10.7), armed by the consult above.
+
+        `storable` refuses the empty and the broken: an errored or truncated
+        run, a turn that wrote, an answer with no text or no evidence — none
+        of them are worth a key.
+        """
+        stash = sample.get("cache_store")
+        if not stash or not answer_store.storable(
+                result if isinstance(result, dict) else {}):
+            return
+        t0 = time.perf_counter()
+        cost = result.get("cost") or {}
+        stash["store"].put(
+            stash["key"], question=stash["question"],
+            response=json.dumps(result, default=str),
+            trail=[e for e in result.get("evidence") or []
+                   if isinstance(e, str)],
+            priced=bool(cost.get("priced")), usd=cost.get("usd"),
+            bound=stash["bound"])
+        sample["cache"] = sample.get("cache", 0.0) \
+            + (time.perf_counter() - t0) * 1000
+
+    def run_composite(principal, forest, vine, policy, name, payload,
+                      sample: dict | None = None) -> dict:
         """Retrieval (scoped, deterministic) plus the forest's bound model.
 
         The model only ever sees material the principal could already read,
-        so binding a model cannot become a way around the policy.
+        so binding a model cannot become a way around the policy. For
+        `answer`, the store of J.10.7 sits exactly here — after the
+        capability and the binding were checked, before the model is paid.
         """
         from monkeyllm_station import inference
 
@@ -893,10 +1009,15 @@ def build_app(
                 # sweep stays the default. `hops: true` means "use the budget
                 # you would have picked"; a number sets it.
                 hops = payload.get("hops")
-                if hops:
+                budget = (6 if hops is True else int(hops)) if hops else None
+                served = consult_answer_store(
+                    sample, forest, vine, policy, binding, payload,
+                    question, k, budget)
+                if served is not None:
+                    return served
+                if budget:
                     return inference.forage(
-                        scoped, question, binding, k=k,
-                        max_hops=6 if hops is True else int(hops))
+                        scoped, question, binding, k=k, max_hops=budget)
                 return inference.answer(scoped, question, binding, k=k)
             return inference.recurate(scoped, payload.get("id"), binding)
         except VineError as e:
@@ -2247,6 +2368,83 @@ def build_app(
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
         return JSONResponse(result)
 
+    async def admin_cache(request: Request) -> JSONResponse:
+        """The answer store's switches and its economy (J.10.7).
+
+        Per forest, behind `admin` on that forest. GET reads settings and
+        stats; POST updates the settings it names, and `clear: true` empties
+        the entries — which costs money, never truth. The tallies survive a
+        clear: what was saved so far is history, not cache.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        body: dict = {}
+        if request.method == "GET":
+            forest = request.query_params.get("forest") or ""
+        else:
+            try:
+                body = await request.json() if await request.body() else {}
+            except json.JSONDecodeError as e:
+                return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+            forest = str(body.get("forest") or "")
+        if not forest or not is_admin(principal, forest):
+            return _envelope(VineError(
+                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+
+        if request.method == "POST":
+            cfg = cache_settings(forest)
+            if "enabled" in body:
+                cfg["enabled"] = bool(body["enabled"])
+            if "max_entries" in body:
+                try:
+                    bound = int(body["max_entries"])
+                except (TypeError, ValueError):
+                    return _envelope(VineError(
+                        E_SCHEMA, "max_entries must be an integer"))
+                if bound < 1:
+                    return _envelope(VineError(
+                        E_SCHEMA, "max_entries must be at least 1",
+                        hint="Switch the store off with enabled: false "
+                             "rather than starving it."))
+                cfg["max_entries"] = bound
+            if "ttl_hours" in body:
+                ttl = body["ttl_hours"]
+                if ttl is not None:
+                    try:
+                        ttl = float(ttl)
+                    except (TypeError, ValueError):
+                        return _envelope(VineError(
+                            E_SCHEMA, "ttl_hours must be a number, or null "
+                                      "to disable the hygiene sweep"))
+                    if ttl <= 0:
+                        return _envelope(VineError(
+                            E_SCHEMA, "ttl_hours must be positive "
+                                      "(null disables it)"))
+                cfg["ttl_hours"] = ttl
+            registry.set_setting(forest, "answer_cache", cfg)
+
+        def work():
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            store = answer_store.AnswerStore(Path(vine.forest.root))
+            out: dict = {}
+            if request.method == "POST" and body.get("clear"):
+                out["cleared"] = store.clear()
+            out["stats"] = store.stats()
+            return out
+
+        result = await in_forest_thread(forest, work)
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        return JSONResponse({"forest": forest,
+                             "settings": cache_settings(forest), **result})
+
     async def admin_snapshots(request: Request) -> JSONResponse:
         """Part I over REST: take a bundle, list the ones taken.
 
@@ -2348,6 +2546,7 @@ def build_app(
         Route("/v1/admin/providers/test", admin_provider_test, methods=["POST"]),
         Route("/v1/admin/models", admin_models, methods=["GET", "POST"]),
         Route("/v1/admin/health", admin_health),
+        Route("/v1/admin/cache", admin_cache, methods=["GET", "POST"]),
         Route("/v1/admin/snapshots", admin_snapshots, methods=["GET", "POST"]),
         # Before the primitive catch-all, which is POST-only: these are GETs
         # of a projection, not calls of a primitive.

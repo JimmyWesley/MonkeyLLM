@@ -156,12 +156,15 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         return await call(forest, "harvest", query=query, terms=terms, k=k)
 
     @mcp.tool()
-    async def answer(forest: str, question: str, k: int = 3) -> dict:
+    async def answer(forest: str, question: str, k: int = 3,
+                     cache: bool = True) -> dict:
         """Ask the forest directly: scoped retrieval read by the model bound
         to this forest, returning a grounded answer with its evidence. The
         one call that replaces a knowledge-base lookup plus a summarisation
-        round-trip."""
-        return await call(forest, "answer", question=question, k=k)
+        round-trip. A repeat of a question may be served from the forest's
+        answer store, labelled `cached: true`; pass `cache: false` to skip
+        the store and buy a fresh run (which replaces the stored one)."""
+        return await call(forest, "answer", question=question, k=k, cache=cache)
 
     @mcp.tool()
     async def query(forest: str, id: str, sql: str) -> dict:

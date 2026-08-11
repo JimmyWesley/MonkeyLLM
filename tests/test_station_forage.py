@@ -64,6 +64,10 @@ def station(forage_root, tmp_path, scripted):
     registry = app.state.registry
     registry.put_provider("p", "http://stub/v1", None)
     registry.bind_model(FOREST, "answer", "p", "scripted-model")
+    # These tests script each walk and assert its hops; a stored answer
+    # (J.10.7) would serve the previous script's walk instead of running
+    # this one's. The store has its own suite.
+    registry.set_setting(FOREST, "answer_cache", {"enabled": False})
     with TestClient(app) as client:
         yield client, registry
 

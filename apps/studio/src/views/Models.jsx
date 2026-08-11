@@ -259,8 +259,106 @@ export default function Models({ forest, grant }) {
                 catalogue={catalogue} loadCatalogue={load}
                 onSaved={refresh} onError={setError} />
 
+      <AnswerStore forest={forest} onError={setError} />
+
       <Note>{t('models.scope_note')}</Note>
     </div>
+  )
+}
+
+/** The answer store (J.10.7) — the cache in front of `answer`.
+ *
+ *  Beside the bindings rather than among them, because it is not one: it
+ *  spends nothing and serves what a binding already bought. Its switches
+ *  live with its economy, because the numbers are the reason the switches
+ *  exist — hits, and the money not spent, are what an operator weighs when
+ *  sizing the bound. The saving shows a dash when the provider states no
+ *  price: silence is never rendered as $0.00 (J.10.4).
+ */
+function AnswerStore({ forest, onError }) {
+  const { t } = useI18n()
+  const status = useAsync(() => api.answerCache(forest), [forest])
+  const [form, setForm] = useState(null)
+  const [clearing, setClearing] = useState(false)
+
+  useEffect(() => {
+    const s = status.data?.settings
+    if (s) setForm({ enabled: !!s.enabled, max_entries: s.max_entries,
+                     ttl_hours: s.ttl_hours ?? '' })
+  }, [status.data])
+
+  const [save, saving, saved] = useSave(async () => {
+    try {
+      await api.setAnswerCache({
+        forest,
+        enabled: form.enabled,
+        max_entries: Number(form.max_entries) || 1,
+        ttl_hours: form.ttl_hours === '' ? null : Number(form.ttl_hours),
+      })
+      status.reload()
+    } catch (err) { onError(err); throw err }
+  })
+
+  async function clear() {
+    setClearing(true)
+    try { await api.setAnswerCache({ forest, clear: true }); status.reload() }
+    catch (err) { onError(err) } finally { setClearing(false) }
+  }
+
+  const s = status.data?.settings
+  const stats = status.data?.stats
+  const dirty = !!s && !!form && (form.enabled !== !!s.enabled
+    || Number(form.max_entries) !== s.max_entries
+    || (form.ttl_hours === '' ? null : Number(form.ttl_hours)) !== (s.ttl_hours ?? null))
+
+  return (
+    <Card title={t('models.cache_title')} subtitle={t('models.cache_sub')} icon={Ask}
+          actions={s && (
+            <Badge tone={s.enabled ? 'accent' : 'default'}>
+              {t(s.enabled ? 'models.cache_on_badge' : 'models.cache_off_badge')}
+            </Badge>
+          )}>
+      {status.error ? <ErrorNote error={status.error} onRetry={status.reload} />
+        : !form ? <Skeleton rows={2} /> : (
+        <>
+          <form onSubmit={save} className="space-y-3">
+            <Toggle checked={form.enabled}
+                    onChange={(v) => setForm({ ...form, enabled: v })}
+                    label={t('models.cache_enabled')}
+                    hint={t('models.cache_enabled_hint')} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t('models.cache_bound')} type="number" min="1"
+                     value={form.max_entries}
+                     onChange={(e) => setForm({ ...form, max_entries: e.target.value })} />
+              <Field label={t('models.cache_ttl')} type="number" min="1"
+                     placeholder="—" value={form.ttl_hours}
+                     onChange={(e) => setForm({ ...form, ttl_hours: e.target.value })} />
+            </div>
+            <p className="text-[11.5px] text-text-3">{t('models.cache_ttl_hint')}</p>
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" className="btn btn-sm btn-danger"
+                      disabled={clearing || !stats?.held} onClick={clear}>
+                <Trash size={13} /> {t('models.cache_clear')}
+              </button>
+              <SaveButton busy={saving} done={saved} dirty={dirty}
+                          label={t('common.save')} />
+            </div>
+          </form>
+          {stats && (
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Metric label={t('models.cache_held')}
+                      value={`${stats.held} / ${s?.max_entries ?? '—'}`} />
+              <Metric label={t('models.cache_hits')} value={stats.hits}
+                      tone="accent" />
+              <Metric label={t('models.cache_misses')} value={stats.misses} />
+              <Metric label={t('models.cache_saved')}
+                      value={stats.avoided_usd != null
+                        ? `$${stats.avoided_usd.toFixed(4)}` : '—'} />
+            </div>
+          )}
+        </>
+      )}
+    </Card>
   )
 }
 
