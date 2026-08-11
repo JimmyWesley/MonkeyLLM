@@ -758,16 +758,19 @@ def build_app(
                 # finish — the ingest is the fact being recorded, and it has
                 # not happened yet.
                 return result
-            # A hit is a record served, not a call made (J.10.7): its stored
-            # trace, usage and cost describe the run that produced it, so
-            # nothing here may re-explain, re-bill, or clock a provider that
-            # did not run.
+            # A sweep hit is explained like any call — the retrieval that
+            # produced its trace is this call's own work (J.10.7 v0.35).
+            # Only a walk hit is a whole record and keeps its stored trace.
+            # Cost is attached only when a provider actually ran: a hit
+            # already carries the original run's cost as the record it is,
+            # and re-billing the recorded usage would spend it twice.
             hit = isinstance(result, dict) and result.get("cached")
             if isinstance(result, dict) and not hit:
                 sample["model"] = result.get("model_ms")
-            if name in EXPLAINED and not hit:
+            if name in EXPLAINED and not (hit and sample.get("cache_walk_hit")):
                 result = explain(result, vine, mark)
-                if name in COMPOSITES and isinstance(result, dict) and "error" not in result:
+                if name in COMPOSITES and isinstance(result, dict) \
+                        and "error" not in result and not hit:
                     billed = cost_of(result, registry.binding(forest, COMPOSITES[name][1]) or {})
                     if billed:
                         result["cost"] = billed
@@ -904,15 +907,24 @@ def build_app(
             cfg.update({key: stored[key] for key in CACHE_DEFAULTS if key in stored})
         return cfg
 
-    def consult_answer_store(sample, forest, vine, policy, binding, payload,
-                             question, k, budget):
-        """The J.10.7 lookup — reached only past the policy and the binding,
-        so nobody the forest refuses can be answered by its store, and an
-        entry is only ever shared inside one scope (the scope is in the key).
+    def whisper(vine, evidence) -> None:
+        """Part D's close for a hosted answer (J.10.7 v0.35): heat on the
+        winning trail, hit or miss alike, through the trails store — the
+        channel the engine's own session close uses, never a primitive."""
+        ids = [e for e in (evidence or []) if isinstance(e, str)]
+        if ids:
+            vine.trails.add_heat(ids)
 
-        Returns the served record on a hit. On a miss — or a `cache: false`
-        bypass, which skips the read and later replaces the entry — it arms
-        the deposit in `sample` and returns None.
+    def consult_walk_store(sample, forest, vine, policy, binding, payload,
+                           question, k, budget):
+        """The walk's J.10.7 lookup, unchanged from v0.33: HEAD in the key
+        (a walk cannot be re-walked without paying the model per hop), the
+        stored response served whole, and heat deposited through the trails
+        store — the one place the store still skips the forest entirely.
+
+        Reached only past the policy and the binding, so nobody the forest
+        refuses can be answered by its store. Returns the served record on a
+        hit; otherwise arms the deposit in `sample` and returns None.
         """
         cfg = cache_settings(forest)
         if sample is None or not cfg["enabled"]:
@@ -921,8 +933,10 @@ def build_app(
 
         t0 = time.perf_counter()
         head = _git(Path(vine.forest.root), "rev-parse", "HEAD")
+        # The walk's `k` is not capped by C.6c and keys as given.
         key = answer_store.build_key(
-            question=question, terms=derive_terms(question), k=k, hops=budget,
+            question=question, terms=derive_terms(question),
+            k=k, hops=budget,
             hybrid=bool(getattr(vine, "hybrid_locate", False)),
             binding=binding, policy=policy, head=head)
         store = answer_store.AnswerStore(Path(vine.forest.root))
@@ -932,6 +946,8 @@ def build_app(
         entry = None
         if payload.get("cache", True) is not False:
             entry = store.get(key, ttl_hours=cfg["ttl_hours"])
+            if entry is None:
+                store.count_miss()
         if entry is None:
             sample["cache"] = sample.get("cache", 0.0) \
                 + (time.perf_counter() - t0) * 1000
@@ -939,11 +955,9 @@ def build_app(
         result = json.loads(entry["response"])
         result["cached"] = True
         result["cached_at"] = entry["created"]
-        # A hit is still a use of the forest: the entry's trail is heated
-        # through the trails store — storage, never a primitive (J.6.1's
-        # warming rule in mirror) — so the Ranger keeps seeing the nodes
-        # behind the most-asked questions as the hot paths they are, and no
-        # tracer event claims a call ran when none did.
+        # No primitive ran and none may appear to have (v0.33): heat goes
+        # through the trails store, and the stored trace is served as the
+        # record it is.
         trail = [t for t in json.loads(entry["trail"] or "[]")
                  if isinstance(t, str)]
         if trail:
@@ -951,10 +965,79 @@ def build_app(
         store.touch(key, priced=bool(entry["priced"]), usd=entry["usd"])
         digest = key[:answer_store.DIGEST_CHARS]
         sample["cache_hit"] = digest
+        sample["cache_walk_hit"] = True
         sample["cache"] = sample.get("cache", 0.0) \
             + (time.perf_counter() - t0) * 1000
         log.info("answer served from the store: forest=%s key=%s", forest, digest)
         return result
+
+    def serve_from_reading(sample, forest, vine, policy, binding, payload,
+                           question, k, bundle):
+        """The sweep's J.10.7 check (v0.35): the key finds the entry, the
+        reading decides the model. The sweep already ran — this function
+        never touches a primitive, so a hit's trace and pheromone are the
+        retrieval's own.
+
+        Returns the assembled response on a hit — fresh retrieval fields,
+        stored model fields. Otherwise counts the miss (absent entry or a
+        reading that changed), arms the deposit in `sample`, and returns
+        None so the model runs on the bundle it was going to read anyway.
+        """
+        cfg = cache_settings(forest)
+        if sample is None or not cfg["enabled"]:
+            return None
+        from monkeyllm.harvest import clamp_k, derive_terms
+
+        t0 = time.perf_counter()
+        # The sweep's answer is shaped by the C.6c cap, so the capped value
+        # is what names it (J.10.7): a cap raised between restarts misses
+        # cleanly instead of serving five-banana answers under a ten-banana
+        # promise.
+        key = answer_store.build_key(
+            question=question, terms=derive_terms(question),
+            k=clamp_k(k), hops=None,
+            hybrid=bool(getattr(vine, "hybrid_locate", False)),
+            binding=binding, policy=policy, head=None)
+        fingerprint = answer_store.reading_fingerprint(bundle)
+        store = answer_store.AnswerStore(Path(vine.forest.root))
+        sample["cache_store"] = {"store": store, "key": key,
+                                 "question": question,
+                                 "fingerprint": fingerprint,
+                                 "bound": cfg["max_entries"]}
+        served = None
+        if payload.get("cache", True) is not False and bundle.get("results"):
+            entry = store.get(key, ttl_hours=cfg["ttl_hours"])
+            if entry is not None and entry["fingerprint"] == fingerprint:
+                stored = json.loads(entry["response"])
+                # Which half is which (J.10.7 v0.35): retrieval fields are
+                # this call's own; model fields are the record, as bought.
+                # No `model_ms`, so neither the trace nor the clocks claim
+                # a provider ran.
+                served = {
+                    "answer": stored.get("answer"),
+                    "model": stored.get("model"),
+                    "usage": stored.get("usage"),
+                    "cached": True,
+                    "cached_at": entry["created"],
+                    "evidence": [r.get("id") for r in bundle.get("results", [])],
+                    "sources": [{"id": r.get("id"), "title": r.get("title"),
+                                 "summary": r.get("summary"),
+                                 "type": r.get("type")}
+                                for r in bundle.get("results", [])],
+                    "harvest": bundle,
+                }
+                if stored.get("cost"):
+                    served["cost"] = stored["cost"]
+                store.touch(key, priced=bool(entry["priced"]), usd=entry["usd"])
+                digest = key[:answer_store.DIGEST_CHARS]
+                sample["cache_hit"] = digest
+                log.info("answer served from the store: forest=%s key=%s",
+                         forest, digest)
+            else:
+                store.count_miss()
+        sample["cache"] = sample.get("cache", 0.0) \
+            + (time.perf_counter() - t0) * 1000
+        return served
 
     def store_answer(sample: dict, result) -> None:
         """The miss path's deposit (J.10.7), armed by the consult above.
@@ -975,7 +1058,7 @@ def build_app(
             trail=[e for e in result.get("evidence") or []
                    if isinstance(e, str)],
             priced=bool(cost.get("priced")), usd=cost.get("usd"),
-            bound=stash["bound"])
+            bound=stash["bound"], fingerprint=stash.get("fingerprint"))
         sample["cache"] = sample.get("cache", 0.0) \
             + (time.perf_counter() - t0) * 1000
 
@@ -1010,15 +1093,34 @@ def build_app(
                 # you would have picked"; a number sets it.
                 hops = payload.get("hops")
                 budget = (6 if hops is True else int(hops)) if hops else None
-                served = consult_answer_store(
-                    sample, forest, vine, policy, binding, payload,
-                    question, k, budget)
-                if served is not None:
-                    return served
                 if budget:
-                    return inference.forage(
-                        scoped, question, binding, k=k, max_hops=budget)
-                return inference.answer(scoped, question, binding, k=k)
+                    served = consult_walk_store(
+                        sample, forest, vine, policy, binding, payload,
+                        question, k, budget)
+                    if served is None:
+                        served = inference.forage(
+                            scoped, question, binding, k=k, max_hops=budget)
+                        whisper(vine, served.get("evidence")
+                                if isinstance(served, dict) else None)
+                    return served
+                # The sweep's retrieval always runs — it is the cheap half,
+                # and its reading is what decides the hit (J.10.7 v0.35).
+                bundle = scoped.harvest(question, k=k)
+                if isinstance(bundle, dict) and "error" in bundle:
+                    return bundle
+                served = serve_from_reading(
+                    sample, forest, vine, policy, binding, payload,
+                    question, k, bundle)
+                if served is None:
+                    served = inference.answer(scoped, question, binding, k=k,
+                                              bundle=bundle)
+                # The whisper closes the hunt either way (v0.35): a hit and
+                # a miss heat identically, because the knowledge was used
+                # identically. (A walk hit deposits its stored trail in
+                # consult_walk_store instead.)
+                whisper(vine, served.get("evidence")
+                        if isinstance(served, dict) else None)
+                return served
             return inference.recurate(scoped, payload.get("id"), binding)
         except VineError as e:
             return e.to_dict()

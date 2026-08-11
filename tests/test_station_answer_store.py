@@ -111,14 +111,19 @@ def test_the_second_ask_makes_one_provider_call(station):
     assert "model" not in clocks, "no provider ran, so no header may claim one"
 
 
-def test_a_hit_serves_the_record_of_the_original_run(station):
-    """Trace, evidence and sources describe the run that produced the
-    answer — a record, not a bill (J.5.9's distinction one level down)."""
+def test_a_hit_serves_the_record_over_a_live_reading(station):
+    """v0.35: the model fields are the record; the retrieval fields are this
+    call's own. Same reading, so same evidence — but the trace is fresh and
+    no step in it may claim a provider ran."""
     client, _, _, _, head = station
     first = _ask(client, head).json()
     second = _ask(client, head).json()
-    assert second["trace"] == first["trace"]
+    assert second["answer"] == first["answer"]
+    assert second["model"] == first["model"]
     assert second["evidence"] == first["evidence"]
+    steps = [s["step"] for s in second["trace"]["steps"]]
+    assert steps, "the sweep's own trace, freshly recorded"
+    assert "model" not in steps, "no provider ran, so no step may claim one"
 
 
 def test_the_hit_is_audited_as_one(station):
@@ -137,21 +142,49 @@ def test_the_hit_is_audited_as_one(station):
 # -- the invalidation -------------------------------------------------------
 
 
-def test_a_write_invalidates_every_entry_before_it(station):
-    """HEAD is in the key: a `plant` between two asks makes it two provider
-    calls, with no invalidation code to be wrong."""
+def test_a_foreign_write_invalidates_nothing(station):
+    """v0.35's point: HEAD left the sweep's key. A `plant` in material the
+    question never reads leaves the reading unchanged — still one provider
+    call, still served."""
     client, _, _, calls, head = station
-    _ask(client, head)
+    first = _ask(client, head)
+    # Foreign means foreign to the READING: planting under a branch whose
+    # index the question retrieves would edit that index's body, which is a
+    # legitimate change of reading. `concepts/` is not in this evidence.
+    assert not any(e.startswith("concepts/") for e in first.json()["evidence"])
     r = client.post(
         f"/v1/forests/{FOREST}/plant",
-        json={"node": {"id": "notes/f37-cache-bust", "parent": "notes/_index",
-                       "type": "note", "title": "Cache bust",
-                       "summary": "Planted to move HEAD under the store."}},
+        json={"node": {"id": "concepts/f37-watering", "parent": "concepts/_index",
+                       "type": "concept", "title": "Watering schedule",
+                       "summary": "Weekly watering rota for the greenhouse "
+                                  "shelves; unrelated to any architecture."}},
+        headers=head)
+    assert r.status_code == 200, r.text
+    second = _ask(client, head)
+    assert len(calls) == 1, "a foreign write must not empty the store"
+    assert second.json()["cached"] is True
+
+
+def test_an_edit_in_the_reading_is_a_miss(station):
+    """A `graft` on a node the question reads changes the reading — there
+    may be new information, so the model runs and the entry is replaced."""
+    client, _, _, calls, head = station
+    first = _ask(client, head)
+    node = first.json()["evidence"][0]
+    r = client.post(
+        f"/v1/forests/{FOREST}/graft",
+        json={"id": node,
+              "patch": {"set_frontmatter": {
+                  "summary": "MixerLLM architecture notes, edited so the "
+                             "reading under the store changes."}}},
         headers=head)
     assert r.status_code == 200, r.text
     second = _ask(client, head)
     assert len(calls) == 2
     assert "cached" not in second.json()
+    third = _ask(client, head)
+    assert len(calls) == 2, "the fresh run replaced the entry"
+    assert third.json()["cached"] is True
 
 
 def test_the_key_is_the_closed_list(station):
@@ -165,6 +198,29 @@ def test_the_key_is_the_closed_list(station):
     assert len(calls) == 2, "case and whitespace are not"
     _ask(client, head, question=OTHER_QUESTION)
     assert len(calls) == 3, "another question is another key"
+
+
+def test_the_key_holds_the_effective_k(station, monkeypatch):
+    """F.38's host half: the C.6c cap shapes the sweep's answer, so the
+    capped value is what names it. Two asks past the cap are one call —
+    and a cap changed between them is a clean miss, never a five-banana
+    answer served under a seven-banana promise."""
+    client, _, _, calls, head = station
+    # Cap 3 rather than the default 5: the whisper of the first ask nudges
+    # heat, and on this small forest the top-5 boundary is a near-tie that
+    # can honestly reshuffle the SET (a real change of reading, v0.35). The
+    # top-3 is stable, and the property under test is the key, not the tie.
+    monkeypatch.setenv("MONKEYLLM_HARVEST_MAX_K", "3")
+
+    _ask(client, head, k=10)
+    second = _ask(client, head, k=50)
+    assert len(calls) == 1, "both clamp to 3, so both name one entry"
+    assert second.json()["cached"] is True
+
+    monkeypatch.setenv("MONKEYLLM_HARVEST_MAX_K", "2")
+    third = _ask(client, head, k=10)
+    assert len(calls) == 2, "a changed cap is a different effective k"
+    assert "cached" not in third.json()
 
 
 # -- the scope --------------------------------------------------------------
@@ -238,26 +294,32 @@ def test_cache_false_bypasses_and_refreshes(station):
 # -- the forest is still used -----------------------------------------------
 
 
-def test_a_hit_heats_the_trail_and_appends_no_trace(station):
-    """A hit deposits heat on the entry's trail through the trails store —
-    storage, never a primitive — so the Ranger keeps seeing the nodes
-    behind the most-asked questions as hot, and no tracer event claims a
-    call ran when none did."""
-    client, _, pool, _, head = station
-    first = _ask(client, head).json()
-    node = first["evidence"][0]
+def test_a_hit_runs_the_retrieval_and_the_whisper_closes_both(station):
+    """v0.35: a sweep hit is a live retrieval with only the bill skipped —
+    the tracer gains this call's own events — and the whisper of Part D
+    lands on the evidence for hit and miss alike, so the Ranger reads the
+    deployment's questions as the heat they are."""
+    client, _, pool, calls, head = station
+    first = _ask(client, head, question=OTHER_QUESTION).json()
 
-    def persistent_heat():
+    def heat_of(nid):
         body = client.get(f"/v1/forests/{FOREST}/trails", headers=head).json()
-        return {row["id"]: row["heat"] for row in body["heat"]}.get(node, 0.0)
+        return {row["id"]: row["heat"] for row in body["heat"]}.get(nid, 0.0)
 
-    heat_before = persistent_heat()
+    # Heat saturates at 1.0, so the rise is asserted on an evidence node
+    # with headroom — index nodes answer most questions and run hot.
+    node = next((i for i in first["evidence"] if heat_of(i) <= 0.8),
+                first["evidence"][0])
+    heat_after_miss = heat_of(node)
+    assert heat_after_miss > 0, "a bought answer whispers too"
     events_before = len(pool.get(FOREST).tracer.events)
 
-    _ask(client, head)
-    assert len(pool.get(FOREST).tracer.events) == events_before, \
-        "a served record must not forge engine activity"
-    assert persistent_heat() > heat_before
+    second = _ask(client, head, question=OTHER_QUESTION)
+    assert second.json()["cached"] is True and len(calls) == 1
+    assert len(pool.get(FOREST).tracer.events) > events_before, \
+        "the hit's sweep really ran"
+    assert heat_of(node) > heat_after_miss, \
+        "a served answer whispers exactly like a bought one"
 
 
 # -- the operator's surface -------------------------------------------------
@@ -317,6 +379,50 @@ def test_a_disabled_store_is_not_consulted(station):
     assert len(calls) == 2
     assert "cached" not in second.json()
     assert "cache" not in _clock_names(first) | _clock_names(second)
+
+
+def test_a_walk_answer_stays_pinned_to_head(station, monkeypatch):
+    """F.37's walk clause: a forager's path cannot be re-walked without
+    paying the model per hop, so walk entries keep HEAD in their key and
+    ANY commit — related to the question or not — invalidates them."""
+    from monkeyllm_station import inference
+
+    turns = []
+
+    def scripted(binding, **_kw):
+        script = iter([
+            '{"tool": "look", "args": {"id": "concepts/rag"}}',
+            '{"tool": "answer", "args": {"text": "walked answer", '
+            '"answer_nodes": ["concepts/rag"]}}',
+        ])
+
+        def chat(messages):
+            turns.append(messages)
+            return next(script)
+        return chat, "scripted-model"
+
+    monkeypatch.setattr(inference, "chat_from_binding", scripted)
+    client, _, _, _, head = station
+
+    first = _ask(client, head, hops=2)
+    assert first.json()["answer"] == "walked answer"
+    assert len(turns) == 2
+
+    second = _ask(client, head, hops=2)
+    assert len(turns) == 2, "a walk hit pays no model turn"
+    assert second.json()["cached"] is True
+
+    r = client.post(
+        f"/v1/forests/{FOREST}/plant",
+        json={"node": {"id": "notes/f37-walk-bust", "parent": "notes/_index",
+                       "type": "note", "title": "Walk bust",
+                       "summary": "Planted only to move HEAD: any commit "
+                                  "unpins a stored walk."}},
+        headers=head)
+    assert r.status_code == 200, r.text
+    third = _ask(client, head, hops=2)
+    assert len(turns) == 4, "the walk is bought again on a moved HEAD"
+    assert "cached" not in third.json()
 
 
 def test_the_admin_surface_needs_admin_on_that_forest(station):

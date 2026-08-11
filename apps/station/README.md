@@ -112,16 +112,24 @@ uses. Failures are the spec's error envelope mapped onto HTTP codes.
 
 ### The answer store (J.10.7)
 
-`answer` is fronted by a per-forest cache of answers already bought. A
-repeat of a question — same normalised question, effective terms, `k`, hops
-budget, entry-search mode, resolved binding, caller scope and forest HEAD —
-is served from the store without a provider round trip. A hit says so on
-every surface: the body carries `cached: true` and the time of the original
-run (`cached_at`), the `Server-Timing` header carries `cache` and no
+`answer` is fronted by a per-forest cache of answers already bought,
+governed by two hashes with two jobs (v0.35). The first — normalised
+question, effective terms, effective `k`, entry-search mode, resolved
+binding, caller scope — finds the entry. The second is the **reading
+fingerprint**: the sweep's retrieval runs on every ask (it is the cheap
+half), and the stored reply is served only when the material the model
+would read is the material it already answered. Invalidation is therefore
+exact, not indiscriminate: an edit to a node the question reads is a
+miss; a write anywhere else invalidates nothing; there is no staleness
+window to tune. (A `hops` walk cannot be re-run without paying the model,
+so walk entries are pinned to the forest's HEAD instead — any commit
+invalidates them.) A hit says so on every surface: the body carries
+`cached: true` and the time of the original run (`cached_at`) over fresh
+retrieval fields, the `Server-Timing` header carries `cache` and no
 `model`, and the audit row is marked as served from the store with the
-entry's key digest. Any write to the forest moves HEAD and thereby
-invalidates every entry made before it — there is no staleness window to
-tune.
+entry's key digest. Hit or miss, the answer's evidence receives the
+Part D whisper, so the pheromone map keeps reading the deployment's
+questions as the heat they are.
 
 Pass `"cache": false` to skip the read and buy a fresh run; the fresh
 result **replaces** the stored entry, which is how with-and-without is

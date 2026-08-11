@@ -11,15 +11,16 @@ snippets and the trail — so the caller's LLM decides the next steps.
 
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 
 from monkeyllm.canopy import rrf_fuse
-from monkeyllm.errors import VineError
+from monkeyllm.errors import E_SCHEMA, VineError
 from monkeyllm.tokens import shrink_list_to_budget
 
 BUDGET_HARVEST = 4000
-HARVEST_MAX_K = 5
+DEFAULT_HARVEST_MAX_K = 5
 MAX_TERMS = 8
 MAX_SECTIONS_PER_NODE = 2
 MAX_CONTENT_TOKENS_PER_NODE = 1200
@@ -54,7 +55,15 @@ def _refined_matches(vine, node_id: str, terms: list[str]) -> list[dict]:
     A common term ("experiment") matches every section and drowns the rare
     one ("1045") under the per-node match cap; scarcity ordering puts the
     most specific evidence on top.
+
+    Never for an index node (v0.35): sniff resolves an index id to its
+    whole subtree, so "refining" one silently grepped the forest under it —
+    children's snippets attributed to the index, picked by heat rank and
+    therefore different on every read. The caller falls back to the global
+    sniff's matches, which are found inside the node's own body.
     """
+    if node_id == "_index" or node_id.endswith("/_index"):
+        return []
     per_term = []
     for t in terms:
         try:
@@ -100,8 +109,36 @@ def _content_for(vine, node_id: str, matches: list[dict]) -> list[dict]:
     return out
 
 
+def harvest_max_k() -> int:
+    """The C.6c cap: the deployment's number, not the caller's.
+
+    Read per call so a Station and its tests see the environment they run
+    under; garbage is refused, never rounded — a cap silently corrected is
+    a bundle sized by a typo.
+    """
+    raw = os.environ.get("MONKEYLLM_HARVEST_MAX_K")
+    if raw is None or not raw.strip():
+        return DEFAULT_HARVEST_MAX_K
+    try:
+        cap = int(raw.strip())
+    except ValueError:
+        cap = 0
+    if cap < 1:
+        raise VineError(
+            E_SCHEMA,
+            f"MONKEYLLM_HARVEST_MAX_K must be an integer >= 1, got {raw!r}",
+            hint="Unset it to keep the default cap of "
+                 f"{DEFAULT_HARVEST_MAX_K}.")
+    return cap
+
+
+def clamp_k(k: int) -> int:
+    """The effective `k` of a sweep — what J.10.7 keys an answer under."""
+    return min(max(1, int(k)), harvest_max_k())
+
+
 def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3) -> dict:
-    k = min(max(1, k), HARVEST_MAX_K)
+    k = clamp_k(k)
     loc = vine.locate(query, k=k * 2)
     terms = terms or derive_terms(query)
     sn = vine.sniff(terms, k=k * 2) if terms else {"results": []}

@@ -3,7 +3,11 @@
 
 """Harvest (spec C.6c): zero-LLM retrieval returns bananas + exact snippets."""
 
-from monkeyllm.harvest import BUDGET_HARVEST, derive_terms, harvest
+import pytest
+
+from monkeyllm.errors import VineError
+from monkeyllm.harvest import (BUDGET_HARVEST, clamp_k, derive_terms, harvest,
+                               harvest_max_k)
 from monkeyllm.tokens import estimate_payload_tokens
 
 
@@ -59,6 +63,37 @@ class TestHarvest:
     def test_k_is_capped(self, vine_ro):
         out = harvest(vine_ro, "sales", k=50)
         assert len(out["results"]) <= 5
+
+    def test_cap_from_env_wins(self, vine_ro, monkeypatch):
+        monkeypatch.setenv("MONKEYLLM_HARVEST_MAX_K", "1")
+        out = harvest(vine_ro, "experiment run compression sales project", k=50)
+        assert len(out["results"]) == 1
+
+    def test_unset_env_keeps_the_old_cap(self, vine_ro, monkeypatch):
+        monkeypatch.delenv("MONKEYLLM_HARVEST_MAX_K", raising=False)
+        out = harvest(vine_ro, "sales", k=50)
+        assert len(out["results"]) <= 5
+
+    def test_raised_cap_still_respects_the_budget(self, vine_ro, monkeypatch):
+        monkeypatch.setenv("MONKEYLLM_HARVEST_MAX_K", "12")
+        out = harvest(vine_ro, "experiment run compression sales project", k=12)
+        assert estimate_payload_tokens(out) <= BUDGET_HARVEST
+        assert "truncated" in out
+
+    def test_clamp_is_the_effective_k(self, monkeypatch):
+        monkeypatch.setenv("MONKEYLLM_HARVEST_MAX_K", "8")
+        assert clamp_k(50) == 8
+        assert clamp_k(3) == 3
+        assert clamp_k(0) == 1
+        monkeypatch.delenv("MONKEYLLM_HARVEST_MAX_K")
+        assert clamp_k(50) == 5
+
+    @pytest.mark.parametrize("bad", ["0", "-3", "banana", "5.5"])
+    def test_garbage_cap_is_refused_never_rounded(self, bad, monkeypatch):
+        monkeypatch.setenv("MONKEYLLM_HARVEST_MAX_K", bad)
+        with pytest.raises(VineError) as exc:
+            harvest_max_k()
+        assert "MONKEYLLM_HARVEST_MAX_K" in str(exc.value)
 
     def test_mcp_server_exposes_harvest(self, forest_ro):
         from monkeyllm.server import build_server

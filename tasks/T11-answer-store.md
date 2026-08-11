@@ -7,7 +7,16 @@ heat-on-hit via `Trails.add_heat`, audit marking + digest, `Server-Timing`
 `/v1/admin/cache`, Studio Ask toggle + cached badge + Models card, locales
 en/es/pt; F.37 suite green except the near-tier clause. Step 8 — the near
 tier — remains.)
-spec: v0.33 (J.10.7, plus the J.10.6 `cache` clock, the J.4 audit rule and F.37)
+spec: v0.35 (J.10.7 two-hash revalidation + the C.6c.2 index-refinement fix;
+was v0.33 J.10.7 + the J.10.6 `cache` clock + the J.4 audit rule + F.37)
+
+2026-08-11, v0.35: HEAD left the sweep's key — the reading fingerprint
+(material as a set keyed by id, volatile fields excluded) now decides
+whether the model runs; the sweep's retrieval runs on every ask; the
+Part D whisper closes every hosted answer, hit and miss alike; walk
+entries stay HEAD-pinned. C.6c.2 fixed along the way: index nodes are no
+longer match-refined (the subtree grep destabilised the reading and
+mislabelled snippets). F.37 suite rewritten accordingly (18 tests).
 
 ## Goal
 

@@ -10,12 +10,16 @@ that shaped the call — so a hit is byte-for-byte the answer that was
 bought, and anything that could change the answer changes the key instead
 of going stale.
 
-The key is a closed list: normalised question, effective terms, `k`, the
-hops budget, the resolved binding, the caller's scope, and the forest's
-HEAD. HEAD is the invalidation — every write to a forest is a commit, so
-every entry made before a write misses after it, with no invalidation code
-to be wrong. The scope is in the key so an entry can never cross scopes:
-J.10.3's invariant survives the store by construction, not by a check.
+Two digests with two jobs (v0.35). The key — normalised question,
+effective terms, `k`, the hops budget, the resolved binding, the caller's
+scope — finds the entry; the **reading fingerprint** stored with it
+decides whether the model owes a fresh pass: the sweep runs its retrieval
+on every ask and serves the stored reply only when the material the model
+would read is the material it already answered. The walk cannot be
+re-walked without paying the model, so walk entries additionally carry
+the forest's HEAD in the key and every commit invalidates them. The scope
+is in the key so an entry can never cross scopes: J.10.3's invariant
+survives the store by construction, not by a check.
 
 The store lives in the forest's `_derived/` — the disposable layer, out of
 git, never a source of truth. A connection is opened per operation, so the
@@ -45,7 +49,8 @@ CREATE TABLE IF NOT EXISTS entries (
     key         TEXT PRIMARY KEY,
     question    TEXT NOT NULL,   -- as asked, for the operator reading the store
     response    TEXT NOT NULL,   -- the whole composite response, as served
-    trail       TEXT NOT NULL,   -- JSON list of node ids: a hit still heats these
+    trail       TEXT NOT NULL,   -- JSON list of node ids: a WALK hit heats these
+    fingerprint TEXT,            -- the reading (v0.35); NULL for walk entries
     priced      INTEGER NOT NULL DEFAULT 0,
     usd         REAL,
     created     TEXT NOT NULL,
@@ -75,7 +80,7 @@ def normalize(question: str) -> str:
 
 
 def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
-              binding: dict, policy, head: str) -> str:
+              binding: dict, policy, head: str | None = None) -> str:
     """The closed list of J.10.7 — and nothing off it.
 
     Every component here can change the answer; nothing else may enter,
@@ -83,7 +88,9 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
     bought. The binding contributes what answers (provider, model, budget,
     reasoning) and never its credentials; the policy contributes the scope
     exactly as enforced (J.3), so an entry is shared across principals whose
-    scope is identical and unreachable across scopes.
+    scope is identical and unreachable across scopes. `head` is the walk's
+    pin (v0.35): a sweep passes None, because its freshness is decided by
+    the reading fingerprint rather than by the forest's clock.
     """
     material = json.dumps({
         "question": normalize(question),
@@ -107,6 +114,29 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
         "head": head,
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def reading_fingerprint(bundle: dict) -> str:
+    """The second digest of J.10.7 (v0.35): the reading, never the ranking.
+
+    Hashes what the model would actually read — the set of results keyed
+    by id, each contributing type, title, summary, matches and body
+    content, plus the truncation flag — and excludes everything volatile:
+    not score, not heat, not the serving order. Pheromone drifts on every
+    use and reorders near-ties (Part D); the order is the ranking's affair,
+    not the body's, and a store invalidated by its own hits would never
+    hold an entry. A result that enters or leaves the set is a change of
+    reading; a set that merely reshuffled is not.
+    """
+    material = sorted(
+        [[r.get("id"), r.get("type"), r.get("title"), r.get("summary"),
+          r.get("matches"), r.get("content")]
+         for r in (bundle.get("results") or [])],
+        key=lambda item: str(item[0]))
+    payload = json.dumps(
+        {"results": material, "truncated": bool(bundle.get("truncated"))},
+        sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def storable(result: dict) -> bool:
@@ -139,6 +169,14 @@ class AnswerStore:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(SCHEMA)
+        # The store is the disposable layer: a file from before the reading
+        # fingerprint (v0.35) is not migrated, it is bought again. Dropping
+        # it costs money, never truth — and never a wrong answer, which a
+        # column full of NULLs served as fingerprints could be.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(entries)")}
+        if "fingerprint" not in cols:
+            conn.execute("DROP TABLE entries")
+            conn.executescript(SCHEMA)
         return conn
 
     def _bump(self, conn: sqlite3.Connection, name: str, amount: float = 1.0) -> None:
@@ -150,10 +188,13 @@ class AnswerStore:
     # -- the read path ------------------------------------------------------
 
     def get(self, key: str, ttl_hours: float | None = None) -> dict | None:
-        """The entry this key names, or None — which is also a counted miss.
+        """The entry this key names, or None. Counting is the caller's:
+        whether an absent row or a stale reading is the miss depends on
+        which check failed (J.10.7 v0.35), and only the caller knows.
 
-        A TTL is hygiene, never correctness (the key already invalidates):
-        an entry past it is deleted on sight rather than served.
+        A TTL is hygiene, never correctness (the reading check and the
+        walk's HEAD already invalidate): an entry past it is deleted on
+        sight rather than served.
         """
         with closing(self._connect()) as conn:
             row = conn.execute("SELECT * FROM entries WHERE key = ?",
@@ -162,12 +203,16 @@ class AnswerStore:
                 born = datetime.fromisoformat(row["created"])
                 if _now() - born > timedelta(hours=float(ttl_hours)):
                     conn.execute("DELETE FROM entries WHERE key = ?", (key,))
+                    conn.commit()
                     row = None
-            if row is None:
-                self._bump(conn, "misses")
-                conn.commit()
-                return None
-            return dict(row)
+            return dict(row) if row is not None else None
+
+    def count_miss(self) -> None:
+        """One consulted lookup that did not serve — absent entry or a
+        reading that changed under it."""
+        with closing(self._connect()) as conn:
+            self._bump(conn, "misses")
+            conn.commit()
 
     def touch(self, key: str, *, priced: bool, usd: float | None) -> None:
         """A hit happened: the entry was served. The saving is counted only
@@ -186,18 +231,20 @@ class AnswerStore:
     # -- the write path -----------------------------------------------------
 
     def put(self, key: str, *, question: str, response: str, trail: list,
-            priced: bool, usd: float | None, bound: int) -> None:
-        """Store (or replace — `cache: false` refreshes) and hold the bound:
-        the store is finite and evicts oldest-served-first, out loud via
-        `stats()` rather than by silently growing."""
+            priced: bool, usd: float | None, bound: int,
+            fingerprint: str | None = None) -> None:
+        """Store (or replace — `cache: false` and a changed reading both
+        refresh) and hold the bound: the store is finite and evicts
+        oldest-served-first, out loud via `stats()` rather than by silently
+        growing."""
         now = _now().isoformat()
         with closing(self._connect()) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO entries "
-                "(key, question, response, trail, priced, usd, created, "
-                " last_served, served) VALUES (?,?,?,?,?,?,?,?,0)",
-                (key, question, response, json.dumps(trail), int(bool(priced)),
-                 usd, now, now))
+                "(key, question, response, trail, fingerprint, priced, usd, "
+                " created, last_served, served) VALUES (?,?,?,?,?,?,?,?,?,0)",
+                (key, question, response, json.dumps(trail), fingerprint,
+                 int(bool(priced)), usd, now, now))
             if bound and bound > 0:
                 conn.execute(
                     "DELETE FROM entries WHERE key NOT IN "

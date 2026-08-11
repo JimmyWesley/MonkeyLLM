@@ -30,7 +30,8 @@ def main() -> int:
     ap.add_argument("query", help="free-text question or search phrase")
     ap.add_argument("--forest", default=str(REPO / "forests" / "forest-fixture"))
     ap.add_argument("--terms", help="comma-separated exact terms (default: derived from the query)")
-    ap.add_argument("--k", type=int, default=3, help="max bananas returned (cap 5)")
+    ap.add_argument("--k", type=int, default=3,
+                    help="max bananas returned (cap: MONKEYLLM_HARVEST_MAX_K, default 5)")
     args = ap.parse_args()
 
     vine = Vine(Path(args.forest), writable=False, session="harvest")

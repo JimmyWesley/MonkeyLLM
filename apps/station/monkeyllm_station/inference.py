@@ -154,14 +154,19 @@ def probe(endpoint: str, api_key: str | None) -> dict:
     return {"ok": True, "models": models[:1000], "count": len(models)}
 
 
-def answer(scoped_vine, question: str, binding: dict, k: int = 3) -> dict:
+def answer(scoped_vine, question: str, binding: dict, k: int = 3,
+           bundle: dict | None = None) -> dict:
     """Retrieve inside the principal's scope, then let the bound model read.
 
     The retrieval half is deterministic and scoped; the model only ever sees
     material the caller was already allowed to read, so the answering model
-    cannot become a way around the policy.
+    cannot become a way around the policy. The host may hand in the sweep's
+    `bundle` it already ran — the answer store's reading check (J.10.7,
+    v0.35) needs the retrieval before it knows whether the model runs, and
+    running the sweep twice would double-deposit its pheromone.
     """
-    bundle = scoped_vine.harvest(question, k=k)
+    if bundle is None:
+        bundle = scoped_vine.harvest(question, k=k)
     if isinstance(bundle, dict) and "error" in bundle:
         return bundle
 
