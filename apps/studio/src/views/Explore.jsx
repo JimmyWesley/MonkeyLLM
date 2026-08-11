@@ -87,7 +87,8 @@ export default function Explore({ forest, grant, node, setNode }) {
       </div>
 
       {mode === 'graph' && (
-        <ForestGraph data={map.data} busy={map.busy} error={map.error}
+        <ForestGraph forest={forest} data={map.data} busy={map.busy}
+                     error={map.error}
                      onReload={map.reload} selected={node} onSelect={setNode}
                      onOpen={(id) => { setNode(id); setMode('files') }} />
       )}

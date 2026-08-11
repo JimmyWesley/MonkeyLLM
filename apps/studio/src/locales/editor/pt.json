@@ -4,6 +4,8 @@
   "editor.code": "Bloco de código",
   "editor.commit": "Commitar via graft",
   "editor.committed": "Commitado como {commit}",
+  "editor.dictate": "Ditar",
+  "editor.dictate_stop": "Parar de ditar",
   "editor.discard": "Descartar",
   "editor.italic": "Itálico",
   "editor.list": "Lista com marcadores",

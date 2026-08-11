@@ -102,6 +102,13 @@ export const Trash = (p) => (
   <S {...p}><path d="M4.5 6.5h15M9.5 6.5V5A1.5 1.5 0 0111 3.5h2A1.5 1.5 0 0114.5 5v1.5" /><path d="M6.5 6.5l.8 12A2 2 0 009.3 20.5h5.4a2 2 0 002-1.9l.8-12" /></S>
 )
 export const Play = (p) => <S {...p}><path d="M7.5 4.8l11 7.2-11 7.2z" /></S>
+export const Pause = (p) => <S {...p}><path d="M8.5 5v14M15.5 5v14" /></S>
+export const Sliders = (p) => (
+  <S {...p}><path d="M4 8h9M17.5 8H20M4 16h2.5M11 16h9" /><circle cx="15" cy="8" r="2.2" /><circle cx="8.5" cy="16" r="2.2" /></S>
+)
+export const Mic = (p) => (
+  <S {...p}><rect x="9.2" y="3.5" width="5.6" height="10" rx="2.8" /><path d="M5.5 11.5a6.5 6.5 0 0013 0M12 18v2.5" /></S>
+)
 export const Key = (p) => (
   <S {...p}><circle cx="8" cy="14" r="4.5" /><path d="M11.3 10.8L20 2.5M17 5.5l2.5 2.5M15 7.5l2.5 2.5" /></S>
 )

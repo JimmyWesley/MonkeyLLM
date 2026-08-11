@@ -22,7 +22,7 @@
  * commit, and a commit is not a keystroke: the exact operations appear
  * beside the editor, in the shape the API will receive them.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -35,7 +35,7 @@ import {
   Badge, Card, ErrorNote, Field, Note, Skeleton,
 } from '../design/ui.jsx'
 import { Highlighted } from '../design/highlight.jsx'
-import { Check, ChevronLeft, Code2, Pencil, Save, Undo } from '../design/icons.jsx'
+import { Check, ChevronLeft, Code2, Mic, Pencil, Save, Undo } from '../design/icons.jsx'
 import { has, useAsync } from './shared.jsx'
 
 /* Markdown is what the forest stores; the editor speaks HTML. The pair is
@@ -309,6 +309,76 @@ function Toolbar({ editor }) {
             () => editor.chain().focus().toggleBlockquote().run(), t('editor.quote'))}
       {item('</>', editor.isActive('codeBlock'),
             () => editor.chain().focus().toggleCodeBlock().run(), t('editor.code'))}
+      <span className="mx-0.5 h-4 w-px bg-line" aria-hidden="true" />
+      <Dictation editor={editor} />
     </div>
+  )
+}
+
+/* Dictation is an input method, nothing more: the words land in the editor
+ * exactly as typing would land them, and the write still leaves as the one
+ * `graft` the operator reviews (J.5.4). Recognition runs in the browser's
+ * own engine — no audio touches the Station — and the button only exists
+ * where the browser offers the API, which is what makes a phone the place
+ * a note gets spoken instead of typed. */
+function Dictation({ editor }) {
+  const { t, lang } = useI18n()
+  const [listening, setListening] = useState(false)
+  const rec = useRef(null)
+  const wanted = useRef(false)
+
+  const Engine = typeof window !== 'undefined'
+    && (window.SpeechRecognition || window.webkitSpeechRecognition)
+
+  useEffect(() => () => {
+    wanted.current = false
+    rec.current?.stop()
+  }, [])
+
+  if (!Engine || !editor) return null
+
+  const SPOKEN = { en: 'en-US', pt: 'pt-BR', es: 'es-ES' }
+
+  function stop() {
+    wanted.current = false
+    setListening(false)
+    rec.current?.stop()
+  }
+  function start() {
+    const engine = new Engine()
+    engine.lang = SPOKEN[lang] || 'en-US'
+    engine.continuous = true
+    engine.interimResults = false
+    engine.onresult = (ev) => {
+      let text = ''
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) text += ev.results[i][0].transcript
+      }
+      text = text.trim()
+      if (text) editor.chain().focus().insertContent(`${text} `).run()
+    }
+    // Browsers end recognition on their own after a silence; while the
+    // operator still wants to talk, a quiet pause is not a stop.
+    engine.onend = () => {
+      if (wanted.current) { try { engine.start() } catch { stop() } }
+    }
+    engine.onerror = (ev) => {
+      if (ev.error !== 'no-speech') stop()
+    }
+    rec.current = engine
+    wanted.current = true
+    setListening(true)
+    try { engine.start() } catch { stop() }
+  }
+
+  return (
+    <button type="button" aria-pressed={listening}
+            title={listening ? t('editor.dictate_stop') : t('editor.dictate')}
+            onClick={() => (listening ? stop() : start())}
+            className={`rounded-md px-2 py-1 transition ${listening
+              ? 'animate-pulse bg-accent-soft text-accent'
+              : 'text-text-3 hover:bg-surface-2'}`}>
+      <Mic size={14} />
+    </button>
   )
 }

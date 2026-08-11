@@ -1576,7 +1576,7 @@ def build_app(
         rows = [
             row for row in conn.execute(
                 "SELECT id, kind, type, title, summary, tags, parent, coverage, "
-                "body_tokens, payload, payload_type, updated "
+                "body_tokens, payload, payload_type, created, updated "
                 "FROM nodes ORDER BY id")
             if in_region(row["id"])
         ]
@@ -1622,7 +1622,9 @@ def build_app(
                 "parent": row["parent"] if row["parent"] in keep else None,
                 "coverage": row["coverage"], "body_tokens": row["body_tokens"],
                 "payload": row["payload"], "payload_type": row["payload_type"],
-                "updated": row["updated"],
+                # Passport dates, day precision (J.11 v0.38): `created` is
+                # what lets a console replay the forest as it grew.
+                "created": row["created"], "updated": row["updated"],
                 # `nodes.stale` is deliberately NOT here. In the engine it
                 # means "this node's vector needs re-embedding after a write"
                 # (Part K bookkeeping), not "this node is unhealthy" — and a

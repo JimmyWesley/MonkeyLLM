@@ -91,6 +91,19 @@ def test_graph_returns_nodes_edges_and_the_forest_dialect(station):
     assert node["type"] == "branch" and node["title"]
 
 
+def test_graph_carries_passport_dates(station):
+    """A replay of the forest's growth is a shape question (J.11 v0.38):
+    `created` rides along with `updated`, at the passport's own day
+    precision, so a console can show the region as it grew without a
+    second call."""
+    client, registry = station
+    body = client.get(f"/v1/forests/{FOREST}/graph",
+                      headers=_key(registry)).json()
+    assert all("created" in n and "updated" in n for n in body["nodes"])
+    node = next(n for n in body["nodes"] if n["id"] == "_index")
+    assert len(node["created"]) == 10 and node["created"][4] == "-"
+
+
 def test_graph_carries_link_confidence(station):
     """A proposal is not an assertion (J.5.4). The channel that separates
     them has to exist in the payload, or a console cannot draw it."""

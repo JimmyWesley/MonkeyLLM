@@ -312,6 +312,13 @@
   }
   .graph-canvas[data-dragging='true'] { @apply cursor-grabbing; }
 
+  /* The view panel's sliders (J.5.4 v0.38). `accent-color` keeps the native
+     control and only paints it, so both themes get it for free. */
+  .graph-range {
+    @apply h-4 cursor-pointer;
+    accent-color: rgb(var(--accent));
+  }
+
   .tree-row {
     @apply flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left
            text-[12.5px] text-text-2 transition hover:bg-surface-2;

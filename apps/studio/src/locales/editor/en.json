@@ -4,6 +4,8 @@
   "editor.code": "Code block",
   "editor.commit": "Commit via graft",
   "editor.committed": "Committed as {commit}",
+  "editor.dictate": "Dictate",
+  "editor.dictate_stop": "Stop dictating",
   "editor.discard": "Discard",
   "editor.italic": "Italic",
   "editor.list": "Bulleted list",
