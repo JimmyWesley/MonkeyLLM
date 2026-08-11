@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.33.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.35.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -79,6 +79,10 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 - **Token budgets** with always-explicit truncation (`truncated: true`):
   look 500, move 600, locate/scan/sniff 800. Never cut silently.
+  `harvest`'s item cap is `MONKEYLLM_HARVEST_MAX_K` (default 5, garbage
+  refused as `E_SCHEMA`, spec C.6c v0.34); its 4000-token budget is the
+  outer wall regardless of cap, and the `answer` cache keys the sweep by
+  the *effective* (capped) `k` (J.10.7).
 - **`locate` is BM25-only by default** (Phase 0, zero embeddings). It becomes
   hybrid (RRF vector+BM25) only when a Canopy index AND an embedder are both
   present — any other combination keeps the BM25-only contract intact.
@@ -137,20 +141,25 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   `GET .../jobs[/{id}]` must never touch a forest (no lane, no trace, no
   pheromone), a restart forgets records but never work, and Studio carries
   the running job in the address as `?job=`.
-- **The answer already bought is served, said, and still heats the forest
-  (spec J.10.7, v0.33 — T11)**: the host caches `answer` and
-  nothing else, per forest, in `_derived/cache/`. The key is a closed list —
-  normalised question, effective terms, `k`, hops, resolved binding, caller
-  scope, forest HEAD — so HEAD is the invalidation and TTL is hygiene only;
-  an entry never crosses scopes. Empty-evidence, errored, truncated or
-  writing runs never enter. A hit says `cached: true`, carries
-  `Server-Timing: cache` with no `model`, audits with the entry digest
-  (cost recorded as avoided, never re-spent), and deposits heat on the
-  stored trail via `Trails.add_heat` — storage, never a primitive (J.6.1's
-  warming rule in mirror). The near-question tier exists only when Canopy
-  AND an embedder are present, is off by default, and names the stored
-  question it answered. `cache: false` skips the read and replaces the
-  entry.
+- **Two hashes: the question finds the entry, the reading decides the
+  model (spec J.10.7, v0.35 — T11)**: the host caches `answer` and nothing
+  else, per forest, in `_derived/cache/`. The sweep's retrieval runs on
+  EVERY ask (it is the cheap half); its key — normalised question,
+  effective terms, effective `k`, hybrid, binding, scope, **no HEAD** —
+  finds the entry, and the **reading fingerprint** (material as a set
+  keyed by id: type/title/summary/matches/content + truncated; never
+  score, heat or order) decides: equal → serve the stored reply with fresh
+  retrieval fields; different → the model runs and the entry is replaced.
+  The walk keeps HEAD in its key and is served whole (it cannot be
+  re-walked without paying per hop). The **whisper closes every hosted
+  answer** — heat on the evidence via `Trails.add_heat`, hit and miss
+  alike. Empty-evidence, errored, truncated or writing runs never enter;
+  an entry never crosses scopes; a hit says `cached: true`, carries
+  `Server-Timing: cache` with no `model`, audits with the entry digest,
+  and never re-bills the recorded cost. `cache: false` skips the serve
+  and replaces. C.6c.2: index nodes are never match-refined — sniff
+  resolves an index id to its subtree, which mislabelled children's
+  snippets and destabilised the reading.
 - **The address is where the console is (spec J.5.8, v0.30)**:
   `/f/{forest}/{console}` with the selection in the query (`node`, `mode`,
   `dataset`, `table`, `tab`). Studio keeps **no second copy** of it — `App`
