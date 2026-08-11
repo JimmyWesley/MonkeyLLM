@@ -31,6 +31,7 @@
   "graph.reorganize": "Reorganize",
   "graph.reset_view": "Reset the view settings",
   "graph.search_ph": "Filter nodes…",
+  "graph.shortcuts": "Shortcuts",
   "graph.structure": "Structure",
   "graph.text_threshold": "Text fade threshold",
   "graph.tip_stats": "{degree} trails · heat {heat}",

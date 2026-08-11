@@ -283,7 +283,8 @@ function seed(sim, w, h) {
  * quiet until asked for. Presentation only — no contract fixes these. */
 const DEFAULTS = {
   query: '',
-  orphans: true, heatOn: true, proposals: false, structure: true,
+  orphans: true, heatOn: true, proposals: false, shortcuts: true,
+  structure: true,
   hiddenTypes: [], hiddenGroups: [],
   colorBy: 'branch', groupDepth: 3,
   arrows: true, labels: 0.5, nodeScale: 1.5, linkWidth: 0.7,
@@ -410,11 +411,26 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     const hiddenT = new Set(p.hiddenTypes)
     const hiddenG = new Set(p.hiddenGroups)
     const words = p.query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    // The quick search keeps what matches AND what stands one trail away:
+    // a hit with its neighbourhood is an answer, a hit alone is a dot.
+    let keep = null
+    if (words.length) {
+      keep = new Set()
+      for (const n of s.nodes) {
+        n.matched = words.every((word) => n.hay.includes(word))
+        if (n.matched) keep.add(n.id)
+      }
+      for (const id of [...keep]) {
+        for (const nb of neighboursRef.current.get(id) || []) keep.add(nb)
+      }
+    } else {
+      for (const n of s.nodes) n.matched = false
+    }
     for (const n of s.nodes) {
       n.on = !hiddenT.has(n.type)
         && !hiddenG.has(groupOf(n.id, p.groupDepth))
         && (p.orphans || n.degree > 0)
-        && words.every((word) => n.hay.includes(word))
+        && (keep === null || keep.has(n.id))
         && n.bornRank < s.alive
     }
     for (const spring of s.springs) {
@@ -572,7 +588,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   useEffect(() => { needsDraw.current = true },
             [settings.arrows, settings.labels, settings.nodeScale,
              settings.linkWidth, settings.heatOn, settings.proposals,
-             settings.structure])
+             settings.shortcuts, settings.structure])
 
   /* -- replay ------------------------------------------------------------ */
 
@@ -663,8 +679,12 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     ctx.scale(v.k, v.k)
     const k = v.k
 
+    // Only the hand dims the map: hovering spotlights a neighbourhood, but
+    // a selection restored from the address (J.5.8) keeps its ring and
+    // nothing else — a reload must open in full colour, not half-faded at
+    // a node somebody chose yesterday.
     const { hover: hov, selected: sel } = focusRef.current
-    const focus = hov || sel
+    const focus = hov
     const near = focus
       ? new Set([focus, ...(neighboursRef.current.get(focus) || [])]) : null
 
@@ -694,6 +714,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
       const proposal = !e.structure && !shortcut && e.confidence < 1
       if (e.structure && !p.structure) continue
       if (proposal && !p.proposals) continue
+      if (shortcut && !p.shortcuts) continue
       const kind = e.structure ? 'structure'
         : shortcut ? 'shortcut' : proposal ? 'proposal' : 'trail'
       const lit = !near || (near.has(e.src) && near.has(e.dst))
@@ -782,7 +803,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
         // Labels arrive with zoom (the display slider says how eagerly) and
         // hubs earn theirs a little sooner; focus is always named.
         const kNeeded = 0.35 + p.labels * 2.4 - Math.min(0.5, n.degree * 0.03)
-        const a = focus && near.has(n.id)
+        const a = (n.id === sel || n.matched || (focus && near.has(n.id)))
           ? 1 : Math.max(0, Math.min(1, (k - kNeeded) * 3))
         if (a > 0.02) {
           ctx.globalAlpha = a * 0.9
@@ -964,7 +985,9 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     if (from && !pinched.current
         && Math.hypot(ev.clientX - from.x, ev.clientY - from.y) <= 4) {
       const n = drag.current || nodeAt(at(ev))
-      if (n) onSelect?.(n.id)
+      // Clicking the forest floor clears the selection: the way back to
+      // full colour must be as easy as the way in.
+      onSelect?.(n ? n.id : null)
     }
     if (drag.current) { drag.current.fx = null; drag.current.fy = null }
     drag.current = null
@@ -1032,6 +1055,13 @@ export default function ForestGraph({ forest, data, selected, onSelect,
                 onClick={() => (replay.on ? exitReplay() : enterReplay())}>
           <Play size={12} /> {t('graph.live')}
         </button>
+        <label className="relative min-w-0 max-w-xs flex-1">
+          <Search size={14} className="pointer-events-none absolute left-2.5
+                                       top-1/2 -translate-y-1/2 text-text-3" />
+          <input className="field h-8 pl-8 text-[12.5px]" value={settings.query}
+                 placeholder={t('graph.search_ph')}
+                 onChange={(ev) => set({ query: ev.target.value })} />
+        </label>
         <span className="flex-1" />
         <button type="button" className="btn btn-sm btn-ghost"
                 onClick={() => {
@@ -1167,14 +1197,7 @@ function ViewPanel({ t, settings, set, types, typeCounts, groups, palette,
 
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
         <Section title={t('graph.filters')} defaultOpen>
-          <label className="relative block">
-            <Search size={14} className="pointer-events-none absolute left-2.5
-                                         top-1/2 -translate-y-1/2 text-text-3" />
-            <input className="field h-8 pl-8 text-[12.5px]" value={settings.query}
-                   placeholder={t('graph.search_ph')}
-                   onChange={(ev) => set({ query: ev.target.value })} />
-          </label>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {types.map((type) => (
               <button key={type} type="button"
                       onClick={() => toggleIn('hiddenTypes', type)}
@@ -1194,6 +1217,8 @@ function ViewPanel({ t, settings, set, types, typeCounts, groups, palette,
                     onChange={(on) => set({ heatOn: on })} />
             <Toggle checked={settings.proposals} label={t('graph.proposals')}
                     onChange={(on) => set({ proposals: on })} />
+            <Toggle checked={settings.shortcuts} label={t('graph.shortcuts')}
+                    onChange={(on) => set({ shortcuts: on })} />
             <Toggle checked={settings.structure} label={t('graph.structure')}
                     onChange={(on) => set({ structure: on })} />
           </div>

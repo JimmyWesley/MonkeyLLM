@@ -31,6 +31,7 @@
   "graph.reorganize": "Reorganizar",
   "graph.reset_view": "Restablecer la vista predeterminada",
   "graph.search_ph": "Filtrar nodos…",
+  "graph.shortcuts": "Atajos",
   "graph.structure": "Estructura",
   "graph.text_threshold": "Umbral de visibilidad del texto",
   "graph.tip_stats": "{degree} senderos · calor {heat}",

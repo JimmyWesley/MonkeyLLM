@@ -31,6 +31,7 @@
   "graph.reorganize": "Reorganizar",
   "graph.reset_view": "Restaurar a visualização padrão",
   "graph.search_ph": "Filtrar nós…",
+  "graph.shortcuts": "Atalhos",
   "graph.structure": "Estrutura",
   "graph.text_threshold": "Limite de visibilidade do texto",
   "graph.tip_stats": "{degree} trilhas · calor {heat}",
