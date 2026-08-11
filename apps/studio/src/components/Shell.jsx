@@ -13,9 +13,10 @@ import { api, signOut } from '../api.js'
 import { hrefFor, linkTo } from '../router.js'
 import { useI18n, LANGUAGES } from '../i18n.jsx'
 import { useTheme } from '../theme.jsx'
-import { Badge, ErrorNote, Field, Modal } from '../design/ui.jsx'
+import { useDevMode } from '../devmode.jsx'
+import { Badge, ErrorNote, Field, Modal, Toggle } from '../design/ui.jsx'
 import {
-  CONSOLE_ICON, ChevronDown, Forest, Globe, LogOut, Moon, More, PanelLeft,
+  CONSOLE_ICON, ChevronDown, Code2, Forest, Globe, LogOut, Moon, More, PanelLeft,
   Plus, Star, Sun, X,
 } from '../design/icons.jsx'
 
@@ -457,6 +458,7 @@ export function NewForestModal({ open, onClose, onCreated }) {
 function Footer({ session, collapsed, onExpand }) {
   const { t, lang, setLang } = useI18n()
   const { resolved, setMode } = useTheme()
+  const { on: devMode, toggle: setDevMode } = useDevMode()
 
   if (collapsed) {
     // Same controls, one column wide. Nothing is dropped on the rail — a
@@ -475,6 +477,11 @@ function Footer({ session, collapsed, onExpand }) {
                 title={t(`theme.${resolved === 'dark' ? 'light' : 'dark'}`)}
                 onClick={() => setMode(resolved === 'dark' ? 'light' : 'dark')}>
           {resolved === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
+        <button className={`btn btn-sm btn-ghost !px-2 ${devMode ? 'text-accent' : ''}`}
+                aria-pressed={devMode} title={t('devmode.label')}
+                onClick={() => setDevMode(!devMode)}>
+          <Code2 size={15} />
         </button>
         <button className="btn btn-sm btn-ghost !px-2" title={`${t('lang.label')}: ${next.label}`}
                 onClick={() => setLang(next.code)}>
@@ -508,6 +515,9 @@ function Footer({ session, collapsed, onExpand }) {
           </button>
         ))}
       </div>
+
+      <Toggle checked={devMode} onChange={setDevMode}
+              label={t('devmode.label')} hint={t('devmode.hint')} />
 
       <label className="relative block">
         <Globe size={14} className="pointer-events-none absolute left-2.5 top-1/2

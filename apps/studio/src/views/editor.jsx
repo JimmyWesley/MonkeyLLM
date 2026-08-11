@@ -34,6 +34,7 @@ import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, ErrorNote, Field, Note, Skeleton,
 } from '../design/ui.jsx'
+import { Highlighted } from '../design/highlight.jsx'
 import { Check, ChevronLeft, Code2, Pencil, Save, Undo } from '../design/icons.jsx'
 import { has, useAsync } from './shared.jsx'
 
@@ -232,7 +233,9 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
         <Card title={t('editor.pending')} subtitle={t('editor.pending_hint')}
               icon={Save}>
           {dirty ? (
-            <pre className="source-view">{JSON.stringify(patch, null, 2)}</pre>
+            <pre className="source-view">
+              <Highlighted text={JSON.stringify(patch, null, 2)} lang="json" />
+            </pre>
           ) : (
             <p className="text-[12.5px] text-text-3">{t('common.no_changes')}</p>
           )}

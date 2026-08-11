@@ -23,6 +23,7 @@ import {
   Badge, Card, Code, CopyButton, Empty, ErrorNote, Modal, Note, Skeleton,
   Spinner, Table, Tabs, Td,
 } from '../design/ui.jsx'
+import { Highlighted } from '../design/highlight.jsx'
 import {
   ChevronLeft, ChevronRight, Code2, Columns, Data as DataIcon, Download,
   Grid as GridIcon, Play, Plus, Refresh, Save,
@@ -747,7 +748,9 @@ function PendingWrite({ pending, onApply, onCancel, t }) {
                              leading-relaxed
                              ${done > i
                                ? 'border-line bg-surface-2 text-text-3 line-through'
-                               : 'border-line bg-surface-2 text-text-2'}`}>{sql}</pre>
+                               : 'border-line bg-surface-2 text-text-2'}`}>
+              {done > i ? sql : <Highlighted text={sql} lang="sql" />}
+            </pre>
           ))}
         </div>
         {error && (
@@ -807,7 +810,7 @@ function Structure({ table, t }) {
             <span className="label !mb-0">{t('data.ddl')}</span>
             <CopyButton value={table.ddl} label={t('common.copy')} />
           </div>
-          <Code max="14rem">{table.ddl}</Code>
+          <Code max="14rem" lang="sql">{table.ddl}</Code>
         </div>
       )}
 

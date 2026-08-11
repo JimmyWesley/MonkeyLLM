@@ -248,7 +248,7 @@ export default function Playground({ forest, grant }) {
                                       bytes={bytes} rate={rate} />}
               {state.data.truncated && <Note tone="warn">{t('common.truncated')}</Note>}
               <div className="mt-3">
-                <Code max="26rem">{JSON.stringify(state.data, null, 2)}</Code>
+                <Code max="26rem" lang="json">{JSON.stringify(state.data, null, 2)}</Code>
               </div>
             </>
           ) : <Empty icon={Beaker}>{t('playground.empty')}</Empty>}
@@ -256,7 +256,7 @@ export default function Playground({ forest, grant }) {
 
         <div className="min-w-0 space-y-4">
           <Card title={t('common.request')}>
-            <Code max="12rem">{JSON.stringify(payload(), null, 2)}</Code>
+            <Code max="12rem" lang="json">{JSON.stringify(payload(), null, 2)}</Code>
           </Card>
 
           <Card title={t('playground.curl')} subtitle={t('playground.curl_hint')}

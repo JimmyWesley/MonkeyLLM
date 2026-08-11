@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Alert, Check, ChevronDown, Copy, Info, Refresh, Search, X } from './icons.jsx'
+import { Highlighted } from './highlight.jsx'
 
 export function Card({ title, subtitle, actions, icon: Icon, children,
                        className = '', bodyClass = 'p-5' }) {
@@ -464,8 +465,14 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
     document.body)
 }
 
-/** Monospace payload viewer — request bodies, SQL, node bodies. */
-export const Code = ({ children, className = '', max = '20rem' }) => (
+/** Monospace payload viewer — request bodies, SQL, node bodies. `lang`
+ *  ('json' | 'sql') tokenizes `children` through programmer mode when it's
+ *  on; omit it (or leave the mode off) and this renders exactly as before. */
+export const Code = ({ children, className = '', max = '20rem', lang = null }) => (
   <pre className={`overflow-auto rounded-lg border border-line bg-surface-2 p-3
-                   prose-body ${className}`} style={{ maxHeight: max }}>{children}</pre>
+                   prose-body ${className}`} style={{ maxHeight: max }}>
+    {lang && typeof children === 'string'
+      ? <Highlighted text={children} lang={lang} />
+      : children}
+  </pre>
 )

@@ -58,6 +58,17 @@
     --type-other: 120 132 124;
     --graph-edge: 122 138 126;
     --graph-shortcut: 200 132 40;
+
+    /* Programmer mode (J.5.x) — JSON/SQL token colours. Aliased to the
+       type-hues above, not restated, so a dark-theme element resolves
+       `var(--type-document)` through its own cascade: no `[data-theme=
+       'dark']` copy of this block is needed, and the two palettes can
+       never drift apart. */
+    --syntax-key: var(--type-document);
+    --syntax-string: var(--type-event);
+    --syntax-number: var(--type-dataset);
+    --syntax-keyword: var(--type-entity);
+    --syntax-punct: var(--text-3);
     color-scheme: light;
   }
 
@@ -174,6 +185,14 @@
   .prose-body {
     @apply whitespace-pre-wrap break-words font-mono text-[12.5px] leading-relaxed text-text-2;
   }
+
+  /* Programmer mode's token colours (design/highlight.jsx). */
+  .syn-key { color: rgb(var(--syntax-key)); }
+  .syn-string { color: rgb(var(--syntax-string)); }
+  .syn-number { color: rgb(var(--syntax-number)); }
+  .syn-keyword { color: rgb(var(--syntax-keyword)); }
+  .syn-punct { color: rgb(var(--syntax-punct)); }
+  .syn-comment { @apply italic text-text-3; }
 
   /* Rendered markdown. Written as element rules rather than as classes on
      the nodes because the markup comes from a parser, not from JSX — the
