@@ -136,6 +136,9 @@ export const Clock = (p) => (
 export const Download = (p) => (
   <S {...p}><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" /></S>
 )
+export const Upload = (p) => (
+  <S {...p}><path d="M12 15V4m0 0L8 8m4-4l4 4M5 19h14" /></S>
+)
 export const Printer = (p) => (
   <S {...p}><path d="M7 9V4h10v5M7 19h10v-5H7v5" />
     <path d="M7 14H5a2 2 0 01-2-2v-3a2 2 0 012-2h14a2 2 0 012 2v3a2 2 0 01-2 2h-2" /></S>

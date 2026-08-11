@@ -1,6 +1,8 @@
 {
   "health.all_clear": "Nada a relatar.",
   "health.confidence": "confiança {c}",
+  "health.download": "Baixar o bundle",
+  "health.download_payloads": "Baixar o sidecar de payloads",
   "health.fat_nodes": "Nós sobrecarregados",
   "health.fat_nodes_hint": "Mais trilhas do que alguém consegue seguir de um lugar só.",
   "health.heat": "Feromônio",
@@ -13,7 +15,7 @@
   "health.needs_split": "Galhos para dividir",
   "health.needs_split_hint": "Um galho tão largo custa caro a cada leitor que passa por ele.",
   "health.no_snapshots": "Nenhum tirado ainda.",
-  "health.restore_note": "Restaurar é operação de linha de comando: um bundle é aberto num diretório vazio, então não há o que restaurar por cima de uma floresta viva.",
+  "health.restore_note": "Restaurar por cima de uma floresta viva continua na linha de comando. Um snapshot viaja: o owner pode baixá-lo aqui e importá-lo como floresta nova no seletor de florestas.",
   "health.scoped": "Este relatório cobre a floresta inteira.",
   "health.scoped_hint": "Ele conta problemas em toda parte, então exige um acesso de admin que não esteja limitado a um galho.",
   "health.snapshots": "Snapshots",

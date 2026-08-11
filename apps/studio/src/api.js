@@ -169,6 +169,46 @@ export const api = {
     request('/v1/admin/snapshots',
             { method: 'POST', body: { forest, with_payloads: withPayloads } }),
 
+  // Snapshot travel (J.13.1/J.13.2, owner-only). Both step around
+  // `request`: the download's body is the bundle rather than JSON, and the
+  // import's is multipart — the browser sets the boundary itself, so no
+  // Content-Type is spelled out.
+  downloadSnapshot: async (forest, name) => {
+    const res = await fetch(
+      `/v1/admin/snapshots/${encodeURIComponent(forest)}/${encodeURIComponent(name)}`,
+      { headers: getKey() ? { Authorization: `Bearer ${getKey()}` } : {} })
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}))
+      const err = payload?.error || {}
+      throw new ApiError(err.message || res.statusText || `HTTP ${res.status}`,
+                         { code: err.code, hint: err.hint, status: res.status })
+    }
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+  importSnapshot: async ({ id, bundle, payloads }) => {
+    const form = new FormData()
+    form.set('id', id)
+    form.set('bundle', bundle)
+    if (payloads) form.set('payloads', payloads)
+    const res = await fetch('/v1/admin/snapshots/import', {
+      method: 'POST',
+      headers: getKey() ? { Authorization: `Bearer ${getKey()}` } : {},
+      body: form,
+    })
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const err = payload?.error || {}
+      throw new ApiError(err.message || res.statusText || `HTTP ${res.status}`,
+                         { code: err.code, hint: err.hint, status: res.status })
+    }
+    return payload
+  },
+
   // What a refresh would re-read (J.8): the recorded source root, whether
   // this Station may still read it, and whether it reads host paths at all.
   ingestStatus: (forest) =>

@@ -23,7 +23,7 @@ import {
 } from '../design/icons.jsx'
 import { NeedsCapability, has, useAsync } from './shared.jsx'
 
-export default function Health({ forest, grant, goto }) {
+export default function Health({ forest, grant, goto, me }) {
   const { t } = useI18n()
 
   if (!has(grant, 'admin')) {
@@ -33,7 +33,7 @@ export default function Health({ forest, grant, goto }) {
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
       <Report forest={forest} goto={goto} />
-      <Snapshots forest={forest} />
+      <Snapshots forest={forest} me={me} />
     </div>
   )
 }
@@ -157,7 +157,7 @@ function NodeList({ title, hint, ids, goto }) {
   )
 }
 
-function Snapshots({ forest }) {
+function Snapshots({ forest, me }) {
   const { t } = useI18n()
   const [payloads, setPayloads] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -171,6 +171,13 @@ function Snapshots({ forest }) {
       await api.takeSnapshot(forest, payloads)
       list.reload()
     } catch (e) { setError(e) } finally { setBusy(false) }
+  }
+
+  // J.13.1 is owner-only; the host refuses everyone else regardless, the
+  // console just doesn't offer a dead door.
+  async function download(name) {
+    setError(null)
+    try { await api.downloadSnapshot(forest, name) } catch (e) { setError(e) }
   }
 
   return (
@@ -192,13 +199,28 @@ function Snapshots({ forest }) {
               <ul className="divide-y divide-line">
                 {list.data.snapshots.map((s) => (
                   <li key={s.name} className="py-2 first:pt-0">
-                    <div className="truncate font-mono text-[11.5px] text-text-2">
-                      {s.name}
+                    <div className="flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-text-2">
+                        {s.name}
+                      </div>
+                      {me?.owner && (
+                        <button className="btn btn-sm btn-ghost !px-1.5"
+                                title={t('health.download')}
+                                onClick={() => download(s.name)}>
+                          <Download size={13} />
+                        </button>
+                      )}
                     </div>
                     <div className="mt-0.5 flex items-center gap-2 text-[11px] text-text-3">
                       <span>{(s.bytes / 1024).toFixed(1)} kB</span>
                       <span>{s.created?.slice(0, 16).replace('T', ' ')}</span>
-                      {s.payloads && <Badge>payloads</Badge>}
+                      {s.payloads && (me?.owner
+                        ? <button className="badge hover:border-accent/40 hover:text-accent"
+                                  title={t('health.download_payloads')}
+                                  onClick={() => download(`${s.name}.payloads.zip`)}>
+                            payloads
+                          </button>
+                        : <Badge>payloads</Badge>)}
                     </div>
                   </li>
                 ))}

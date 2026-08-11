@@ -16,7 +16,7 @@ import { useTheme } from '../theme.jsx'
 import { ErrorNote, Field, Modal } from '../design/ui.jsx'
 import {
   CONSOLE_ICON, ChevronDown, Forest, Globe, LogOut, Moon, More, PanelLeft,
-  Plus, Star, Sun, X,
+  Plus, Star, Sun, Upload, X,
 } from '../design/icons.jsx'
 import JobPill from './JobPill.jsx'
 
@@ -299,6 +299,7 @@ function ForestSwitcher({ session, forest, view, onCreated, collapsed,
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [importing, setImporting] = useState(false)
   const box = useRef(null)
 
   useEffect(() => {
@@ -398,12 +399,24 @@ function ForestSwitcher({ session, forest, view, onCreated, collapsed,
                 <Plus size={14} /> {t('forest.new')}
               </button>
             )}
+            {/* J.13.2 is owner-only; the host refuses everyone else
+                regardless, the console just doesn't offer a dead door. */}
+            {session.me.owner && (
+              <button className="flex w-full items-center gap-2 border-t border-line
+                                 px-2.5 py-2 text-[13px] font-medium text-accent
+                                 transition hover:bg-surface-2"
+                      onClick={() => { setOpen(false); setImporting(true) }}>
+                <Upload size={14} /> {t('forest.import')}
+              </button>
+            )}
           </div>
         )}
       </div>
 
       <NewForestModal open={creating} onClose={() => setCreating(false)}
                       onCreated={onCreated} />
+      <ImportForestModal open={importing} onClose={() => setImporting(false)}
+                         onCreated={onCreated} />
     </div>
   )
 }
@@ -454,6 +467,68 @@ export function NewForestModal({ open, onClose, onCreated }) {
         <Field label={`${t('forest.summary')} (${t('common.optional')})`}
                value={form.summary}
                onChange={(e) => setForm({ ...form, summary: e.target.value })} />
+        <ErrorNote error={error} />
+      </form>
+    </Modal>
+  )
+}
+
+/** A forest from a snapshot (J.13.2, owner-only). The id obeys the same J.7
+ *  rules as creation — a name, refused if taken — and the bundle enters
+ *  as-is: no curation, no canopy, `locate` BM25-only until built. */
+export function ImportForestModal({ open, onClose, onCreated }) {
+  const { t } = useI18n()
+  const [id, setId] = useState('')
+  const [bundle, setBundle] = useState(null)
+  const [payloads, setPayloads] = useState(null)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (open) { setId(''); setBundle(null); setPayloads(null); setError(null) }
+  }, [open])
+
+  // The bundle is named after its forest and stamp; the stamp is not an id,
+  // so the suggestion strips it. Still just a suggestion.
+  const onBundle = (file) => {
+    setBundle(file)
+    if (file && !id) {
+      setId(file.name.replace(/(-\d{8}T\d{6}Z(-\d+)?)?\.bundle$/, '')
+        .toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-|-$/g, '').slice(0, 63))
+    }
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    setBusy(true); setError(null)
+    try {
+      await api.importSnapshot({ id, bundle, payloads })
+      onCreated(id)
+      onClose()
+    } catch (err) { setError(err) } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={t('forest.import_title')}
+           subtitle={t('forest.import_sub')}
+           footer={<>
+             <button className="btn" onClick={onClose}>{t('common.cancel')}</button>
+             <button className="btn btn-primary" form="import-forest"
+                     disabled={busy || !id || !bundle}>
+               {busy ? t('common.working') : t('forest.import_go')}
+             </button>
+           </>}>
+      <form id="import-forest" onSubmit={submit} className="space-y-3.5">
+        <Field label={t('forest.bundle')} type="file" accept=".bundle" required
+               hint={t('forest.bundle_hint')}
+               onChange={(e) => onBundle(e.target.files?.[0] || null)} />
+        <Field label={t('forest.id')} value={id} required
+               placeholder="imported-forest" hint={t('forest.id_hint')}
+               onChange={(e) => setId(e.target.value)} />
+        <Field label={`${t('forest.payloads')} (${t('common.optional')})`}
+               type="file" accept=".zip" hint={t('forest.payloads_hint')}
+               onChange={(e) => setPayloads(e.target.files?.[0] || null)} />
         <ErrorNote error={error} />
       </form>
     </Modal>

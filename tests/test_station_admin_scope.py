@@ -103,6 +103,10 @@ def test_the_route_table_is_what_we_think_it_is(station):
         ("/v1/admin/providers", "GET"), ("/v1/admin/providers", "POST"),
         ("/v1/admin/providers/test", "POST"),
         ("/v1/admin/snapshots", "GET"), ("/v1/admin/snapshots", "POST"),
+        # Snapshot travel (v0.39): both owner-only, so the non-admin and
+        # anonymous sweeps below cover them like every other admin route.
+        ("/v1/admin/snapshots/import", "POST"),
+        ("/v1/admin/snapshots/{forest}/{file}", "GET"),
     ]
 
 

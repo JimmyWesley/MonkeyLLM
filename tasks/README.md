@@ -11,7 +11,7 @@ Conventions:
 - Language policy: **everything in English** — task files, code comments,
   docstrings, docs, CLI output. See `T02-english-normalization.md` for the
   one-time cleanup; new work must already comply.
-- The spec is the truth (`docs/monkeyllm-spec-v0.33.md`): contract changes
+- The spec is the truth (`docs/monkeyllm-spec-v0.39.md`): contract changes
   require a new spec version *before* code, and that rule applies to tasks too.
 
 | Task | Title | Status |
@@ -28,3 +28,4 @@ Conventions:
 | T10 | Studio Forest Views: graph mode, files mode, governed editing, Write tab | done (2026-08-09: spec v0.22 → J.11 map projections + J.5.4 + J.8 compose; graph/files/editor/Write shipped, F.25 suite green) |
 | T10.1 | Compose with review: the passport before the plant | done (2026-08-09: spec v0.24 → J.8.1 two-phase compose + F.27; `Gardener(dry_run=True)`, approval-as-`on_curate`, review card in the Write tab) |
 | T11 | Answer store: serve the answer already bought (spec v0.33 → J.10.7 + F.37) | in-progress (2026-08-11: exact tier shipped end-to-end, F.37 green minus the near-tier clause; the near tier remains) |
+| T12 | Snapshot travel: download and import over the Station (spec v0.39 → J.13.1/J.13.2 + F.39) | done (2026-08-11: owner-only download + import routes, Studio controls, F.39 suite green) |

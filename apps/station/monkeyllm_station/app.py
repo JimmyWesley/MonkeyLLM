@@ -22,6 +22,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -35,7 +36,7 @@ from starlette.applications import Starlette
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -2552,10 +2553,13 @@ def build_app(
     async def admin_snapshots(request: Request) -> JSONResponse:
         """Part I over REST: take a bundle, list the ones taken.
 
-        Restore is absent by design (J.13): Part I restores into an *empty*
-        destination, so there is nothing to offer a console pointed at a live
-        forest, and taking a filesystem destination from an HTTP caller would
-        spend the Station's authority rather than the caller's.
+        Restore into a live forest is absent by design (J.13): Part I
+        restores into an *empty* destination, so there is nothing to offer a
+        console pointed at an existing forest, and taking a filesystem
+        destination from an HTTP caller would spend the Station's authority
+        rather than the caller's. Import (J.13.2) is neither of those things:
+        it restores into a forest that does not exist yet, at a destination
+        the host derives from a validated name.
         """
         principal, err = require_principal(request)
         if err:
@@ -2621,6 +2625,166 @@ def build_app(
                              "bytes": result["bytes"],
                              "payloads": result.get("payloads")})
 
+    async def admin_snapshot_file(request: Request):
+        """One bundle or sidecar, streamed out (J.13.1).
+
+        Owner-only: a bundle is the whole forest with its whole history, so
+        every branch scope the grant table enforces collapses the moment the
+        bytes leave — there is no such thing as a scoped bundle. `admin` on
+        the forest is authority over its *service*, not over every byte it
+        has ever held under every other principal's scope.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        if not registry.is_owner(principal):
+            return _envelope(VineError(
+                E_FORBIDDEN, "downloading a snapshot requires the owner",
+                hint="A bundle carries the whole forest with its full "
+                     "history; no per-forest grant covers that."), 403)
+        forest = request.path_params["forest"]
+        name = request.path_params["file"]
+        # J.8.2 posture: a name before it is a path, contained after
+        # resolution. Anything the listing would not return is the same
+        # not-found — never a probe into the volume.
+        directory = snapshot_dir(forest).resolve()
+        plausible = (FOREST_ID.match(forest)
+                     and "/" not in name and "\\" not in name
+                     and not name.startswith(".")
+                     and (name.endswith(".bundle")
+                          or name.endswith(".bundle.payloads.zip")))
+        target = (directory / name).resolve() if plausible else None
+        if target is None or target.parent != directory or not target.is_file():
+            return _envelope(VineError(E_NOT_FOUND, "no such snapshot"), 404)
+        registry.record(principal=principal, forest=forest,
+                        primitive="snapshot-download", args={"file": name},
+                        result="ok", size=target.stat().st_size)
+        # Host state only (J.13.1): no lane, no trace, no pheromone, no
+        # commit — the audit row above is the only record this leaves.
+        return FileResponse(target, filename=name,
+                            media_type="application/octet-stream")
+
+    async def admin_snapshot_import(request: Request) -> JSONResponse:
+        """A forest from a snapshot (J.13.2): J.7 creation, with content.
+
+        Owner-only: an imported bundle bypasses every converter, curation
+        pass and review the J.8 surface imposes on bytes entering a forest —
+        a bundle is already forest and enters as-is. It arrives servable
+        (restore rebuilds the catalog) and arrives cold: no model call, no
+        canopy — `locate` stays BM25-only until an operator asks (C.6).
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        if pool.mode != "registry":
+            return _envelope(VineError(
+                E_SCHEMA, "this Station serves a single forest",
+                hint="Start it with --root <registry> to host more than one."))
+        if not writable:
+            return _envelope(VineError(
+                E_READONLY, "this Station serves read-only forests",
+                hint="Start it with --writable to import forests."), 403)
+        if not registry.is_owner(principal):
+            return _envelope(VineError(
+                E_FORBIDDEN, "importing a snapshot requires the owner",
+                hint="A bundle enters as-is — no converter, curation or "
+                     "review sees it — so only the authority over the whole "
+                     "volume may plant one."), 403)
+
+        form = await request.form()
+        forest_id = str(form.get("id") or "").strip()
+        bundle = form.get("bundle")
+        sidecar = form.get("payloads")
+        if not FOREST_ID.match(forest_id):
+            return _envelope(VineError(
+                E_SCHEMA, f"invalid forest id: {forest_id!r}",
+                hint="Lowercase letters, digits, '-' and '_'; up to 63 characters."))
+        if bundle is None or isinstance(bundle, str):
+            return _envelope(VineError(
+                E_SCHEMA, "a bundle file is required",
+                hint="Send multipart/form-data with the bundle in 'bundle' "
+                     "and, optionally, the payload sidecar in 'payloads'."))
+        target = pool.root / forest_id
+        if target.exists():
+            # Same rule as J.7 creation: adopting the existing forest because
+            # the name matched would be an access-control bug wearing a
+            # convenience feature.
+            return _envelope(VineError(E_SCHEMA, f"'{forest_id}' already exists",
+                                       hint="Pick another id."))
+
+        # The body is the source (J.13.2): staged outside every forest,
+        # beside the bundles the host already keeps.
+        cap_mb = float(os.environ.get("MONKEYLLM_STATION_IMPORT_MAX_MB") or 0)
+        incoming = Path(registry_path).resolve().parent / "snapshots" / "_incoming"
+        incoming.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(dir=incoming))
+        try:
+            paths: dict[str, Path] = {}
+            for field_name, upload in (("bundle", bundle), ("payloads", sidecar)):
+                if upload is None or isinstance(upload, str):
+                    continue
+                suffix = "bundle" if field_name == "bundle" else "payloads.zip"
+                dest = staging / f"{forest_id}.{suffix}"
+                written = 0
+                with dest.open("wb") as fh:
+                    while chunk := await upload.read(1 << 20):
+                        written += len(chunk)
+                        if cap_mb and written > cap_mb * 1024 * 1024:
+                            return _envelope(VineError(
+                                E_SCHEMA,
+                                f"snapshot exceeds this deployment's "
+                                f"{cap_mb:g} MB import cap",
+                                hint="MONKEYLLM_STATION_IMPORT_MAX_MB."))
+                        fh.write(chunk)
+                paths[field_name] = dest
+            uploaded = paths["bundle"].stat().st_size
+
+            def work():
+                from monkeyllm.snapshot import restore_snapshot
+
+                try:
+                    return restore_snapshot(
+                        paths["bundle"], target,
+                        payload_sidecar=paths.get("payloads"))
+                except VineError as e:
+                    shutil.rmtree(target, ignore_errors=True)
+                    return e.to_dict()
+                except Exception as e:  # noqa: BLE001 — a corrupt bundle fails the clone
+                    # A half-restored tree would be a forest nobody asked
+                    # for, so it is removed rather than reported as a
+                    # success with a hole in it (J.7).
+                    shutil.rmtree(target, ignore_errors=True)
+                    return VineError(
+                        E_SCHEMA, f"could not import '{forest_id}': {e}",
+                        hint="Nothing was left behind; is this a Part I "
+                             "bundle?").to_dict()
+
+            result = await in_forest_thread(forest_id, work)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+
+        # A forest nobody can open is a silent failure with a 200 (J.7) —
+        # and an imported one opens and warms like any other (J.6.1), best
+        # effort, on the lane that will serve it.
+        registry.grant(principal, forest_id, set(CAPS))
+        try:
+            await in_forest_thread(forest_id, lambda: pool.get(forest_id))
+        except Exception:  # noqa: BLE001 — mirror the boot warm's rule
+            pass
+        commit = _git(target, "rev-parse", "HEAD") or None
+        registry.record(principal=principal, forest=forest_id,
+                        primitive="snapshot-import",
+                        args={"nodes": result.get("nodes"),
+                              "payloads": result.get("restored_payloads")},
+                        result="ok", size=uploaded, commit_sha=commit)
+        return JSONResponse({"forest": {"id": forest_id, "commit": commit},
+                             "nodes": result.get("nodes"),
+                             "payloads": result.get("restored_payloads"),
+                             "grants": registry.grants_of(principal)})
+
     async def studio_missing(request: Request):
         return JSONResponse(
             {"error": {"code": E_NOT_FOUND, "message": "the Studio build is not present",
@@ -2652,6 +2816,9 @@ def build_app(
         Route("/v1/admin/health", admin_health),
         Route("/v1/admin/cache", admin_cache, methods=["GET", "POST"]),
         Route("/v1/admin/snapshots", admin_snapshots, methods=["GET", "POST"]),
+        Route("/v1/admin/snapshots/import", admin_snapshot_import,
+              methods=["POST"]),
+        Route("/v1/admin/snapshots/{forest}/{file}", admin_snapshot_file),
         # Before the primitive catch-all, which is POST-only: these are GETs
         # of a projection, not calls of a primitive.
         # Jobs before the generic pair: `/jobs` is a literal, and the
