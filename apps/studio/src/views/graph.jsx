@@ -203,10 +203,15 @@ function step(sim, w, h, p) {
 }
 
 /** Deterministic placement: the same forest opens the same way twice, which
- *  matters when somebody is describing what they are looking at. Nodes seed
- *  around their group's angle so the clusters the physics will find are
- *  roughly where they start; orphans seed on the outer ring, which is where
- *  the repulsion would carry them anyway. */
+ *  matters when somebody is describing what they are looking at.
+ *
+ *  A node is born beside its own nucleus, never at the middle of the world:
+ *  each branch gets a centre on a ring, roots hatch at their branch's
+ *  centre, and every child hatches beside its parent — breadth-first down
+ *  the structure, so a branch opens as a disc around its own hub and the
+ *  physics only has to bloom it, not carry it across the map. Orphans with
+ *  no home at all seed on the outer ring, which is where the repulsion
+ *  would take them anyway. */
 function seed(sim, w, h) {
   let s = 7
   const rand = () => {
@@ -214,31 +219,75 @@ function seed(sim, w, h) {
     return s / 2147483648
   }
   sim.rand = rand
-  const groups = [...new Set(sim.nodes.map((n) => n.seedGroup))].sort()
-  const R = Math.min(w, h) * 0.3
-  for (const n of sim.nodes) {
-    const slot = groups.indexOf(n.seedGroup)
-    const angle = (slot / Math.max(1, groups.length)) * Math.PI * 2
-                  + (rand() - 0.5) * (Math.PI * 1.2 / Math.max(1, groups.length))
-    const r = n.degree === 0
-      ? R * 1.5 * (0.85 + rand() * 0.3)
-      : R * (0.3 + rand() * 0.7)
-    n.x = w / 2 + Math.cos(angle) * r + (rand() - 0.5) * 12
-    n.y = h / 2 + Math.sin(angle) * r + (rand() - 0.5) * 12
+  const { nodes, index } = sim
+  const groups = [...new Set(nodes.map((n) => n.seedGroup))].sort()
+  const R = Math.min(w, h) * 0.34
+  const centre = {}
+  groups.forEach((g, i) => {
+    const angle = (i / Math.max(1, groups.length)) * Math.PI * 2
+    centre[g] = { x: w / 2 + Math.cos(angle) * R,
+                  y: h / 2 + Math.sin(angle) * R }
+  })
+
+  const hatch = (n, x, y, spread) => {
+    const a = rand() * Math.PI * 2
+    const r = spread * (0.35 + rand() * 0.65)
+    n.x = x + Math.cos(a) * r
+    n.y = y + Math.sin(a) * r
     n.vx = 0; n.vy = 0; n.fx = null; n.fy = null
+    n.placed = true
+  }
+
+  const kids = new Map()
+  const queue = []
+  for (const n of nodes) {
+    n.placed = false
+    const pi = n.parent != null ? index[n.parent] : undefined
+    if (pi === undefined) {
+      // No parent in the payload: this IS a nucleus (or a true orphan).
+      const c = centre[n.seedGroup]
+      if (n.degree === 0) {
+        const a = rand() * Math.PI * 2
+        const r = Math.min(w, h) * 0.52 * (0.9 + rand() * 0.25)
+        hatch(n, w / 2 + Math.cos(a) * r, h / 2 + Math.sin(a) * r, 10)
+      } else {
+        hatch(n, c.x, c.y, 24)
+      }
+      queue.push(n)
+    } else {
+      if (!kids.has(pi)) kids.set(pi, [])
+      kids.get(pi).push(n)
+    }
+  }
+  while (queue.length) {
+    const n = queue.shift()
+    for (const child of kids.get(index[n.id]) || []) {
+      if (child.placed) continue
+      hatch(child, n.x, n.y, 26)
+      queue.push(child)
+    }
+  }
+  // A parent pointer the walk never reached (it cannot happen in a tree,
+  // but a map must not hang on a malformed payload): the branch centre.
+  for (const n of nodes) {
+    if (!n.placed) hatch(n, centre[n.seedGroup].x, centre[n.seedGroup].y, 24)
   }
 }
 
 /* -- view settings (J.5.4 v0.38: presentation, per forest, never in the
       address, never a call) ---------------------------------------------- */
 
+/* The factory preset is the operator-tuned one that read best on a real
+ * ~1900-node forest: long links and strong repulsion open the clusters,
+ * heavier nodes and thinner trails keep the nuclei legible, proposals stay
+ * quiet until asked for. Presentation only — no contract fixes these. */
 const DEFAULTS = {
   query: '',
-  orphans: true, heatOn: true, proposals: true, structure: true,
+  orphans: true, heatOn: true, proposals: false, structure: true,
   hiddenTypes: [], hiddenGroups: [],
-  colorBy: 'branch', groupDepth: 2,
-  arrows: false, labels: 0.5, nodeScale: 1, linkWidth: 1,
-  center: 1, repel: 1, attract: 1, distance: 1,
+  colorBy: 'branch', groupDepth: 3,
+  arrows: true, labels: 0.5, nodeScale: 1.5, linkWidth: 0.7,
+  center: 1.2, repel: 1.5, attract: 0.85, distance: 2.3,
 }
 
 const settingsKey = (forest) => `monkeyllm.graph.${forest}`
@@ -471,7 +520,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     // Replay order: the forest as it grew (J.5.4 v0.38). A passport without
     // `created` (an old projection) falls back to `updated`, and a node
     // with neither is treated as older than every record.
-    const order = nodes.map((n, i) => i).sort((a, b) => {
+    const order = nodes.map((_, i) => i).sort((a, b) => {
       const ka = nodes[a].created || nodes[a].updated || '0000'
       const kb = nodes[b].created || nodes[b].updated || '0000'
       return ka < kb ? -1 : ka > kb ? 1 : (nodes[a].id < nodes[b].id ? -1 : 1)
