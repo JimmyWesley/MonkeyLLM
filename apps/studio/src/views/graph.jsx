@@ -318,6 +318,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   const [panel, setPanel] = useState(false)
   const [hover, setHover] = useState(null)
   const [replay, setReplay] = useState({ on: false, playing: false, t: 0 })
+  const [hitCount, setHitCount] = useState(null)
 
   const calm = typeof matchMedia === 'function'
     && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -410,15 +411,21 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     const p = paramsRef.current
     const hiddenT = new Set(p.hiddenTypes)
     const hiddenG = new Set(p.hiddenGroups)
-    const words = p.query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    // A single letter is not a question yet: it would match the whole
+    // forest by substring and the filter would flash everything away on
+    // the first keystroke.
+    const words = p.query.trim().toLowerCase().split(/\s+/)
+      .filter((word) => word.length >= 2)
     // The quick search keeps what matches AND what stands one trail away:
     // a hit with its neighbourhood is an answer, a hit alone is a dot.
     let keep = null
+    s.searching = words.length > 0
+    s.matchCount = 0
     if (words.length) {
       keep = new Set()
       for (const n of s.nodes) {
         n.matched = words.every((word) => n.hay.includes(word))
-        if (n.matched) keep.add(n.id)
+        if (n.matched) { keep.add(n.id); s.matchCount += 1 }
       }
       for (const id of [...keep]) {
         for (const nb of neighboursRef.current.get(id) || []) keep.add(nb)
@@ -567,6 +574,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     if (!s.nodes.length) return
     applyFilters(s)
     applyColors(s)
+    setHitCount(s.searching ? s.matchCount : null)
     s.alpha = Math.max(s.alpha, 0.5)
     s.active = true
     if (calm) settle(300)
@@ -669,7 +677,13 @@ export default function ForestGraph({ forest, data, selected, onSelect,
       el.height = Math.round(h * dpr)
     }
     const ctx = el.getContext('2d')
-    const { nodes, index } = sim.current
+    const s = sim.current
+    const { nodes, index } = s
+    // The hits are lit and named; their neighbourhood stays as half-lit
+    // context. Naming is only forced while the result is small enough to
+    // read — past that, labels return to the zoom rule, or a broad term
+    // would white the map out with its own captions.
+    const labelHits = s.searching && s.matchCount <= 60
     const p = paramsRef.current
     const pal = paletteRef.current
     const v = view.current
@@ -787,7 +801,8 @@ export default function ForestGraph({ forest, data, selected, onSelect,
         ctx.arc(n.x, n.y, r * 3.6, 0, Math.PI * 2)
         ctx.fill()
       }
-      ctx.globalAlpha = dim ? 0.14 : pop
+      const lit = s.searching && !n.matched ? 0.35 : 1
+      ctx.globalAlpha = dim ? 0.14 : lit * pop
       ctx.fillStyle = n.color
       ctx.beginPath()
       ctx.arc(n.x, n.y, r, 0, Math.PI * 2)
@@ -803,8 +818,9 @@ export default function ForestGraph({ forest, data, selected, onSelect,
         // Labels arrive with zoom (the display slider says how eagerly) and
         // hubs earn theirs a little sooner; focus is always named.
         const kNeeded = 0.35 + p.labels * 2.4 - Math.min(0.5, n.degree * 0.03)
-        const a = (n.id === sel || n.matched || (focus && near.has(n.id)))
-          ? 1 : Math.max(0, Math.min(1, (k - kNeeded) * 3))
+        const a = (n.id === sel || (labelHits && n.matched)
+                   || (focus && near.has(n.id)))
+          ? 1 : Math.max(0, Math.min(1, (k - kNeeded) * 3)) * lit
         if (a > 0.02) {
           ctx.globalAlpha = a * 0.9
           ctx.fillStyle = pal.text
@@ -1091,6 +1107,13 @@ export default function ForestGraph({ forest, data, selected, onSelect,
                 onPointerDown={down} onPointerMove={move} onPointerUp={up}
                 onPointerCancel={up}
                 onPointerLeave={() => setHover(null)} />
+
+        {hitCount === 0 && (
+          <div className="pointer-events-none absolute inset-0 flex items-center
+                          justify-center text-[13px] text-text-3">
+            {t('explore.no_hits')}
+          </div>
+        )}
 
         {hovered && !panel && (
           <div className="pointer-events-none absolute left-3 top-3 max-w-[19rem]
