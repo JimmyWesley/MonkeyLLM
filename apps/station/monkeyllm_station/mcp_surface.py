@@ -42,12 +42,17 @@ INSTRUCTIONS = (
 )
 
 
-def build_mcp_mount(pool, registry, in_forest_thread, run_primitive):
+def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
+                    launch_ingest=None):
     """Returns `(asgi_app, session_lifespan)`.
 
     The session manager is started by the *parent* app's lifespan: a mounted
     Starlette app never gets its own lifespan run, and without it every
     request dies on "Task group is not initialized".
+
+    `launch_ingest` starts an accepted batch's driver (spec J.9); the
+    `ingest` tool waits on it by default, because an agent's poll loop
+    would be context spent on plumbing.
     """
     try:
         from mcp.server.mcpserver import MCPServer
@@ -78,11 +83,18 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive):
         if principal is None:
             return UNAUTHENTICATED
         result = await in_forest_thread(
-            lambda: run_primitive(principal, forest, name, kwargs)
+            forest, lambda: run_primitive(principal, forest, name, kwargs)
         )
         if result is None:
             return {"error": {"code": "E_NOT_FOUND", "message": f"unknown forest: {forest}",
                               "hint": "Call forests() to list what this key may use."}}
+        if isinstance(result, dict) and "_prepared" in result:
+            # J.9: an accepted batch. Waiting is this surface's default —
+            # kwargs carried the caller's choice through run_primitive.
+            job = launch_ingest(result["_prepared"])
+            if kwargs.get("wait", True) and job.task is not None:
+                await job.task
+            return {"job": job.snapshot()}
         return result
 
     @mcp.tool()
@@ -174,16 +186,19 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive):
     @mcp.tool()
     async def ingest(forest: str, mode: str = "upload",
                      files: list[dict] | None = None, path: str | None = None,
-                     dest: str | None = None) -> dict:
+                     dest: str | None = None, wait: bool = True) -> dict:
         """Put documents into the forest (needs the 'ingest' capability).
 
         `upload` sends the documents themselves as [{name, text}]; `adopt`
         and `sync` mirror a directory the Station host can read and
         additionally need 'admin'. Converters, summarisation and commits are
         the Gardener's, so an agent ingests exactly as an operator does.
+        A batch runs as a job (spec J.9); by default this call waits for it
+        and returns the finished job. Pass wait=false to get the running
+        job's id back immediately instead.
         """
         return await call(forest, "ingest", mode=mode, files=files,
-                          path=path, dest=dest)
+                          path=path, dest=dest, wait=wait)
 
     # Transport options belong to the app factory in mcp 2.x, not the
     # constructor. streamable_http_path="/" because this app gets mounted

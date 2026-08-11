@@ -129,6 +129,17 @@ export const api = {
     request(`/v1/forests/${encodeURIComponent(forest)}/ingest`,
             { method: 'POST', body }),
 
+  // Ingest jobs (J.9): a batch answers 202 with a job. Reading one is a
+  // host-record read — it never touches the forest, which is what makes
+  // polling free while the batch runs.
+  job: (forest, id) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/jobs/${encodeURIComponent(id)}`),
+  jobs: (forest) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/jobs`),
+  cancelJob: (forest, id) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/jobs/${encodeURIComponent(id)}/cancel`,
+            { method: 'POST' }),
+
   // governance
   principals: () => request('/v1/admin/principals'),
   grant: (body) => request('/v1/admin/grant', { method: 'POST', body }),

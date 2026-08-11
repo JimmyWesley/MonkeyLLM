@@ -107,9 +107,9 @@ def test_warming_deposits_no_pheromone_and_writes_no_audit(warm_root, tmp_path):
 
     app = _app(warm_root, tmp_path / "clean.db")
     with _serve(app):
-        # Through the forest thread: those connections belong to it, and the
+        # Through the forest's lane: those connections belong to it, and the
         # pool is not empty any more precisely because warming ran.
-        after = app.state.forest_worker.submit(
+        after = app.state.forest_lane(FOREST).submit(
             lambda: (app.state.pool.get(FOREST).trails.heat_all(),
                      len(app.state.pool.get(FOREST).tracer.events))).result()
         assert after == (before, traced)

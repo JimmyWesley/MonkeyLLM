@@ -133,17 +133,31 @@ DOCS = [
 ]
 
 
+def _ingest(client, headers, body, forest=FOREST):
+    """POST a batch ingest and hand back `(status, v0.31-shaped result)`.
+
+    J.9 (v0.32): batch modes answer with a job; `wait: true` returns the
+    finished job in one response, and its `report` is exactly the body
+    every earlier test read. Refusals stay synchronous, exactly as before.
+    """
+    r = client.post(f"/v1/forests/{forest}/ingest",
+                    json={**body, "wait": True}, headers=headers)
+    out = r.json()
+    if r.status_code == 200 and isinstance(out, dict) and "job" in out:
+        assert out["job"]["state"] == "done", out["job"]
+        return r.status_code, out["job"]["report"]
+    return r.status_code, out
+
+
 def test_upload_ingest_creates_nodes_without_any_model(station):
     """A forest with no `ingest` binding still ingests: curation falls back
     to the deterministic G.4 derivation (J.8)."""
     client, registry, root = station
     head = _key(registry, ["read", "ingest"])
 
-    r = client.post(f"/v1/forests/{FOREST}/ingest",
-                    json={"mode": "upload", "files": DOCS, "dest": "uploads"},
-                    headers=head)
-    assert r.status_code == 200, r.text
-    body = r.json()
+    status, body = _ingest(client, head,
+                           {"mode": "upload", "files": DOCS, "dest": "uploads"})
+    assert status == 200, body
     assert body["curated"] is False
     assert len(body["planted"]) == 2
     assert body["errors"] == []
@@ -196,11 +210,10 @@ def test_scoped_principal_must_say_where(station):
 def test_scoped_principal_ingests_into_its_own_subtree(station):
     client, registry, _ = station
     head = _key(registry, ["read", "ingest"], allow=["projects/"])
-    r = client.post(f"/v1/forests/{FOREST}/ingest",
-                    json={"mode": "upload", "files": DOCS, "dest": "projects"},
-                    headers=head)
-    assert r.status_code == 200, r.text
-    planted = r.json()["planted"]
+    status, body = _ingest(client, head,
+                           {"mode": "upload", "files": DOCS, "dest": "projects"})
+    assert status == 200, body
+    planted = body["planted"]
     assert planted and all(p.startswith("projects/") for p in planted)
 
 
@@ -248,11 +261,11 @@ def test_admin_may_adopt_a_host_path_inside_the_ingest_roots(ingest_station):
     (src / "policy.md").write_text("# Policy\n\nExpenses are filed monthly.\n")
 
     head = _key(registry, ["read", "ingest", "admin"])
-    r = client.post(f"/v1/forests/{FOREST}/ingest",
-                    json={"mode": "adopt", "path": str(src), "dest": "handbook"},
-                    headers=head)
-    assert r.status_code == 200, r.text
-    assert len(r.json()["planted"]) == 1
+    status, body = _ingest(client, head,
+                           {"mode": "adopt", "path": str(src),
+                            "dest": "handbook"})
+    assert status == 200, body
+    assert len(body["planted"]) == 1
 
 
 class TestIngestRoots:
@@ -278,13 +291,11 @@ class TestIngestRoots:
         modes that carry their own bytes are untouched."""
         client, registry, _ = station
         head = _key(registry, ["read", "ingest"])
-        r = client.post(
-            f"/v1/forests/{FOREST}/ingest",
-            json={"mode": "upload", "dest": "uploads",
-                  "files": [{"name": "n.md", "text": "# N\n\nA fact.\n"}]},
-            headers=head)
-        assert r.status_code == 200, r.text
-        assert len(r.json()["planted"]) == 1
+        status, body = _ingest(client, head, {
+            "mode": "upload", "dest": "uploads",
+            "files": [{"name": "n.md", "text": "# N\n\nA fact.\n"}]})
+        assert status == 200, body
+        assert len(body["planted"]) == 1
 
     def test_path_outside_the_roots_is_refused(self, ingest_station, tmp_path):
         client, registry, _, _ = ingest_station
@@ -354,9 +365,9 @@ class TestSyncHasASource:
         (tmp_path / "secret.md").write_text("# S\n\nhunter2\n", encoding="utf-8")
 
         head = _key(registry, ["read", "ingest", "admin"])
-        assert client.post(f"/v1/forests/{FOREST}/ingest",
-                           json={"mode": "adopt", "path": str(src), "dest": "docs"},
-                           headers=head).status_code == 200
+        status, _ = _ingest(client, head, {"mode": "adopt", "path": str(src),
+                                           "dest": "docs"})
+        assert status == 200
 
         r = client.post(f"/v1/forests/{FOREST}/ingest",
                         json={"mode": "sync", "path": "../../secret.md"},
@@ -375,9 +386,9 @@ class TestSyncHasASource:
         src.mkdir()
         (src / "a.md").write_text("# A\n\nAdopted body.\n", encoding="utf-8")
         head = _key(registry, ["read", "ingest", "admin"])
-        assert client.post(f"/v1/forests/{FOREST}/ingest",
-                           json={"mode": "adopt", "path": str(src), "dest": "docs"},
-                           headers=head).status_code == 200
+        status, _ = _ingest(client, head, {"mode": "adopt", "path": str(src),
+                                           "dest": "docs"})
+        assert status == 200
 
         narrowed = tmp_path / "other-inbox"
         narrowed.mkdir()
@@ -407,17 +418,15 @@ def test_sync_after_upload_sees_an_edit(station):
     client, registry, _ = station
     head = _key(registry, ["read", "ingest"])
     first = [{"name": "note.md", "text": "# Note\n\nThe old fact.\n"}]
-    r1 = client.post(f"/v1/forests/{FOREST}/ingest",
-                     json={"mode": "upload", "files": first, "dest": "uploads"},
-                     headers=head)
-    assert r1.status_code == 200 and len(r1.json()["planted"]) == 1
+    s1, b1 = _ingest(client, head,
+                     {"mode": "upload", "files": first, "dest": "uploads"})
+    assert s1 == 200 and len(b1["planted"]) == 1
 
     second = [{"name": "note.md", "text": "# Note\n\nThe new fact entirely.\n"}]
-    r2 = client.post(f"/v1/forests/{FOREST}/ingest",
-                     json={"mode": "upload", "files": second, "dest": "uploads"},
-                     headers=head)
-    assert r2.status_code == 200, r2.text
-    assert r2.json()["planted"] == [], "a re-upload must not duplicate the node"
+    s2, b2 = _ingest(client, head,
+                     {"mode": "upload", "files": second, "dest": "uploads"})
+    assert s2 == 200, b2
+    assert b2["planted"] == [], "a re-upload must not duplicate the node"
 
     hit = client.post(f"/v1/forests/{FOREST}/sniff",
                       json={"terms": ["entirely"]}, headers=head).json()
@@ -460,11 +469,9 @@ def test_a_silent_ingest_model_is_reported_as_silent(station):
     head = _key(registry, ["read", "ingest"])
     _bind_ingest(registry, "http://127.0.0.1:9/v1")  # discard port: nothing listens
 
-    r = client.post(f"/v1/forests/{FOREST}/ingest",
-                    json={"mode": "upload", "files": DOCS, "dest": "uploads"},
-                    headers=head)
-    assert r.status_code == 200, r.text
-    body = r.json()
+    status, body = _ingest(client, head,
+                           {"mode": "upload", "files": DOCS, "dest": "uploads"})
+    assert status == 200, body
     assert body["planted"], "a dead model must not stop the ingest"
     assert body["bound"] is True
     assert body["curated"] is False, "nothing was curated, so nothing may claim it was"
@@ -490,12 +497,11 @@ def test_a_model_that_answers_badly_is_not_reported_as_unreachable(
 
     monkeypatch.setattr(inference, "chat_from_binding", fake_chat_from_binding)
 
-    r = client.post(f"/v1/forests/{FOREST}/ingest",
-                    json={"mode": "upload", "files": DOCS, "dest": "uploads"},
-                    headers=head)
-    assert r.status_code == 200, r.text
-    stats = r.json()["curation"]
-    assert r.json()["curated"] is False and r.json()["bound"] is True
+    status, body = _ingest(client, head,
+                           {"mode": "upload", "files": DOCS, "dest": "uploads"})
+    assert status == 200, body
+    stats = body["curation"]
+    assert body["curated"] is False and body["bound"] is True
     assert stats["transport_errors"] == 0, "the endpoint answered every time"
     assert "error" not in stats, "there was no connection problem to report"
     assert stats["rejected"] > 0 and stats["retries"] > 0
@@ -530,11 +536,9 @@ def test_a_verbose_model_is_trimmed_rather_than_discarded(station, monkeypatch):
 
     monkeypatch.setattr(inference, "chat_from_binding", fake_chat_from_binding)
 
-    r = client.post(f"/v1/forests/{FOREST}/ingest",
-                    json={"mode": "upload", "files": DOCS, "dest": "uploads"},
-                    headers=head)
-    assert r.status_code == 200, r.text
-    body = r.json()
+    status, body = _ingest(client, head,
+                           {"mode": "upload", "files": DOCS, "dest": "uploads"})
+    assert status == 200, body
     assert body["curated"] is True, "a trimmed model summary is still curated"
     assert body["curation"]["llm_summaries"] == len(DOCS)
     assert body["curation"]["rejected"] == 0
@@ -568,11 +572,9 @@ def test_a_working_ingest_model_reports_what_it_wrote(station, monkeypatch):
 
     monkeypatch.setattr(inference, "chat_from_binding", fake_chat_from_binding)
 
-    r = client.post(f"/v1/forests/{FOREST}/ingest",
-                    json={"mode": "upload", "files": DOCS, "dest": "uploads"},
-                    headers=head)
-    assert r.status_code == 200, r.text
-    body = r.json()
+    status, body = _ingest(client, head,
+                           {"mode": "upload", "files": DOCS, "dest": "uploads"})
+    assert status == 200, body
     assert body["curated"] is True and body["bound"] is True
     assert body["curation"]["llm_summaries"] == len(DOCS)
     assert body["curation"]["transport_errors"] == 0
@@ -587,23 +589,23 @@ def test_a_later_upload_lands_where_the_operator_said(station):
     client, registry, _ = station
     head = _key(registry, ["read", "ingest"])
 
-    first = client.post(f"/v1/forests/{FOREST}/ingest", headers=head, json={
+    _, first = _ingest(client, head, {
         "mode": "upload", "dest": "uploads",
         "files": [{"name": "first.md", "text": "# First\n\nAlpha fact.\n"}]})
-    assert first.json()["planted"] == ["uploads/first"]
+    assert first["planted"] == ["uploads/first"]
 
-    second = client.post(f"/v1/forests/{FOREST}/ingest", headers=head, json={
+    s2, second = _ingest(client, head, {
         "mode": "upload", "dest": "projects",
         "files": [{"name": "second.md", "text": "# Second\n\nBeta fact.\n"}]})
-    assert second.status_code == 200, second.text
-    assert second.json()["planted"] == ["projects/second"]
+    assert s2 == 200, second
+    assert second["planted"] == ["projects/second"]
 
     # A re-send of a known name still updates in place rather than moving it.
-    third = client.post(f"/v1/forests/{FOREST}/ingest", headers=head, json={
+    _, third = _ingest(client, head, {
         "mode": "upload", "dest": "people",
         "files": [{"name": "first.md", "text": "# First\n\nAlpha fact, revised.\n"}]})
-    assert third.json()["planted"] == []
-    assert third.json()["updated"] == ["uploads/first"]
+    assert third["planted"] == []
+    assert third["updated"] == ["uploads/first"]
 
 
 def test_upload_accepts_bytes_so_binary_converters_are_reachable(station):
@@ -616,10 +618,10 @@ def test_upload_accepts_bytes_so_binary_converters_are_reachable(station):
     head = _key(registry, ["read", "ingest"])
     raw = b"PK\x03\x04 not really a docx"
 
-    r = client.post(f"/v1/forests/{FOREST}/ingest", headers=head, json={
+    status, body = _ingest(client, head, {
         "mode": "upload", "dest": "uploads",
         "files": [{"name": "report.docx", "b64": base64.b64encode(raw).decode()}]})
-    assert r.status_code == 200, r.text
+    assert status == 200, body
     staged = root / FOREST / "_derived" / "uploads" / "report.docx"
     assert staged.read_bytes() == raw, "the bytes must survive the round trip"
 
@@ -635,11 +637,11 @@ def test_upload_refuses_undecodable_bytes(station):
 
 
 def test_ingest_is_audited(station):
+    """J.9: the audit row is written when the job finishes — waiting makes
+    that moment this response."""
     client, registry, _ = station
     head = _key(registry, ["read", "ingest", "admin"])
-    client.post(f"/v1/forests/{FOREST}/ingest",
-                json={"mode": "upload", "files": DOCS, "dest": "uploads"},
-                headers=head)
+    _ingest(client, head, {"mode": "upload", "files": DOCS, "dest": "uploads"})
     entries = client.get("/v1/admin/audit", headers=head).json()["entries"]
     ingest = [e for e in entries if e["primitive"] == "ingest"]
     assert ingest and ingest[0]["result"] == "ok"
@@ -663,9 +665,9 @@ class TestIngestStatus:
         (src / "a.md").write_text("# A\n\nAdopted body.\n", encoding="utf-8")
 
         head = _key(registry, ["read", "ingest", "admin"])
-        assert client.post(f"/v1/forests/{FOREST}/ingest",
-                           json={"mode": "adopt", "path": str(src), "dest": "docs"},
-                           headers=head).status_code == 200
+        status, _ = _ingest(client, head, {"mode": "adopt", "path": str(src),
+                                           "dest": "docs"})
+        assert status == 200
 
         body = client.get(f"/v1/forests/{FOREST}/ingest", headers=head).json()
         assert body["source"] == src.resolve().as_posix()

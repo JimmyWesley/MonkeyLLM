@@ -54,14 +54,18 @@ def station(station_root, tmp_path):
 
 
 def _close_pool(client):
-    """Close every open vine, in the thread that opened them.
+    """Close every open vine, each in the thread that opened it.
 
     A SQLite connection belongs to its thread and the Station confines every
-    forest touch to one; `state.forest_worker` is that thread, and it is how
-    anything outside a request gets in there.
+    forest touch to its own lane (J.9); `state.forest_lane(forest)` is that
+    thread, and it is how anything outside a request gets in there.
     """
     state = client.app.state
-    state.forest_worker.submit(state.pool.close).result()
+    for entry in state.pool.list()["forests"]:
+        if entry["active"]:
+            fid = entry["id"]
+            state.forest_lane(fid).submit(
+                lambda fid=fid: state.pool.close_one(fid)).result()
 
 
 def _key(registry, caps=("read",), forest=FOREST, principal="alice"):

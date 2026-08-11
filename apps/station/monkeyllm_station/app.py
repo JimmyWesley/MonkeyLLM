@@ -21,9 +21,11 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -47,6 +49,7 @@ from monkeyllm.errors import (
     VineError,
 )
 from monkeyllm.server import ForestPool
+from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
 from monkeyllm_station.registry import Registry
 
@@ -90,6 +93,26 @@ MIN_OWNER_PASSWORD = 12
 # by going through the same converters and commits as any adopted folder.
 # One stable directory per forest, so a later `sync` still has its source.
 UPLOAD_DIR = ("_derived", "uploads")
+
+
+@dataclass
+class PreparedIngest:
+    """An accepted batch, handed from the forest lane back to the event
+    loop (J.9): everything the driver needs to step it — one document per
+    lane task, so other calls to the forest interleave — and everything the
+    finisher needs to close it exactly as the v0.31 response did."""
+
+    job: object
+    steps: object          # the G.10 step iterator
+    gardener: object
+    curator: object | None
+    mode: str
+    staged: list = field(default_factory=list)
+    root: Path | None = None
+    before: str | None = None
+    principal: str = ""
+    forest: str = ""
+    payload: dict = field(default_factory=dict)
 
 # The Studio is a React/Vite build: static files only, no server rendering,
 # so it stays a plain REST client with no privileged side-channel (J.5).
@@ -422,14 +445,153 @@ def build_app(
     # rightly does not weaken that guarantee for the host's convenience. So the
     # Station confines every forest touch — open, call, close — to one
     # dedicated thread. It also keeps the blocking reads off the event loop.
-    # Serialising across forests is a simplification; a worker per forest is
-    # the scale-out step, and it changes nothing above this line.
-    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forest")
+    # One lane PER forest (J.9 isolation): a call on one forest never waits
+    # on another forest's work. Lanes open lazily with the forest and close
+    # with the pool; the `None` lane is host work that belongs to no open
+    # forest — creating one, or answering for a forest that does not exist.
+    class ForestLanes:
+        def __init__(self):
+            self._lanes: dict[str | None, ThreadPoolExecutor] = {}
+            self._lock = threading.Lock()
 
-    async def in_forest_thread(fn):
-        return await asyncio.get_running_loop().run_in_executor(worker, fn)
+        def lane(self, forest: str | None) -> ThreadPoolExecutor:
+            with self._lock:
+                ex = self._lanes.get(forest)
+                if ex is None:
+                    name = f"forest-{forest}" if forest else "station-host"
+                    ex = ThreadPoolExecutor(max_workers=1,
+                                            thread_name_prefix=name)
+                    self._lanes[forest] = ex
+                return ex
+
+        def shutdown(self) -> None:
+            with self._lock:
+                lanes, self._lanes = list(self._lanes.values()), {}
+            for ex in lanes:
+                ex.shutdown(wait=True)
+
+    lanes = ForestLanes()
+
+    def _servable(forest: str) -> bool:
+        """Whether this name earns its own lane — a filesystem stat, safe
+        from any thread. Names that are not forests share the host lane,
+        where they get the same unknown-forest answer they always got;
+        without this check, unauthenticated garbage in the URL would mint
+        one thread per guess."""
+        if not forest or pool.root is None:
+            return False
+        target = (pool.root / forest).resolve()
+        return (target.is_relative_to(pool.root) and target != pool.root
+                and (target / "_index.md").is_file())
+
+    async def in_forest_thread(forest: str | None, fn):
+        lane = lanes.lane(forest if forest and _servable(forest) else None)
+        return await asyncio.get_running_loop().run_in_executor(lane, fn)
+
+    # -- ingest jobs (J.9) ---------------------------------------------------
+
+    board = JobBoard()
+
+    def _advance(steps):
+        """One G.10 step, shaped for the executor: `next` raising
+        StopIteration through a Future would poison the awaiting
+        coroutine, so exhaustion is `None` and the report is read off
+        `steps.result`."""
+        try:
+            return next(steps)
+        except StopIteration:
+            return None
+
+    def _finish_ingest(prep: PreparedIngest, cancelled: bool) -> dict:
+        """On the forest lane: the tail every v0.31 ingest ran — rollup,
+        HEAD, curation stats — plus the audit row, written now because the
+        ingest had not happened until now (J.9)."""
+        report = (prep.steps.report.as_dict() if cancelled
+                  else prep.steps.result)
+        # A cancelled batch spends no further model calls: the rollup
+        # describes branches somebody just decided not to finish filling.
+        rollup = (prep.gardener.rollup(prep.curator)
+                  if (prep.curator and not cancelled) else None)
+        after = _git(prep.root, "rev-parse", "HEAD")
+        # `curated` is what the model DID, not what the operator configured
+        # — same reasoning as the compose path (G.4 rule 6).
+        stats = dict(prep.curator.stats) if prep.curator else None
+        if stats and prep.curator.last_error:
+            stats["error"] = prep.curator.last_error
+        if stats and prep.curator.last_reject:
+            stats["rejected_because"] = prep.curator.last_reject
+            stats["last_reply"] = prep.curator.last_reply or ""
+        written = bool(stats and (stats["llm_summaries"] or stats["branch_rollups"]))
+        result = {
+            **report, "mode": prep.mode, "staged": prep.staged,
+            "rollup": rollup,
+            "commit": after or None, "commit_before": prep.before,
+            "curated": written, "bound": prep.curator is not None,
+            "curation": stats,
+        }
+        result.pop("drafts", None)  # an ordinary ingest has none
+        registry.record(
+            principal=prep.principal, forest=prep.forest, primitive="ingest",
+            args={**prep.payload, "job": prep.job.id}, result="ok",
+            size=len(json.dumps(result, default=str)),
+            commit_sha=result.get("commit"),
+        )
+        return result
+
+    async def _drive_ingest(prep: PreparedIngest) -> None:
+        """The job, from accept to finish: each step is one lane task, so
+        between steps every queued call to this forest gets its turn (J.9
+        fairness). Cancellation is honoured at step boundaries — a document
+        is whole or absent, never half."""
+        job, steps = prep.job, prep.steps
+        try:
+            while True:
+                if job.cancel_requested:
+                    final = await in_forest_thread(
+                        prep.forest, lambda: _finish_ingest(prep, cancelled=True))
+                    board.finish(job, "cancelled", report=final)
+                    return
+                step = await in_forest_thread(
+                    prep.forest, lambda: _advance(steps))
+                if step is None:
+                    final = await in_forest_thread(
+                        prep.forest, lambda: _finish_ingest(prep, cancelled=False))
+                    board.finish(job, "done", report=final)
+                    return
+                board.note_step(job, step)
+        except Exception as e:  # noqa: BLE001 — a job must land somewhere
+            err = (e.to_dict() if isinstance(e, VineError)
+                   else VineError(E_SCHEMA, f"ingest failed: {e}"[:300]).to_dict())
+            partial = {**prep.steps.report.as_dict(), "mode": prep.mode,
+                       "staged": prep.staged}
+            board.finish(job, "error", report=partial, error=err.get("error", err))
+            registry.record(
+                principal=prep.principal, forest=prep.forest, primitive="ingest",
+                args={**prep.payload, "job": job.id}, result="error",
+                size=len(json.dumps(err)))
+
+    def _launch_ingest(prep: PreparedIngest):
+        prep.job.task = asyncio.get_running_loop().create_task(
+            _drive_ingest(prep))
+        return prep.job
 
     mcp_lifespan = None  # set below when the MCP surface is mounted
+
+    async def _warm_boot() -> dict:
+        """`warm_all`, one lane at a time: each forest must open on the
+        thread that will serve it. Same shape, same best-effort rule —
+        one locked forest never stops the others (J.6.1)."""
+        opened, skipped = [], {}
+        for entry in pool.list()["forests"]:
+            fid = entry["id"]
+            if entry["active"]:
+                continue
+            try:
+                await in_forest_thread(fid, lambda fid=fid: pool.get(fid))
+                opened.append(fid)
+            except Exception as e:  # noqa: BLE001 — mirror warm_all
+                skipped[fid] = str(e)
+        return {"warmed": opened, "skipped": skipped}
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -441,12 +603,17 @@ def build_app(
             # either way — this only moves who waits for it, from whoever
             # arrives first to the boot nobody is watching.
             if warm_forests:
-                _app.state.warmed = await in_forest_thread(pool.warm_all)
+                _app.state.warmed = await _warm_boot()
             try:
                 yield
             finally:
-                await in_forest_thread(pool.close)  # vines close in their own thread
-                worker.shutdown(wait=True)
+                # Each vine closes on its own lane — the thread that opened it.
+                for entry in pool.list()["forests"]:
+                    if entry["active"]:
+                        fid = entry["id"]
+                        await in_forest_thread(
+                            fid, lambda fid=fid: pool.close_one(fid))
+                lanes.shutdown()
                 registry.close()
 
     # -- auth ---------------------------------------------------------------
@@ -573,6 +740,11 @@ def build_app(
         if name in COMPOSITES or name in HOST_ACTIONS:
             runner = run_composite if name in COMPOSITES else run_ingest
             result = runner(principal, forest, vine, policy, name, payload)
+            if isinstance(result, dict) and "_prepared" in result:
+                # J.9: an accepted batch. The audit row waits for the job to
+                # finish — the ingest is the fact being recorded, and it has
+                # not happened yet.
+                return result
             if isinstance(result, dict):
                 sample["model"] = result.get("model_ms")
             if name in EXPLAINED:
@@ -826,6 +998,9 @@ def build_app(
                 hint="adopt, sync and upload are batches; there is no single "
                      "draft to decide on. Use mode 'compose'.").to_dict()
 
+        # J.9: batches answer with a job; compose answers in place. Decided
+        # here, before compose rewrites itself into an upload.
+        composed = mode == "compose"
         if mode == "compose":
             # Authored prose is a source like any other (J.8): it becomes one
             # staged document and then walks the whole pipeline — converter,
@@ -906,15 +1081,33 @@ def build_app(
         root = Path(vine.forest.root)
         before = _git(root, "rev-parse", "HEAD")
         staged: list[str] = []
+        if mode == "upload":
+            files = payload.get("files")
+            if not isinstance(files, list) or not files:
+                return VineError(
+                    E_SCHEMA, "upload needs a non-empty 'files' list",
+                    hint='Each entry is {"name": "notes.md", "text": "…"} '
+                         'or {"name": "report.docx", "b64": "…"}.').to_dict()
+
+        # J.9: a batch claims its job before anything is staged. The refusal
+        # has to come first — batches share one staging area per forest, and
+        # a second upload must not overwrite files the running job is still
+        # reading. A claim that fails validation below is abandoned, so the
+        # caller who got an error never also got a job.
+        job = None
+        if not composed:
+            job = board.claim(forest, mode, 0, principal)
+            if job is None:
+                running = board.running(forest)
+                return VineError(
+                    E_LOCKED,
+                    "an ingest job is already running on this forest"
+                    + (f": {running.id}" if running else ""),
+                    hint="Watch it under GET /v1/forests/{forest}/jobs, "
+                         "cancel it, or wait for it to finish.").to_dict()
         try:
             if mode == "upload":
-                files = payload.get("files")
-                if not isinstance(files, list) or not files:
-                    return VineError(
-                        E_SCHEMA, "upload needs a non-empty 'files' list",
-                        hint='Each entry is {"name": "notes.md", "text": "…"} '
-                             'or {"name": "report.docx", "b64": "…"}.').to_dict()
-                source, staged = stage_upload(root, files)
+                source, staged = stage_upload(root, payload["files"])
 
             curator = inference.curator_from_binding(
                 vine, policy, registry.binding(forest, "ingest"))
@@ -945,7 +1138,7 @@ def build_app(
                 # keeps the flip working when the forest root reaches the
                 # Station through a symlink — otherwise adopt runs twice and
                 # plants a duplicate of every staged document.
-                mode, report = "sync", gardener.sync(source, dest=dest)
+                mode, steps = "sync", gardener.sync_iter(source, dest=dest)
             elif mode == "sync":
                 # A targeted path here is relative to the source root a prior
                 # adopt recorded — vetted then, and contained by G.8 now.
@@ -961,14 +1154,36 @@ def build_app(
                     if recorded:
                         denied = ingest_roots.check(recorded)
                         if denied is not None:
-                            return denied.to_dict()
-                report = gardener.sync(source, path=payload.get("path"))
+                            raise denied
+                steps = gardener.sync_iter(source, path=payload.get("path"))
             else:
-                report = gardener.adopt(source, dest=dest)
+                steps = gardener.adopt_iter(source, dest=dest)
+
+            if not composed:
+                # Accepted (J.9): iterator construction was the eager half —
+                # source resolved, walk done, total known — so the response
+                # is the job and the report arrives on it. The driver on the
+                # event loop steps the iterator from here; the audit row
+                # waits for the finish.
+                job.mode, job.total = mode, steps.total
+                return {"_prepared": PreparedIngest(
+                    job=job, steps=steps, gardener=gardener, curator=curator,
+                    mode=mode, staged=staged, root=root, before=before or None,
+                    principal=principal, forest=forest, payload=payload)}
+
+            # compose answers in place (J.9): one document, and the J.8.1
+            # review is a conversation, not a batch.
+            for _ in steps:
+                pass
+            report = steps.result
             rollup = gardener.rollup(curator) if (curator and not stage) else None
         except VineError as e:
+            if job is not None:
+                board.abandon(job)
             return e.to_dict()
         except Exception as e:
+            if job is not None:
+                board.abandon(job)
             return VineError(E_SCHEMA, f"ingest failed: {e}"[:300]).to_dict()
 
         after = _git(root, "rev-parse", "HEAD")
@@ -1469,7 +1684,7 @@ def build_app(
             return {**vine.canopy_status,
                     "enabled": registry.setting(forest, "gauntlet", True)}
 
-        status = await in_forest_thread(work)
+        status = await in_forest_thread(forest, work)
         if status is None:
             return _unknown_forest(forest)
         if "error" in status:
@@ -1698,7 +1913,7 @@ def build_app(
                                summary=body.get("summary") or None)
 
         try:
-            info = await in_forest_thread(create)
+            info = await in_forest_thread(forest_id, create)
         except VineError as e:
             return _envelope(e)
         except Exception as e:
@@ -1740,13 +1955,24 @@ def build_app(
         # would say which forests exist by staying silent.
         clocks: dict = {}
         result = await in_forest_thread(
-            lambda: run_primitive(principal, forest, name, payload, clocks)
+            forest, lambda: run_primitive(principal, forest, name, payload, clocks)
         )
         timing = _server_timing(clocks)
         if result is None:
             response = _unknown_forest(forest)
             response.headers["Server-Timing"] = timing
             return response
+        if isinstance(result, dict) and "_prepared" in result:
+            # J.9: the batch was accepted on the lane; the driver steps it
+            # from the event loop. 202 now — or, for a caller that said
+            # `wait`, the finished job in one response.
+            job = _launch_ingest(result["_prepared"])
+            if payload.get("wait"):
+                await job.task
+                return JSONResponse({"job": job.snapshot()},
+                                    headers={"Server-Timing": timing})
+            return JSONResponse({"job": job.snapshot()}, status_code=202,
+                                headers={"Server-Timing": timing})
         if isinstance(result.get("error"), dict):
             code = result["error"].get("code", E_SCHEMA)
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400),
@@ -1886,7 +2112,7 @@ def build_app(
         if kind == "ingest":
             # The GET beside the POST: what a refresh would re-read (J.8).
             result = await in_forest_thread(
-                lambda: run_ingest_status(principal, forest))
+                forest, lambda: run_ingest_status(principal, forest))
             if result is None:
                 return _unknown_forest(forest)
             if isinstance(result.get("error"), dict):
@@ -1900,13 +2126,79 @@ def build_app(
                      "Primitives are POSTed to this path."))
         params = dict(request.query_params)
         result = await in_forest_thread(
-            lambda: run_map(principal, forest, kind, params))
+            forest, lambda: run_map(principal, forest, kind, params))
         if result is None:
             return _unknown_forest(forest)
         if isinstance(result.get("error"), dict):
             code = result["error"].get("code", E_SCHEMA)
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
         return JSONResponse(result)
+
+    # -- ingest jobs, read side (J.9) ---------------------------------------
+
+    def _job_watch_refusal(principal: str, forest: str) -> JSONResponse | None:
+        """Who may watch: whoever could have asked (J.9). Touches only the
+        host registry — never the forest, never a lane — which is what
+        keeps polling free while the batch runs."""
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            return _unknown_forest(forest)
+        if not policy.grants("ingest"):
+            return _envelope(VineError(
+                E_FORBIDDEN, "watching ingest jobs requires the 'ingest' capability",
+                hint=f"This principal holds: {sorted(policy.caps)}."), 403)
+        return None
+
+    async def jobs_list(request: Request) -> JSONResponse:
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        refused = _job_watch_refusal(principal, forest)
+        if refused is not None:
+            return refused
+        listed, truncated = board.list(forest)
+        out: dict = {"jobs": listed}
+        if truncated:
+            out["truncated"] = True
+        return JSONResponse(out)
+
+    async def job_get(request: Request) -> JSONResponse:
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        refused = _job_watch_refusal(principal, forest)
+        if refused is not None:
+            return refused
+        job = board.get(forest, request.path_params["job"])
+        if job is None:
+            # Absence of the record is not failure of the work (J.9): a
+            # restart forgets jobs, never commits.
+            return _envelope(VineError(
+                E_NOT_FOUND, f"no such job: {request.path_params['job']}",
+                hint="A restart forgets job records, never the work — the "
+                     "forest's own account is the audit log and git log."), 404)
+        return JSONResponse({"job": job.snapshot()})
+
+    async def job_cancel(request: Request) -> JSONResponse:
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        refused = _job_watch_refusal(principal, forest)
+        if refused is not None:
+            return refused
+        job = board.get(forest, request.path_params["job"])
+        if job is None:
+            return _envelope(VineError(
+                E_NOT_FOUND, f"no such job: {request.path_params['job']}"), 404)
+        # Asked here, honoured by the driver at the next step boundary
+        # (J.9): a document is whole or absent, never half. On a finished
+        # job this is a no-op, not an error — "make it not run" is already
+        # true.
+        board.cancel(job)
+        return JSONResponse({"job": job.snapshot()})
 
     # -- maintenance (J.13) -------------------------------------------------
 
@@ -1949,7 +2241,7 @@ def build_app(
             # own scheduled run, never a side effect of opening a console.
             return Ranger(vine).health()
 
-        result = await in_forest_thread(work)
+        result = await in_forest_thread(forest, work)
         if isinstance(result.get("error"), dict):
             code = result["error"].get("code", E_SCHEMA)
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
@@ -2015,7 +2307,7 @@ def build_app(
             except VineError as e:
                 return e.to_dict()
 
-        result = await in_forest_thread(work)
+        result = await in_forest_thread(forest, work)
         if isinstance(result.get("error"), dict):
             code = result["error"].get("code", E_SCHEMA)
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
@@ -2059,6 +2351,12 @@ def build_app(
         Route("/v1/admin/snapshots", admin_snapshots, methods=["GET", "POST"]),
         # Before the primitive catch-all, which is POST-only: these are GETs
         # of a projection, not calls of a primitive.
+        # Jobs before the generic pair: `/jobs` is a literal, and the
+        # `{kind}` GET below would otherwise swallow it (J.9).
+        Route("/v1/forests/{forest}/jobs", jobs_list, methods=["GET"]),
+        Route("/v1/forests/{forest}/jobs/{job}", job_get, methods=["GET"]),
+        Route("/v1/forests/{forest}/jobs/{job}/cancel", job_cancel,
+              methods=["POST"]),
         Route("/v1/forests/{forest}/{kind:str}", forest_map, methods=["GET"]),
         Route("/v1/forests/{forest}/{primitive}", primitive, methods=["POST"]),
     ]
@@ -2067,7 +2365,7 @@ def build_app(
         from monkeyllm_station.mcp_surface import build_mcp_mount
 
         mcp_app, mcp_lifespan = build_mcp_mount(pool, registry, in_forest_thread,
-                                                run_primitive)
+                                                run_primitive, _launch_ingest)
         if mcp_app is not None:
             routes.append(Mount("/mcp", app=mcp_app))
 
@@ -2096,9 +2394,12 @@ def build_app(
     app.state.registry = registry
     app.state.ingest_roots = ingest_roots
     app.state.run_primitive = run_primitive
-    # Exposing the pool without the one thread it may be touched from was an
+    # Exposing the pool without the threads it may be touched from was an
     # invitation to break its own invariant: a SQLite connection belongs to
     # the thread that opened it, and since boot warming the pool is rarely
-    # empty. Anything reaching for `state.pool` submits through here.
-    app.state.forest_worker = worker
+    # empty. Anything reaching for `state.pool` submits through the owning
+    # forest's lane (J.9: one worker thread per forest).
+    app.state.forest_lane = lambda forest=None: lanes.lane(
+        forest if forest and _servable(forest) else None)
+    app.state.jobs = board
     return app

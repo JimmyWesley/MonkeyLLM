@@ -442,6 +442,64 @@ class IngestReport:
         return {k: list(v) for k, v in self.__dict__.items()}
 
 
+# G.10: which report list a step grew names what the step did. Ordered by
+# precedence — a planted file may also record its branch, and the branch is
+# not the action. A draft counts as `planted`: a preview steps exactly as
+# the run it previews.
+_STEP_ACTIONS = (("planted", "planted"), ("updated", "updated"),
+                 ("unchanged", "unchanged"), ("unsupported", "unsupported"),
+                 ("errors", "error"), ("stale", "stale"), ("drafts", "planted"))
+
+
+def _counts(report: IngestReport) -> dict:
+    return {attr: len(getattr(report, attr)) for attr, _ in _STEP_ACTIONS}
+
+
+def _step(file: str, index: int, total: int, report: IngestReport,
+          before: dict) -> dict:
+    action = "skipped"
+    for attr, name in _STEP_ACTIONS:
+        if len(getattr(report, attr)) > before[attr]:
+            action = name
+            break
+    return {"file": file, "index": index, "total": total, "action": action}
+
+
+def _drain(steps: "IngestSteps") -> dict:
+    for _ in steps:
+        pass
+    return steps.result
+
+
+class IngestSteps:
+    """G.10 step iterator: one document per `next()`, the report at the end.
+
+    Construction is eager where iteration is lazy — the source is resolved
+    and walked before this exists, so `total` is known up front and a bad
+    source fails before any step runs (spec J.9 needs both to refuse before
+    accepting). `report` is the live `IngestReport` the steps are filling —
+    what a consumer that died mid-batch can still account from — and
+    `result` is its final dict once the iterator is exhausted, None until
+    then.
+    """
+
+    def __init__(self, total: int, steps, report: IngestReport):
+        self.total = total
+        self.report = report
+        self.result: dict | None = None
+        self._steps = steps
+
+    def __iter__(self) -> "IngestSteps":
+        return self
+
+    def __next__(self) -> dict:
+        try:
+            return next(self._steps)
+        except StopIteration as done:
+            self.result = done.value
+            raise
+
+
 class Gardener:
     """Adopts a directory into forest (Part G).
 
@@ -678,15 +736,36 @@ class Gardener:
     # -- adopt (G.3) ---------------------------------------------------------
 
     def adopt(self, source: str | Path, dest: str | None = None) -> dict:
+        return _drain(self.adopt_iter(source, dest))
+
+    def adopt_iter(self, source: str | Path,
+                   dest: str | None = None) -> IngestSteps:
+        """One document per step (G.10); `adopt` is exactly "drain this".
+
+        The source root is recorded before the first step, not after the
+        last: a run abandoned at any yield — a crash, a cancel (J.9) —
+        leaves the stepped files planted and committed, and the recorded
+        root is what lets `sync` finish the remainder instead of the
+        operator starting over.
+        """
         src = self._resolve_source(source)
+        if not self.dry_run:
+            self.config["source_root"] = src.as_posix()
+            if dest:
+                self.config["dest"] = dest
+            self._save_config()
+        files = self._walk(src)
         report = IngestReport()
-        for f in self._walk(src):
-            self._ingest_file(src, f, dest, report)
-        self.config["source_root"] = src.as_posix()
-        if dest:
-            self.config["dest"] = dest
-        self._save_config()
-        return report.as_dict()
+
+        def steps():
+            for i, f in enumerate(files):
+                before = _counts(report)
+                self._ingest_file(src, f, dest, report)
+                yield _step(f.relative_to(src).as_posix(), i + 1, len(files),
+                            report, before)
+            return report.as_dict()
+
+        return IngestSteps(len(files), steps(), report)
 
     def _ingest_file(self, src: Path, f: Path, dest: str | None,
                      report: IngestReport) -> None:
@@ -829,10 +908,21 @@ class Gardener:
         moves nodes. Without the override a caller who says where a new
         document goes is silently overruled by whatever the last adopt
         recorded."""
+        return _drain(self.sync_iter(source=source, path=path, dest=dest))
+
+    def sync_iter(self, source: str | Path | None = None,
+                  path: str | None = None,
+                  dest: str | None = None) -> IngestSteps:
+        """One document per step (G.10); `sync` is exactly "drain this".
+
+        Resolution and containment are eager — a bad source or an escaping
+        `path` fails here, before any step — while the passport read joins
+        the first step: it reads the forest, and construction touches only
+        the filesystem.
+        """
         src = self._resolve_source(source, recorded=True)
         dest = dest or self.config.get("dest")
         report = IngestReport()
-        passports = self._passports()
 
         if path:  # G.8 targeted sync: one file, the event-trigger building block
             # `path` is source-root-relative and MUST stay there. `relative_to`
@@ -847,23 +937,38 @@ class Gardener:
                     hint="A targeted sync names a path relative to the "
                          "adopted source root.")
             rel = f.relative_to(src).as_posix()
-            if f.is_file():
+
+            def one():
+                passports = self._passports()
+                before = _counts(report)
+                if f.is_file():
+                    self._sync_one(src, f, rel, passports, dest, report)
+                elif rel in passports:
+                    report.stale.append(passports[rel]["id"])
+                else:
+                    report.unsupported.append(rel)
+                yield _step(rel, 1, 1, report, before)
+                return report.as_dict()
+
+            return IngestSteps(1, one(), report)
+
+        files = self._walk(src)
+
+        def steps():
+            passports = self._passports()
+            seen: set[str] = set()
+            for i, f in enumerate(files):
+                rel = f.relative_to(src).as_posix()
+                seen.add(rel)
+                before = _counts(report)
                 self._sync_one(src, f, rel, passports, dest, report)
-            elif rel in passports:
-                report.stale.append(passports[rel]["id"])
-            else:
-                report.unsupported.append(rel)
+                yield _step(rel, i + 1, len(files), report, before)
+            for rel, info in passports.items():
+                if rel not in seen:
+                    report.stale.append(info["id"])
             return report.as_dict()
 
-        seen: set[str] = set()
-        for f in self._walk(src):
-            rel = f.relative_to(src).as_posix()
-            seen.add(rel)
-            self._sync_one(src, f, rel, passports, dest, report)
-        for rel, info in passports.items():
-            if rel not in seen:
-                report.stale.append(info["id"])
-        return report.as_dict()
+        return IngestSteps(len(files), steps(), report)
 
     def _sync_one(self, src: Path, f: Path, rel: str, passports: dict,
                   dest: str | None, report: IngestReport) -> None:

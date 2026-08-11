@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Jimmy Wesley
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -80,6 +80,10 @@ export default function Ingest({ forest, grant, goto }) {
   // does not mention them.
   const [mode, setMode] = useRouteState('mode', 'upload',
                                         { allow: ['upload', 'adopt', 'compose'] })
+  // The running batch, by address (J.9.1): `?job=` is replaced in, so a
+  // reload restores the progress view by reading the job — a record, never
+  // a call — and Back does not walk the batch's lifetime.
+  const [jobId, setJobId] = useRouteState('job', '')
   const [title, setTitle] = useState('')
   const [files, setFiles] = useState([])
   const [dest, setDest] = useState('')
@@ -115,12 +119,41 @@ export default function Ingest({ forest, grant, goto }) {
     : bindings.busy ? undefined
     : (bindings.data || []).find((b) => b.role === 'ingest') || null
 
+  /* The job the address names, watched by polling its record (J.9): a read
+     of host memory, so watching is free and survives a reload. A 404 is a
+     Station that restarted — said as such, never dressed up as a failure. */
+  const [job, setJob] = useState(null)
+  const [jobLost, setJobLost] = useState(false)
+  const [settled, setSettled] = useState(0)
+  useEffect(() => {
+    setJob(null)
+    setJobLost(false)
+    if (!jobId) return undefined
+    let alive = true
+    let timer
+    const tick = async () => {
+      try {
+        const out = await api.job(forest, jobId)
+        if (!alive) return
+        setJob(out.job)
+        if (out.job.state === 'running') timer = setTimeout(tick, 800)
+        else setSettled((n) => n + 1)
+      } catch (error) {
+        if (!alive) return
+        if (error.status === 404) setJobLost(true)
+        else timer = setTimeout(tick, 2000) // transient; keep watching
+      }
+    }
+    tick()
+    return () => { alive = false; clearTimeout(timer) }
+  }, [forest, jobId])
+
   /* J.8: a refresh reads a directory the request never names — it comes
      from what a past adopt recorded. So the console asks what that is and
      shows it, because a button whose reach is invisible is not consent.
      Re-asked after every run: an adopt is exactly what changes the answer. */
   const ingestState = useAsync(() => api.ingestStatus(forest),
-                               [forest, state.report])
+                               [forest, state.report, settled])
   const status = ingestState.data || {}
 
   if (!has(grant, 'ingest')) {
@@ -207,6 +240,15 @@ export default function Ingest({ forest, grant, goto }) {
         setState({ busy: false,
                    review: { ...composition, ...report, stamp: staging.current } })
         return  // nothing has been planted yet; the composer keeps its text
+      }
+      if (report.job) {
+        // J.9: the batch was accepted, not finished. The job goes into the
+        // address and the poll above takes over — the form is free again,
+        // and so is the operator.
+        setState({})
+        setJobId(report.job.id)
+        if (mode === 'upload') { setFiles([]); setSkipped([]) }
+        return
       }
       setState({ busy: false, report })
       if (mode === 'upload') { setFiles([]); setSkipped([]) }
@@ -402,10 +444,13 @@ export default function Ingest({ forest, grant, goto }) {
             )}
 
             <div className="flex justify-end">
-              <button className="btn btn-primary" disabled={!ready || state.busy}>
+              {/* One batch per forest at a time (J.9): a second submit would
+                  be refused E_LOCKED anyway, so the button says so first. */}
+              <button className="btn btn-primary"
+                      disabled={!ready || state.busy || job?.state === 'running'}>
                 {mode === 'sync' ? <Refresh size={14} />
                   : mode === 'compose' ? <Pencil size={14} /> : <Upload size={14} />}
-                {state.busy ? t('ingest.running')
+                {state.busy || job?.state === 'running' ? t('ingest.running')
                   : mode === 'compose' ? t('ingest.review') : t('ingest.start')}
               </button>
             </div>
@@ -419,8 +464,37 @@ export default function Ingest({ forest, grant, goto }) {
                        onPublish={publish}
                        onDiscard={() => setState({})} />
         )}
+        {jobLost && (
+          <Card title={t('ingest.job_title')}>
+            {/* A dead job id is said, not dressed up (J.9.1): absence of the
+                record is not failure of the work. */}
+            <Note tone="warn">{t('ingest.job_lost')}</Note>
+            <button className="btn btn-sm mt-3" onClick={() => setJobId('')}>
+              {t('common.close')}
+            </button>
+          </Card>
+        )}
+        {job && job.state === 'running' && (
+          <JobProgress job={job}
+                       onCancel={() => api.cancelJob(forest, job.id).catch(() => {})} />
+        )}
+        {job && job.state === 'cancelled' && (
+          <Card title={t('ingest.job_title')}>
+            <Note tone="warn">{t('ingest.job_cancelled')}</Note>
+          </Card>
+        )}
+        {job && job.state === 'error' && (
+          <Card title={t('ingest.job_title')}>
+            <Note tone="danger">{t('ingest.job_failed')}</Note>
+            {job.error && <div className="mt-2"><ErrorNote error={job.error} /></div>}
+          </Card>
+        )}
+        {job && job.state !== 'running' && job.report && (
+          <Report report={job.report} forest={forest} />
+        )}
         {state.report && <Report report={state.report} forest={forest} />}
-        {!state.busy && !state.error && !state.report && !state.review && (
+        {!state.busy && !state.error && !state.report && !state.review
+          && !jobId && (
           <Card><Empty icon={Upload}>{t('ingest.empty')}</Empty></Card>
         )}
       </div>
@@ -459,6 +533,48 @@ export default function Ingest({ forest, grant, goto }) {
         // from here (J.5.7): the ingest that prompted the branch continues.
         onCreated={(id) => { setDest(branchOf(id)); tree.reload() }} />
     </div>
+  )
+}
+
+/** The running batch, from its job record (J.9.1): done over total, the
+ *  document in hand, the errors so far — and the one control a batch has,
+ *  which stops at the next step boundary. Never modal: freeing the operator
+ *  to look elsewhere is the reason jobs exist. */
+function JobProgress({ job, onCancel }) {
+  const { t } = useI18n()
+  const [asked, setAsked] = useState(false)
+  const total = Math.max(job.total || 0, 1)
+  const pct = Math.min(100, Math.round(((job.done || 0) / total) * 100))
+  return (
+    <Card title={t('ingest.job_title')} subtitle={t('ingest.job_sub')}
+          icon={Upload}
+          actions={<Badge tone="accent">{job.mode}</Badge>}>
+      <div className="flex items-center justify-between text-[12.5px]">
+        <span className="font-medium text-text">
+          {t('ingest.job_progress', { done: job.done || 0, total: job.total || 0 })}
+        </span>
+        <span className="text-text-3">{pct}%</span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-2">
+        <div className="h-full rounded-full bg-accent transition-[width] duration-500"
+             style={{ width: `${pct}%` }} />
+      </div>
+      {job.current && (
+        <p className="mt-2 truncate font-mono text-[11.5px] text-text-3">
+          {t('ingest.job_current', { file: job.current })}
+        </p>
+      )}
+      <div className="mt-3 flex items-center justify-between">
+        {job.errors > 0
+          ? <Badge tone="danger">{t('ingest.job_errors', { n: job.errors })}</Badge>
+          : <span />}
+        <button type="button" className="btn btn-sm" disabled={asked}
+                onClick={() => { setAsked(true); onCancel() }}>
+          <X size={13} />
+          {asked ? t('ingest.job_cancelling') : t('ingest.job_cancel')}
+        </button>
+      </div>
+    </Card>
   )
 }
 

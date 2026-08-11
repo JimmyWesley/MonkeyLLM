@@ -122,6 +122,14 @@ class ForestPool:
             vine.close()
         self._vines.clear()
 
+    def close_one(self, forest: str) -> None:
+        """Close a single forest. A host that confines each forest to its
+        own thread (spec J.9 isolation) closes each one from that thread,
+        which `close()` — all forests, one caller — cannot offer."""
+        vine = self._vines.pop(forest, None)
+        if vine is not None:
+            vine.close()
+
 
 def build_server(
     forest_root: str | Path | None = None,

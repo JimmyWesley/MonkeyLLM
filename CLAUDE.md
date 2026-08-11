@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.31.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.32.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -120,10 +120,22 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   Ranger reads as evidence. A Station opens and warms every forest at boot
   (`--no-warm` / `MONKEYLLM_STATION_WARM=0` for registries too big to hold
   open), best effort: one locked forest never stops the others.
-- **`app.state.pool` is only touchable from `app.state.forest_worker`**: a
-  SQLite connection belongs to its opening thread, and since boot warming
-  the pool is rarely empty — code that reached for the pool directly used to
-  get away with it because there was nothing open yet.
+- **`app.state.pool` is only touchable through `app.state.forest_lane(id)`**
+  (spec J.9, v0.32): one worker thread — lane — per forest; a SQLite
+  connection belongs to its opening thread, and since boot warming the pool
+  is rarely empty. Never touch a vine from another forest's lane, and never
+  from the event loop.
+- **Batch ingest is a job (spec J.9 + G.10, v0.32)**: `adopt`/`sync`/
+  `upload` validate synchronously and answer **202 + job** (`wait: true`
+  blocks; the MCP `ingest` tool waits by default); `compose` stays in
+  place. One batch per forest at a time — the E_LOCKED refusal names the
+  running job. The Gardener steps one document per `next()`
+  (`adopt_iter`/`sync_iter`), records `source_root` BEFORE the first step
+  (that is what makes cancel/crash recoverable by `sync`), and same-forest
+  reads interleave between steps. Job records live in host memory only:
+  `GET .../jobs[/{id}]` must never touch a forest (no lane, no trace, no
+  pheromone), a restart forgets records but never work, and Studio carries
+  the running job in the address as `?job=`.
 - **The address is where the console is (spec J.5.8, v0.30)**:
   `/f/{forest}/{console}` with the selection in the query (`node`, `mode`,
   `dataset`, `table`, `tab`). Studio keeps **no second copy** of it — `App`
