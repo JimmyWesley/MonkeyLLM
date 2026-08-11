@@ -8,7 +8,8 @@ import {
 } from '../history.js'
 import { useI18n } from '../i18n.jsx'
 import {
-  Badge, Card, Empty, ErrorNote, Modal, Note, Segmented, Spinner, Toggle,
+  Badge, Card, CopyButton, Empty, ErrorNote, Modal, Note, Segmented, Spinner,
+  Toggle,
 } from '../design/ui.jsx'
 import { Markdown } from '../design/markdown.jsx'
 import {
@@ -98,6 +99,19 @@ export default function Ask({ forest, grant, me, goto }) {
   }
 
   const noModel = error?.code === 'E_SCHEMA' && /no model is bound/i.test(error.message)
+
+  // The request as a command (the Playground's pattern): the parameters as
+  // the form would send them now, and never the key — `$MONKEYLLM_KEY` is a
+  // placeholder because a credential pasted into a chat or a script is a
+  // credential published (J.10's write-only rule, one surface out).
+  const curl = `curl -X POST ${window.location.origin}/v1/forests/${forest}/answer \\
+  -H "Authorization: Bearer $MONKEYLLM_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '${JSON.stringify({
+    question, k,
+    ...(hybrid ? { hybrid: true } : {}), ...(hops ? { hops: true } : {}),
+    ...(cache ? {} : { cache: false }),
+  })}'`
 
   return (
     <div className="space-y-4">
@@ -284,6 +298,7 @@ export default function Ask({ forest, grant, me, goto }) {
                 diagram — a bundled PDF writer would do both worse. */}
             <div className="no-print mt-5 flex flex-wrap justify-end gap-2
                             border-t border-line pt-3">
+              <CopyButton value={curl} label={t('ask.copy_curl')} />
               <button className="btn btn-sm"
                       onClick={() => downloadMarkdown(result, question, forest)}>
                 <Download size={14} /> {t('ask.download_md')}

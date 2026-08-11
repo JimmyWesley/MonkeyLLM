@@ -110,6 +110,38 @@ curl -sX POST localhost:8800/v1/forests/forest-fixture/answer \
 `POST /v1/admin/forests` (J.7) and the other `/v1/admin/*` routes the Studio
 uses. Failures are the spec's error envelope mapped onto HTTP codes.
 
+### The answer store (J.10.7)
+
+`answer` is fronted by a per-forest cache of answers already bought. A
+repeat of a question — same normalised question, effective terms, `k`, hops
+budget, entry-search mode, resolved binding, caller scope and forest HEAD —
+is served from the store without a provider round trip. A hit says so on
+every surface: the body carries `cached: true` and the time of the original
+run (`cached_at`), the `Server-Timing` header carries `cache` and no
+`model`, and the audit row is marked as served from the store with the
+entry's key digest. Any write to the forest moves HEAD and thereby
+invalidates every entry made before it — there is no staleness window to
+tune.
+
+Pass `"cache": false` to skip the read and buy a fresh run; the fresh
+result **replaces** the stored entry, which is how with-and-without is
+compared:
+
+```bash
+curl -sX POST localhost:8800/v1/forests/forest-fixture/answer \
+     -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
+     -d '{"question": "who wrote the MixerLLM architecture?", "cache": false}'
+```
+
+The MCP `answer` tool takes the same parameter. Settings and economy live
+at `GET|POST /v1/admin/cache?forest=` (requires `admin` on that forest):
+`enabled` (default on), `max_entries` (the stated bound, evicting
+oldest-served-first), `ttl_hours` (hygiene only — the key already
+invalidates), and `clear: true` to empty the store. The stats report hits,
+misses, entries held against the bound, and the money not spent — counted
+only over runs the provider priced, because an unpriced saving is unpriced,
+never $0.00.
+
 ### Maintenance (J.13)
 
 `GET /v1/admin/health?forest=` relays the Ranger's H.3 report unchanged —

@@ -84,6 +84,10 @@ export default function Playground({ forest, grant }) {
   // K.1: off by default, because measurement says fusing the dense layer
   // into an already-correct BM25 moves the right node off rank 1.
   const [hybrid, setHybrid] = useState(false)
+  // J.10.7: on by default, like the Ask console — and shown here precisely
+  // because this panel is where somebody measures. `cache: false` is the
+  // with-and-without instrument: it skips the read and replaces the entry.
+  const [cache, setCache] = useState(true)
   const [state, setState] = useState({})
   // How large the haystack was — above the early return, because a hook
   // behind a condition is a hook that changes count between renders.
@@ -111,6 +115,9 @@ export default function Playground({ forest, grant }) {
     // The other dense switch, and a different one: this fuses the vector
     // layer into ENTRY search (K.1). Sent only where entry search happens.
     if (ENTRY_OPS.includes(op) && hybrid) out.hybrid = true
+    // Only `answer` has a store in front of it (J.10.7); sending the flag
+    // anywhere else would be a control with no wire behind it.
+    if (op === 'answer' && !cache) out.cache = false
     return out
   }
 
@@ -200,6 +207,12 @@ export default function Playground({ forest, grant }) {
               <div className="mr-auto">
                 <Toggle checked={hybrid} onChange={setHybrid}
                         label={t('ask.hybrid')} hint={t('ask.hybrid_hint')} />
+              </div>
+            )}
+            {op === 'answer' && (
+              <div className="mr-auto">
+                <Toggle checked={cache} onChange={setCache}
+                        label={t('ask.cache')} hint={t('ask.cache_hint')} />
               </div>
             )}
             <button className="btn btn-primary" disabled={state.busy}>

@@ -4,6 +4,7 @@
   "ask.cache_hint": "Uma pergunta já respondida nesta floresta inalterada é servida do banco na hora, sem pagar o modelo de novo. Desligado, esta pergunta compra uma resposta nova e substitui a guardada.",
   "ask.cached": "Do banco",
   "ask.collapse": "Trazer o painel de volta",
+  "ask.copy_curl": "Copiar cURL",
   "ask.depth": "Quanto ler",
   "ask.download_md": "Baixar .md",
   "ask.download_pdf": "Salvar em PDF",
