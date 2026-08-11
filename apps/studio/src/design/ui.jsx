@@ -291,7 +291,7 @@ export function Segmented({ value, onChange, options, className = '' }) {
 
 export function Tabs({ value, onChange, options }) {
   return (
-    <div className="flex flex-wrap justify-center gap-1 border-b border-line">
+    <div className="flex flex-wrap gap-1 border-b border-line">
       {options.map((o) => (
         <button key={o.value} type="button" onClick={() => onChange(o.value)}
                 className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2

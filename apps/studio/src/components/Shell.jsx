@@ -277,13 +277,13 @@ function TabBar({ pins, view, forest, node, onMore, moreOpen }) {
              aria-current={view === key ? 'page' : undefined}
              {...consoleLink(forest, key, node)}>
             <Icon size={19} />
-            <span className="w-full truncate">{t(`nav.${key}`)}</span>
+            <span className="w-full truncate text-center">{t(`nav.${key}`)}</span>
           </a>
         )
       })}
       <button className={tab(moreOpen)} onClick={onMore} aria-expanded={moreOpen}>
         <More size={19} />
-        <span className="w-full truncate">{t('nav.more')}</span>
+        <span className="w-full truncate text-center">{t('nav.more')}</span>
       </button>
     </nav>
   )
