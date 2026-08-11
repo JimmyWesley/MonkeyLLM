@@ -18,6 +18,7 @@ import {
   CONSOLE_ICON, ChevronDown, Forest, Globe, LogOut, Moon, More, PanelLeft,
   Plus, Star, Sun, X,
 } from '../design/icons.jsx'
+import JobPill from './JobPill.jsx'
 
 /** `cap` is what the console's own endpoints require. Absent means every
  *  principal has something to see there: Overview describes the key itself,
@@ -248,6 +249,11 @@ export function Shell({ session, forest, view, node, onForestCreated,
 
         <TabBar pins={pins} view={view} forest={forest} node={node}
                 onMore={() => setOpen(true)} moreOpen={open} />
+
+        {/* The batch, visible from every console (J.9.3). Renders nothing
+            on the ingest console — the full card is already there — and
+            nothing when the board is idle. */}
+        <JobPill forest={forest} view={view} grant={grant} />
       </div>
     </div>
   )

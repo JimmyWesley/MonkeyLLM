@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.35.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.38.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -140,7 +140,16 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   reads interleave between steps. Job records live in host memory only:
   `GET .../jobs[/{id}]` must never touch a forest (no lane, no trace, no
   pheromone), a restart forgets records but never work, and Studio carries
-  the running job in the address as `?job=`.
+  the running job in the address as `?job=`. Entering the ingest console
+  without `?job=` rediscovers a running job from the job list and puts it
+  back in the address (J.9.1, v0.36); next batches may wait in a FIFO in
+  tab memory (J.9.2) — visible, never in the address, dead with the tab,
+  fired one per settle, held on cancel or non-`E_LOCKED` refusal. The
+  host itself still never queues. A pill on every console announces the
+  running batch and the queue (J.9.3, v0.37): it reads the job board only
+  — never a browser-storage copy — through ONE watcher per forest whose
+  cadence follows the attention (~1 min collapsed, ~2 s expanded or with
+  the ingest console open), and it yields on the ingest console itself.
 - **Two hashes: the question finds the entry, the reading decides the
   model (spec J.10.7, v0.35 — T11)**: the host caches `answer` and nothing
   else, per forest, in `_derived/cache/`. The sweep's retrieval runs on

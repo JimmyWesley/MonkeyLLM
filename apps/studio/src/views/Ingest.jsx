@@ -11,10 +11,14 @@ import { api } from '../api.js'
 import { useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import {
+  WATCH, enqueue, noteJob, release, remove as unqueue, takeFired, useAttend,
+  useBoard,
+} from '../board.js'
+import {
   Badge, Card, Empty, ErrorNote, Field, Note, Select, Spinner, Tabs,
 } from '../design/ui.jsx'
 import {
-  File, Files, Ingest as Upload, Pencil, Plus, Refresh, X,
+  Clock, File, Files, Ingest as Upload, Pencil, Play, Plus, Refresh, X,
 } from '../design/icons.jsx'
 import {
   NeedsCapability, NewBranch, branchOf, has, nodeLink, useAsync, useForestTree,
@@ -119,34 +123,54 @@ export default function Ingest({ forest, grant, goto }) {
     : bindings.busy ? undefined
     : (bindings.data || []).find((b) => b.role === 'ingest') || null
 
-  /* The job the address names, watched by polling its record (J.9): a read
-     of host memory, so watching is free and survives a reload. A 404 is a
-     Station that restarted — said as such, never dressed up as a failure. */
-  const [job, setJob] = useState(null)
-  const [jobLost, setJobLost] = useState(false)
-  const [settled, setSettled] = useState(0)
+  /* The tab's one view of the job board (J.9.3): the batches waiting their
+     turn, and the jobs as last read. Tab memory, so both survive a look at
+     another console — which is the whole reason they are not state of this
+     component. This console is somebody watching, so it registers the fine
+     cadence; the board polls once for every reader. */
+  const board = useBoard(forest)
+  useAttend(forest, WATCH, has(grant, 'ingest'))
+
+  /* J.9.1 (v0.36): the query belongs to its console, so coming back from
+     the map loses `?job=` while the batch runs on. Whenever the address
+     names no job and the board says one is running — entering, returning,
+     or a batch begun by another client — it goes into the address,
+     replacing: a correction, not a place the operator went. */
   useEffect(() => {
-    setJob(null)
-    setJobLost(false)
-    if (!jobId) return undefined
-    let alive = true
-    let timer
-    const tick = async () => {
-      try {
-        const out = await api.job(forest, jobId)
-        if (!alive) return
-        setJob(out.job)
-        if (out.job.state === 'running') timer = setTimeout(tick, 800)
-        else setSettled((n) => n + 1)
-      } catch (error) {
-        if (!alive) return
-        if (error.status === 404) setJobLost(true)
-        else timer = setTimeout(tick, 2000) // transient; keep watching
-      }
+    if (!jobId && board.running) setJobId(board.running.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [board.version, jobId])
+
+  /* When the tab's queue fires a batch, the console that is looking follows
+     it — the new job goes into the address exactly as a submit's would,
+     even over a settled job's report. A console that is not mounted leaves
+     it for the rediscovery above. */
+  useEffect(() => {
+    const fired = takeFired(forest)
+    if (fired) setJobId(fired)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forest, board.version])
+
+  /* The job the address names, read off the board (J.9): host memory, so
+     watching is free and survives a reload. An id the board no longer
+     carries is a Station that restarted — said as such, never dressed up
+     as a failure — but only once the board has actually been read. */
+  const job = jobId ? board.jobs.find((j) => j.id === jobId) || null : null
+  const jobLost = Boolean(jobId) && board.fetched && !job
+
+  /* A settle is what changes what `sync` would re-read, so the status card
+     below re-asks after one. Watched as a transition, not a state: the
+     report of a batch that finished last week must not retrigger it. */
+  const [settled, setSettled] = useState(0)
+  const lastSeen = useRef({ id: null, state: null })
+  useEffect(() => {
+    const prev = lastSeen.current
+    if (job && prev.id === job.id && prev.state === 'running'
+        && job.state !== 'running') {
+      setSettled((n) => n + 1)
     }
-    tick()
-    return () => { alive = false; clearTimeout(timer) }
-  }, [forest, jobId])
+    lastSeen.current = { id: job?.id || null, state: job?.state || null }
+  }, [job])
 
   /* J.8: a refresh reads a directory the request never names — it comes
      from what a past adopt recorded. So the console asks what that is and
@@ -206,25 +230,39 @@ export default function Ingest({ forest, grant, goto }) {
 
   async function submit(e) {
     e.preventDefault()
+    // `bytes` is display-only; the wire contract is {name, text|b64}.
+    const payload = files.map(({ bytes, ...rest }) => rest)
+    // Composing does NOT publish (J.8.1): it stages, and what comes back
+    // is a proposal. The text travels with the review so the accepting
+    // call sends the same bytes the Curator read — re-serialising the
+    // editor at publish time would let a stray keystroke change the
+    // document out from under the passport that was approved.
+    const composition = {
+      mode: 'compose', title: title.trim(),
+      text: turndown.turndown(composer?.getHTML() || ''),
+      dest: dest || undefined,
+    }
+    const body = mode === 'upload'
+      ? { mode, files: payload, dest: dest || undefined }
+      : mode === 'adopt' ? { mode, path, dest: dest || undefined }
+      : mode === 'compose' ? { ...composition, stage: true }
+      : { mode: 'sync' }
+    // J.9.2: while the board is busy this submit is a promise, not a POST.
+    // It joins the tab's queue and fires, in order, when the board frees;
+    // the button said so.
+    if (queueing) {
+      enqueue(forest, body, {
+        mode,
+        count: mode === 'upload' ? files.length : undefined,
+        dest: dest || undefined,
+        path: mode === 'adopt' ? path : undefined,
+      })
+      if (mode === 'upload') { setFiles([]); setSkipped([]) }
+      setState({})
+      return
+    }
     setState({ busy: true })
     try {
-      // `bytes` is display-only; the wire contract is {name, text|b64}.
-      const payload = files.map(({ bytes, ...rest }) => rest)
-      // Composing does NOT publish (J.8.1): it stages, and what comes back
-      // is a proposal. The text travels with the review so the accepting
-      // call sends the same bytes the Curator read — re-serialising the
-      // editor at publish time would let a stray keystroke change the
-      // document out from under the passport that was approved.
-      const composition = {
-        mode: 'compose', title: title.trim(),
-        text: turndown.turndown(composer?.getHTML() || ''),
-        dest: dest || undefined,
-      }
-      const body = mode === 'upload'
-        ? { mode, files: payload, dest: dest || undefined }
-        : mode === 'adopt' ? { mode, path, dest: dest || undefined }
-        : mode === 'compose' ? { ...composition, stage: true }
-        : { mode: 'sync' }
       const report = await api.ingest(forest, body)
       // The report is the fresher fact about what is bound: a model bound
       // from another tab (or from Models, moments ago) would otherwise leave
@@ -242,9 +280,10 @@ export default function Ingest({ forest, grant, goto }) {
         return  // nothing has been planted yet; the composer keeps its text
       }
       if (report.job) {
-        // J.9: the batch was accepted, not finished. The job goes into the
-        // address and the poll above takes over — the form is free again,
-        // and so is the operator.
+        // J.9: the batch was accepted, not finished. The job goes onto the
+        // board view first-hand and into the address; the watcher takes
+        // over — the form is free again, and so is the operator.
+        noteJob(forest, report.job)
         setState({})
         setJobId(report.job.id)
         if (mode === 'upload') { setFiles([]); setSkipped([]) }
@@ -269,6 +308,14 @@ export default function Ingest({ forest, grant, goto }) {
       bindings.reload()
     } catch (error) { setState({ ...state, busy: false, error }) }
   }
+
+  // The board is busy while a batch runs or others wait their turn: a
+  // submit then queues instead of posting (J.9.2). Compose never queues —
+  // it is a synchronous review, not a batch — so it just waits.
+  const boardBusy = Boolean(board.running) || board.items.length > 0
+    || Boolean(board.held)
+  const queueing = boardBusy && mode !== 'compose'
+  const composeWaits = mode === 'compose' && Boolean(board.running)
 
   const composed = (composer?.getText() || '').trim()
   const ready = mode === 'upload' ? files.length > 0
@@ -444,13 +491,18 @@ export default function Ingest({ forest, grant, goto }) {
             )}
 
             <div className="flex justify-end">
-              {/* One batch per forest at a time (J.9): a second submit would
-                  be refused E_LOCKED anyway, so the button says so first. */}
+              {/* One batch per forest at a time (J.9) — but a busy board no
+                  longer disables the button: the batch waits in the tab's
+                  queue instead (J.9.2), and the label says it will wait
+                  rather than start. Compose stays out: it is a synchronous
+                  review, not a batch, so it simply waits for the board. */}
               <button className="btn btn-primary"
-                      disabled={!ready || state.busy || job?.state === 'running'}>
+                      disabled={!ready || state.busy || composeWaits}>
                 {mode === 'sync' ? <Refresh size={14} />
-                  : mode === 'compose' ? <Pencil size={14} /> : <Upload size={14} />}
-                {state.busy || job?.state === 'running' ? t('ingest.running')
+                  : mode === 'compose' ? <Pencil size={14} />
+                  : queueing ? <Clock size={14} /> : <Upload size={14} />}
+                {state.busy || composeWaits ? t('ingest.running')
+                  : queueing ? t('ingest.queue')
                   : mode === 'compose' ? t('ingest.review') : t('ingest.start')}
               </button>
             </div>
@@ -493,8 +545,11 @@ export default function Ingest({ forest, grant, goto }) {
           <Report report={job.report} forest={forest} />
         )}
         {state.report && <Report report={state.report} forest={forest} />}
+        {(board.items.length > 0 || board.held) && (
+          <QueueCard forest={forest} queue={board} />
+        )}
         {!state.busy && !state.error && !state.report && !state.review
-          && !jobId && (
+          && !jobId && !board.items.length && !board.held && (
           <Card><Empty icon={Upload}>{t('ingest.empty')}</Empty></Card>
         )}
       </div>
@@ -574,6 +629,65 @@ function JobProgress({ job, onCancel }) {
           {asked ? t('ingest.job_cancelling') : t('ingest.job_cancel')}
         </button>
       </div>
+    </Card>
+  )
+}
+
+/** The batches waiting their turn (J.9.2): tab memory, shown where it
+ *  waits. Each entry fires as an ordinary batch POST when the board frees,
+ *  oldest first; a cancel of the running batch — or a refusal — holds the
+ *  line until the operator's hand, because stop means everything. */
+function QueueCard({ forest, queue }) {
+  const { t } = useI18n()
+  return (
+    <Card title={t('ingest.queue_title')} subtitle={t('ingest.queue_sub')}
+          icon={Clock}
+          actions={<Badge tone="accent">{queue.items.length}</Badge>}>
+      {queue.held && (
+        <Note tone="warn">
+          <div>
+            {t(queue.held.why === 'cancelled' ? 'ingest.queue_held_cancelled'
+                                              : 'ingest.queue_held_refused')}
+          </div>
+          {queue.held.error && (
+            <div className="mt-2"><ErrorNote error={queue.held.error} /></div>
+          )}
+          {queue.items.length > 0 && (
+            <button type="button" className="btn btn-sm mt-2"
+                    onClick={() => release(forest)}>
+              <Play size={13} /> {t('ingest.queue_release')}
+            </button>
+          )}
+        </Note>
+      )}
+      {queue.items.length > 0 && (
+        <ul className={`space-y-1.5 ${queue.held ? 'mt-3' : ''}`}>
+          {queue.items.map((item, i) => (
+            <li key={item.id}
+                className="flex items-center gap-2 rounded-lg border border-line
+                           bg-surface-2 px-2.5 py-1.5">
+              <Badge tone={i === 0 ? 'accent' : undefined}>{item.mode}</Badge>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-text-2">
+                {item.mode === 'upload'
+                  ? t('ingest.queue_files', { n: item.count || 0 })
+                  : item.mode === 'adopt'
+                    ? <code className="font-mono text-[12px]">{item.path}</code>
+                    : t('ingest.mode_sync')}
+                {item.mode !== 'sync' && (
+                  <span className="text-text-3">
+                    {' → '}{item.dest || t('ingest.dest_root')}
+                  </span>
+                )}
+              </span>
+              <button type="button" className="btn btn-sm btn-ghost !p-1"
+                      title={t('ingest.queue_remove')}
+                      onClick={() => unqueue(forest, item.id)}>
+                <X size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   )
 }
