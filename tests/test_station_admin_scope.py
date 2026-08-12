@@ -102,6 +102,9 @@ def test_the_route_table_is_what_we_think_it_is(station):
         ("/v1/admin/principals", "GET"),
         ("/v1/admin/providers", "GET"), ("/v1/admin/providers", "POST"),
         ("/v1/admin/providers/test", "POST"),
+        # The catalog rebuild (v0.41, J.13.3): `admin` on the forest and an
+        # unrestricted scope, so the sweeps below cover it as they do health.
+        ("/v1/admin/reindex", "POST"),
         ("/v1/admin/snapshots", "GET"), ("/v1/admin/snapshots", "POST"),
         # Snapshot travel (v0.39): both owner-only, so the non-admin and
         # anonymous sweeps below cover them like every other admin route.

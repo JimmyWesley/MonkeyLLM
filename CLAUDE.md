@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.40.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.41.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -89,6 +89,19 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 - **locate/sniff contract split** (spec C.6b): `locate` searches curated
   metadata only; `sniff` searches bodies only (literal grep, no regex).
   Never mix the two.
+- **The repair is on the console (spec J.13.3, v0.41)**: `POST
+  /v1/admin/reindex` rebuilds one forest's catalog — `admin` on that
+  forest AND an unrestricted scope (the count IS the forest's size and
+  every row rewritten includes nodes a branch-scoped principal may not
+  read). It runs on the lane and the caller waits, like a canopy build;
+  it is NOT a J.9 job (it plants nothing, commits nothing, has no report
+  to stream). Writes `_derived/` only, so a **read-only Station serves
+  it too** — an index it could never repair would degrade forever. In
+  Studio it lives in the ingest console's **Optimize** tab (renamed from
+  "Refresh"): `sync` keeps the content current, `reindex` keeps what
+  finds it current. Every tab value MUST be in `useRouteState`'s `allow`
+  list — `sync` never was, so clicking it wrote an address the validator
+  rejected and the console snapped back to Upload (J.5.8).
 - **The scan is memoized, never replaced (spec C.6b.1, v0.40)**: two
   thirds of a global `sniff` was the OS opening files, on every ask, and
   since J.10.7 v0.35 the sweep's retrieval runs even when the answer is

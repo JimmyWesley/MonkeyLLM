@@ -82,8 +82,13 @@ export default function Ingest({ forest, grant, goto }) {
   // and a destination are work in progress, and a reload has already lost
   // them — an address that claimed otherwise would be worse than one that
   // does not mention them.
+  // 'optimize' was missing from this list while a tab set it, so clicking
+  // the tab wrote `?mode=sync` and the validator handed back the fallback:
+  // the console snapped to Upload and the page appeared to close itself.
+  // A tab that exists MUST be nameable in the address (J.5.8).
   const [mode, setMode] = useRouteState('mode', 'upload',
-                                        { allow: ['upload', 'adopt', 'compose'] })
+                                        { allow: ['upload', 'adopt', 'compose',
+                                                  'optimize'] })
   // The running batch, by address (J.9.1): `?job=` is replaced in, so a
   // reload restores the progress view by reading the job — a record, never
   // a call — and Back does not walk the batch's lifetime.
@@ -340,7 +345,7 @@ export default function Ingest({ forest, grant, goto }) {
             // is refused teaches the operator nothing about why.
             ...(has(grant, 'admin') && status.host_paths !== false
               ? [{ value: 'adopt', label: t('ingest.mode_adopt'), icon: Files }] : []),
-            { value: 'sync', label: t('ingest.mode_sync'), icon: Refresh },
+            { value: 'optimize', label: t('ingest.mode_optimize'), icon: Refresh },
           ]} />
 
           <form onSubmit={submit} className="mt-4 space-y-4">
@@ -450,7 +455,7 @@ export default function Ingest({ forest, grant, goto }) {
                      onChange={(e) => setPath(e.target.value)} />
             )}
 
-            {mode === 'sync' ? (
+            {mode === 'optimize' ? (
               <div className="space-y-2">
                 <Note>{t('ingest.sync_hint')}</Note>
                 {/* The whole point of J.8's amendment: name the directory. */}
@@ -498,7 +503,7 @@ export default function Ingest({ forest, grant, goto }) {
                   review, not a batch, so it simply waits for the board. */}
               <button className="btn btn-primary"
                       disabled={!ready || state.busy || composeWaits}>
-                {mode === 'sync' ? <Refresh size={14} />
+                {mode === 'optimize' ? <Refresh size={14} />
                   : mode === 'compose' ? <Pencil size={14} />
                   : queueing ? <Clock size={14} /> : <Upload size={14} />}
                 {state.busy || composeWaits ? t('ingest.running')
@@ -509,6 +514,14 @@ export default function Ingest({ forest, grant, goto }) {
           </form>
         </Card>
 
+        {/* J.13.3: the other half of keeping a forest current. Sync refreshes
+            the content; this refreshes what the content is found by, and
+            until v0.41 the console printed "reindex to rebuild it" without
+            offering any way to. Its own card because it is not an ingest —
+            it plants nothing, joins no queue and takes no destination. */}
+        {mode === 'optimize' && has(grant, 'admin') && (
+          <Rebuild forest={forest} />
+        )}
         {state.busy && <Card><Spinner label={t('ingest.running')} /></Card>}
         {state.error && <Card><ErrorNote error={state.error} /></Card>}
         {state.review && !state.busy && (
@@ -672,8 +685,8 @@ function QueueCard({ forest, queue }) {
                   ? t('ingest.queue_files', { n: item.count || 0 })
                   : item.mode === 'adopt'
                     ? <code className="font-mono text-[12px]">{item.path}</code>
-                    : t('ingest.mode_sync')}
-                {item.mode !== 'sync' && (
+                    : t('ingest.mode_optimize')}
+                {item.mode !== 'optimize' && (
                   <span className="text-text-3">
                     {' → '}{item.dest || t('ingest.dest_root')}
                   </span>
@@ -946,6 +959,51 @@ function Report({ report, forest }) {
           {report.commit_before?.slice(0, 7)} → {report.commit.slice(0, 7)}
         </p>
       )}
+    </Card>
+  )
+}
+
+/** The catalog rebuild (J.13.3) — the repair every "the files win" rule in
+ *  the spec ends with, finally reachable without a shell.
+ *
+ *  Deliberately not part of the ingest form: it plants nothing, it takes no
+ *  destination, and it never joins the J.9.2 queue, because the host runs it
+ *  on the lane rather than as a batch. It is the same errand as Sync told
+ *  about a different layer — content vs. what finds the content — which is
+ *  why the two share this tab and nothing else. */
+function Rebuild({ forest }) {
+  const { t } = useI18n()
+  const [state, setState] = useState({})
+
+  const run = async () => {
+    setState({ busy: true })
+    try {
+      setState({ done: await api.reindex(forest) })
+    } catch (error) {
+      setState({ error })
+    }
+  }
+
+  return (
+    <Card title={t('ingest.rebuild_title')} subtitle={t('ingest.rebuild_sub')}
+          icon={Refresh}>
+      <Note>{t('ingest.rebuild_hint')}</Note>
+      {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
+      {state.done && (
+        <div className="mt-3">
+          <Note>
+            {t('ingest.rebuild_done', { n: state.done.nodes,
+                                        ms: Math.round(state.done.ms) })}
+          </Note>
+        </div>
+      )}
+      <div className="mt-4 flex justify-end">
+        <button type="button" className="btn btn-primary" disabled={state.busy}
+                onClick={run}>
+          <Refresh size={14} />
+          {state.busy ? t('ingest.rebuild_running') : t('ingest.rebuild_start')}
+        </button>
+      </div>
     </Card>
   )
 }

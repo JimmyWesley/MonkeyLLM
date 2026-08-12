@@ -30,7 +30,7 @@
   "ingest.job_title": "Ingestão em andamento",
   "ingest.mode_adopt": "Espelhar uma pasta",
   "ingest.mode_compose": "Escrever",
-  "ingest.mode_sync": "Atualizar",
+  "ingest.mode_optimize": "Otimizar",
   "ingest.mode_upload": "Enviar arquivos",
   "ingest.model_empty_hint": "Resposta vazia normalmente significa que um modelo de raciocínio gastou todo o orçamento de tokens pensando. Aumente o máximo de tokens deste vínculo, ou escolha um modelo que responda direto.",
   "ingest.model_rejected": "O modelo de ingestão respondeu, mas o resumo foi recusado {n} vez(es) e todos os resumos vieram do próprio texto. Isso é problema de modelo, prompt ou orçamento de tokens não de conexão.",
@@ -82,5 +82,11 @@
   "ingest.unchanged": "Sem mudança",
   "ingest.uncurated": "Nenhum modelo de ingestão está ligado, então os resumos foram derivados do próprio texto. Funciona ligar um deixa melhor.",
   "ingest.unsupported": "Ignorados, sem conversor",
-  "ingest.updated": "Atualizados"
+  "ingest.updated": "Atualizados",
+  "ingest.rebuild_title": "Reconstruir o índice",
+  "ingest.rebuild_sub": "O que encontra o conteúdo, refeito a partir do conteúdo.",
+  "ingest.rebuild_hint": "Os arquivos são a verdade e o índice é derivado deles, então este é o reparo para tudo que parecer desatualizado: uma entrada que falta, uma busca que não acha um nó que você consegue ler, uma floresta que veio de um snapshot ou de uma versão anterior. Ele lê todos os nós e reescreve o índice. Nada é escrito na floresta em si e nenhum histórico muda.",
+  "ingest.rebuild_start": "Reconstruir",
+  "ingest.rebuild_running": "Reconstruindo…",
+  "ingest.rebuild_done": "{n} nós reconstruídos em {ms} ms."
 }

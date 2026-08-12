@@ -30,7 +30,7 @@
   "ingest.job_title": "Ingesta en curso",
   "ingest.mode_adopt": "Espejar una carpeta",
   "ingest.mode_compose": "Escribir",
-  "ingest.mode_sync": "Refrescar",
+  "ingest.mode_optimize": "Optimizar",
   "ingest.mode_upload": "Enviar archivos",
   "ingest.model_empty_hint": "Una respuesta vacía suele significar que un modelo de razonamiento gastó todo su presupuesto de tokens pensando. Sube el máximo de tokens de este enlace, o elige un modelo que responda directo.",
   "ingest.model_rejected": "El modelo de ingesta respondió, pero su resumen fue rechazado {n} vez(ces) y todos los resúmenes salieron del propio texto. Es un problema de modelo, prompt o presupuesto de tokens no de conexión.",
@@ -82,5 +82,11 @@
   "ingest.unchanged": "Sin cambios",
   "ingest.uncurated": "No hay modelo de ingesta enlazado, así que los resúmenes se derivaron del propio texto. Funciona enlazar uno los mejora.",
   "ingest.unsupported": "Omitidos, sin conversor",
-  "ingest.updated": "Actualizados"
+  "ingest.updated": "Actualizados",
+  "ingest.rebuild_title": "Reconstruir el índice",
+  "ingest.rebuild_sub": "Lo que encuentra el contenido, rehecho a partir del contenido.",
+  "ingest.rebuild_hint": "Los archivos son la verdad y el índice se deriva de ellos, así que esta es la reparación para todo lo que parezca desactualizado: una entrada que falta, una búsqueda que no encuentra un nodo que sí puedes leer, un bosque que llegó de un snapshot o de una versión anterior. Lee todos los nodos y reescribe el índice. No se escribe nada en el bosque en sí y ningún historial cambia.",
+  "ingest.rebuild_start": "Reconstruir",
+  "ingest.rebuild_running": "Reconstruyendo…",
+  "ingest.rebuild_done": "{n} nodos reconstruidos en {ms} ms."
 }

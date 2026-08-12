@@ -2473,6 +2473,64 @@ def build_app(
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
         return JSONResponse(result)
 
+    async def admin_reindex(request: Request) -> JSONResponse:
+        """Rebuild one forest's catalog from its files (J.13.3).
+
+        The repair the whole derived layer is designed around, finally
+        reachable by the operator the host layer exists for: every
+        divergence in this system ends with "the files win and the catalog
+        rebuilds", and until now the console said so without being able to
+        do it.
+
+        Offered by a read-only Station too. `_derived/` is not the content —
+        rebuilding it plants nothing and commits nothing — and a Station
+        that could never repair its own index would degrade permanently
+        with no way back that does not involve a shell.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        try:
+            body = await request.json() if await request.body() else {}
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        forest = str(body.get("forest") or request.query_params.get("forest") or "")
+        if not forest or not is_admin(principal, forest):
+            return _envelope(VineError(
+                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+        policy = registry.policy_for(principal, forest)
+        # J.13.3, health's rule with one addition: the count IS the size of
+        # the whole forest, and every row rewritten includes nodes a scoped
+        # principal may not read.
+        if policy is None or not policy.unrestricted:
+            return _envelope(VineError(
+                E_FORBIDDEN, "a rebuild covers the whole forest",
+                hint="It rewrites the row of every node and reports how many "
+                     "there are, so it needs an admin grant that is not "
+                     "limited to a branch."), 403)
+
+        def work():
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            t0 = time.perf_counter()
+            # Storage only, like `warm()` (J.6.1): no primitive runs, so no
+            # trace event and no pheromone claim a caller went anywhere.
+            nodes = vine.catalog.reindex()
+            return {"forest": forest, "nodes": nodes,
+                    "ms": round((time.perf_counter() - t0) * 1000, 1)}
+
+        result = await in_forest_thread(forest, work)
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        registry.record(principal=principal, forest=forest, primitive="reindex",
+                        args={}, result="ok", size=result["nodes"])
+        return JSONResponse(result)
+
     async def admin_cache(request: Request) -> JSONResponse:
         """The answer store's switches and its economy (J.10.7).
 
@@ -2815,6 +2873,7 @@ def build_app(
         Route("/v1/admin/models", admin_models, methods=["GET", "POST"]),
         Route("/v1/admin/health", admin_health),
         Route("/v1/admin/cache", admin_cache, methods=["GET", "POST"]),
+        Route("/v1/admin/reindex", admin_reindex, methods=["POST"]),
         Route("/v1/admin/snapshots", admin_snapshots, methods=["GET", "POST"]),
         Route("/v1/admin/snapshots/import", admin_snapshot_import,
               methods=["POST"]),

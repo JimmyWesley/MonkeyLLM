@@ -223,4 +223,10 @@ export const api = {
   answerCache: (forest) =>
     request(`/v1/admin/cache?forest=${encodeURIComponent(forest)}`),
   setAnswerCache: (body) => request('/v1/admin/cache', { method: 'POST', body }),
+
+  // The repair the derived layer is designed around (J.13.3). Synchronous
+  // on purpose: the caller waits, because a rebuild the console could not
+  // confirm is a rebuild nobody can rely on.
+  reindex: (forest) => request('/v1/admin/reindex', { method: 'POST',
+                                                      body: { forest } }),
 }
