@@ -147,6 +147,73 @@ def _sniff_snippet(line: str, pos: int) -> str:
     return out
 
 
+def _scan_lines(body: str, folded_terms: list[str]) -> list[list[list]]:
+    """The memoizable unit of C.6b.1: for each term, every line it occurs
+    in, as `[line_no, section, pos, line_text]`.
+
+    Line granularity is not an implementation taste — the scan emits one
+    match per line centred on the LEFTMOST term that hit it, so per-term
+    results can only be recombined if each carries its own position.
+
+    One pass over the body for all the terms: folding is proportional to
+    the corpus, and doing it once per term made a three-term question fold
+    the whole forest three times.
+    """
+    folded_body = _fold(body)
+    out: list[list[list]] = [[] for _ in folded_terms]
+    present = [t in folded_body for t in folded_terms]
+    if not any(present):
+        return out
+    section: str | None = None
+    # `_fold` preserves length, so a position found in the folded line
+    # indexes the original line.
+    for line_no, (line, folded) in enumerate(
+        zip(body.splitlines(), folded_body.splitlines()), start=1
+    ):
+        h = _HEADER_LINE_RE.match(line)
+        if h and len(h.group(1)) in (2, 3):
+            section = h.group(2)
+        for i, term in enumerate(folded_terms):
+            if not present[i]:
+                continue
+            pos = folded.find(term)
+            if pos != -1:
+                out[i].append([line_no, section, pos, line])
+    return out
+
+
+def _sniff_lines(body: str, folded_term: str) -> list[list]:
+    """One term's line records — the shape a memo row holds."""
+    return _scan_lines(body, [folded_term])[0]
+
+
+def _combine_lines(per_term: list[list[list]]) -> tuple[list[dict], set[int]]:
+    """Rebuild `_sniff_body`'s answer from per-term line records.
+
+    Same output, by construction: one match per line, ordered by line
+    number, its snippet centred on the smallest position among the terms
+    that hit that line — which is what `first_pos` means in the direct
+    scan.
+    """
+    best: dict[int, list] = {}
+    terms_hit: set[int] = set()
+    for i, lines in enumerate(per_term):
+        if lines:
+            terms_hit.add(i)
+        for line_no, section, pos, line in lines:
+            prev = best.get(line_no)
+            if prev is None:
+                best[line_no] = [section, pos, line]
+            elif pos < prev[1]:
+                prev[1] = pos
+    matches = [
+        {"section": section, "line": line_no,
+         "snippet": _sniff_snippet(line, pos)}
+        for line_no, (section, pos, line) in sorted(best.items())
+    ]
+    return matches, terms_hit
+
+
 def _sniff_body(body: str, folded_terms: list[str]) -> tuple[list[dict], set[int]]:
     """All matching lines of a body, each attributed to its H2/H3 section.
     Returns (matches, indexes of the terms that hit anywhere in the body)."""
@@ -1011,31 +1078,68 @@ class Vine:
                     prefix = scope_id[: -len("_index")]  # "<branch>/_index" -> "<branch>/"
 
         k = min(max(1, k), SNIFF_MAX_K)
-        rows = self.catalog.conn.execute("SELECT * FROM nodes ORDER BY id").fetchall()
+        # The scope is a WHERE, never a Python skip. Fetching every row to
+        # discard all but one made a single-node sniff cost the whole
+        # forest — and the sweep (C.6c) issues one per term per result.
+        where: list[str] = []
+        params: list = []
+        if only_id:
+            where.append("{n}id = ?")
+            params.append(only_id)
+        elif prefix:
+            # substr, not LIKE: '_' is a single-character wildcard there and
+            # node ids are full of them ('_index'), so LIKE would silently
+            # widen the scope the caller asked to narrow.
+            where.append("substr({n}id, 1, ?) = ?")
+            params.extend([len(prefix), prefix])
+        if type_filter:
+            where.append("{n}type = ?")
+            params.append(type_filter)
+        clauses = [c.format(n="") for c in where]
+        rows = self.catalog.conn.execute(
+            "SELECT * FROM nodes"
+            + (" WHERE " + " AND ".join(clauses) if clauses else "")
+            + " ORDER BY id", params).fetchall()
+        # C.6b.1: what the scan already knows, per term, still valid by hash.
+        memo = [self.catalog.sniff_memo(t, where, params) for t in folded_terms]
+        learned: list[tuple[str, str, str, str]] = []
         scanned = 0
         hits = []
         for r in rows:
             nid = r["id"]
-            if only_id and nid != only_id:
-                continue
-            if prefix and not nid.startswith(prefix):
-                continue
-            if type_filter and r["type"] != type_filter:
-                continue
-            try:
-                text = self.forest.path_for(nid).read_text(encoding="utf-8")
-            except (VineError, OSError):
-                continue  # validate() reports broken nodes; sniff skips them
-            body = _raw_body(text)
-            if _CONTENT_MARKER_RE.search(text):
-                # G.7: non-inline node — grep the resolved FLESH instead of
-                # the stub; an unreachable body degrades to "no match"
+            body_hash = r["body_hash"]
+            remembered = [m.get(nid) for m in memo]
+            if body_hash and all(lines is not None for lines in remembered):
+                # Not one file opened for this node: the terms were all
+                # scanned against this exact body before.
+                scanned += 1
+                matches, terms_hit = _combine_lines(
+                    [json.loads(lines) for lines in remembered])
+            else:
                 try:
-                    body = self._resolved_body(self.forest.read(nid))
-                except VineError:
-                    continue
-            scanned += 1
-            matches, terms_hit = _sniff_body(body, folded_terms)
+                    text = self.forest.path_for(nid).read_text(encoding="utf-8")
+                except (VineError, OSError):
+                    continue  # validate() reports broken nodes; sniff skips them
+                body = _raw_body(text)
+                if _CONTENT_MARKER_RE.search(text):
+                    # G.7: non-inline node — grep the resolved FLESH instead
+                    # of the stub; an unreachable body degrades to "no match".
+                    # Its hash is empty by construction, so it is never
+                    # memoized: the `.md` this hash covers is not this text.
+                    try:
+                        body = self._resolved_body(self.forest.read(nid))
+                    except VineError:
+                        continue
+                scanned += 1
+                if body_hash:
+                    per_term = _scan_lines(body, folded_terms)
+                    learned.extend(
+                        (t, nid, body_hash, json.dumps(per_term[i]))
+                        for i, t in enumerate(folded_terms)
+                        if remembered[i] is None)
+                    matches, terms_hit = _combine_lines(per_term)
+                else:
+                    matches, terms_hit = _sniff_body(body, folded_terms)
             if not matches:
                 continue
             strength = len(terms_hit) / len(folded_terms)
@@ -1053,6 +1157,10 @@ class Vine:
                     "matches": matches[:SNIFF_MATCHES_PER_NODE],
                 }
             )
+        # After the answer is decided, never before it: what the scan learned
+        # is latency for the next caller, and it must not be able to change
+        # this one's result.
+        self.catalog.sniff_memo_store(learned)
         hits.sort(key=lambda h: (h["score"], h["match_count"]), reverse=True)
         payload = {
             "results": hits[:k],

@@ -10,12 +10,32 @@ Never the source of truth: rebuildable from files via reindex().
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
 
 from monkeyllm.forest import Forest, tune_derived
 from monkeyllm.parser import ParsedNode
+
+# G.7 policies whose scanned text is NOT the node's own `.md` body: a
+# `reference` body is the source file, a `cached` one lives in
+# `_derived/bodies`. Both can change with the `.md` byte-identical, so the
+# hash below would say "unchanged" about text it never read.
+_FOREIGN_BODY = ("cached", "reference")
+
+
+def body_hash_of(node: ParsedNode) -> str:
+    """The C.6.1 digest of the body **as `sniff` would scan it**, or `''`
+    for a node whose body the `.md` does not carry.
+
+    Empty is the honest answer, not a fallback: it reads as a miss
+    everywhere (C.6b.1), which keeps those nodes on the direct scan
+    forever instead of memoizing a body nobody hashed.
+    """
+    if str(node.frontmatter.get("content") or "") in _FOREIGN_BODY:
+        return ""
+    return hashlib.sha256(node.body.encode("utf-8")).hexdigest()
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS nodes (
@@ -39,10 +59,24 @@ CREATE TABLE IF NOT EXISTS nodes (
     coverage TEXT,
     body_tokens INTEGER NOT NULL DEFAULT 0,
     outline TEXT NOT NULL DEFAULT '[]',
-    stale INTEGER NOT NULL DEFAULT 0
+    stale INTEGER NOT NULL DEFAULT 0,
+    body_hash TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent);
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
+
+-- C.6b.1: the memoized literal scan. One row per (folded term, node),
+-- valid while `body_hash` still matches the node's. `lines` is the
+-- complete per-line record, '[]' meaning "scanned, matched nothing" —
+-- the negative is the whole point, since nearly every node is one.
+CREATE TABLE IF NOT EXISTS sniff_memo (
+    term TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    body_hash TEXT NOT NULL,
+    lines TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (term, node_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sniff_memo_node ON sniff_memo(node_id);
 
 CREATE TABLE IF NOT EXISTS edges (
     src TEXT NOT NULL,
@@ -77,6 +111,15 @@ class Catalog:
         }:
             self.conn.execute(
                 "ALTER TABLE edges ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0")
+        # Same bargain for the body hash (C.6.1, v0.40): the column is added
+        # in place and stays empty until the next write or reindex fills it.
+        # Empty is a miss, never a match — a blank hash that compared equal
+        # would serve stale snippets forever.
+        if "body_hash" not in {
+            r[1] for r in self.conn.execute("PRAGMA table_info(nodes)")
+        }:
+            self.conn.execute(
+                "ALTER TABLE nodes ADD COLUMN body_hash TEXT NOT NULL DEFAULT ''")
         self.conn.commit()
 
     def close(self) -> None:
@@ -109,6 +152,43 @@ class Catalog:
 
     # -- write -------------------------------------------------------------
 
+    # -- the memoized scan (C.6b.1) -----------------------------------------
+
+    def sniff_memo(self, term: str, where: list[str],
+                   params: list) -> dict[str, str]:
+        """Valid entries for one folded term: `{node_id: lines_json}`.
+
+        Validity is the join condition, not a later check: an entry whose
+        `body_hash` no longer equals the node's simply does not come back,
+        and neither does one for a node the caller's scope excludes. An
+        empty hash matches nothing on either side (C.6.1).
+        """
+        sql = ("SELECT m.node_id, m.lines FROM sniff_memo m "
+               "JOIN nodes n ON n.id = m.node_id "
+               "AND n.body_hash = m.body_hash AND n.body_hash != '' "
+               "WHERE m.term = ?")
+        clauses = [c.format(n="n.") for c in where]
+        if clauses:
+            sql += " AND " + " AND ".join(clauses)
+        rows = self.conn.execute(sql, [term, *params]).fetchall()
+        return {r["node_id"]: r["lines"] for r in rows}
+
+    def sniff_memo_store(self, entries: list[tuple[str, str, str, str]]) -> None:
+        """Record what a scan just learned: `(term, node_id, body_hash,
+        lines_json)`, matches and non-matches alike."""
+        if not entries:
+            return
+        self.conn.executemany(
+            "INSERT INTO sniff_memo (term, node_id, body_hash, lines) "
+            "VALUES (?,?,?,?) ON CONFLICT(term, node_id) DO UPDATE SET "
+            "body_hash = excluded.body_hash, lines = excluded.lines",
+            entries)
+        self.conn.commit()
+
+    def sniff_memo_clear(self) -> None:
+        self.conn.execute("DELETE FROM sniff_memo")
+        self.conn.commit()
+
     def reindex(self) -> int:
         """Full rebuild from the files (the files always win)."""
         self.conn.execute("DELETE FROM nodes")
@@ -122,6 +202,13 @@ class Catalog:
                 continue  # validate() reports broken nodes; catalog skips them
             self._upsert(node)
             n += 1
+        # A node that no longer has a file has no row either, and its memo
+        # entries are now unreachable weight (C.6b.1). Per-node upsert only
+        # prunes other generations of nodes that still exist; this is where
+        # the departed are swept, and it is the only place that knows they
+        # are gone.
+        self.conn.execute(
+            "DELETE FROM sniff_memo WHERE node_id NOT IN (SELECT id FROM nodes)")
         self.conn.commit()
         return n
 
@@ -138,12 +225,21 @@ class Catalog:
         self.conn.execute("DELETE FROM nodes WHERE id = ?", (node.id,))
         self.conn.execute("DELETE FROM nodes_fts WHERE id = ?", (node.id,))
         self.conn.execute("DELETE FROM edges WHERE src = ?", (node.id,))
+        # Only the generations this body is NOT (C.6b.1). Dropping the
+        # matching one too would make `reindex` — which upserts every node —
+        # erase a memo that is still entirely valid, and the whole reason
+        # validity is a content hash is that rewriting a file with the same
+        # bytes changes nothing.
+        body_hash = body_hash_of(node)
+        self.conn.execute(
+            "DELETE FROM sniff_memo WHERE node_id = ? AND body_hash != ?",
+            (node.id, body_hash))
         self.conn.execute(
             """INSERT INTO nodes (id, kind, type, title, summary, tags, aliases,
                 created, updated, confidence, source, entity_kind, payload,
                 payload_type, payload_hash, parent, trail, coverage, body_tokens,
-                outline, stale)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+                outline, stale, body_hash)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)""",
             (
                 node.id,
                 kind,
@@ -165,6 +261,7 @@ class Catalog:
                 fm.get("coverage"),
                 node.body_tokens,
                 json.dumps(node.outline, ensure_ascii=False),
+                body_hash,
             ),
         )
         self.conn.execute(

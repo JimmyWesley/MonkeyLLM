@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.39.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.40.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -89,6 +89,22 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 - **locate/sniff contract split** (spec C.6b): `locate` searches curated
   metadata only; `sniff` searches bodies only (literal grep, no regex).
   Never mix the two.
+- **The scan is memoized, never replaced (spec C.6b.1, v0.40)**: two
+  thirds of a global `sniff` was the OS opening files, on every ask, and
+  since J.10.7 v0.35 the sweep's retrieval runs even when the answer is
+  served from the store. `_sniff_body` is a pure function of (body,
+  folded term), so `_derived` keeps one row per (term, node) — **including
+  non-matches**, or the ~95% that never match are rescanned forever —
+  valid while `nodes.body_hash` still matches. Hash, never `mtime`: a
+  `reindex` or an edit reverted to its original text must invalidate
+  nothing. Rows are per LINE (`[line_no, section, pos, line_text]`)
+  because the scan emits one match per line centred on the *leftmost*
+  term that hit it — storing rendered snippets would make a two-term
+  question disagree with itself. Ranking (`heat`, `score`, order) is
+  NEVER memoized; it is recomputed per call. `content: cached|reference`
+  bodies carry an empty hash and keep the direct scan: the `.md` the
+  hash digests is not the text they scan. Dropping the memo may change
+  latency and nothing else.
 - `query` is read-only SQL over `type:dataset` nodes: reject every write
   (`;DROP`, `ATTACH`, multi-statement, `PRAGMA`) — there is an injection suite.
 - `tend` (spec C.10) is the ONLY dataset write path: single INSERT/UPDATE/
