@@ -15,7 +15,7 @@
   "graph.group_depth": "Branch depth",
   "graph.groups": "Groups",
   "graph.heat": "Heat",
-  "graph.hint": "Drag a node, scroll to zoom, click to select",
+  "graph.hint": "Drag a node, scroll to zoom, click to select, double-click to open",
   "graph.legend_heat": "pheromone",
   "graph.legend_proposal": "proposal, not yet promoted",
   "graph.legend_shortcut": "shortcut a hunt discovered",

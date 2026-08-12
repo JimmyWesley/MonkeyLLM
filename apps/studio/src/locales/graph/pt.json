@@ -15,7 +15,7 @@
   "graph.group_depth": "Profundidade do galho",
   "graph.groups": "Grupos",
   "graph.heat": "Calor",
-  "graph.hint": "Arraste um nó, role para dar zoom, clique para selecionar",
+  "graph.hint": "Arraste um nó, role para dar zoom, clique para selecionar, duplo clique para abrir",
   "graph.legend_heat": "feromônio",
   "graph.legend_proposal": "proposta, ainda não promovida",
   "graph.legend_shortcut": "atalho que uma caçada descobriu",

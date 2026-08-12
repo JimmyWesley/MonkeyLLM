@@ -15,7 +15,7 @@
   "graph.group_depth": "Profundidad de la rama",
   "graph.groups": "Grupos",
   "graph.heat": "Calor",
-  "graph.hint": "Arrastre un nodo, use la rueda para acercar, haga clic para seleccionar",
+  "graph.hint": "Arrastre un nodo, use la rueda para acercar, haga clic para seleccionar, doble clic para abrir",
   "graph.legend_heat": "feromona",
   "graph.legend_proposal": "propuesta, aún sin promover",
   "graph.legend_shortcut": "atajo que descubrió una cacería",

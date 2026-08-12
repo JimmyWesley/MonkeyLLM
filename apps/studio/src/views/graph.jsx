@@ -532,10 +532,17 @@ export default function ForestGraph({ forest, data, selected, onSelect,
       const da = simDegree[e.src]
       const db = simDegree[e.dst]
       const kind = e.structure ? 1 : (e.confidence < 1 ? 0.35 : 0.7)
+      // Gravity, not chains: a trail inside a branch holds its disc
+      // together at full strength; a trail that crosses branches — the
+      // root's tethers included — barely pulls. The repulsion then keeps a
+      // margin of sky around every nucleus, which is what a folder-shaped
+      // map never gets when the root is the sun everything orbits close to.
+      const cross = nodes[index[e.src]].seedGroup
+        !== nodes[index[e.dst]].seedGroup
       return {
         a: index[e.src], b: index[e.dst],
         bias: da / (da + db),
-        strength: (kind / Math.min(da, db)),
+        strength: (kind / Math.min(da, db)) * (cross ? 0.12 : 1),
         on: true,
       }
     })
@@ -913,6 +920,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   }
 
   const drag = useRef(null)
+  const lastClick = useRef({ id: null, at: 0 })
   const origin = useRef(null)   // where the gesture began, for click detection
   const panLast = useRef(null)  // last position while panning
   const pointers = useRef(new Map())
@@ -1002,8 +1010,16 @@ export default function ForestGraph({ forest, data, selected, onSelect,
         && Math.hypot(ev.clientX - from.x, ev.clientY - from.y) <= 4) {
       const n = drag.current || nodeAt(at(ev))
       // Clicking the forest floor clears the selection: the way back to
-      // full colour must be as easy as the way in.
+      // full colour must be as easy as the way in. Clicking a node twice
+      // opens it — a map where the notes are one gesture away is what
+      // makes the graph a place to read, not only to look.
       onSelect?.(n ? n.id : null)
+      const now = performance.now()
+      if (n && lastClick.current.id === n.id
+          && now - lastClick.current.at < 350) {
+        onOpen?.(n.id)
+      }
+      lastClick.current = { id: n?.id || null, at: now }
     }
     if (drag.current) { drag.current.fx = null; drag.current.fy = null }
     drag.current = null
