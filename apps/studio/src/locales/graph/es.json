@@ -22,6 +22,7 @@
   "graph.legend_trail": "sendero curado",
   "graph.link_width": "Grosor de los enlaces",
   "graph.live": "Live",
+  "graph.min_heat": "Calor mínimo",
   "graph.node_size": "Tamaño de los nodos",
   "graph.open_in_files": "Abrir en Archivos",
   "graph.orphans": "Huérfanos",

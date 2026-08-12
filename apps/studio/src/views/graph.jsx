@@ -283,7 +283,7 @@ function seed(sim, w, h) {
  * quiet until asked for. Presentation only — no contract fixes these. */
 const DEFAULTS = {
   query: '',
-  orphans: true, heatOn: true, proposals: false, shortcuts: true,
+  orphans: true, heatOn: true, minHeat: 0, proposals: false, shortcuts: true,
   structure: true,
   hiddenTypes: [], hiddenGroups: [],
   colorBy: 'branch', groupDepth: 3,
@@ -433,12 +433,15 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     } else {
       for (const n of s.nodes) n.matched = false
     }
+    s.hasHeat = false
     for (const n of s.nodes) {
       n.on = !hiddenT.has(n.type)
         && !hiddenG.has(groupOf(n.id, p.groupDepth))
         && (p.orphans || n.degree > 0)
+        && n.heat >= p.minHeat
         && (keep === null || keep.has(n.id))
         && n.bornRank < s.alive
+      if (n.on && n.heat > 0.05) s.hasHeat = true
     }
     for (const spring of s.springs) {
       spring.on = s.nodes[spring.a].on && s.nodes[spring.b].on
@@ -512,6 +515,11 @@ export default function ForestGraph({ forest, data, selected, onSelect,
       label: (n.title || n.id.split('/').pop().replace('_index', '/')).slice(0, 34),
       hay: `${n.id} ${n.title || ''} ${(n.tags || []).join(' ')} ${n.type}`
         .toLowerCase(),
+      // Twinkle phase, from the id: the warm nodes shimmer out of step
+      // with each other, the way embers do — never as one synchronised
+      // blink, which would read as an alert instead of a temperature.
+      tw: ([...n.id].reduce((a, c) => a + c.charCodeAt(0), 0) % 97) / 97
+        * Math.PI * 2,
       seedGroup: groupOf(n.id, 2),
       r0: 2.4 + Math.min(8, Math.sqrt(n.degree || 0) * 1.7),
       on: true, bornRank: 0, bornAt: 0, fx: null, fy: null,
@@ -798,14 +806,22 @@ export default function ForestGraph({ forest, data, selected, onSelect,
         ? Math.min(1, (now - n.bornAt) / 350) : 1
       const r = n.r0 * p.nodeScale * (0.4 + 0.6 * pop)
       if (p.heatOn && n.heat > 0.05 && !dim) {
-        const glow = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r * 3.6)
-        glow.addColorStop(0, pal.shortcut.replace(')', ` / ${0.34 * n.heat})`)
-          .replace('rgb(', 'rgba('))
+        // An ember breathes: the glow swells and fades on the node's own
+        // phase. The swing scales with the heat itself, so the value the
+        // channel carries (J.5.4) is still the value on display — a warm
+        // node shimmers gently, a hot one throbs. Reduced motion gets the
+        // same glow, standing still.
+        const pulse = calm ? 1
+          : 0.72 + 0.28 * Math.sin(now * 0.0035 + n.tw)
+        const gr = r * (3 + 1.1 * pulse)
+        const glow = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, gr)
+        glow.addColorStop(0, pal.shortcut.replace(')',
+          ` / ${(0.2 + 0.26 * pulse) * n.heat})`).replace('rgb(', 'rgba('))
         glow.addColorStop(1, pal.shortcut.replace(')', ' / 0)')
           .replace('rgb(', 'rgba('))
         ctx.fillStyle = glow
         ctx.beginPath()
-        ctx.arc(n.x, n.y, r * 3.6, 0, Math.PI * 2)
+        ctx.arc(n.x, n.y, gr, 0, Math.PI * 2)
         ctx.fill()
       }
       const lit = s.searching && !n.matched ? 0.35 : 1
@@ -878,6 +894,12 @@ export default function ForestGraph({ forest, data, selected, onSelect,
       if (needsDraw.current) {
         needsDraw.current = false
         drawRef.current()
+      }
+      // Embers keep the frame warm: while visible heat exists the glow
+      // pulses, so the paint goes on — the LAYOUT stays settled, which is
+      // what the settle rule protects. A cold map still costs nothing.
+      if (el && sim.current.hasHeat && paramsRef.current.heatOn) {
+        needsDraw.current = true
       }
       requestAnimationFrame(tick)
     }
@@ -1069,6 +1091,10 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   }
 
   const hovered = hover && data.nodes.find((n) => n.id === hover)
+  const selNode = selected && data.nodes.find((n) => n.id === selected)
+  const colorOf = (n) => (settings.colorBy === 'branch'
+    ? groups.colors[groupOf(n.id, settings.groupDepth)] || palette.other
+    : palette.byType[n.type] || palette.other)
   const s = sim.current
   const bornCount = Math.min(s.nodes.length, Math.floor(replay.t))
   const newest = replay.on && bornCount > 0
@@ -1147,6 +1173,12 @@ export default function ForestGraph({ forest, data, selected, onSelect,
           </div>
         )}
 
+        {selNode && !panel && (
+          <SelectionCard t={t} node={selNode} groupColor={colorOf(selNode)}
+                         onClose={() => onSelect?.(null)}
+                         onOpen={() => onOpen?.(selected)} />
+        )}
+
         {panel && (
           <ViewPanel t={t} settings={settings} set={set} types={types}
                      typeCounts={typeCounts} groups={groups} palette={palette}
@@ -1200,14 +1232,59 @@ export default function ForestGraph({ forest, data, selected, onSelect,
         )}
       </div>
 
-      {selected && (
-        <div className="border-t border-line px-3 py-2 text-[12px] text-text-3">
-          <button type="button" className="btn btn-sm"
-                  onClick={() => onOpen?.(selected)}>
-            {t('graph.open_in_files')}
-          </button>
+    </div>
+  )
+}
+
+/* The pinned card of the selected node (a request straight from use): a
+ * click is a question about one node, and the answer should stay put while
+ * the eye wanders — with the way to the file one action away. Everything
+ * shown is the projection's own scent; the body still costs a `pick`,
+ * behind the open button where it belongs. */
+function SelectionCard({ t, node, groupColor, onClose, onOpen }) {
+  return (
+    <div className="absolute bottom-3 right-3 top-3 flex w-[17.5rem] flex-col
+                    rounded-lg border border-line bg-bg-elev/95 shadow-pop
+                    backdrop-blur">
+      <div className="flex items-start gap-2 border-b border-line px-3 py-2">
+        <span className="tree-dot mt-1.5" style={{ background: groupColor }} />
+        <span className="nodeid min-w-0 flex-1 break-all pt-0.5">{node.id}</span>
+        <button type="button" className="btn btn-sm btn-ghost -mr-1"
+                onClick={onClose} aria-label={t('graph.close')}>
+          <X size={13} />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+        <div className="text-[14px] font-medium leading-snug text-text">
+          {node.title}
         </div>
-      )}
+        {node.summary && (
+          <p className="text-[12.5px] leading-relaxed text-text-3">
+            {node.summary}
+          </p>
+        )}
+        {!!node.tags?.length && (
+          <div className="flex flex-wrap gap-1">
+            {node.tags.map((tag) => <span key={tag} className="badge">{tag}</span>)}
+          </div>
+        )}
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11.5px]">
+          <div><dt className="text-text-3">{t('explore.degree')}</dt>
+            <dd className="font-mono text-text-2">{node.degree}</dd></div>
+          <div><dt className="text-text-3">{t('explore.heat')}</dt>
+            <dd className="font-mono text-text-2">{node.heat.toFixed(2)}</dd></div>
+          <div><dt className="text-text-3">{t('explore.updated')}</dt>
+            <dd className="font-mono text-text-2">{node.updated || '—'}</dd></div>
+          <div><dt className="text-text-3">type</dt>
+            <dd className="font-mono text-text-2">{node.type}</dd></div>
+        </dl>
+      </div>
+      <div className="border-t border-line p-2">
+        <button type="button" className="btn btn-primary btn-sm w-full"
+                onClick={onOpen}>
+          {t('graph.open_in_files')}
+        </button>
+      </div>
     </div>
   )
 }
@@ -1254,6 +1331,9 @@ function ViewPanel({ t, settings, set, types, typeCounts, groups, palette,
                     onChange={(on) => set({ orphans: on })} />
             <Toggle checked={settings.heatOn} label={t('graph.heat')}
                     onChange={(on) => set({ heatOn: on })} />
+            <Range label={t('graph.min_heat')} min={0} max={1} step={0.05}
+                   value={settings.minHeat}
+                   onChange={(minHeat) => set({ minHeat })} />
             <Toggle checked={settings.proposals} label={t('graph.proposals')}
                     onChange={(on) => set({ proposals: on })} />
             <Toggle checked={settings.shortcuts} label={t('graph.shortcuts')}

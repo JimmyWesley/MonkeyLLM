@@ -22,6 +22,7 @@
   "graph.legend_trail": "curated trail",
   "graph.link_width": "Link thickness",
   "graph.live": "Live",
+  "graph.min_heat": "Minimum heat",
   "graph.node_size": "Node size",
   "graph.open_in_files": "Open in Files",
   "graph.orphans": "Orphans",

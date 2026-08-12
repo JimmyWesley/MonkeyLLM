@@ -22,6 +22,7 @@
   "graph.legend_trail": "trilha curada",
   "graph.link_width": "Grossura dos links",
   "graph.live": "Live",
+  "graph.min_heat": "Calor mínimo",
   "graph.node_size": "Tamanho dos nós",
   "graph.open_in_files": "Abrir em Arquivos",
   "graph.orphans": "Órfãos",
