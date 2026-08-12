@@ -342,13 +342,19 @@ class SectionPatch(BaseModel):
 
 
 class GraftPatch(BaseModel):
-    """Input of graft() (C.8). All operations optional and combinable."""
+    """Input of graft() (C.8). All operations optional and combinable —
+    except `replace_body` with the section operations: one patch states
+    one truth about the body (v0.43)."""
 
     set_frontmatter: dict[str, Any] = Field(default_factory=dict)
     add_links: list[Link] = Field(default_factory=list)
     remove_links: list[Link] = Field(default_factory=list)
     append_section: SectionPatch | None = None
     replace_section: SectionPatch | None = None
+    # The whole body at once — the note as the unit of edit. `""` is a
+    # valid body (clearing a note is an edit), so every check on this
+    # field is `is not None`, never truthiness.
+    replace_body: str | None = None
 
     def is_empty(self) -> bool:
         return not (
@@ -357,6 +363,7 @@ class GraftPatch(BaseModel):
             or self.remove_links
             or self.append_section
             or self.replace_section
+            or self.replace_body is not None
         )
 
     def summary_line(self) -> str:
@@ -371,4 +378,6 @@ class GraftPatch(BaseModel):
             parts.append(f"append '{self.append_section.header}'")
         if self.replace_section:
             parts.append(f"replace '{self.replace_section.header}'")
+        if self.replace_body is not None:
+            parts.append(f"replace body ({len(self.replace_body.split())} words)")
         return "; ".join(parts) or "noop"

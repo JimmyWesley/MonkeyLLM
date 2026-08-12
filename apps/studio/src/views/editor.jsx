@@ -1,26 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Jimmy Wesley
 
-/* Governed editing (spec J.5.4).
+/* Governed editing (spec J.5.4, v0.43).
  *
  * The whole point of this screen is what it does NOT do: it never writes a
- * file. It is a rich editor whose Save is a `graft` — the same call an
- * agent makes over MCP, validated by the same parser, committed by the same
- * git, stamped with the acting principal by the same host. Humans and
- * agents write through one door.
+ * file. It is an editor whose Save is a `graft` — the same call an agent
+ * makes over MCP, validated by the same parser, committed by the same git,
+ * stamped with the acting principal by the same host. Humans and agents
+ * write through one door.
  *
- * Two consequences shape the design.
+ * Three consequences shape the design.
  *
- * **One section per edit.** `graft` replaces one section atomically (C.8).
- * Editing the whole body would mean several grafts, several commits, and a
- * half-applied edit whenever the third one failed. So the editor works at
- * the contract's own grain: pick a section, edit it, one commit. The
- * frontmatter form rides along in the same patch, because `set_frontmatter`
- * is part of the same operation.
+ * **The note is the unit of edit (v0.43).** A whole body under the pick
+ * budget is edited in one surface and saved as ONE `graft` carrying
+ * `replace_body` — one commit for one thought. Two fallbacks keep that
+ * honest: a body over the pick budget was read truncated, and writing back
+ * less than was read is how notes lose their tails, so it is edited at the
+ * section grain; and an index's body is the indexer's render, so it too
+ * stays at the section grain.
+ *
+ * **What the rich editor cannot hold, it must not eat.** A body carrying
+ * markdown beyond the rich schema (tables, raw HTML) round-trips lossily —
+ * so those bodies open in the Markdown surface, where the bytes on screen
+ * are the bytes stored, and the rich mode is locked rather than lossy.
  *
  * **The patch is shown before it is sent.** The operator is authoring a
- * commit, and a commit is not a keystroke: the exact operations appear
- * beside the editor, in the shape the API will receive them.
+ * commit, and a commit is not a keystroke: the operations appear beside
+ * the editor, in the shape the API will receive them.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
@@ -38,8 +44,9 @@ import { Highlighted } from '../design/highlight.jsx'
 import { Check, ChevronLeft, Code2, Mic, Pencil, Save, Undo } from '../design/icons.jsx'
 import { has, useAsync } from './shared.jsx'
 
-/* Markdown is what the forest stores; the editor speaks HTML. The pair is
- * kept in one place so a round trip cannot drift between two settings. */
+/* Markdown is what the forest stores; the rich editor speaks HTML. The
+ * pair is kept in one place so a round trip cannot drift between two
+ * settings. */
 const turndown = new TurndownService({
   headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced',
 })
@@ -53,13 +60,18 @@ turndown.addRule('keepWikilinks', {
 const toHtml = (md) => marked.parse(String(md || ''), { gfm: true, breaks: false })
 const toMarkdown = (html) => turndown.turndown(String(html || '')).trim()
 
+/** Markdown the rich schema cannot represent: pipe tables and raw HTML
+ *  blocks. Round-tripping them through the rich editor would silently drop
+ *  them, so such bodies edit as source (J.5.4 v0.43). */
+const richLossy = (md) => /^\s*\|.*\|/m.test(md || '') || /^\s*<\w+/m.test(md || '')
+
 /** The engine's own budget for a summary (models.validate_summary): 60
  *  tokens, counted the way the parser counts them — whitespace-separated. */
 const SUMMARY_TOKENS = 60
 const countTokens = (s) => String(s || '').split(/\s+/).filter(Boolean).length
 
-/** Sections of a markdown body, `## Header` down. The editor offers these
- *  because `replace_section` addresses exactly them. */
+/** Sections of a markdown body, `## Header` down. The section grain offers
+ *  these because `replace_section` addresses exactly them. */
 function sectionsOf(body) {
   const out = []
   const lines = String(body || '').split('\n')
@@ -84,12 +96,23 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [done, setDone] = useState(null)
+  const [mode, setMode] = useState(null)   // 'rich' | 'source', whole-note only
+  const [src, setSrc] = useState('')
+  const srcRef = useRef(null)
 
   const digest = useAsync(() => api.call(forest, 'look', { id }), [forest, id])
   const body = useAsync(() => api.call(forest, 'pick', { id }), [forest, id])
 
-  const sections = useMemo(() => sectionsOf(body.data?.body), [body.data])
+  // The two grains (J.5.4 v0.43): whole note when the read was whole and
+  // the body is the author's; section surgery for truncated reads and for
+  // indexes, whose body is the indexer's render.
+  const isIndex = id === '_index' || id.endsWith('/_index')
+  const whole = Boolean(body.data && !body.data.truncated && !isIndex)
+  const orig = body.data?.body || ''
+
+  const sections = useMemo(() => sectionsOf(orig), [orig])
   const original = sections.find((s) => s.header === section) || null
+  const lossy = useMemo(() => richLossy(orig), [orig])
 
   const editor = useEditor({
     extensions: [
@@ -100,7 +123,7 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
     editorProps: { attributes: { class: 'editor-surface' } },
   }, [])
 
-  // The passport form and the first section load once the two reads land.
+  // The passport form loads once the digest lands.
   useEffect(() => {
     if (!digest.data || form) return
     setForm({
@@ -110,15 +133,25 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
     })
   }, [digest.data, form])
 
+  // Whole-note mode: the body lands in the surface that can hold it.
   useEffect(() => {
-    if (!sections.length || section !== null) return
+    if (!body.data || !whole) return
+    const start = lossy ? 'source' : 'rich'
+    setMode(start)
+    setSrc(orig)
+    if (editor && start === 'rich') editor.commands.setContent(toHtml(orig))
+  }, [body.data, whole, lossy, editor])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Section grain: pick the first section once the body lands.
+  useEffect(() => {
+    if (whole || !sections.length || section !== null) return
     setSection(sections[0].header)
-  }, [sections, section])
+  }, [whole, sections, section])
 
   useEffect(() => {
-    if (!editor || !original) return
+    if (whole || !editor || !original) return
     editor.commands.setContent(toHtml(original.body))
-  }, [editor, original?.header])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [whole, editor, original?.header])   // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!has(grant, 'write')) {
     return (
@@ -135,11 +168,12 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
   if (body.error) return <Card><ErrorNote error={body.error} onRetry={body.reload} /></Card>
 
   const d = digest.data
-  const edited = editor ? toMarkdown(editor.getHTML()) : ''
   const tags = form?.tags.split(',').map((s) => s.trim()).filter(Boolean) || []
 
   /* The patch is derived, never accumulated: what is sent is exactly the
-     difference between what was read and what is on screen. */
+     difference between what was read and what is on screen. In rich mode
+     the comparison runs against the round-tripped original, so opening a
+     note and saving it untouched stays a no-op. */
   const patch = {}
   const frontmatter = {}
   if (form && form.title !== d.title) frontmatter.title = form.title
@@ -148,13 +182,52 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
     frontmatter.tags = tags
   }
   if (Object.keys(frontmatter).length) patch.set_frontmatter = frontmatter
-  if (original && edited && edited !== original.body) {
-    patch.replace_section = { header: original.header, body: edited }
+
+  if (whole && mode === 'rich' && editor) {
+    const edited = toMarkdown(editor.getHTML())
+    const baseline = toMarkdown(toHtml(orig))
+    if (edited !== baseline) patch.replace_body = edited
+  } else if (whole && mode === 'source') {
+    if (src !== orig) patch.replace_body = src
+  } else if (!whole && original && editor) {
+    const edited = toMarkdown(editor.getHTML())
+    if (edited && edited !== original.body) {
+      patch.replace_section = { header: original.header, body: edited }
+    }
   }
 
   const summaryTokens = countTokens(form?.summary)
   const summaryTooLong = summaryTokens > SUMMARY_TOKENS
   const dirty = Object.keys(patch).length > 0
+
+  // Shown before it is sent — with a long body folded for the eye. The
+  // fold is display only: what the editor holds is what the API receives.
+  const shownPatch = patch.replace_body !== undefined && patch.replace_body.length > 400
+    ? { ...patch,
+        replace_body: `${patch.replace_body.slice(0, 400)}\n… (+${patch.replace_body.length - 400})` }
+    : patch
+
+  function switchMode(next) {
+    if (next === mode || !editor) return
+    if (next === 'source') {
+      // An untouched rich surface hands back the stored bytes, not its own
+      // normalisation of them.
+      const edited = toMarkdown(editor.getHTML())
+      const baseline = toMarkdown(toHtml(orig))
+      setSrc(edited === baseline ? orig : edited)
+    } else {
+      editor.commands.setContent(toHtml(src))
+    }
+    setMode(next)
+  }
+
+  function dictate(text) {
+    const el = srcRef.current
+    if (!el) { setSrc((prev) => `${prev}${prev.endsWith(' ') || !prev ? '' : ' '}${text} `); return }
+    const at = el.selectionStart ?? src.length
+    const next = `${src.slice(0, at)}${text} ${src.slice(el.selectionEnd ?? at)}`
+    setSrc(next)
+  }
 
   async function save() {
     setSaving(true)
@@ -169,7 +242,21 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
       digest.reload()
       body.reload()
       setForm(null)
+      setSection(null)
     } catch (e) { setError(e) } finally { setSaving(false) }
+  }
+
+  function discard() {
+    setForm({
+      title: d.title || '', summary: d.summary || '',
+      tags: (d.tags || []).join(', '),
+    })
+    if (whole) {
+      setSrc(orig)
+      if (editor && mode === 'rich') editor.commands.setContent(toHtml(orig))
+    } else if (editor && original) {
+      editor.commands.setContent(toHtml(original.body))
+    }
   }
 
   return (
@@ -205,28 +292,70 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
           </div>
         </Card>
 
-        <Card title={t('editor.section')} subtitle={t('editor.section_hint')}
-              icon={Code2}
-              actions={
-                <select className="field !w-auto !py-1.5 text-[12.5px]"
-                        value={section || ''}
-                        onChange={(e) => setSection(e.target.value)}>
-                  {sections.map((s) => (
-                    <option key={s.header} value={s.header}>{s.header}</option>
-                  ))}
-                </select>
-              }>
-          {!sections.length ? (
-            <Note>{t('editor.no_sections')}</Note>
-          ) : (
-            <>
-              <Toolbar editor={editor} />
-              <div className="mt-2 rounded-lg border border-line bg-surface-2 p-3">
-                <EditorContent editor={editor} />
-              </div>
-            </>
-          )}
-        </Card>
+        {whole ? (
+          <Card title={t('common.body')} subtitle={t('editor.whole_hint')}
+                icon={Code2}
+                actions={
+                  <div className="segment">
+                    <button type="button" aria-pressed={mode === 'rich'}
+                            disabled={lossy}
+                            title={lossy ? t('editor.rich_locked') : undefined}
+                            onClick={() => switchMode('rich')}>
+                      {t('editor.mode_rich')}
+                    </button>
+                    <button type="button" aria-pressed={mode === 'source'}
+                            onClick={() => switchMode('source')}>
+                      {t('editor.mode_source')}
+                    </button>
+                  </div>
+                }>
+            {lossy && <Note>{t('editor.rich_locked')}</Note>}
+            {mode === 'rich' ? (
+              <>
+                <Toolbar editor={editor} />
+                <div className="mt-2 rounded-lg border border-line bg-surface-2 p-3">
+                  <EditorContent editor={editor} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-end">
+                  <Dictation onText={dictate} />
+                </div>
+                <textarea ref={srcRef} value={src} spellCheck={false}
+                          onChange={(e) => setSrc(e.target.value)}
+                          className="mt-1 min-h-[22rem] w-full resize-y rounded-lg
+                                     border border-line bg-surface-2 p-3 font-mono
+                                     text-[13px] leading-relaxed text-text-2
+                                     outline-none focus:border-accent" />
+              </>
+            )}
+          </Card>
+        ) : (
+          <Card title={t('editor.section')} subtitle={t('editor.section_hint')}
+                icon={Code2}
+                actions={
+                  <select className="field !w-auto !py-1.5 text-[12.5px]"
+                          value={section || ''}
+                          onChange={(e) => setSection(e.target.value)}>
+                    {sections.map((s) => (
+                      <option key={s.header} value={s.header}>{s.header}</option>
+                    ))}
+                  </select>
+                }>
+            {body.data?.truncated && <Note>{t('editor.body_truncated')}</Note>}
+            {!sections.length ? (
+              <Note>{t('editor.no_sections')}</Note>
+            ) : (
+              <>
+                <Toolbar editor={editor} />
+                <div className="mt-2 rounded-lg border border-line bg-surface-2 p-3">
+                  <EditorContent editor={editor} />
+                </div>
+              </>
+            )}
+          </Card>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -234,7 +363,7 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
               icon={Save}>
           {dirty ? (
             <pre className="source-view">
-              <Highlighted text={JSON.stringify(patch, null, 2)} lang="json" />
+              <Highlighted text={JSON.stringify(shownPatch, null, 2)} lang="json" />
             </pre>
           ) : (
             <p className="text-[12.5px] text-text-3">{t('common.no_changes')}</p>
@@ -246,13 +375,7 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
               {saving ? t('common.saving') : t('editor.commit')}
             </button>
             <button className="btn btn-sm" disabled={!dirty || saving}
-                    onClick={() => {
-                      setForm({
-                        title: d.title || '', summary: d.summary || '',
-                        tags: (d.tags || []).join(', '),
-                      })
-                      if (editor && original) editor.commands.setContent(toHtml(original.body))
-                    }}>
+                    onClick={discard}>
               <Undo size={13} /> {t('editor.discard')}
             </button>
           </div>
@@ -310,22 +433,26 @@ function Toolbar({ editor }) {
       {item('</>', editor.isActive('codeBlock'),
             () => editor.chain().focus().toggleCodeBlock().run(), t('editor.code'))}
       <span className="mx-0.5 h-4 w-px bg-line" aria-hidden="true" />
-      <Dictation editor={editor} />
+      <Dictation onText={(text) => editor.chain().focus().insertContent(`${text} `).run()} />
     </div>
   )
 }
 
-/* Dictation is an input method, nothing more: the words land in the editor
- * exactly as typing would land them, and the write still leaves as the one
- * `graft` the operator reviews (J.5.4). Recognition runs in the browser's
- * own engine — no audio touches the Station — and the button only exists
- * where the browser offers the API, which is what makes a phone the place
- * a note gets spoken instead of typed. */
-function Dictation({ editor }) {
+/* Dictation is an input method, nothing more: the words land in whichever
+ * surface is open exactly as typing would land them, and the write still
+ * leaves as the one `graft` the operator reviews (J.5.4). Recognition runs
+ * in the browser's own engine — no audio touches the Station — and the
+ * button only exists where the browser offers the API, which is what makes
+ * a phone the place a note gets spoken instead of typed. */
+function Dictation({ onText }) {
   const { t, lang } = useI18n()
   const [listening, setListening] = useState(false)
   const rec = useRef(null)
   const wanted = useRef(false)
+  // The engine outlives many renders; results must land in the CURRENT
+  // surface state, not the one captured when the mic was pressed.
+  const onTextRef = useRef(onText)
+  useEffect(() => { onTextRef.current = onText })
 
   const Engine = typeof window !== 'undefined'
     && (window.SpeechRecognition || window.webkitSpeechRecognition)
@@ -335,7 +462,7 @@ function Dictation({ editor }) {
     rec.current?.stop()
   }, [])
 
-  if (!Engine || !editor) return null
+  if (!Engine) return null
 
   const SPOKEN = { en: 'en-US', pt: 'pt-BR', es: 'es-ES' }
 
@@ -355,7 +482,7 @@ function Dictation({ editor }) {
         if (ev.results[i].isFinal) text += ev.results[i][0].transcript
       }
       text = text.trim()
-      if (text) editor.chain().focus().insertContent(`${text} `).run()
+      if (text) onTextRef.current(text)
     }
     // Browsers end recognition on their own after a silence; while the
     // operator still wants to talk, a quiet pause is not a stop.

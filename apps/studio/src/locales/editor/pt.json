@@ -1,5 +1,6 @@
 {
   "editor.back": "Voltar",
+  "editor.body_truncated": "Corpo acima do orçamento de leitura — edite uma seção por vez.",
   "editor.bold": "Negrito",
   "editor.code": "Bloco de código",
   "editor.commit": "Commitar via graft",
@@ -10,6 +11,8 @@
   "editor.italic": "Itálico",
   "editor.list": "Lista com marcadores",
   "editor.locked": "Fixo por toda a vida do nó",
+  "editor.mode_rich": "Texto",
+  "editor.mode_source": "Markdown",
   "editor.needs_write": "Editar exige a capacidade de write nesta floresta.",
   "editor.no_sections": "Este corpo não tem seções para substituir.",
   "editor.ordered": "Lista numerada",
@@ -17,6 +20,7 @@
   "editor.pending_hint": "Exatamente o que será enviado, no formato que a API recebe.",
   "editor.placeholder": "Escreva…",
   "editor.quote": "Citação",
+  "editor.rich_locked": "Este corpo tem tabelas ou HTML que o editor rico não segura; edite o Markdown.",
   "editor.rule_commit": "O resultado é um commit git carimbado com o seu principal.",
   "editor.rule_immutable": "Id, tipo e data de criação não mudam.",
   "editor.rule_summary": "O resumo é validado contra o orçamento de tokens.",
@@ -28,5 +32,6 @@
   "editor.summary_long": "Longo demais: o parser recusa resumo acima do orçamento.",
   "editor.tags": "Tags",
   "editor.tags_hint": "Separadas por vírgula",
-  "editor.title": "Título"
+  "editor.title": "Título",
+  "editor.whole_hint": "A nota inteira — um commit."
 }

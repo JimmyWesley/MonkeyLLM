@@ -175,6 +175,59 @@ class TestGraft:
             vine_rw.graft("concepts/rag", {"add_links": [{"rel": "hates", "target": "concepts/bm25"}]})
         assert e.value.code == E_SCHEMA
 
+    def test_replace_body_swaps_the_whole_note_in_one_commit(
+        self, vine_rw, forest_rw
+    ):
+        """C.8 v0.43: the note as the unit of edit — body and frontmatter
+        land in the same single commit."""
+        before = git_log(forest_rw)
+        new_body = "# RAG\n\n## Rewritten\n\nThe whole body at once."
+        r = vine_rw.graft(
+            "concepts/rag",
+            {"replace_body": new_body, "set_frontmatter": {"title": "RAG, whole"}},
+        )
+        assert r["commit"]
+        p = vine_rw.pick("concepts/rag")
+        # serialize_node normalises the file with one trailing newline
+        assert p["body"].rstrip("\n") == new_body
+        head = git_log(forest_rw)
+        assert head != before and head.startswith("graft(concepts/rag):")
+        assert "replace body" in head
+        # one edit, one commit: the head moved exactly once
+        assert git_log(forest_rw, 2).splitlines()[1] == before.splitlines()[0]
+
+    def test_replace_body_empty_string_clears_the_note(self, vine_rw):
+        """Clearing a note is an edit, not an error: `""` must not be
+        mistaken for an absent operation."""
+        r = vine_rw.graft("concepts/rag", {"replace_body": ""})
+        assert r["commit"]
+        assert vine_rw.pick("concepts/rag")["body"] == ""
+
+    def test_replace_body_refuses_section_operations_alongside(self, vine_rw):
+        """One patch, one truth about the body."""
+        with pytest.raises(VineError) as e:
+            vine_rw.graft(
+                "concepts/rag",
+                {"replace_body": "x",
+                 "replace_section": {"header": "Anything", "body": "y"}},
+            )
+        assert e.value.code == E_SCHEMA
+        with pytest.raises(VineError) as e:
+            vine_rw.graft(
+                "concepts/rag",
+                {"replace_body": "x",
+                 "append_section": {"header": "Anything", "body": "y"}},
+            )
+        assert e.value.code == E_SCHEMA
+
+    def test_replace_body_refuses_indexes(self, vine_rw):
+        """An index's body is the indexer's render; hand-writing it whole
+        would stop it parsing as a map."""
+        for idx in ("_index", "concepts/_index"):
+            with pytest.raises(VineError) as e:
+                vine_rw.graft(idx, {"replace_body": "# Not a map anymore"})
+            assert e.value.code == E_SCHEMA
+
     def test_empty_patch_rejected(self, vine_rw):
         with pytest.raises(VineError):
             vine_rw.graft("concepts/rag", {})

@@ -56,6 +56,7 @@ from monkeyllm.parser import (
     append_section,
     extract_outline,
     extract_section,
+    parse_node,
     replace_section,
     serialize_node,
 )
@@ -1451,6 +1452,24 @@ class Vine:
         if patch.is_empty():
             raise VineError(E_SCHEMA, "empty graft patch")
 
+        # C.8 v0.43: one patch states one truth about the body — a whole-body
+        # replace alongside section surgery is refused, never resolved by
+        # precedence. And an index's body is the indexer's render: a
+        # hand-written one would stop parsing as a map.
+        if patch.replace_body is not None:
+            if patch.replace_section or patch.append_section:
+                raise VineError(
+                    E_SCHEMA,
+                    "replace_body cannot be combined with section operations",
+                    hint="Send the whole body, or section patches — not both.",
+                )
+            if id == "_index" or id.endswith("/_index"):
+                raise VineError(
+                    E_SCHEMA,
+                    f"'{id}' is an index: its body is the indexer's render",
+                    hint="Indexes accept section operations only.",
+                )
+
         for field in patch.set_frontmatter:
             if field not in MUTABLE_FRONTMATTER_FIELDS:
                 raise VineError(
@@ -1503,6 +1522,9 @@ class Vine:
         if not fm["links"]:
             fm.pop("links")
 
+        if patch.replace_body is not None:
+            body = patch.replace_body
+            file_changed = True
         if patch.replace_section:
             new_body = replace_section(body, patch.replace_section.header, patch.replace_section.body)
             if new_body is None:
@@ -1523,6 +1545,11 @@ class Vine:
         fm["updated"] = dt.date.today().isoformat()
         validate_frontmatter(fm, self.forest.dialect, strict_summary=False)
         content = serialize_node(fm, body)
+        if patch.replace_body is not None:
+            # The write validates before it commits (v0.43): whatever the
+            # next read would refuse is refused now, while the file on disk
+            # is still the old one.
+            parse_node(id, content)
 
         touched: list[tuple[Path, str]] = []
         assert node.path is not None

@@ -1,5 +1,6 @@
 {
   "editor.back": "Back",
+  "editor.body_truncated": "Body over the reading budget — edited one section at a time.",
   "editor.bold": "Bold",
   "editor.code": "Code block",
   "editor.commit": "Commit via graft",
@@ -10,6 +11,8 @@
   "editor.italic": "Italic",
   "editor.list": "Bulleted list",
   "editor.locked": "Fixed for the life of the node",
+  "editor.mode_rich": "Text",
+  "editor.mode_source": "Markdown",
   "editor.needs_write": "Editing needs the write capability on this forest.",
   "editor.no_sections": "This body has no sections to replace.",
   "editor.ordered": "Numbered list",
@@ -17,6 +20,7 @@
   "editor.pending_hint": "Exactly what will be sent, in the shape the API receives it.",
   "editor.placeholder": "Write…",
   "editor.quote": "Quote",
+  "editor.rich_locked": "This body carries tables or raw HTML the rich editor cannot hold; edit the Markdown.",
   "editor.rule_commit": "The result is a git commit stamped with your principal.",
   "editor.rule_immutable": "Id, type and creation date cannot change.",
   "editor.rule_summary": "The summary is validated against its token budget.",
@@ -28,5 +32,6 @@
   "editor.summary_long": "Too long: the parser refuses a summary over the budget.",
   "editor.tags": "Tags",
   "editor.tags_hint": "Separated by commas",
-  "editor.title": "Title"
+  "editor.title": "Title",
+  "editor.whole_hint": "The whole note — one commit."
 }
