@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from itertools import islice
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -213,11 +214,22 @@ def validate_dataset_rows(schema: dict[str, TableSchema],
                 )
 
 
-def validate_dataset_schema(schema: dict[str, TableSchema]) -> None:
-    """C.7.1: names regex-checked, types allowlisted, limits enforced."""
+def validate_dataset_schema(schema: dict[str, TableSchema], *,
+                            limits: bool = True) -> None:
+    """C.7.1: names regex-checked, types allowlisted, limits enforced.
+
+    `limits=False` keeps every name and type check and drops only the two
+    COUNTS (G.2.5, v0.45). They bound what a model may *declare* — a guard
+    against hallucinated DDL — and the Gardener adopting a spreadsheet
+    somebody already owns is not declaring anything. A 141-column ERP
+    export is not a mistake, and refusing it would be the tool telling the
+    operator their data is wrong. Unreachable from the wire: `plant`'s
+    `adopted` flag is keyword-only and `ScopedVine.plant` forwards only
+    `node`.
+    """
     if not schema:
         raise VineError(E_SCHEMA, "schema: must declare at least one table")
-    if len(schema) > MAX_DATASET_TABLES:
+    if limits and len(schema) > MAX_DATASET_TABLES:
         raise VineError(E_SCHEMA, f"schema: max {MAX_DATASET_TABLES} tables per dataset")
     for tname, table in schema.items():
         if not DATASET_NAME_RE.fullmatch(tname):
@@ -228,7 +240,7 @@ def validate_dataset_schema(schema: dict[str, TableSchema]) -> None:
             )
         if not table.columns:
             raise VineError(E_SCHEMA, f"schema: table '{tname}' has no columns")
-        if len(table.columns) > MAX_DATASET_COLUMNS:
+        if limits and len(table.columns) > MAX_DATASET_COLUMNS:
             raise VineError(
                 E_SCHEMA, f"schema: table '{tname}' exceeds {MAX_DATASET_COLUMNS} columns"
             )
@@ -268,9 +280,14 @@ def dataset_ddl(schema: dict[str, TableSchema]) -> list[str]:
 
 MANUAL_SECTION = "Query manual"
 SAMPLE_SECTION = "Sample rows"
+# C.2.1: the section a PERSON writes and nothing else touches. The map says
+# what is in the payload; this says what it means — which column is USD,
+# what a status code stands for, which join answers the real question.
+NOTES_SECTION = "Notes"
 SAMPLE_ROWS = 3          # rows shown per table
 SAMPLE_CELL_CHARS = 120  # a cell longer than this is clipped, visibly
 SAMPLE_MAX_TABLES = 20   # tables that get a sample; the rest are counted
+SAMPLE_MAX_COLUMNS = 12  # columns per sampled row; the manual still lists all
 
 
 def rows_label(n: int) -> str:
@@ -315,18 +332,39 @@ def dataset_map(tables: dict[str, dict[str, str]],
                          for c, t in columns.items())
         lines.append(f"- `{tname}({cols})`")
     lines += ["", "Example queries:"]
-    for tname in tables:
-        lines.append(f"- `SELECT * FROM {tname} LIMIT 5`")
-        lines.append(f"- `SELECT COUNT(*) FROM {tname}`")
+    for tname, columns in tables.items():
+        # G.2.3 rule 6 (v0.47): on a wide table `SELECT *` does not fit the
+        # C.5.1 result budget, so offering it as the example is offering a
+        # statement that will come back truncated. Column COUNT is
+        # arithmetic and the Gardener may state it; which columns matter is
+        # meaning, it does not know, and that is what `## Notes` is for —
+        # so no example here picks columns on the reader's behalf.
+        if len(columns) > SAMPLE_MAX_COLUMNS:
+            lines.append(f"- `SELECT COUNT(*) FROM {tname}`")
+            lines.append(f"- Note: `{tname}` has {len(columns)} columns, so "
+                         "`SELECT *` will not fit the query result budget. "
+                         "Name the columns you need — all of them are listed "
+                         "above.")
+        else:
+            lines.append(f"- `SELECT * FROM {tname} LIMIT 5`")
+            lines.append(f"- `SELECT COUNT(*) FROM {tname}`")
 
     lines += ["", f"## {SAMPLE_SECTION}", ""]
     shown = list(tables)[:SAMPLE_MAX_TABLES]
     for tname in shown:
-        columns = list(tables[tname])
+        all_columns = list(tables[tname])
+        # A wide table (an ERP export runs to a hundred and more) would put
+        # three rows of a hundred clipped cells into the body and into every
+        # `look` of it. The manual above still names every column — that is
+        # the structure — and the sample shows the leading ones.
+        columns = all_columns[:SAMPLE_MAX_COLUMNS]
         count = counts.get(tname)
         heading = f"### {tname}" + (f" — {rows_label(count)}" if count is not None else "")
         lines += [heading, ""]
-        rows = list(samples.get(tname) or [])[:SAMPLE_ROWS]
+        # islice, not a slice: `samples` for a freshly converted CSV holds
+        # every row of it, and copying twenty thousand of them to show three
+        # is work nobody asked for.
+        rows = list(islice(samples.get(tname) or (), SAMPLE_ROWS))
         if not rows:
             lines += ["_No rows._", ""]
             continue
@@ -336,6 +374,13 @@ def dataset_map(tables: dict[str, dict[str, str]],
             cells = [_sample_cell(row[i]) if i < len(row) else ""
                      for i in range(len(columns))]
             lines.append("| " + " | ".join(cells) + " |")
+        cut = len(all_columns) - len(columns)
+        if cut > 0:
+            # "not sampled" alone reads as "not available": a model asked
+            # about column 40 answered that the data did not contain it,
+            # having seen only the first twelve. Say that they are there.
+            lines.append(f"_{cut} further column(s) exist and are queryable; "
+                         f"the manual above names them all._")
         lines.append("")
     # Never cut silently: a map that stops without saying so reads as a map
     # of everything there is.

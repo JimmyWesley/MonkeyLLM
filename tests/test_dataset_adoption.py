@@ -8,7 +8,9 @@ carries the sample map, and a workbook is one table per sheet.
 """
 
 import hashlib
+import re
 import sqlite3
+import zipfile
 
 import pytest
 
@@ -40,6 +42,13 @@ def garden(tmp_path):
     src = tmp_path / "dump"
     src.mkdir()
     return Gardener(vine, hooks=[]), vine, src
+
+
+@pytest.fixture()
+def vine_only(tmp_path):
+    root = tmp_path / "forest"
+    init_forest(root, title="Test Forest")
+    return Vine(root, writable=True)
 
 
 # --- G.2.2: the file is the payload ----------------------------------------
@@ -128,7 +137,7 @@ def test_a_refused_plant_leaves_no_orphan_payload(garden, monkeypatch):
     g, vine, src = garden
     build_db(src / "audit.db")
 
-    def refuse(node):
+    def refuse(node, **kwargs):
         raise VineError("E_SCHEMA", "refused for the test")
 
     monkeypatch.setattr(vine, "plant", refuse)
@@ -192,20 +201,87 @@ def test_workbook_plants_one_table_per_sheet(garden):
     assert vine.query("book", "SELECT total FROM orders_2026")["rows"] == [[99.5]]
 
 
-def test_a_workbook_over_the_table_limit_is_refused_by_name(garden):
+def test_an_empty_workbook_is_refused_by_name(garden):
     openpyxl = pytest.importorskip("openpyxl")
     g, vine, src = garden
     wb = openpyxl.Workbook()
-    wb.remove(wb.active)
-    for i in range(11):
-        ws = wb.create_sheet(f"Sheet{i}")
-        ws.append(["a"])
-        ws.append([i])
-    wb.save(src / "wide.xlsx")
+    wb.active.append(["only", "a", "header"])
+    wb.save(src / "hollow.xlsx")
 
     report = g.adopt(src)
     assert report["planted"] == []
-    assert report["errors"] == ["wide.xlsx: workbook has 11 sheets with data: wide.xlsx"]
+    assert report["errors"] == ["hollow.xlsx: workbook has no data rows: hollow.xlsx"]
+
+
+def test_a_lying_dimension_record_does_not_hide_the_rows(garden):
+    """G.2.4 (v0.45): a read-only reader believes the file's `<dimension>`,
+    and exports written by anything but Excel routinely declare `A1:A1`.
+    A real sheet then arrives as one row and is reported as empty."""
+    openpyxl = pytest.importorskip("openpyxl")
+    g, vine, src = garden
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "report"
+    ws.append(["invoice", "client"])
+    for i in range(1, 41):
+        ws.append([f"NF-{i}", f"Client {i}"])
+    wb.save(src / "export.xlsx")
+
+    # Rewrite the sheet's declared extent to a single cell, in place — this
+    # is exactly the shape of the file that failed.
+    path = src / "export.xlsx"
+    with zipfile.ZipFile(path) as zf:
+        entries = {n: zf.read(n) for n in zf.namelist()}
+    sheet = "xl/worksheets/sheet1.xml"
+    entries[sheet] = re.sub(rb'<dimension ref="[^"]*"/>',
+                            b'<dimension ref="A1:A1"/>', entries[sheet])
+    assert b'<dimension ref="A1:A1"/>' in entries[sheet], "the lie was not planted"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+
+    assert g.adopt(src)["planted"] == ["export"]
+    assert vine.query("export", "SELECT COUNT(*) FROM report")["rows"] == [[40]]
+
+
+def test_a_wide_export_is_adopted_and_its_map_stays_bounded(garden):
+    """G.2.5: the C.7.1 counts guard a model's invention, not a real file."""
+    openpyxl = pytest.importorskip("openpyxl")
+    g, vine, src = garden
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "report"
+    ws.append([f"field_{i}" for i in range(141)])
+    ws.append([f"v{i}" for i in range(141)])
+    wb.save(src / "erp.xlsx")
+
+    assert g.adopt(src)["planted"] == ["erp"]
+    # Every column is there to be queried…
+    assert vine.query("erp", "SELECT field_140 FROM report")["rows"] == [["v140"]]
+    body = vine.forest.read("erp").body
+    # …and named in the manual, which is the structure.
+    assert "field_140 TEXT" in extract_section(body, "Query manual")
+    # The sample is capped, and says so rather than stopping quietly.
+    sample = extract_section(body, "Sample rows")
+    assert "| v11 |" in sample and "v12" not in sample
+    assert "129 further column(s) exist and are queryable" in sample
+
+
+def test_the_wire_still_cannot_declare_a_wide_table(vine_only):
+    """G.2.5 rule 2: a flag an agent can set is not a guard."""
+    from monkeyllm.errors import E_SCHEMA
+
+    columns = {f"c{i}": "TEXT" for i in range(60)}
+    node = {"id": "wide", "type": "dataset", "parent": "_index",
+            "title": "Wide", "summary": "A table with too many columns declared.",
+            "schema": {"t": {"columns": columns}}}
+    with pytest.raises(VineError) as caught:
+        vine_only.plant(node)
+    assert caught.value.code == E_SCHEMA
+    assert "exceeds 50 columns" in caught.value.message
+    # The exemption is keyword-only, so it cannot arrive as a body key.
+    with pytest.raises(TypeError):
+        vine_only.plant({**node, "id": "wide2"}, True)
 
 
 # --- G.2.3: the map is bounded, and says when it stops ----------------------

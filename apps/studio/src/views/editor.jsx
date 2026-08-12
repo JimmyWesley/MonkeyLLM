@@ -38,7 +38,7 @@ import TurndownService from 'turndown'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import {
-  Badge, Card, ErrorNote, Field, Note, Skeleton,
+  Badge, Card, CodeArea, ErrorNote, Field, Note, Skeleton,
 } from '../design/ui.jsx'
 import { Highlighted } from '../design/highlight.jsx'
 import { Check, ChevronLeft, Code2, Mic, Pencil, Save, Undo } from '../design/icons.jsx'
@@ -322,12 +322,14 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
                 <div className="flex justify-end">
                   <Dictation onText={dictate} />
                 </div>
-                <textarea ref={srcRef} value={src} spellCheck={false}
-                          onChange={(e) => setSrc(e.target.value)}
-                          className="mt-1 min-h-[22rem] w-full resize-y rounded-lg
-                                     border border-line bg-surface-2 p-3 font-mono
-                                     text-[13px] leading-relaxed text-text-2
-                                     outline-none focus:border-accent" />
+                {/* J.5.10: coloured, because this is the surface the rich
+                    editor hands back whenever a body holds a table — which
+                    every dataset's does. It was the plainest text in the
+                    console at exactly the moment structure mattered most. */}
+                <CodeArea ref={srcRef} lang="markdown" value={src}
+                          className="mt-1" minHeight="22rem"
+                          aria-label={t('editor.body')}
+                          onChange={(e) => setSrc(e.target.value)} />
               </>
             )}
           </Card>

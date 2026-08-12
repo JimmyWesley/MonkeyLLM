@@ -323,3 +323,90 @@ def test_prose_around_the_json_is_tolerated(station, scripted):
     out = _ask(client, _key(registry), question="q", hops=3)
     assert [h["tool"] for h in out["hops"]] == ["look"]
     assert out["answer"] == "ok"
+
+
+# -- what the walk is told before it decides (v0.47) -------------------------
+
+
+DATASET = "sales/report-q1-2026"
+TEACHING = ("Always filter text columns with LIKE, never with =. "
+            "Never return more than 10 rows.")
+
+
+def _teach(client, head, text=TEACHING):
+    r = client.post(f"/v1/forests/{FOREST}/graft",
+                    json={"id": DATASET,
+                          "patch": {"append_section": {"header": "Notes",
+                                                       "body": text}}},
+                    headers=head)
+    assert r.status_code == 200, r.text
+
+
+def test_the_entry_carries_a_dataset_notes_without_any_look(station, scripted):
+    """C.2.1 rule 6 / J.10.5 (v0.47).
+
+    The observed failure: the walk enters through `locate` — curated
+    metadata, no body — and on a dataset the natural next move is `query`,
+    not `look`. So the mode with more freedom saw less of what the operator
+    wrote than the sweep did, and read as the agent ignoring it.
+    """
+    client, registry = station
+    head = _key(registry)
+    _teach(client, head)
+    script, seen = scripted
+    script += [final("ok", [])]
+
+    _ask(client, head, question="sales report Q1 2026 revenue", hops=3)
+
+    assert seen["turns"] == 1, "the model answered without a single hop"
+    entry = seen["messages"][-1]["content"]
+    assert "LIKE" in entry and "10 rows" in entry
+    assert '"tool": "look"' not in entry  # nothing was opened to get it
+
+
+def test_a_node_that_is_not_a_dataset_is_not_looked_up(station, scripted):
+    """Bounded by `k` and by type: the entry must not turn into a `look`
+    per result. Only datasets carry notes (C.2.1 rule 5)."""
+    client, registry = station
+    head = _key(registry)
+    script, _ = scripted
+    script += [final("ok", [])]
+
+    out = _ask(client, head, question="architecture notes", hops=3)
+    # No hop was spent, and the walk still answered from its entry.
+    assert out["hops"] == []
+
+
+def test_a_failed_hop_reports_what_went_wrong_not_only_that_it_did(
+        station, scripted):
+    """J.10.5 (v0.47): the code alone rendered a guessed table name and a
+    guessed column name as the same word twice, so a reader could not see
+    that the engine had already answered both."""
+    client, registry = station
+    script, _ = scripted
+    script += [tool("query", id=DATASET, sql="SELECT * FROM report_q1_2026"),
+               tool("query", id=DATASET, sql="SELECT nonexistent FROM sales"),
+               final("ok", [])]
+
+    hops = _ask(client, _key(registry), question="q", hops=4)["hops"]
+
+    assert [h["ok"] for h in hops[:2]] == [False, False]
+    # C.5.2: a mistyped name is invalid, not forbidden.
+    assert hops[0]["out"]["error"] == "E_QUERY_INVALID"
+    assert "no such table" in hops[0]["out"]["message"]
+    assert "no such column" in hops[1]["out"]["message"]
+
+
+def test_the_model_is_told_why_a_hop_failed(station, scripted):
+    """It already was — this pins it. The console reporting is a copy of
+    what the loop feeds back, never the source of it."""
+    client, registry = station
+    script, seen = scripted
+    script += [tool("query", id=DATASET, sql="SELECT * FROM nope"),
+               final("ok", [])]
+
+    _ask(client, _key(registry), question="q", hops=3)
+
+    fed_back = seen["messages"][-1]["content"]
+    assert "no such table" in fed_back
+    assert "Tables in this dataset" in fed_back  # the C.5 hint travels too

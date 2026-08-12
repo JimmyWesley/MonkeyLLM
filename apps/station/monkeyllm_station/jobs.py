@@ -45,6 +45,10 @@ class IngestJob:
         self.done = 0
         self.total = total
         self.current: str | None = None
+        # G.10.1: the phase of `current`. A batch of one document is
+        # one step, so `done` alone stands at 0 until it is 1 — which
+        # an operator cannot tell from a hang.
+        self.stage: str | None = None
         self.errors = 0
         self.started = _now()
         self.finished: str | None = None
@@ -59,7 +63,8 @@ class IngestJob:
         out = {
             "id": self.id, "forest": self.forest, "mode": self.mode,
             "state": self.state, "done": self.done, "total": self.total,
-            "current": self.current, "errors": self.errors,
+            "current": self.current, "stage": self.stage,
+            "errors": self.errors,
             "started": self.started,
         }
         if self.finished:
@@ -126,8 +131,22 @@ class JobBoard:
         with self._lock:
             job.done = int(step.get("index") or job.done + 1)
             job.current = step.get("file")
+            # The document is finished; its phase is not a thing any more.
+            job.stage = None
             if step.get("action") == "error":
                 job.errors += 1
+
+    def note_stage(self, job: IngestJob, file: str, stage: str) -> None:
+        """G.10.1: the Gardener named the phase it is in, mid-step.
+
+        Called from the forest lane, never from the event loop, so it takes
+        the board's lock like every other mutation. It reports; it never
+        pauses the work, and a job already finished ignores it.
+        """
+        with self._lock:
+            if job.state == "running":
+                job.current = file
+                job.stage = stage
 
     def finish(self, job: IngestJob, state: str, report: dict | None = None,
                error: dict | None = None) -> None:
@@ -135,6 +154,7 @@ class JobBoard:
             job.state = state
             job.finished = _now()
             job.current = None
+            job.stage = None
             job.report = report
             job.error = error
 

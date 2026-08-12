@@ -156,19 +156,28 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3) -> dic
         matches = (sniff_by.get(nid) or {}).get("matches", [])
         if nid in sniff_by and terms:
             matches = _refined_matches(vine, nid, terms) or matches
-        results.append(
-            {
-                "id": nid,
-                "title": meta.get("title"),
-                "type": meta.get("type"),
-                "trail": meta.get("trail"),
-                "summary": meta.get("summary") or vine.look(nid, fields=["summary"]).get("summary"),
-                "score": round(fused[nid], 4),
-                "found_by": [name for name, ids in (("locate", loc_ids), ("sniff", sniff_ids)) if nid in ids],
-                "matches": matches,
-                "content": _content_for(vine, nid, matches),
-            }
-        )
+        item = {
+            "id": nid,
+            "title": meta.get("title"),
+            "type": meta.get("type"),
+            "trail": meta.get("trail"),
+            "summary": meta.get("summary") or vine.look(nid, fields=["summary"]).get("summary"),
+            "score": round(fused[nid], 4),
+            "found_by": [name for name, ids in (("locate", loc_ids), ("sniff", sniff_ids)) if nid in ids],
+            "matches": matches,
+            "content": _content_for(vine, nid, matches),
+        }
+        # C.2.1 (v0.46): a dataset's notes travel with it. The sweep is
+        # `locate` + `sniff` + the matched sections — it never calls `look`,
+        # so a teaching that only rides in the digest reaches the walk and
+        # not the console's ordinary ask. And whether the notes section
+        # happens to match the question's terms is not a good reason to
+        # withhold what a person wrote about how to read this data.
+        if meta.get("type") == "dataset":
+            notes = vine.look(nid, fields=["notes"]).get("notes")
+            if notes:
+                item["notes"] = notes
+        results.append(item)
     payload = {"query": query, "terms": terms, "results": results, "truncated": False}
     # budget: drop whole tail results, never slice a body silently (C.6c)
     return shrink_list_to_budget(payload, "results", BUDGET_HARVEST)

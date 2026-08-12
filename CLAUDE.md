@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.44.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.47.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -134,6 +134,27 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   latency and nothing else.
 - `query` is read-only SQL over `type:dataset` nodes: reject every write
   (`;DROP`, `ATTACH`, multi-statement, `PRAGMA`) — there is an injection suite.
+- **A row cap is not a token cap (spec C.5.1, v0.47)**: `query` was the only
+  read primitive with no budget, so `SELECT *` on a 141-column export
+  measured **86,929 tokens for 15 rows** (429,397 for 200) — into a walk
+  that re-sends its history every turn. `BUDGET_QUERY` = 2000, below
+  `pick`'s 4000 because a body is read once and a result is carried
+  forward. Whole rows drop from the tail; **`columns` never does** — it is
+  the map back, so a result whose every row was refused still says *these
+  are the columns your statement produces*. `limited` (the injected `LIMIT
+  200` was reached) and `truncated` (the budget dropped rows) are
+  independent, and the hint MUST lead with **the missing rows exist**: a
+  live model read "truncated to 5 of 15" as "only 5 matched" and offered
+  them as the answer. Sized by summing each row's own cost, never by
+  `shrink_list_to_budget` — 200 re-serialisations of a wide result is
+  seconds.
+- **Invalid is not forbidden (spec C.5.2, v0.47)**: every SQLite failure
+  wore `E_QUERY_FORBIDDEN`, the code for attempting a write, so a mistyped
+  table on a readable dataset was indistinguishable from a policy denial —
+  in the console and in the audit. `E_QUERY_INVALID` (HTTP **400**) is what
+  SQLite decides; `E_QUERY_FORBIDDEN` (**403**) stays what the guard
+  decides. Both `query` and `tend`: one kept honest would make the code
+  mean different things per primitive.
 - `tend` (spec C.10) is the ONLY dataset write path: single INSERT/UPDATE/
   DELETE, WHERE mandatory on UPDATE/DELETE, no DDL; refreshes `payload_hash`
   and commits only the `.md` (it has its own injection suite too).
@@ -148,7 +169,60 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   table, first 3 rows, cells clipped at 120 chars, ≤20 tables sampled and
   the omission stated. That map is the ONLY thing `sniff` can see inside a
   payload. `sync` rewrites those two sections and no others. Workbooks are
-  one table per sheet (G.2.4), refused by name over the C.7.1 limit.
+  one table per sheet (G.2.4) — and **never trust `<dimension>`**: openpyxl
+  in read-only mode believes it, and non-Excel exports declare `A1:A1`, so
+  a real 130-row sheet arrives as one row and reads as "no data"
+  (`ws.reset_dimensions()`).
+- **A count limit guards invention, not data (spec G.2.5, v0.45)**: C.7.1's
+  ≤10 tables / ≤50 columns stop a model inventing DDL; they were also
+  refusing real 141-column ERP exports. `Vine.plant(node, adopted=True)`
+  drops **only those two counts** — names, types and `primary_key` are
+  validated as always. Keyword-only and unreachable from the wire
+  (`ScopedVine.plant(self, node)` forwards `node` alone), because a flag an
+  agent can set is not a guard. A wide table's real cost is tokens, so the
+  bound lives in the G.2.3 map instead: ≤12 sampled columns, omission
+  stated, while the manual still names every column.
+- **`## Notes` is the human half of the map (spec C.2.1, v0.46)**: the map
+  says what is in a dataset, a person says what it *means* (which column is
+  USD, what a status code stands for, which join answers the real
+  question). `look` returns it as `notes` for `type: dataset` — bounded to
+  `BUDGET_NOTES` (200) inside look's 500 and flagged `truncated` when
+  clipped — because the agent's path is `look` → `query` and a note only
+  `pick` can reach is a note nobody reads. Written through ONE `graft`
+  (`append_section` first time, `replace_section` after); the Gardener
+  never touches it (G.2.3 rule 4) and curation MUST NOT either. A console
+  edits it from `pick`, NEVER from the digest — saving a clipped copy
+  deletes the tail. Datasets only: elsewhere the body is already reachable.
+  **The notes travel with the dataset on EVERY path** (v0.47): any material
+  a host assembles for a model carries the `notes` of every dataset in it,
+  not just `look`. `harvest` does it because the sweep never looks; the
+  walk's entry (J.10.5) does it because the entry is `locate` — curated
+  metadata, no body — and on a dataset the natural next move is `query`,
+  so a model that never looks never reads a word the operator wrote. The
+  mode with more freedom was the mode with less information, and it read
+  as the agent ignoring them. Unconditional: whether the section shares
+  vocabulary with today's question is not a reason to withhold it. The walk calls primitives; the sweep is
+  `locate` + `sniff` + matched sections and looks at nothing — so notes
+  that only ride in the digest are invisible from the console's ordinary
+  ask, which is exactly where they get written. `look`'s dataset extras are
+  now computed per requested field, so `fields=["notes"]` (and the sweep's
+  existing `fields=["summary"]`) no longer open the payload for nothing.
+- **Curation reads the map, never the file (spec G.4.6, v0.45)**: a dataset
+  is curated from `## Query manual` + `## Sample rows`, so a 5 MB CSV and a
+  5 GB `.db` cost the model the same ~150 tokens. `_clip` cuts by LINE —
+  flattening newlines turned every pipe table into one line of pipes.
+- **A stage is reported, never yielded (spec G.10.1, v0.45)**: a G.10 step
+  is still a whole document (yielding mid-document would suspend an open
+  model call), but the Gardener names its phase — `convert`/`curate`/
+  `plant` — through `on_stage`, and the J.9 job carries it as `stage`. That
+  is the only reason a one-file batch's progress bar can move; a raising
+  observer is swallowed. A `sync` never reports `curate`: a refresh keeps
+  the scent somebody already approved.
+- **"Nothing to do" is not a rejection (spec J.8, v0.45)**: curation stats
+  carry `skipped`, and the console's discriminator is **no fallback and no
+  retry** — a real rejection always leaves one behind. Reporting an
+  all-`unchanged` batch as a model failure sends the operator to tune a
+  model that was never asked anything.
 - **Datasets are born via `plant` with a declarative `schema`** (spec C.7.1):
   the model never writes DDL — Vine validates names/types, creates the `.db`,
   auto-generates `## Query manual`, and commits only the `.md`. No `ALTER`

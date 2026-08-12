@@ -117,10 +117,28 @@ _TAG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def _clip(text: str, budget: int = CONTENT_BUDGET_TOKENS) -> str:
-    words = text.split()
-    while words and estimate_tokens(" ".join(words)) > budget:
+    """The content the model sees, cut to the budget — by LINE.
+
+    Flattening every newline, as this did until v0.45, is invisible on
+    prose and destructive on structure: a dataset's map (G.2.3) and a
+    converted document's pipe tables (G.2.1) both stop being tables, and
+    the model is left guessing where a row ended. Horizontal whitespace
+    still collapses, because that carries nothing.
+
+    Every loop here is guaranteed to make progress, and the final slice
+    catches the pathological input both loops can't shrink: one enormous
+    unbroken word.
+    """
+    lines = [re.sub(r"[ \t]+", " ", line).rstrip() for line in text.splitlines()]
+    while len(lines) > 1 and estimate_tokens("\n".join(lines)) > budget:
+        del lines[max(1, len(lines) * 3 // 4):]
+    out = "\n".join(lines).strip()
+    if estimate_tokens(out) <= budget:
+        return out
+    words = out.split()
+    while len(words) > 1 and estimate_tokens(" ".join(words)) > budget:
         del words[max(1, len(words) * 3 // 4):]
-    return " ".join(words)
+    return " ".join(words)[:budget * CHARS_PER_TOKEN]
 
 
 def _clip_lines(lines: list[str], budget: int = CONTENT_BUDGET_TOKENS) -> str:
@@ -190,7 +208,13 @@ class Curator:
         self.system = SYSTEM_PROMPT.format(max_tags=MAX_TAGS,
                                            max_chars=SUMMARY_MAX_CHARS,
                                            directives=directives_block)
+        # `skipped` (v0.45) is the third outcome beside a summary and a
+        # fallback: a draft with nothing for a model to read. Without it, a
+        # batch that needed no model is four zeros — indistinguishable from
+        # a model that answered and was refused, and the two have opposite
+        # fixes (J.8).
         self.stats = {"llm_summaries": 0, "fallbacks": 0, "retries": 0,
+                      "skipped": 0,
                       "links_proposed": 0, "proposal_fallbacks": 0,
                       "branch_rollups": 0, "branch_fallbacks": 0,
                       "transport_errors": 0, "rejected": 0, "repaired": 0}
@@ -204,9 +228,17 @@ class Curator:
         self.last_reply: str | None = None
 
     def __call__(self, draft: dict) -> dict:
+        # G.4.6 (v0.45): a dataset is curated from its G.2.3 map — structure
+        # and three rows per table, already in the draft's body — and never
+        # from the payload or the source. The map is bounded by its own
+        # rules, so a 5 MB CSV and a 5 GB database cost the model the same.
+        # (It used to be skipped outright: before v0.44 there was nothing to
+        # read but a column list, which the factual template already stated
+        # better than a model would.)
         body = draft.get("body")
-        if not body or draft.get("type") == "dataset":
-            return draft  # datasets keep their factual template summary
+        if not body:
+            self.stats["skipped"] += 1
+            return draft
         result = self._ask(draft.get("title", ""), body)
         if result is not None:
             summary, tags = result

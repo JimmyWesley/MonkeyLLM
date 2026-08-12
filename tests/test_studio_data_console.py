@@ -20,6 +20,7 @@ DATA = (STUDIO / "views" / "Data.jsx").read_text(encoding="utf-8")
 UI = (STUDIO / "design" / "ui.jsx").read_text(encoding="utf-8")
 CSS = (STUDIO / "index.css").read_text(encoding="utf-8")
 INGEST = (STUDIO / "views" / "Ingest.jsx").read_text(encoding="utf-8")
+EDITOR = (STUDIO / "views" / "editor.jsx").read_text(encoding="utf-8")
 
 # The formats a dataset can be born from (G.2.2 + G.2.4 + the tabular
 # built-ins). Both consoles must accept the same set: a file the Data
@@ -79,14 +80,36 @@ def test_leaving_a_dataset_clears_the_selection_and_keeps_a_draft():
     assert "setId('')" in body and "setTable('')" in body
 
 
-def test_sql_is_coloured_where_it_is_typed():
-    assert "<CodeArea lang=\"sql\"" in DATA
+def test_source_is_coloured_wherever_it_is_typed():
+    """J.5.10: the SQL box and the markdown body editor both — the second
+    is what the rich editor hands back whenever a body holds a table, which
+    every dataset's does."""
+    assert '<CodeArea lang="sql"' in DATA
     assert "<textarea" not in DATA, "the SQL box is the CodeArea now"
+    assert '<CodeArea ref={srcRef} lang="markdown"' in EDITOR
+    assert "<textarea" not in EDITOR, "the markdown box is the CodeArea now"
     # The mirror renders the same characters a second time; a screen reader
     # must not read them twice.
-    mirror = UI.split("export function CodeArea")[1]
+    mirror = UI.split("CodeArea = forwardRef")[1]
     assert 'aria-hidden="true"' in mirror
     assert "pointer-events-none" in mirror
+    # …and the ref has to reach the real input, or dictation loses the caret.
+    assert "useImperativeHandle(outer, () => box.current" in mirror
     # Selection over a transparent input has to be translucent or it hides
     # the very characters being selected.
     assert ".codearea::selection" in CSS
+
+
+def test_teaching_the_agent_is_one_graft_into_the_node():
+    """C.2.1: a side store would be teaching the agent cannot read."""
+    notes = DATA.split("function Notes(")[1].split("\n}")[0]
+    # Read whole through `pick`, never from the digest — `look` clips notes
+    # to their budget and editing a clipped copy would save the clip.
+    assert "'pick', { id, section: NOTES_SECTION }" in notes
+    assert "'graft'" in notes
+    assert "append_section" in notes and "replace_section" in notes
+    # The heading is a contract token: `look` reads this exact section back.
+    assert "const NOTES_SECTION = 'Notes'" in DATA
+    # And the tab has to be in the allow list or the address bounces (J.5.8).
+    allow = re.search(r"allow: \[([^\]]*)\]", DATA).group(1)
+    assert "'notes'" in allow

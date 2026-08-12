@@ -60,8 +60,11 @@ class TestQueryContract:
 
     def test_limit_injected(self, vine_ro):
         r = vine_ro.query(DS, "SELECT * FROM sales")
-        assert r["row_count"] == 200
+        # `limited` reports the injected LIMIT 200 being reached — what the
+        # *query* matched — and is decided before C.5.1's token budget
+        # trims what is *returned*. The two are independent by design.
         assert r["limited"] is True
+        assert 0 < r["row_count"] <= 200
 
     def test_explicit_limit_respected(self, vine_ro):
         r = vine_ro.query(DS, "SELECT * FROM sales LIMIT 5")
@@ -89,3 +92,36 @@ class TestQueryContract:
         with pytest.raises(VineError) as e:
             vine_ro.query(DS, sql)
         assert e.value.code == E_TIMEOUT
+
+
+def test_an_unknown_name_says_what_is_there(tmp_path):
+    """C.5 (v0.46): an agent that has not `look`ed guesses the table from
+    the node's id — a reasonable guess, normally wrong. Without the hint it
+    spends a whole hop discovering what the failing call already had open."""
+    from monkeyllm.forest import init_forest
+    from monkeyllm.gardener import Gardener
+    from monkeyllm.vine import Vine
+
+    root = tmp_path / "forest"
+    init_forest(root, title="T")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "sales.csv").write_text("region,total\nSouth,10\n", encoding="utf-8")
+    vine = Vine(root, writable=True)
+    Gardener(vine, hooks=[]).adopt(src)
+
+    with pytest.raises(VineError) as caught:
+        vine.query("sales", "SELECT * FROM sales_report")
+    assert "no such table" in caught.value.message
+    assert caught.value.hint == "Tables in this dataset: sales."
+
+    with pytest.raises(VineError) as caught:
+        vine.query("sales", "SELECT nope FROM sales")
+    assert "no such column" in caught.value.message
+    assert "sales(region, total)" in caught.value.hint
+
+    # A statement refused by the guards is not a naming mistake, and must
+    # not be dressed up as one.
+    with pytest.raises(VineError) as caught:
+        vine.query("sales", "DROP TABLE sales")
+    assert caught.value.hint is None

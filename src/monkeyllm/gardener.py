@@ -37,7 +37,7 @@ import yaml
 from monkeyllm import indexer
 from monkeyllm.errors import E_SCHEMA, VineError
 from monkeyllm.models import (
-    MANUAL_SECTION, MAX_DATASET_TABLES, SAMPLE_ROWS, SAMPLE_SECTION,
+    MANUAL_SECTION, SAMPLE_ROWS, SAMPLE_SECTION,
     dataset_map, rows_label, validate_summary,
 )
 from monkeyllm.parser import (
@@ -54,6 +54,14 @@ DEFAULT_IGNORE_GLOBS = ("~$*", "*.tmp", "*.lock", ".DS_Store", "Thumbs.db")
 ASSETS_DIR = "_assets"
 SUMMARY_TARGET_TOKENS = 50
 INGEST_CONFIDENCE = 0.7  # G.4: unreviewed by an LLM or a human
+
+# G.10.1: the phases a document passes through inside its one step. Closed
+# and ordered on purpose — a consumer renders position as index/len, which
+# is the only reason a one-document batch can show progress at all.
+STAGE_CONVERT = "convert"
+STAGE_CURATE = "curate"
+STAGE_PLANT = "plant"
+STAGES = (STAGE_CONVERT, STAGE_CURATE, STAGE_PLANT)
 
 PAYLOAD_TYPE_BY_EXT = {
     ".pdf": "pdf", ".docx": "docx",
@@ -212,10 +220,14 @@ def _sql_name(text: str) -> str:
 
 def _sheet_tables(sheets: list[tuple[str, list[list]]], path: Path,
                   ) -> list[tuple[str, list[str], list[list]]]:
-    """G.2.4: every sheet becomes a table. Empty sheets are skipped; a
-    workbook with more sheets than C.7.1 allows is refused by name, because
-    taking sheet one and dropping the rest is how a spreadsheet arrives in
-    a forest missing the data somebody adopted it for."""
+    """G.2.4: every sheet becomes a table. Empty sheets are skipped.
+
+    No count limit here (G.2.5): C.7.1's ≤10 tables and ≤50 columns bound
+    what a MODEL declares, and a workbook somebody exported is not a
+    declaration. Taking sheet one and dropping the rest — or refusing a
+    141-column ERP export — is the tool telling the operator their data is
+    wrong. The map's own caps (G.2.3) are what keep the body bounded.
+    """
     tables: list[tuple[str, list[str], list[list]]] = []
     used: set[str] = set()
     for sheet_name, data in sheets:
@@ -230,14 +242,9 @@ def _sheet_tables(sheets: list[tuple[str, list[list]]], path: Path,
                   for i, v in enumerate(data[0])]
         tables.append((table, header, data[1:]))
     if not tables:
-        raise VineError(E_SCHEMA, f"workbook has no data rows: {path.name}")
-    if len(tables) > MAX_DATASET_TABLES:
         raise VineError(
-            E_SCHEMA,
-            f"workbook has {len(tables)} sheets with data: {path.name}",
-            hint=f"A dataset holds at most {MAX_DATASET_TABLES} tables "
-                 f"(C.7.1). Split the workbook, or drop the sheets that "
-                 f"are not data.")
+            E_SCHEMA, f"workbook has no data rows: {path.name}",
+            hint="Every sheet was empty or held only a header row.")
     return tables
 
 
@@ -289,8 +296,19 @@ class XlsxConverter:
 
         wb = load_workbook(path, read_only=True, data_only=True)
         try:
-            sheets = [(ws.title, [list(row) for row in ws.iter_rows(values_only=True)])
-                      for ws in wb.worksheets]
+            sheets = []
+            for ws in wb.worksheets:
+                # A read-only worksheet trusts the file's own `<dimension>`
+                # record, and files written by anything other than Excel
+                # routinely declare `A1:A1` or omit it — openpyxl then
+                # yields ONE row of a hundred and the converter reports a
+                # workbook with no data. `reset_dimensions` makes it infer
+                # the extent from the rows that are actually there, which
+                # is the only source that cannot be wrong.
+                if hasattr(ws, "reset_dimensions"):
+                    ws.reset_dimensions()
+                sheets.append(
+                    (ws.title, [list(row) for row in ws.iter_rows(values_only=True)]))
         finally:
             wb.close()
         return _tables_conversion(path.stem.replace("-", " ").replace("_", " "),
@@ -711,7 +729,8 @@ class Gardener:
     """
 
     def __init__(self, vine: Vine, converters: list | None = None,
-                 hooks: list[Callable] | None = None, *, dry_run: bool = False):
+                 hooks: list[Callable] | None = None, *, dry_run: bool = False,
+                 on_stage: Callable[[str, str], None] | None = None):
         self.vine = vine
         self.forest = vine.forest
         self.config = self._load_config()
@@ -719,6 +738,23 @@ class Gardener:
                            else discover_converters(self.config))
         self.hooks = hooks if hooks is not None else discover_hooks()
         self.dry_run = bool(dry_run)
+        self.on_stage = on_stage
+
+    def _stage(self, file: str, stage: str) -> None:
+        """G.10.1: name the phase, never pause in it.
+
+        A step is still a whole document — nothing here is a suspension
+        point — but a batch of ONE document would otherwise show a consumer
+        nothing until it shows everything, which is indistinguishable from
+        a hang. An observer that raises is swallowed: progress reporting
+        that can abort the work it reports on is worse than none.
+        """
+        if self.on_stage is None:
+            return
+        try:
+            self.on_stage(file, stage)
+        except Exception:
+            pass
 
     # -- config (G.6) -------------------------------------------------------
 
@@ -973,6 +1009,7 @@ class Gardener:
         if conv_obj is None:
             report.unsupported.append(rel.as_posix())
             return
+        self._stage(rel.as_posix(), STAGE_CONVERT)
         try:
             conversion = conv_obj.convert(f)
         except VineError as e:
@@ -1008,10 +1045,19 @@ class Gardener:
             "source_mtime": round(st.st_mtime, 3),
         }
         if conversion.kind == "dataset":
+            # The map goes in here rather than being left to C.7.1's auto
+            # manual, because curation runs BEFORE the plant and G.4.6 reads
+            # it. Same text either way — plant keeps a caller-provided
+            # manual verbatim — so the body a reader sees is unchanged.
             draft.update({
                 "type": "dataset",
                 "schema": conversion.schema,
                 "rows": conversion.rows,
+                "body": f"# {conversion.title}\n\n" + dataset_map(
+                    {t: {c: ty.upper() for c, ty in s["columns"].items()}
+                     for t, s in (conversion.schema or {}).items()},
+                    conversion.rows,
+                    {t: len(r) for t, r in (conversion.rows or {}).items()}),
                 "summary": self._dataset_summary(conversion),
             })
         elif conversion.kind == "payload":
@@ -1045,6 +1091,7 @@ class Gardener:
                               "payload_hash": phash})
 
         # curation sees the FULL converted text (G.7.4)…
+        self._stage(rel.as_posix(), STAGE_CURATE)
         draft = self._curate(draft, report)
         # …and only then the content policy slims the node (G.7)
         if conversion.kind == "markdown":
@@ -1053,13 +1100,18 @@ class Gardener:
         if self.dry_run:
             report.drafts.append(draft)
             return
+        self._stage(rel.as_posix(), STAGE_PLANT)
         installed: Path | None = None
         try:
             if conversion.kind == "payload":
                 installed = self._install_payload(node_id, f)
                 draft["payload"] = installed.name
                 draft["payload_hash"] = source_hash
-            self.vine.plant(draft)
+            # G.2.5: the Gardener is trusted infrastructure adopting a
+            # source that already exists, not a model declaring a schema —
+            # so the C.7.1 count limits do not bind it. Names and types are
+            # validated exactly as they are for everyone else.
+            self.vine.plant(draft, adopted=True)
             report.planted.append(node_id)
         except VineError as e:
             # C.7's atomicity extends to the copy (G.2.2 rule 5): a payload
@@ -1265,16 +1317,21 @@ class Gardener:
         if new_hash == info["hash"]:
             report.unchanged.append(info["id"])
             return
-        self._update_passport(info["id"], f, new_hash, report)
+        self._update_passport(info["id"], f, new_hash, report, rel)
 
     def _update_passport(self, node_id: str, f: Path, new_hash: str,
-                         report: IngestReport) -> None:
+                         report: IngestReport, rel: str | None = None) -> None:
         """G.3: refresh body + source_hash via the audited write path —
-        curated frontmatter (summary, tags, links, confidence) is preserved."""
+        curated frontmatter (summary, tags, links, confidence) is preserved.
+
+        No `curate` stage here, and that is the contract rather than an
+        omission: a refresh keeps the scent somebody already approved.
+        """
         conv_obj = self._converter_for(f)
         if conv_obj is None:
             report.unsupported.append(node_id)
             return
+        self._stage(rel or node_id, STAGE_CONVERT)
         try:
             conversion = conv_obj.convert(f)
         except VineError as e:
@@ -1291,6 +1348,7 @@ class Gardener:
             report.updated.append(node_id)
             return
 
+        self._stage(rel or node_id, STAGE_PLANT)
         node = self.forest.read(node_id)
         fm = dict(node.frontmatter)
         fm["source_hash"] = new_hash

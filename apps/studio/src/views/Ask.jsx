@@ -755,6 +755,15 @@ function Path({ hops }) {
                 <span className="text-text-3"> + {Math.round(h.model_ms)} ms</span>
               )}
             </span>
+            {/* J.10.5 (v0.47): the code alone rendered a mistyped table and a
+                mistyped column as the same word twice, so a reader could not
+                see that the engine had already answered both. The model was
+                always given the whole envelope; this is the panel catching up. */}
+            {h.out?.message && (
+              <p className="basis-full pl-6 font-mono text-[11px] leading-snug text-danger/80">
+                {h.out.message}
+              </p>
+            )}
           </li>
         ))}
       </ol>

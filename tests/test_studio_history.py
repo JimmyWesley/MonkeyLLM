@@ -171,3 +171,28 @@ def test_storage_failure_is_not_a_failed_ask():
         "a storage error can reach the ask's failure path")
     history = HISTORY.read_text(encoding="utf-8")
     assert "return { ok: false, runs: [], bytes: 0 }" in history
+
+
+# -- what a failed hop is allowed to say (J.10.5, v0.47) ---------------------
+
+
+def _path_component() -> str:
+    src = ASK.read_text(encoding="utf-8")
+    start = src.index("function Path(")
+    return src[start:src.index("\nfunction ", start + 1)]
+
+
+def test_a_failed_hop_shows_the_message_and_not_only_the_code():
+    """The code alone rendered a guessed table and a guessed column as the
+    same word twice. The engine had already answered both."""
+    path = _path_component()
+    assert "h.out?.message" in path
+    assert "hop_error" in path  # the code is still there beside it
+
+
+def test_the_hop_message_gets_its_own_line():
+    """The hop row truncates its arguments to stay one line; a message
+    appended to it would be the part that disappears."""
+    path = _path_component()
+    message_block = path[path.index("h.out?.message"):]
+    assert "basis-full" in message_block[:400]

@@ -31,6 +31,7 @@ from monkeyllm.dialect import MAX_LINKS_PER_NODE
 from monkeyllm.errors import (
     E_NOT_FOUND,
     E_QUERY_FORBIDDEN,
+    E_QUERY_INVALID,
     E_READONLY,
     E_SCHEMA,
     E_TIMEOUT,
@@ -41,6 +42,7 @@ from monkeyllm.forest import Forest, WriterLock
 from monkeyllm.gitops import GitRepo
 from monkeyllm.models import (
     MUTABLE_FRONTMATTER_FIELDS,
+    NOTES_SECTION,
     GraftPatch,
     Link,
     NodeSpec,
@@ -74,6 +76,9 @@ BUDGET_LOOK = 500
 BUDGET_MOVE = 600
 BUDGET_SCAN = 800
 BUDGET_SNIFF = 800
+# C.2.1: the operator's notes ride inside BUDGET_LOOK, with their own
+# ceiling — a long note must not starve the digest it travels in.
+BUDGET_NOTES = 200
 SNIFF_MAX_TERMS = 8
 SNIFF_MAX_K = 20
 SNIFF_MATCHES_PER_NODE = 3
@@ -83,6 +88,10 @@ NEIGHBOR_SUMMARY_TOKENS = 25
 MAX_EDGES_SHOWN = 12
 QUERY_DEFAULT_LIMIT = 200
 QUERY_TIMEOUT_S = 2.0
+# C.5.1 (v0.47): a row cap is not a token cap — width is unbounded. Below
+# PICK_MAX_BODY_TOKENS on purpose: a body is read once, a result enters a
+# loop that carries it forward turn after turn.
+BUDGET_QUERY = 2000
 
 _FORBIDDEN_SQL = re.compile(
     r"\b(ATTACH|DETACH|PRAGMA|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|VACUUM|REINDEX)\b",
@@ -95,6 +104,66 @@ _TEND_FORBIDDEN = re.compile(
 )
 _LIMIT_RE = re.compile(r"\bLIMIT\s+\d+", re.IGNORECASE)
 _HEADER_LINE_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
+
+
+def _fit_query_budget(payload: dict) -> dict:
+    """Keep whole rows while the response fits BUDGET_QUERY (spec C.5.1).
+
+    `columns` is never dropped: it is the smallest useful part of the
+    response and the only one that says how to ask again, so a result whose
+    every row was refused still answers *these are the columns your
+    statement produces, and none of the rows fit*.
+
+    Sized by summing each row's own cost instead of re-serialising the
+    envelope per drop (`shrink_list_to_budget`): a 200-row result of a
+    141-column table would otherwise pay 200 serialisations of ~430k
+    characters to discover it must keep two.
+    """
+    rows = payload["rows"]
+    if not rows:
+        return payload
+    spent = estimate_payload_tokens({**payload, "rows": []})
+    kept: list = []
+    per_row = 0
+    for row in rows:
+        cost = estimate_payload_tokens(row)
+        if not kept:
+            per_row = cost
+        if spent + cost > BUDGET_QUERY:
+            break
+        kept.append(row)
+        spent += cost
+    if len(kept) == len(rows):
+        return payload
+    payload["rows"] = kept
+    payload["row_count"] = len(kept)
+    payload["truncated"] = True
+    columns = len(payload.get("columns") or [])
+    # Say that the missing rows EXIST, first and in those words. A model
+    # given "truncated to 5 of 15" reported that only 5 rows matched the
+    # filter and offered them as the complete answer: it read a display
+    # bound as a count. Truncation is never absence (C.5.1 rule 5), and the
+    # sentence that prevents that reading has to come before the advice.
+    dropped = len(rows) - len(kept)
+    if kept:
+        payload["hint"] = (
+            f"Showing {len(kept)} of {len(rows)} rows. The other {dropped} "
+            f"matched your query and exist: they were dropped by the "
+            f"{BUDGET_QUERY}-token response budget, not by your filter — do "
+            f"NOT report these {len(kept)} as the complete result. This "
+            f"statement returns {columns} column(s); ask again with fewer "
+            "columns to fit more rows, or aggregate.")
+    else:
+        # The hint is the whole payload now, so it carries the arithmetic
+        # that makes the next statement obviously different.
+        payload["hint"] = (
+            f"{len(rows)} row(s) matched your query and exist, but none fit "
+            f"the {BUDGET_QUERY}-token response budget: one row of this "
+            f"result costs ~{per_row} tokens across {columns} column(s). "
+            "Nothing is missing from the data — ask again naming only the "
+            "columns you need (the node's Query manual lists them all), or "
+            "aggregate.")
+    return payload
 
 
 _FOLD_CACHE: dict[str, str] = {}
@@ -695,8 +764,24 @@ class Vine:
             digest["outline"] = json.loads(row["outline"])
 
         if row["type"] == "dataset" and row["payload_type"] == "sqlite":
-            digest["query_manual"] = self._dataset_manual(node)
-            digest["sample_rows"] = self._dataset_sample(node)
+            # Each of these opens the payload, so a caller that named its
+            # fields does not pay for the ones it did not ask for — the
+            # sweep asks for exactly one of them, per result (C.6c).
+            wanted = set(fields) if fields else None
+            if wanted is None or "query_manual" in wanted:
+                digest["query_manual"] = self._dataset_manual(node)
+            if wanted is None or "sample_rows" in wanted:
+                digest["sample_rows"] = self._dataset_sample(node)
+            # C.2.1: what a person taught about this data. It rides in the
+            # digest because the path an agent takes to a dataset is `look`
+            # then `query` — a note reachable only through `pick` is a note
+            # it will not read.
+            if wanted is None or "notes" in wanted:
+                notes, clipped = self._dataset_notes(node)
+                if notes:
+                    digest["notes"] = notes
+                    if clipped:
+                        digest["truncated"] = True
 
         digest["stats"] = {
             "body_tokens": row["body_tokens"],
@@ -777,6 +862,53 @@ class Vine:
         manual_section = extract_section(node.body, "Query manual") or ""
         example_queries = re.findall(r"`(SELECT[^`]+)`", manual_section, re.IGNORECASE)[:3]
         return {"tables": tables, "example_queries": example_queries}
+
+    @staticmethod
+    def _name_hint(conn, error: str) -> str | None:
+        """What exists, for a query that named something that does not.
+
+        Only for the two errors where a list is the answer — anything else
+        gets no hint rather than an irrelevant one. Best effort by
+        construction: this runs while an exception is already being raised,
+        so a failure here must not replace the error the caller needs.
+        """
+        text = error.lower()
+        try:
+            if text.startswith("no such table"):
+                names = [r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table','view') "
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+                return f"Tables in this dataset: {', '.join(names)}." if names else None
+            if text.startswith("no such column"):
+                names = [r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+                columns: list[str] = []
+                for name in names[:4]:
+                    quoted = '"' + str(name).replace('"', '""') + '"'
+                    cols = [c[1] for c in conn.execute(f"PRAGMA table_info({quoted})")]
+                    columns.append(f"{name}({', '.join(cols[:25])})")
+                return f"Columns: {'; '.join(columns)}." if columns else None
+        except sqlite3.Error:
+            return None
+        return None
+
+    def _dataset_notes(self, node: ParsedNode) -> tuple[str, bool]:
+        """C.2.1: the operator's `## Notes`, clipped to its own budget.
+
+        Clipped here rather than left to the digest's overall check so the
+        cut is stated instead of the whole section vanishing, and so a long
+        note cannot starve the rest of the digest. Header line dropped —
+        the key already names it.
+        """
+        section = extract_section(node.body, NOTES_SECTION)
+        if not section:
+            return "", False
+        text = "\n".join(section.splitlines()[1:]).strip()
+        if not text:
+            return "", False
+        clipped = truncate_text(text, BUDGET_NOTES)
+        return clipped, clipped != text
 
     def _dataset_sample(self, node: ParsedNode, n: int = 3) -> dict:
         db = self._dataset_db(node)
@@ -983,17 +1115,24 @@ class Vine:
         except sqlite3.OperationalError as e:
             if "interrupted" in str(e).lower():
                 raise VineError(E_TIMEOUT, f"query exceeded {QUERY_TIMEOUT_S}s") from e
-            raise VineError(E_QUERY_FORBIDDEN, f"SQL error: {e}") from e
+            # C.5 (v0.46): a name that is not there is the most common way
+            # for generated SQL to fail, and "no such table: x" alone sends
+            # the caller off to spend a `look` finding out what IS there.
+            # The answer costs one read of sqlite_master on a path that has
+            # already failed, so it is free where it matters.
+            raise VineError(E_QUERY_INVALID, f"SQL error: {e}",
+                            hint=self._name_hint(conn, str(e))) from e
         finally:
             conn.close()
         elapsed_ms = (time.perf_counter() - t0) * 1000
-        return {
+        payload = {
             "columns": columns,
             "rows": [list(r) for r in rows],
             "row_count": len(rows),
             "limited": limited_injected and len(rows) == QUERY_DEFAULT_LIMIT,
             "elapsed_ms": round(elapsed_ms, 2),
         }
+        return _fit_query_budget(payload)
 
     # =======================================================================
     # C.6 scan — metadata queries via the Catalog (<= 800 tokens)
@@ -1268,10 +1407,14 @@ class Vine:
             conn.rollback()
             if "interrupted" in str(e).lower():
                 raise VineError(E_TIMEOUT, f"tend exceeded {QUERY_TIMEOUT_S}s") from e
-            raise VineError(E_QUERY_FORBIDDEN, f"SQL error: {e}") from e
+            # C.5.2 (v0.47): the guard above said what is forbidden; from
+            # here on it is SQLite saying what is invalid, on a dataset this
+            # principal is allowed to write.
+            raise VineError(E_QUERY_INVALID, f"SQL error: {e}",
+                            hint=self._name_hint(conn, str(e))) from e
         except sqlite3.Error as e:
             conn.rollback()
-            raise VineError(E_QUERY_FORBIDDEN, f"SQL error: {e}") from e
+            raise VineError(E_QUERY_INVALID, f"SQL error: {e}") from e
         finally:
             conn.close()
         elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -1309,13 +1452,23 @@ class Vine:
     # =======================================================================
 
     @_traced
-    def plant(self, node: dict | NodeSpec) -> dict:
+    def plant(self, node: dict | NodeSpec, *, adopted: bool = False) -> dict:
+        """`adopted` (G.2.5, v0.45) says the schema was READ off a source the
+        operator already owns, not declared by a model: the C.7.1 count
+        limits are guards against hallucinated DDL and do not apply to it.
+        Names and types are validated exactly as always.
+
+        Keyword-only, and deliberately unreachable from the wire — the host
+        dispatches `getattr(scoped, "plant")(**payload)` and
+        `ScopedVine.plant(self, node)` forwards `node` alone, so an extra
+        key in a request body is a TypeError, never a relaxed guard.
+        """
         self._require_writable()
         spec = node if isinstance(node, NodeSpec) else NodeSpec.model_validate(node)
         with self._write_mutex:
-            return self._plant(spec)
+            return self._plant(spec, adopted=adopted)
 
-    def _prepare_dataset_spec(self, spec: NodeSpec) -> None:
+    def _prepare_dataset_spec(self, spec: NodeSpec, *, adopted: bool = False) -> None:
         """C.7.1: the schema is data, never DDL — validate it whole and
         default the payload fields before the frontmatter is built."""
         if spec.type != "dataset":
@@ -1324,7 +1477,7 @@ class Vine:
                 f"schema is only valid on type:dataset nodes (got type={spec.type})",
             )
         assert spec.table_schema is not None
-        validate_dataset_schema(spec.table_schema)
+        validate_dataset_schema(spec.table_schema, limits=not adopted)
         if spec.rows:
             validate_dataset_rows(spec.table_schema, spec.rows)
         if spec.payload is None:
@@ -1338,11 +1491,11 @@ class Vine:
         if spec.payload_type != "sqlite":
             raise VineError(E_SCHEMA, "schema requires payload_type: sqlite")
 
-    def _plant(self, spec: NodeSpec) -> dict:
+    def _plant(self, spec: NodeSpec, *, adopted: bool = False) -> dict:
         if spec.rows and spec.table_schema is None:
             raise VineError(E_SCHEMA, "rows require a schema (C.7.1 rule 7)")
         if spec.table_schema is not None:
-            self._prepare_dataset_spec(spec)
+            self._prepare_dataset_spec(spec, adopted=adopted)
         fm = spec.frontmatter_dict()
         validate_frontmatter(fm, self.forest.dialect)
         if self.forest.exists(spec.id):

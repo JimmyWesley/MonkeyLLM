@@ -29,7 +29,8 @@ import {
 import { Highlighted } from '../design/highlight.jsx'
 import {
   ChevronLeft, ChevronRight, Code2, Columns, Data as DataIcon, Download,
-  Grid as GridIcon, Ingest as ImportIcon, Play, Plus, Refresh, Save, Trash, X,
+  Grid as GridIcon, Ingest as ImportIcon, Pencil, Play, Plus, Refresh, Save,
+  Trash, X,
 } from '../design/icons.jsx'
 import { Grid, TypedInput, fieldKind, isComplete } from '../design/grid.jsx'
 import {
@@ -49,6 +50,10 @@ const IMPORT_MAX_BYTES = 100 * 1024 * 1024
 /* C.7.1 rule 1: the four types a declared column may have, and the limits
  * the engine will enforce anyway. Shown here so the form refuses before the
  * round trip does — never instead of it. */
+/* C.2.1: the heading is a contract token — `look` reads this exact section
+ * back out, so the console may not localise it or spell it differently. */
+const NOTES_SECTION = 'Notes'
+
 const COLUMN_TYPES = ['TEXT', 'INTEGER', 'REAL', 'BLOB']
 const MAX_TABLES = 10
 const MAX_COLUMNS = 50
@@ -241,8 +246,10 @@ export default function Data({ forest, grant }) {
   // are how a table is read, not which table it is.
   const [id, setId] = useRouteState('dataset', '', { push: true })
   const [table, setTable] = useRouteState('table', '', { push: true })
+  // Every tab value MUST be in the allow list, or clicking it writes an
+  // address the validator rejects and the console snaps back (J.5.8).
   const [tab, setTab] = useRouteState('tab', 'rows',
-                                      { allow: ['rows', 'structure', 'sql'] })
+                                      { allow: ['rows', 'structure', 'sql', 'notes'] })
   const [page, setPage] = useState(0)
   const [size, setSize] = useState(100)
   const [sort, setSort] = useState(null)          // {col, dir}
@@ -629,6 +636,7 @@ export default function Data({ forest, grant }) {
                 { value: 'rows', label: t('data.tab_rows'), icon: GridIcon },
                 { value: 'structure', label: t('data.tab_structure'), icon: Columns },
                 { value: 'sql', label: t('data.tab_sql'), icon: Code2 },
+                { value: 'notes', label: t('data.tab_notes'), icon: Pencil },
               ]} />
             </div>
 
@@ -732,6 +740,11 @@ export default function Data({ forest, grant }) {
 
               {tab === 'structure' && (
                 <Structure table={current} t={t} />
+              )}
+
+              {tab === 'notes' && (
+                <Notes forest={forest} id={id} mayWrite={has(grant, 'write')}
+                       t={t} onSaved={meta.reload} />
               )}
 
               {tab === 'sql' && (
@@ -905,6 +918,104 @@ function Structure({ table, t }) {
       )}
 
       <Note>{t('data.structure_note')}</Note>
+    </div>
+  )
+}
+
+/** What a person teaches the agent about this data (spec C.2.1).
+ *
+ *  Everything else this console shows about a dataset was inferred: the
+ *  structure came from the file, the sample from its first rows, the
+ *  summary from those. What none of it can supply is meaning — that this
+ *  column is USD and that one BRL, that `status` is a one-letter code,
+ *  which join answers the question people actually ask. An agent without
+ *  that writes SQL that runs and answers wrongly, which is the worst
+ *  failure available to it.
+ *
+ *  The section is read with `pick`, never from `look`: the digest clips
+ *  notes to their budget, and editing a clipped copy would save the clip.
+ *  It is written with ONE `graft` — `append_section` the first time,
+ *  `replace_section` after — so the teaching is part of the node, commit
+ *  and attribution included, and the Gardener will not touch it (G.2.3
+ *  rule 4 rewrites the two generated sections and only those). */
+function Notes({ forest, id, mayWrite, onSaved, t }) {
+  const [text, setText] = useState(null)
+  const [exists, setExists] = useState(false)
+  const [state, setState] = useState({})
+
+  const loaded = useAsync(async () => {
+    try {
+      const r = await api.call(forest, 'pick', { id, section: NOTES_SECTION })
+      // `pick` returns the section with its heading; the heading is the
+      // contract, not the content, so it never reaches the editor.
+      return { body: (r.body || '').split('\n').slice(1).join('\n').trim(),
+               exists: true }
+    } catch (error) {
+      if (error?.code === 'E_NOT_FOUND') return { body: '', exists: false }
+      throw error
+    }
+  }, [forest, id])
+
+  useEffect(() => {
+    if (!loaded.data) return
+    setText(loaded.data.body)
+    setExists(loaded.data.exists)
+    setState({})
+  }, [loaded.data])
+
+  const value = text ?? ''
+  const dirty = loaded.data && value !== loaded.data.body
+
+  async function save() {
+    setState({ busy: true })
+    const body = value.trim()
+    try {
+      await api.call(forest, 'graft', {
+        id,
+        patch: exists
+          ? { replace_section: { header: NOTES_SECTION, body } }
+          : { append_section: { header: NOTES_SECTION, body } },
+      })
+      setState({ saved: true })
+      setExists(true)
+      loaded.reload()
+      onSaved?.()
+    } catch (error) { setState({ busy: false, error }) }
+  }
+
+  if (loaded.busy) return <Spinner label={t('common.loading')} />
+  if (loaded.error) return <ErrorNote error={loaded.error} onRetry={loaded.reload} />
+
+  return (
+    <div className="space-y-3">
+      <Note>{t('data.notes_hint')}</Note>
+      <label className="block">
+        <span className="label">{t('data.tab_notes')}</span>
+        <CodeArea lang="markdown" value={value} minHeight="14rem"
+                  aria-label={t('data.tab_notes')} readOnly={!mayWrite}
+                  placeholder={t('data.notes_placeholder')}
+                  onChange={(e) => { setText(e.target.value); setState({}) }} />
+      </label>
+
+      {state.error && <ErrorNote error={state.error} />}
+      {state.saved && !dirty && <Note>{t('data.notes_saved')}</Note>}
+
+      <div className="flex items-center justify-end gap-2">
+        <span className="mr-auto text-[11.5px] text-text-3">
+          {t('data.notes_commit')}
+        </span>
+        {dirty && (
+          <button className="btn btn-sm" onClick={() => setText(loaded.data.body)}>
+            {t('data.discard')}
+          </button>
+        )}
+        <button className="btn btn-primary btn-sm" onClick={save}
+                disabled={!mayWrite || !dirty || state.busy}>
+          <Save size={14} />
+          {state.busy ? t('common.working') : t('data.notes_save')}
+        </button>
+      </div>
+      {!mayWrite && <Note tone="warn">{t('data.notes_read_only')}</Note>}
     </div>
   )
 }

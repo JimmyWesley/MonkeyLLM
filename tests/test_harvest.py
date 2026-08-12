@@ -106,3 +106,34 @@ class TestHarvest:
             assert "harvest" in {t.name for t in tools}
         finally:
             mcp._close()
+
+
+def test_a_dataset_carries_its_notes_into_the_sweep(tmp_path):
+    """C.2.1 rule 6: `look` is on the walk's path and not the sweep's, so a
+    teaching that only rides in the digest is invisible from the console's
+    ordinary ask — which is where it will actually be written."""
+    from monkeyllm.forest import init_forest
+    from monkeyllm.gardener import Gardener
+    from monkeyllm.harvest import harvest
+    from monkeyllm.vine import Vine
+
+    root = tmp_path / "forest"
+    init_forest(root, title="T")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "leads.csv").write_text("cliente,total\nKATUN BRASIL,1200\nAcme,300\n",
+                                   encoding="utf-8")
+    vine = Vine(root, writable=True)
+    Gardener(vine, hooks=[]).adopt(src)
+
+    assert "notes" not in harvest(vine, "faturamento KATUN")["results"][0]
+
+    vine.graft("leads", {"append_section": {
+        "header": "Notes",
+        "body": "Use LIKE on text columns — names carry suffixes."}})
+
+    # Deliberately a question sharing no vocabulary with the note: whether
+    # a person's instructions match today's terms is not a reason to
+    # withhold them.
+    item = harvest(vine, "faturamento KATUN")["results"][0]
+    assert item["notes"] == "Use LIKE on text columns — names carry suffixes."

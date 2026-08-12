@@ -10,7 +10,12 @@ import subprocess
 import anyio
 import pytest
 
-from monkeyllm.errors import E_QUERY_FORBIDDEN, E_READONLY, VineError
+from monkeyllm.errors import (
+    E_QUERY_FORBIDDEN,
+    E_QUERY_INVALID,
+    E_READONLY,
+    VineError,
+)
 from monkeyllm.forest import Forest
 from monkeyllm.lint import lint_forest
 
@@ -86,8 +91,19 @@ class TestTendWrites:
         before = db_path(forest_rw).read_bytes()
         with pytest.raises(VineError) as e:
             vine_rw.tend(DATASET, "INSERT INTO nonexistent VALUES (1)")
-        assert e.value.code == E_QUERY_FORBIDDEN
+        # C.5.2: naming a table that is not there is the caller writing bad
+        # SQL, not the guard denying a write. Same split as query().
+        assert e.value.code == E_QUERY_INVALID
         assert db_path(forest_rw).read_bytes() == before
+
+    def test_invalid_is_not_forbidden(self, vine_rw):
+        """C.5.2 (v0.47): the guard's refusals keep the forbidden code."""
+        with pytest.raises(VineError) as invalid:
+            vine_rw.tend(DATASET, "INSERT INTO sales (nonexistent) VALUES (1)")
+        assert invalid.value.code == E_QUERY_INVALID
+        with pytest.raises(VineError) as forbidden:
+            vine_rw.tend(DATASET, "DROP TABLE sales")
+        assert forbidden.value.code == E_QUERY_FORBIDDEN
 
     def test_non_dataset_rejected(self, vine_rw):
         with pytest.raises(VineError) as e:

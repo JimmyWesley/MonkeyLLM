@@ -10,6 +10,11 @@ E_SCHEMA = "E_SCHEMA"
 E_FRONTMATTER = "E_FRONTMATTER"
 E_READONLY = "E_READONLY"
 E_QUERY_FORBIDDEN = "E_QUERY_FORBIDDEN"
+# C.5.2 (v0.47): the guard decides what is forbidden, SQLite decides what
+# is invalid. Reporting a mistyped column with the code for "you tried to
+# write" makes a typo read as a policy denial — in the response, in the
+# console and in the audit.
+E_QUERY_INVALID = "E_QUERY_INVALID"
 E_TIMEOUT = "E_TIMEOUT"
 E_LOCKED = "E_LOCKED"
 

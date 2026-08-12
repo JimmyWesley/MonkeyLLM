@@ -45,6 +45,7 @@ from monkeyllm.errors import (
     E_LOCKED,
     E_NOT_FOUND,
     E_QUERY_FORBIDDEN,
+    E_QUERY_INVALID,
     E_READONLY,
     E_SCHEMA,
     E_TIMEOUT,
@@ -162,6 +163,10 @@ STATUS_BY_CODE = {
     E_FORBIDDEN: 403,
     E_READONLY: 403,
     E_QUERY_FORBIDDEN: 403,
+    # C.5.2 (v0.47): 403 says the principal may not, 400 says the request
+    # was wrong. A client retrying a 403 is confused; a client retrying a
+    # 400 with a corrected statement is doing exactly the right thing.
+    E_QUERY_INVALID: 400,
     E_LOCKED: 409,
     E_TIMEOUT: 504,
 }
@@ -1346,7 +1351,16 @@ def build_app(
                 hooks.append(compose.approval_hook(approved, vine, policy))
             elif curator is not None:
                 hooks.append(curator)
-            gardener = Gardener(vine, hooks=hooks, dry_run=stage)
+            # G.10.1: the Gardener names the phase it is in and the job
+            # carries it. This is called from the forest lane mid-step and
+            # suspends nothing — a step is still a whole document — but it
+            # is what lets a batch of ONE large file show movement instead
+            # of standing at 0/1 for a minute, which reads as a hang.
+            watched = job
+            gardener = Gardener(
+                vine, hooks=hooks, dry_run=stage,
+                on_stage=(None if watched is None
+                          else lambda f, st: board.note_stage(watched, f, st)))
 
             if mode == "upload" and gardener.config.get("source_root") == \
                     Path(source).resolve().as_posix():

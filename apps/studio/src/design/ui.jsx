@@ -8,7 +8,7 @@
  * should add it here rather than hand-roll a one-off — a second kind of card
  * is how a design system stops being one.
  */
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Alert, Check, ChevronDown, Copy, Info, Refresh, Search, X } from './icons.jsx'
 import { Highlighted } from './highlight.jsx'
@@ -491,10 +491,16 @@ export const Code = ({ children, className = '', max = '20rem', lang = null }) =
  *  characters a second time and a screen reader must not read them twice.
  *  The trailing newline on the mirror keeps the last line from collapsing
  *  when the caret sits on an empty one. */
-export function CodeArea({ value, onChange, lang = null, className = '',
-                           minHeight = '8.5rem', ...rest }) {
+export const CodeArea = forwardRef(function CodeArea(
+  { value, onChange, lang = null, className = '', minHeight = '8.5rem', ...rest },
+  outer,
+) {
+  // The ref reaches the real `<textarea>`, not the wrapper: a caller that
+  // wants one wants `selectionStart` — inserting dictated words at the
+  // caret is the whole reason this component keeps a native input.
   const box = useRef(null)
   const mirror = useRef(null)
+  useImperativeHandle(outer, () => box.current, [])
   /* Both layers are `pre-wrap` and identically padded, so two things can
    * desynchronise them: the scroll offset, and the width. The width matters
    * because a scrollbar inside the textarea — or a drag of its resize
@@ -534,4 +540,4 @@ export function CodeArea({ value, onChange, lang = null, className = '',
                             text-transparent caret-text outline-none`} />
     </div>
   )
-}
+})

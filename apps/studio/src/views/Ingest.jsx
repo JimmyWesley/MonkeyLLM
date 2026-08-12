@@ -35,6 +35,11 @@ const ACCEPT = '.md,.markdown,.txt,.csv,.json,.tsv,.yaml,.yml,.docx,.xls,'
              + '.xlsx,.db,.sqlite,.sqlite3'
 const MAX_BYTES = 25 * 1024 * 1024
 
+/* The G.10.1 stages, in the Gardener's order. Named here rather than read
+ * off the job, because a bar's fraction needs to know how many phases
+ * there are before it has seen them all. */
+const STAGES = ['convert', 'curate', 'plant']
+
 /* The Curator's own wording for the one rejection with a specific cure:
  * a thinking model that spent its whole budget before writing anything. */
 const EMPTY_REPLY = 'the model returned an empty message'
@@ -616,7 +621,15 @@ function JobProgress({ job, onCancel }) {
   const { t } = useI18n()
   const [asked, setAsked] = useState(false)
   const total = Math.max(job.total || 0, 1)
-  const pct = Math.min(100, Math.round(((job.done || 0) / total) * 100))
+  /* G.10.1: a document is one step, so a one-file batch would sit at 0%
+     for as long as the file takes — which reads as a hang, not as work.
+     The stage the Gardener reports moves the bar WITHIN the current
+     document: `done` documents, plus how far into the one in hand. The
+     fraction stays honest because the stage list is closed and ordered,
+     and it never reaches the next whole number — only a finished step
+     does that. */
+  const within = job.stage ? (STAGES.indexOf(job.stage) + 1) / (STAGES.length + 1) : 0
+  const pct = Math.min(100, Math.round((((job.done || 0) + within) / total) * 100))
   return (
     <Card title={t('ingest.job_title')} subtitle={t('ingest.job_sub')}
           icon={Upload}
@@ -634,6 +647,11 @@ function JobProgress({ job, onCancel }) {
       {job.current && (
         <p className="mt-2 truncate font-mono text-[11.5px] text-text-3">
           {t('ingest.job_current', { file: job.current })}
+          {job.stage && (
+            <span className="ml-1.5 text-text-2">
+              · {t(`ingest.stage_${job.stage}`)}
+            </span>
+          )}
         </p>
       )}
       <div className="mt-3 flex items-center justify-between">
@@ -884,11 +902,16 @@ function Report({ report, forest }) {
           actions={<Badge tone={report.curated ? 'accent' : 'default'}>
             {report.mode}
           </Badge>}>
-      {/* Four states, not two. The Curator falls back silently by contract
+      {/* Five states, not two. The Curator falls back silently by contract
           (G.4 rule 6), so every failure produces the same nodes a working
           ingest would — which is why the report has to name WHICH failure.
           "Never answered" and "answered and was rejected" look identical on
-          disk and have opposite fixes. */}
+          disk and have opposite fixes.
+          The fifth is not a failure at all (J.8, v0.45): a batch of only
+          `unchanged` files asks the model nothing, and reporting that as a
+          rejection sends the operator to tune a model that was never asked
+          anything. A real rejection always leaves a fallback or a retry
+          behind — that is the discriminator, not the zero. */}
       {report.curated ? (
         <Note tone="info">
           {t('ingest.curated', {
@@ -905,6 +928,10 @@ function Report({ report, forest }) {
           {stats.error && (
             <div className="mt-1.5 font-mono text-[11.5px]">{stats.error}</div>
           )}
+        </Note>
+      ) : !(stats.fallbacks || stats.retries) ? (
+        <Note tone="info">
+          {t('ingest.model_unneeded', { n: stats.skipped || 0 })}
         </Note>
       ) : (
         <Note tone="danger">

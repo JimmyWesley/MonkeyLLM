@@ -233,11 +233,15 @@ Always respond with a SINGLE JSON object, nothing else:
 Strategy: an exact rare term (code, proper name, number)? sniff first — it lands in the section and
 you read it with pick(id, section). Conceptual? locate first, look around, pick only the target.
 Rules:
-- "truncated": true means the list was CUT by budget — do not conclude something does not exist;
-  refine with more specific terms or scan(parent_id, filter).
+- "truncated": true means the result was CUT by budget — do not conclude something does not exist;
+  refine with more specific terms or scan(parent_id, filter). On a query it means rows were
+  dropped, never that they failed the filter: never present a truncated result as the complete
+  set, and never state a count from one. Read the "hint" and ask again, narrower.
 - Repeating the same call with the same arguments returns the same result. Change tool or terms.
 - type:dataset nodes answer through SQL: read the manual in look, then query. Aggregates are not
-  in the prose.
+  in the prose. A "notes" field on a dataset is what its operator wrote about how to read it —
+  follow it. Never `SELECT *` on a wide table: results are token-budgeted, so name the columns
+  you need or the rows come back truncated.
 - answer_nodes are exact ids from tool results, and only nodes you actually opened.
 Entry points for this question are in the first message."""
 
@@ -305,7 +309,17 @@ def _outcome(tool: str, result: dict) -> dict:
     unless the count is there.
     """
     if isinstance(result, dict) and "error" in result:
-        return {"error": (result.get("error") or {}).get("code")}
+        # J.10.5 (v0.47): the code alone made two different mistakes render
+        # as the same word twice — a guessed table name and a guessed column
+        # name both read as "forbidden", when the engine had in fact answered
+        # both with the C.5 hint. The model already receives the whole
+        # envelope; this is the console catching up. Nothing is disclosed
+        # that the caller's own statement did not produce.
+        err = result.get("error") or {}
+        out = {"error": err.get("code")}
+        if err.get("message"):
+            out["message"] = str(err["message"])[:160]
+        return out
     if not isinstance(result, dict):
         return {}
     for key, field in (("results", "results"), ("nodes", "nodes"),
@@ -399,6 +413,30 @@ def _absorb(read: dict, tool: str, args: dict, result: dict) -> None:
         })
 
 
+def _teach_datasets(scoped_vine, entry: dict) -> None:
+    """C.2.1 rule 6: a dataset arrives with what its operator wrote about it.
+
+    The walk's first message is the entry `locate`, which is curated
+    metadata — no body, no manual, no notes. On a dataset the natural next
+    move is `query`, not `look`, so a model that never looks never reads a
+    word the operator wrote: the mode with more freedom became the mode with
+    less information, and it looked exactly like the agent ignoring them.
+
+    In place, so the notes sit on the result they belong to rather than in a
+    block the model has to re-associate. Bounded by `k`, and best effort —
+    a note that cannot be read must not cost the walk its entry points.
+    """
+    for result in (entry.get("results") if isinstance(entry, dict) else None) or []:
+        if not isinstance(result, dict) or result.get("type") != "dataset":
+            continue
+        node_id = result.get("id")
+        if not isinstance(node_id, str):
+            continue
+        digest = scoped_vine.call("look", id=node_id, fields=["notes"])
+        if isinstance(digest, dict) and digest.get("notes"):
+            result["notes"] = digest["notes"]
+
+
 def forage(scoped_vine, question: str, binding: dict, k: int = 3,
            max_hops: int = 6) -> dict:
     """Answer by navigating (J.10.5), instead of by one deterministic sweep.
@@ -417,6 +455,7 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
     chat, model = chat_from_binding(binding)
 
     entry = scoped_vine.call("locate", query=question, k=k)
+    _teach_datasets(scoped_vine, entry)
     messages = [
         {"role": "system", "content": FORAGE_SYSTEM},
         {"role": "user", "content":

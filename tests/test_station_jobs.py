@@ -348,3 +348,41 @@ def test_a_restart_forgets_the_record_and_keeps_the_work(tmp_path):
         entries = client2.get("/v1/admin/audit", headers=head).json()["entries"]
         assert any(e["primitive"] == "ingest" and e["result"] == "ok"
                    for e in entries)
+
+
+# -- G.10.1: the stage inside the step (v0.45) --------------------------------
+
+
+def test_a_one_document_batch_reports_its_stage(station, monkeypatch):
+    """A document is one step, so `done` alone stands at 0 until it is 1 —
+    which an operator watching a large file cannot tell from a hang. The
+    stage moves inside the step without suspending it (G.10.1)."""
+    client, registry, _ = station
+    head = _key(registry, ["read", "ingest"])
+    _slow_hook(monkeypatch, 0.4)   # the nap happens during `curate`
+
+    r = client.post(f"/v1/forests/{FOREST}/ingest",
+                    json={"mode": "upload", "files": _docs(1), "dest": "uploads"},
+                    headers=head)
+    assert r.status_code == 202, r.text
+    job_id = r.json()["job"]["id"]
+
+    seen = set()
+    deadline = time.monotonic() + 20.0
+    while time.monotonic() < deadline:
+        job = client.get(f"/v1/forests/{FOREST}/jobs/{job_id}",
+                         headers=head).json()["job"]
+        if job["stage"]:
+            seen.add(job["stage"])
+            # `done` counts documents, and this one is not finished yet.
+            assert job["done"] == 0
+            assert job["current"]
+        if job["state"] != "running":
+            break
+        time.sleep(0.02)
+
+    assert "curate" in seen, f"never saw the slow stage; saw {seen}"
+    done = _poll(client, head, job_id)
+    assert done["state"] == "done"
+    # A finished job is in no phase at all.
+    assert done["stage"] is None and done["current"] is None

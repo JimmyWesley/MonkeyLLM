@@ -45,10 +45,21 @@ file, never a crash.
 Every dataset passport — from `.csv`, from a workbook, from a `.db`, and
 from a C.7.1 birth carrying rows — gets the **sample map** (G.2.3) in its
 body: `## Query manual` (tables and columns) followed by `## Sample rows`
-(each table's first 3 rows as a pipe table). That map is the only thing
-`sniff` can see inside a payload, so it is what makes a dataset findable by
-what it *contains* rather than only by what it is called. A `sync` rewrites
-those two sections and leaves the rest of the body alone.
+(each table's first 3 rows as a pipe table, ≤12 columns wide, saying how
+many it left out). That map is the only thing `sniff` can see inside a
+payload, so it is what makes a dataset findable by what it *contains*
+rather than only by what it is called. A `sync` rewrites those two sections
+and leaves the rest of the body alone.
+
+The map is also **the only thing the ingest model reads** about a dataset
+(G.4.6): a 5 MB CSV and a 5 GB database both cost about 150 tokens, so
+curation never scales with the source. Without a bound model the G.4.1
+factual template stays, as always.
+
+Sizes the Gardener does **not** refuse (G.2.5): C.7.1's ≤10 tables and ≤50
+columns bound what a *model* may declare, not what an operator already
+owns, so a 141-column ERP export adopts whole. What is bounded is the map,
+because that is where the tokens are.
 
 The `DocxConverter` does a single-pass `w:t` traversal in document order:
 heading-styled paragraphs become `##`+ headings, pipe tables keep their

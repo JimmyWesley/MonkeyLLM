@@ -1,5 +1,6 @@
 {
   "editor.back": "Volver",
+  "editor.body": "Cuerpo",
   "editor.body_truncated": "Cuerpo por encima del presupuesto de lectura — se edita una sección a la vez.",
   "editor.bold": "Negrita",
   "editor.code": "Bloque de código",

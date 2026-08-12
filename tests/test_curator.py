@@ -62,6 +62,7 @@ class TestCurator:
         # tags: cleaned (lowercase slug only), deduped, merged after defaults
         assert out["tags"] == ["adopted", "sales", "discounts"]
         assert c.stats == {"llm_summaries": 1, "fallbacks": 0, "retries": 0,
+                           "skipped": 0,
                            "links_proposed": 0, "proposal_fallbacks": 0,
                            "branch_rollups": 0, "branch_fallbacks": 0,
                            "transport_errors": 0, "rejected": 0, "repaired": 0}

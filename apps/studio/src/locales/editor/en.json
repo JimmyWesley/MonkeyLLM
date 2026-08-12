@@ -1,5 +1,6 @@
 {
   "editor.back": "Back",
+  "editor.body": "Body",
   "editor.body_truncated": "Body over the reading budget — edited one section at a time.",
   "editor.bold": "Bold",
   "editor.code": "Code block",
