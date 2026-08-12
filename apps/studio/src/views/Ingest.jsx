@@ -25,13 +25,14 @@ import {
 } from './shared.jsx'
 
 /* What the Gardener's built-in converters read (G.2). Text goes up as text;
- * .docx/.xlsx go up as base64, because their converters read bytes. Anything
- * else is refused HERE, by name, instead of being dropped on the floor: an
- * upload that silently ignores half the selection is indistinguishable from
- * one that failed. */
+ * .docx/.xls/.xlsx and SQLite databases go up as base64, because their
+ * converters read bytes. Anything else is refused HERE, by name, instead of
+ * being dropped on the floor: an upload that silently ignores half the
+ * selection is indistinguishable from one that failed. */
 const TEXTUAL = /\.(md|markdown|txt|csv|json|tsv|ya?ml)$/i
-const BINARY = /\.(docx|xlsx)$/i
-const ACCEPT = '.md,.markdown,.txt,.csv,.json,.tsv,.yaml,.yml,.docx,.xlsx'
+const BINARY = /\.(docx|xlsx?|db|sqlite|sqlite3)$/i
+const ACCEPT = '.md,.markdown,.txt,.csv,.json,.tsv,.yaml,.yml,.docx,.xls,'
+             + '.xlsx,.db,.sqlite,.sqlite3'
 const MAX_BYTES = 25 * 1024 * 1024
 
 /* The Curator's own wording for the one rejection with a specific cure:

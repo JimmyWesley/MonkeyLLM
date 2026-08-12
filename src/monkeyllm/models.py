@@ -264,17 +264,100 @@ def dataset_ddl(schema: dict[str, TableSchema]) -> list[str]:
     return stmts
 
 
-def dataset_manual(schema: dict[str, TableSchema]) -> str:
-    """Auto `## Query manual` body section (C.7.1) — feeds C.2's query_manual."""
-    lines = ["## Query manual", "", "Tables:"]
-    for tname, table in schema.items():
-        cols = ", ".join(f"{c} {t.upper()}" for c, t in table.columns.items())
+# --- G.2.3 the sample map --------------------------------------------------
+
+MANUAL_SECTION = "Query manual"
+SAMPLE_SECTION = "Sample rows"
+SAMPLE_ROWS = 3          # rows shown per table
+SAMPLE_CELL_CHARS = 120  # a cell longer than this is clipped, visibly
+SAMPLE_MAX_TABLES = 20   # tables that get a sample; the rest are counted
+
+
+def rows_label(n: int) -> str:
+    return f"{n} row" if n == 1 else f"{n} rows"
+
+
+def _sample_cell(value) -> str:
+    """One value as a markdown table cell (G.2.3 rule 3).
+
+    Bounded and escaped in the same place: a clipped cell that still ends
+    in a raw `|` would break the row it was clipped to fit.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"<blob {len(bytes(value))} bytes>"
+    text = re.sub(r"\s+", " ", str(value)).strip()
+    if len(text) > SAMPLE_CELL_CHARS:
+        text = text[:SAMPLE_CELL_CHARS].rstrip() + "…"
+    return text.replace("|", "\\|")
+
+
+def dataset_map(tables: dict[str, dict[str, str]],
+                samples: dict[str, list[list]] | None = None,
+                counts: dict[str, int] | None = None) -> str:
+    """The two generated body sections of a dataset passport (G.2.3).
+
+    `tables` is `{table: {column: declared type}}` — plain strings, because
+    an adopted database (G.2.2) declares types this project's four-type
+    schema vocabulary does not have, and the map reports what is there.
+
+    `## Sample rows` is the only place a value living inside the payload is
+    visible to `sniff` (C.6b searches bodies): three rows per table put the
+    shape of the values — the vocabulary, the id format, the units — where
+    a text primitive can reach them.
+    """
+    samples = samples or {}
+    counts = counts or {}
+    lines = [f"## {MANUAL_SECTION}", "", "Tables:"]
+    for tname, columns in tables.items():
+        cols = ", ".join(f"{c} {t.upper()}" if t else str(c)
+                         for c, t in columns.items())
         lines.append(f"- `{tname}({cols})`")
     lines += ["", "Example queries:"]
-    for tname in schema:
+    for tname in tables:
         lines.append(f"- `SELECT * FROM {tname} LIMIT 5`")
         lines.append(f"- `SELECT COUNT(*) FROM {tname}`")
-    return "\n".join(lines)
+
+    lines += ["", f"## {SAMPLE_SECTION}", ""]
+    shown = list(tables)[:SAMPLE_MAX_TABLES]
+    for tname in shown:
+        columns = list(tables[tname])
+        count = counts.get(tname)
+        heading = f"### {tname}" + (f" — {rows_label(count)}" if count is not None else "")
+        lines += [heading, ""]
+        rows = list(samples.get(tname) or [])[:SAMPLE_ROWS]
+        if not rows:
+            lines += ["_No rows._", ""]
+            continue
+        lines.append("| " + " | ".join(_sample_cell(c) for c in columns) + " |")
+        lines.append("|" + " --- |" * len(columns))
+        for row in rows:
+            cells = [_sample_cell(row[i]) if i < len(row) else ""
+                     for i in range(len(columns))]
+            lines.append("| " + " | ".join(cells) + " |")
+        lines.append("")
+    # Never cut silently: a map that stops without saying so reads as a map
+    # of everything there is.
+    omitted = len(tables) - len(shown)
+    if omitted > 0:
+        lines.append(f"_{omitted} further table(s) not sampled; the manual "
+                     f"above lists them all._")
+    return "\n".join(lines).rstrip()
+
+
+def dataset_manual(schema: dict[str, TableSchema],
+                   rows: dict[str, list[list]] | None = None) -> str:
+    """Auto body map for a C.7.1 birth — feeds C.2's `query_manual`.
+
+    A node born with `rows` is sampled from them (C.7.1 rule 4): the
+    payload is opaque to every text primitive the forest has, so a dataset
+    born full and mapped empty is findable by nothing it contains.
+    """
+    tables = {tname: {c: t.upper() for c, t in table.columns.items()}
+              for tname, table in schema.items()}
+    counts = {tname: len(rows.get(tname) or []) for tname in schema} if rows else None
+    return dataset_map(tables, rows, counts)
 
 
 class NodeSpec(BaseModel):

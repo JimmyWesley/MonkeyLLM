@@ -1400,7 +1400,10 @@ class Vine:
         if not body.lstrip().startswith("#"):
             body = f"# {spec.title}\n\n{body}"
         if spec.table_schema is not None and extract_section(body, "Query manual") is None:
-            body = f"{body.rstrip()}\n\n{dataset_manual(spec.table_schema)}"
+            # C.7.1 rule 4 (v0.44): the manual is followed by G.2.3's sample
+            # map when the node is born with rows — the body is the only
+            # place a value inside the payload is visible to `sniff`.
+            body = f"{body.rstrip()}\n\n{dataset_manual(spec.table_schema, spec.rows)}"
         content = serialize_node(fm, body)
 
         parent_node = self.forest.read(spec.parent)

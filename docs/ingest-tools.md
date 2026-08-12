@@ -23,13 +23,32 @@ summaries, tags, and edge proposals (G.4.2.1).
 | `.txt` | `MarkdownConverter` | — |
 | `.csv` | `CsvConverter` -> dataset (C.7.1 schema + rows) | — |
 | `.json` (tabular array) | `JsonConverter` -> dataset | — |
-| `.xlsx` | `XlsxConverter` -> dataset | `pip install monkeyllm[ingest]` (openpyxl) |
+| `.db` / `.sqlite` / `.sqlite3` | `SqliteConverter` -> dataset **adopted whole** (G.2.2) | — |
+| `.xlsx` | `XlsxConverter` -> dataset, one table per sheet (G.2.4) | `pip install monkeyllm[ingest]` (openpyxl) |
+| `.xls` | `XlsConverter` -> dataset, one table per sheet (G.2.4) | `pip install monkeyllm[ingest]` (xlrd) |
 | `.docx` | `DocxConverter` (spec v0.12 G.2.1) | `pip install monkeyllm[ingest]` (python-docx) |
 
-`.xlsx`/`.docx` silently report `unsupported` when the extra isn't
-installed — sync never crashes on a missing optional dependency. Anything
-without a matching converter is reported `unsupported` in the adopt/sync
-report; nothing is dropped silently.
+`.xls`/`.xlsx`/`.docx` silently report `unsupported` when the extra isn't
+installed — sync never crashes on a missing optional dependency. SQLite
+needs no extra: it is the standard library and already the payload format.
+Anything without a matching converter is reported `unsupported` in the
+adopt/sync report; nothing is dropped silently.
+
+A SQLite source is **not** rebuilt row by row. The converter reads the
+structure of every table and its first 3 rows; the Gardener copies the file
+into place as the node's payload and plants a passport with no `schema`
+(G.2.2). Rebuilding would be unbounded in the source's size and lossy in
+its types — and the result would be byte-for-byte what the source already
+was. A file whose header is not `SQLite format 3` is an error naming the
+file, never a crash.
+
+Every dataset passport — from `.csv`, from a workbook, from a `.db`, and
+from a C.7.1 birth carrying rows — gets the **sample map** (G.2.3) in its
+body: `## Query manual` (tables and columns) followed by `## Sample rows`
+(each table's first 3 rows as a pipe table). That map is the only thing
+`sniff` can see inside a payload, so it is what makes a dataset findable by
+what it *contains* rather than only by what it is called. A `sync` rewrites
+those two sections and leaves the rest of the body alone.
 
 The `DocxConverter` does a single-pass `w:t` traversal in document order:
 heading-styled paragraphs become `##`+ headings, pipe tables keep their

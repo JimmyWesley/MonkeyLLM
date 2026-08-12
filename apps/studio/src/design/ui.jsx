@@ -477,3 +477,61 @@ export const Code = ({ children, className = '', max = '20rem', lang = null }) =
       : children}
   </pre>
 )
+
+/** The editable counterpart of `Code` (spec J.5.10).
+ *
+ *  This console colours every literal surface it *prints*; the one surface
+ *  it did not colour is the one a person actually reads while composing —
+ *  the box they type SQL into. A `<textarea>` cannot hold spans, so the
+ *  editor is a highlighted mirror with a transparent input laid exactly
+ *  over it: same font, same metrics, same wrapping, scrolled together.
+ *
+ *  The input stays a real `<textarea>` — native editing, native undo, one
+ *  tab stop — and the mirror is `aria-hidden`, because it renders the same
+ *  characters a second time and a screen reader must not read them twice.
+ *  The trailing newline on the mirror keeps the last line from collapsing
+ *  when the caret sits on an empty one. */
+export function CodeArea({ value, onChange, lang = null, className = '',
+                           minHeight = '8.5rem', ...rest }) {
+  const box = useRef(null)
+  const mirror = useRef(null)
+  /* Both layers are `pre-wrap` and identically padded, so two things can
+   * desynchronise them: the scroll offset, and the width. The width matters
+   * because a scrollbar inside the textarea — or a drag of its resize
+   * handle — narrows the text it wraps and not the mirror's, and one
+   * character of drift makes every line below it wrong. `clientWidth`
+   * already excludes the scrollbar, so copying it is the whole fix. */
+  const sync = () => {
+    if (!mirror.current || !box.current) return
+    mirror.current.style.width = `${box.current.clientWidth}px`
+    mirror.current.scrollTop = box.current.scrollTop
+    mirror.current.scrollLeft = box.current.scrollLeft
+  }
+  useEffect(sync, [value])
+  useEffect(() => {
+    if (!box.current || typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(sync)
+    observer.observe(box.current)
+    return () => observer.disconnect()
+  }, [])
+
+  // The frame is the wrapper's, so neither layer carries a border that the
+  // other would have to match to the pixel.
+  const shared = `m-0 block w-full whitespace-pre-wrap break-words p-3
+                  font-mono text-[12.5px] leading-relaxed`
+  return (
+    <div className={`relative rounded-lg border border-line bg-surface-2 transition
+                     focus-within:border-accent focus-within:ring-2
+                     focus-within:ring-accent/20 ${className}`}>
+      <pre ref={mirror} aria-hidden="true"
+           className={`${shared} pointer-events-none absolute inset-y-0 left-0
+                       overflow-hidden text-text-2`}>
+        <Highlighted text={`${value ?? ''}\n`} lang={lang} />
+      </pre>
+      <textarea ref={box} value={value} onChange={onChange} onScroll={sync}
+                spellCheck={false} {...rest} style={{ minHeight }}
+                className={`${shared} codearea relative resize-y bg-transparent
+                            text-transparent caret-text outline-none`} />
+    </div>
+  )
+}

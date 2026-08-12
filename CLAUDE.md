@@ -137,6 +137,18 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 - `tend` (spec C.10) is the ONLY dataset write path: single INSERT/UPDATE/
   DELETE, WHERE mandatory on UPDATE/DELETE, no DDL; refreshes `payload_hash`
   and commits only the `.md` (it has its own injection suite too).
+- **A `.db` is adopted, a `.csv` is converted (spec G.2.2, v0.44)**: a
+  SQLite source becomes a `payload` conversion — the converter reads
+  structure + 3 rows per table and the Gardener **copies the file** into
+  place as the payload, planting with no `schema` (C.7.1's "payload
+  already exists" path). Never re-INSERT a `.db` row by row: unbounded in
+  the source's size, lossy in its types, and the round trip's destination
+  is what the source already was. Every dataset passport carries the
+  **sample map** (G.2.3): `## Query manual` + `## Sample rows` — every
+  table, first 3 rows, cells clipped at 120 chars, ≤20 tables sampled and
+  the omission stated. That map is the ONLY thing `sniff` can see inside a
+  payload. `sync` rewrites those two sections and no others. Workbooks are
+  one table per sheet (G.2.4), refused by name over the C.7.1 limit.
 - **Datasets are born via `plant` with a declarative `schema`** (spec C.7.1):
   the model never writes DDL — Vine validates names/types, creates the `.db`,
   auto-generates `## Query manual`, and commits only the `.md`. No `ALTER`
@@ -224,6 +236,15 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   a GET that matches no route and no file is answered with the shell **only
   when it accepts HTML**: a missing asset must stay a 404, or the browser
   gets an HTML body under a JavaScript MIME type.
+- **The Data console makes, imports and leaves (spec J.5.10, v0.44)**: a
+  dataset is born through ONE `plant` with a declarative schema (no DDL in
+  the console, ever); a file is imported through the J.8 `upload` ingest
+  (never parsed in the browser, never planted beside the Gardener) and the
+  answer is a J.9 job; a selected dataset collapses the picker to itself
+  and offers an explicit way back that clears `?dataset`/`?table` — and
+  refuses while a `tend` draft is staged. SQL is coloured where it is
+  typed: a highlighted mirror under a transparent `<textarea>`, mirror
+  `aria-hidden` so the characters are not read twice.
 - **The console shapes the forest through `plant` (spec J.5.7, v0.27)**:
   branch creation in Studio composes ONE `plant` call — the id lives under
   the chosen parent, the parent-index entry and the commit are the engine's.

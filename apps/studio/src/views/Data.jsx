@@ -3,11 +3,13 @@
 
 /* The Data console — a database client over the forest's datasets.
  *
- * Everything here is the two primitives the spec already defines. Reading is
+ * Everything here is the primitives the spec already defines. Reading is
  * `query` (C.5, read-only, single statement); writing is `tend` (C.10, one
- * INSERT/UPDATE/DELETE at a time, WHERE mandatory, its own git commit). The
- * console never gets a private channel: the SQL it builds is the SQL it
- * shows, and an operator without the `tend` capability simply browses.
+ * INSERT/UPDATE/DELETE at a time, WHERE mandatory, its own git commit);
+ * making one is `plant` with a declarative schema (C.7.1); bringing one in
+ * is the J.8 ingest surface. The console never gets a private channel: the
+ * SQL it builds is the SQL it shows, and an operator without the `tend`
+ * capability simply browses.
  *
  * Structure is deliberately read-only. `tend` forbids DDL forever (spec
  * v0.21 C.10) and schema evolution is not the query surface's job — a table
@@ -15,23 +17,42 @@
  * rebuilding it, so offering an "add column" button here would only be a
  * button that always fails.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
+import { noteJob } from '../board.js'
 import { useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import {
-  Badge, Card, Code, CopyButton, Empty, ErrorNote, Modal, Note, Skeleton,
-  Spinner, Table, Tabs, Td,
+  Badge, Card, Code, CodeArea, CopyButton, Empty, ErrorNote, Field, Modal,
+  Note, Select, Skeleton, Spinner, Table, Tabs, Td, TextArea,
 } from '../design/ui.jsx'
 import { Highlighted } from '../design/highlight.jsx'
 import {
   ChevronLeft, ChevronRight, Code2, Columns, Data as DataIcon, Download,
-  Grid as GridIcon, Play, Plus, Refresh, Save,
+  Grid as GridIcon, Ingest as ImportIcon, Play, Plus, Refresh, Save, Trash, X,
 } from '../design/icons.jsx'
 import { Grid, TypedInput, fieldKind, isComplete } from '../design/grid.jsx'
-import { NeedsCapability, has, rootsOf, useAsync } from './shared.jsx'
+import {
+  NeedsCapability, branchOf, has, rootsOf, slugOf, useAsync, useForestTree,
+} from './shared.jsx'
 
 const PAGE_SIZES = [25, 50, 100, 500]
+
+/* G.2 says which converters exist; this is the subset that becomes a
+ * dataset. Everything here goes up as bytes — `.csv` and `.json` are text,
+ * but the wire contract takes either and one rule is easier to trust than
+ * two. */
+const IMPORT_ACCEPT = '.db,.sqlite,.sqlite3,.csv,.json,.xls,.xlsx'
+const IMPORTABLE = /\.(db|sqlite|sqlite3|csv|json|xlsx?)$/i
+const IMPORT_MAX_BYTES = 100 * 1024 * 1024
+
+/* C.7.1 rule 1: the four types a declared column may have, and the limits
+ * the engine will enforce anyway. Shown here so the form refuses before the
+ * round trip does — never instead of it. */
+const COLUMN_TYPES = ['TEXT', 'INTEGER', 'REAL', 'BLOB']
+const MAX_TABLES = 10
+const MAX_COLUMNS = 50
+const SQL_NAME = /^[a-z_][a-z0-9_]*$/
 
 /* -- SQL the console writes for you ------------------------------------- */
 
@@ -232,8 +253,12 @@ export default function Data({ forest, grant }) {
   const [pending, setPending] = useState(null)    // the compiled statements
   const [written, setWritten] = useState(null)
   const [inserting, setInserting] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   const mayWrite = has(grant, 'tend')
+  const mayPlant = has(grant, 'write')   // J.3: `plant` is the write row
+  const mayIngest = has(grant, 'ingest')
 
   const found = useAsync(async () => {
     const all = []
@@ -391,6 +416,23 @@ export default function Data({ forest, grant }) {
   ], [rows.data, draft.inserts, gridColumns])
   const changes = countChanges(draft)
 
+  /* Opening and leaving a dataset (J.5.10). Both are navigations, so both
+   * push: the address is where the console is (J.5.8), and Back is how an
+   * operator returns to the list they came from. */
+  function connect(next) {
+    setId(next); setPage(0); setSort(null); setFilters({})
+    setPending(null); setWritten(null); setFree({}); setDraft(EMPTY_DRAFT)
+  }
+
+  /* Leaving MUST NOT drop a pending write. An unapplied draft is work the
+   * operator can still see; discarding it silently because they clicked
+   * "disconnect" would be the console spending it for them. */
+  function disconnect() {
+    if (changes > 0) return
+    setId(''); setTable(''); setPage(0); setSort(null); setFilters({})
+    setPending(null); setWritten(null); setFree({}); setDraft(EMPTY_DRAFT)
+  }
+
   /* Editing stages; it never writes. A cell put back to what the database
    * already holds stops being a change at all, so the counter can be trusted:
    * "3 changes" always means three things really differ. */
@@ -472,60 +514,98 @@ export default function Data({ forest, grant }) {
 
   const pages = Math.max(1, Math.ceil((rows.data?.total || 0) / size))
 
+  const connected = (found.data || []).find((n) => n.id === id) || null
+
   return (
     <div className="grid gap-4 lg:grid-cols-[290px_1fr]">
-      <Card title={t('data.pick')} icon={DataIcon} bodyClass="p-2"
-            actions={<button className="btn btn-sm btn-ghost" onClick={found.reload}
-                             title={t('common.refresh')}><Refresh size={14} /></button>}>
-        {found.busy ? <div className="p-3"><Skeleton rows={3} /></div>
+      {/* J.5.10: while a dataset is selected the picker IS that dataset. The
+          list is a browse surface and the selection is a working surface,
+          and keeping eleven other databases one mis-click from the query
+          being edited is inviting the mis-click. */}
+      <Card title={id ? t('data.connected') : t('data.pick')} icon={DataIcon}
+            bodyClass="p-2"
+            actions={id ? (
+              <button className="btn btn-sm" onClick={disconnect} disabled={changes > 0}
+                      title={changes > 0 ? t('data.disconnect_blocked') : undefined}>
+                <ChevronLeft size={14} /> {t('data.disconnect')}
+              </button>
+            ) : (
+              <button className="btn btn-sm btn-ghost" onClick={found.reload}
+                      title={t('common.refresh')}><Refresh size={14} /></button>
+            )}>
+        {/* The connected panel comes first on purpose: it is built from
+            `look`, not from the list, so an address that arrives with a
+            dataset already in it must not wait on a scan — or worse, show
+            the list's error where the dataset was asked for. */}
+        {id ? (
+          <div className="space-y-2 p-1.5">
+            <div>
+              <span className="nodeid block break-all">{id}</span>
+              <span className="mt-1 block text-[12px] leading-relaxed text-text-3">
+                {connected?.summary || meta.data?.summary}
+              </span>
+            </div>
+            {changes > 0 && <Note tone="warn">{t('data.disconnect_blocked')}</Note>}
+            <ul className="space-y-0.5 border-t border-line pt-2">
+              {meta.busy && <li className="px-2 py-1"><Skeleton rows={2} /></li>}
+              {(meta.data?.tables || []).map((tb) => (
+                <li key={tb.name}>
+                  <button onClick={() => {
+                            setTable(tb.name); setPage(0); setSort(null)
+                            setFilters({}); setTab('rows'); setDraft(EMPTY_DRAFT)
+                          }}
+                          className={`flex w-full items-center justify-between gap-2
+                            rounded-md px-2 py-1.5 text-left transition hover:bg-surface-2
+                            ${tb.name === table ? 'bg-surface-2' : ''}`}>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <GridIcon size={13} className={tb.name === table
+                        ? 'text-accent' : 'text-text-3'} />
+                      <span className="truncate font-mono text-[12px] text-text-2">
+                        {tb.name}
+                      </span>
+                    </span>
+                    <span className="shrink-0 font-mono text-[10.5px] text-text-3">
+                      {tb.rows ?? ''}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : found.busy ? <div className="p-3"><Skeleton rows={3} /></div>
           : found.error ? <div className="p-3"><ErrorNote error={found.error} /></div>
-          : (found.data || []).length === 0 ? <Empty icon={DataIcon}>{t('data.none')}</Empty> : (
+          : (found.data || []).length === 0 ? (
+          <Empty icon={DataIcon}>{t('data.none')}</Empty>
+        ) : (
           <ul className="space-y-0.5">
             {found.data.map((n) => (
               <li key={n.id}>
-                <button onClick={() => {
-                          setId(n.id); setPage(0); setSort(null); setFilters({})
-                          setPending(null); setWritten(null); setFree({})
-                          setDraft(EMPTY_DRAFT)
-                        }}
-                        className={`w-full rounded-lg px-2.5 py-2 text-left transition
-                          hover:bg-surface-2 ${n.id === id ? 'bg-accent-soft' : ''}`}>
+                <button onClick={() => connect(n.id)}
+                        className="w-full rounded-lg px-2.5 py-2 text-left transition
+                                   hover:bg-surface-2">
                   <span className="nodeid block truncate">{n.id}</span>
                   <span className="mt-0.5 block line-clamp-2 text-[12px] text-text-3">
                     {n.summary}
                   </span>
                 </button>
-
-                {n.id === id && (
-                  <ul className="mb-1 ml-2 mt-1 space-y-0.5 border-l border-line pl-2">
-                    {meta.busy && <li className="px-2 py-1"><Skeleton rows={1} /></li>}
-                    {(meta.data?.tables || []).map((tb) => (
-                      <li key={tb.name}>
-                        <button onClick={() => {
-                                  setTable(tb.name); setPage(0); setSort(null)
-                                  setFilters({}); setTab('rows'); setDraft(EMPTY_DRAFT)
-                                }}
-                                className={`flex w-full items-center justify-between gap-2
-                                  rounded-md px-2 py-1.5 text-left transition hover:bg-surface-2
-                                  ${tb.name === table ? 'bg-surface-2' : ''}`}>
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            <GridIcon size={13} className={tb.name === table
-                              ? 'text-accent' : 'text-text-3'} />
-                            <span className="truncate font-mono text-[12px] text-text-2">
-                              {tb.name}
-                            </span>
-                          </span>
-                          <span className="shrink-0 font-mono text-[10.5px] text-text-3">
-                            {tb.rows ?? ''}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
               </li>
             ))}
           </ul>
+        )}
+
+        {(mayPlant || mayIngest) && (
+          <div className="mt-2 flex flex-wrap gap-2 border-t border-line px-1.5 pt-2">
+            {mayPlant && (
+              <button className="btn btn-sm" onClick={() => setCreating(true)}>
+                <Plus size={14} /> {t('data.new')}
+              </button>
+            )}
+            {mayIngest && (
+              <button className="btn btn-sm" onClick={() => setImporting(true)}>
+                <ImportIcon size={14} /> {t('data.import')}
+              </button>
+            )}
+          </div>
         )}
       </Card>
 
@@ -658,9 +738,8 @@ export default function Data({ forest, grant }) {
                 <form onSubmit={runFree} className="space-y-3">
                   <label className="block">
                     <span className="label">{t('data.sql')}</span>
-                    <textarea className="field min-h-[130px] resize-y font-mono text-[12.5px]
-                                         leading-relaxed"
-                              rows={5} value={sql} spellCheck={false}
+                    <CodeArea lang="sql" value={sql} minHeight="8.5rem"
+                              aria-label={t('data.sql')}
                               onChange={(e) => setSql(e.target.value)} />
                   </label>
                   {(meta.data?.examples || []).length > 0 && (
@@ -721,6 +800,17 @@ export default function Data({ forest, grant }) {
 
       <InsertRow open={inserting} columns={gridColumns} t={t}
                  onClose={() => setInserting(false)} onSubmit={stageInsert} />
+
+      {creating && (
+        <NewDataset forest={forest} grant={grant} t={t}
+                    onClose={() => setCreating(false)}
+                    onCreated={(newId) => { found.reload(); connect(newId) }} />
+      )}
+      {importing && (
+        <ImportDataset forest={forest} grant={grant} t={t}
+                       onClose={() => setImporting(false)}
+                       onQueued={() => found.reload()} />
+      )}
     </div>
   )
 }
@@ -817,6 +907,349 @@ function Structure({ table, t }) {
       <Note>{t('data.structure_note')}</Note>
     </div>
   )
+}
+
+/* -- making one, and bringing one in (spec J.5.10) ----------------------- */
+
+const EMPTY_TABLE = () => ({ name: '', columns: [{ name: '', type: 'TEXT', pk: false }] })
+
+/** A dataset is born through ONE `plant` with a declarative schema (C.7.1).
+ *
+ *  The console never writes DDL and never offers a box to type it into:
+ *  table names, column names, the four types and the primary key are
+ *  fields, and the `CREATE TABLE` is the Vine's. Everything that makes a
+ *  node a node — the id under its parent, the entry in the parent index,
+ *  the commit, the audit row — comes for free from the primitive, exactly
+ *  as it does for an agent.
+ *
+ *  Ids are composed, never typed: the leaf is slugged from the name and
+ *  shown before the call, because no primitive relocates a node and a
+ *  mistake here is permanent. */
+function NewDataset({ forest, grant, onClose, onCreated, t }) {
+  const [parent, setParent] = useState(rootsOf(grant)[0] || '_index')
+  const [name, setName] = useState('')
+  const [summary, setSummary] = useState('')
+  const [tables, setTables] = useState([EMPTY_TABLE()])
+  const [state, setState] = useState({})
+
+  const tree = useForestTree(forest, grant, api.call)
+  const parents = tree.data?.branches || rootsOf(grant).map((r) => ({ id: r }))
+
+  const slug = slugOf(name)
+  const under = branchOf(parent || '_index')
+  const id = slug ? (under ? `${under}/${slug}` : slug) : null
+  // The engine owns the A.4 verdict; this is the budget shown while typing.
+  const tokens = Math.ceil(summary.trim().split(/\s+/).filter(Boolean).length * 1.3)
+
+  const patch = (i, next) =>
+    setTables((ts) => ts.map((tb, j) => (j === i ? { ...tb, ...next } : tb)))
+  const patchColumn = (i, j, next) => patch(i, {
+    columns: tables[i].columns.map((c, k) => (k === j ? { ...c, ...next } : c)),
+  })
+
+  /* What the engine will refuse, said before the round trip — never
+   * instead of it. C.7.1 validates every one of these again, and the two
+   * can only ever disagree in the direction of an extra refusal here. */
+  const problems = []
+  const names = tables.map((tb) => tb.name.trim())
+  tables.forEach((tb, i) => {
+    if (!SQL_NAME.test(names[i])) problems.push(t('data.bad_table', { n: i + 1 }))
+    else if (names.indexOf(names[i]) !== i) problems.push(t('data.dup_table', { name: names[i] }))
+    const cols = tb.columns.map((c) => c.name.trim())
+    if (!cols.length) problems.push(t('data.no_columns', { name: names[i] || i + 1 }))
+    cols.forEach((c, j) => {
+      if (!SQL_NAME.test(c)) problems.push(t('data.bad_column', { n: j + 1, table: names[i] }))
+      else if (cols.indexOf(c) !== j) problems.push(t('data.dup_column', { name: c }))
+    })
+  })
+  const ready = id && summary.trim() && !problems.length && !state.busy
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!ready) return
+    setState({ busy: true })
+    const schema = {}
+    for (const tb of tables) {
+      const columns = {}
+      for (const c of tb.columns) columns[c.name.trim()] = c.type
+      const pk = tb.columns.filter((c) => c.pk).map((c) => c.name.trim())
+      schema[tb.name.trim()] = pk.length ? { columns, primary_key: pk } : { columns }
+    }
+    try {
+      // C.7 takes ONE object: the request body is the call's keyword
+      // arguments, so a flat passport would reach `plant(id=…)` and fail.
+      await api.call(forest, 'plant', {
+        node: {
+          id,
+          type: 'dataset',
+          parent: parent || '_index',
+          title: name.trim(),
+          summary: summary.trim(),
+          source: 'manual',
+          schema,
+        },
+      })
+      onCreated?.(id)
+      onClose?.()
+    } catch (error) { setState({ busy: false, error }) }
+  }
+
+  return (
+    <Modal open wide onClose={onClose} title={t('data.new')} subtitle={t('data.new_sub')}
+           footer={<>
+             <button className="btn" onClick={onClose}>{t('common.cancel')}</button>
+             <button className="btn btn-primary" disabled={!ready} onClick={submit}>
+               <Plus size={14} />
+               {state.busy ? t('data.creating') : t('data.create')}
+             </button>
+           </>}>
+      <form onSubmit={submit} className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select label={t('data.parent')} value={parent} hint={t('data.parent_hint')}
+                  onChange={(e) => setParent(e.target.value)}>
+            {parents.map((p) => (
+              <option key={p.id} value={p.id}>{branchOf(p.id) || t('branch.root')}</option>
+            ))}
+          </Select>
+          <Field label={t('data.name')} value={name} required autoFocus
+                 placeholder={t('data.name_placeholder')}
+                 onChange={(e) => setName(e.target.value)}
+                 hint={id ? t('data.will_be', { id }) : t('data.name_hint')} />
+        </div>
+
+        <Field as={TextArea} label={t('data.summary')} value={summary} required rows={2}
+               placeholder={t('data.summary_placeholder')}
+               onChange={(e) => setSummary(e.target.value)}
+               hint={t('branch.summary_hint', { n: tokens })}
+               error={tokens > 60 ? t('branch.summary_long') : undefined} />
+
+        <div className="space-y-3">
+          <span className="label !mb-0">{t('data.tables')}</span>
+          {tables.map((tb, i) => (
+            <div key={i} className="rounded-lg border border-line bg-surface-2 p-3">
+              <div className="flex items-center gap-2">
+                <input className="field font-mono text-[12.5px]" value={tb.name}
+                       placeholder={t('data.table_name')} aria-label={t('data.table_name')}
+                       onChange={(e) => patch(i, { name: e.target.value })} />
+                {tables.length > 1 && (
+                  <button type="button" className="btn btn-sm btn-ghost"
+                          aria-label={t('data.remove_table')}
+                          onClick={() => setTables((ts) => ts.filter((_, j) => j !== i))}>
+                    <Trash size={14} />
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-2 space-y-1.5">
+                {tb.columns.map((c, j) => (
+                  <div key={j} className="flex items-center gap-2">
+                    <input className="field font-mono text-[12.5px]" value={c.name}
+                           placeholder={t('data.column_name')}
+                           aria-label={t('data.column_name')}
+                           onChange={(e) => patchColumn(i, j, { name: e.target.value })} />
+                    <select className="field !w-auto font-mono text-[12.5px]" value={c.type}
+                            aria-label={t('common.type')}
+                            onChange={(e) => patchColumn(i, j, { type: e.target.value })}>
+                      {COLUMN_TYPES.map((ty) => <option key={ty} value={ty}>{ty}</option>)}
+                    </select>
+                    <label className="flex shrink-0 items-center gap-1.5 text-[12px] text-text-3">
+                      <input type="checkbox" checked={c.pk}
+                             onChange={(e) => patchColumn(i, j, { pk: e.target.checked })} />
+                      PK
+                    </label>
+                    {tb.columns.length > 1 && (
+                      <button type="button" className="btn btn-sm btn-ghost"
+                              aria-label={t('data.remove_column')}
+                              onClick={() => patch(i, {
+                                columns: tb.columns.filter((_, k) => k !== j),
+                              })}>
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button type="button" className="btn btn-sm"
+                        disabled={tb.columns.length >= MAX_COLUMNS}
+                        onClick={() => patch(i, {
+                          columns: [...tb.columns, { name: '', type: 'TEXT', pk: false }],
+                        })}>
+                  <Plus size={13} /> {t('data.add_column')}
+                </button>
+              </div>
+            </div>
+          ))}
+          <button type="button" className="btn btn-sm" disabled={tables.length >= MAX_TABLES}
+                  onClick={() => setTables((ts) => [...ts, EMPTY_TABLE()])}>
+            <Plus size={13} /> {t('data.add_table')}
+          </button>
+        </div>
+
+        {problems.length > 0 && (
+          <Note tone="warn">{problems[0]}</Note>
+        )}
+        <Note>{t('data.new_note')}</Note>
+        {state.error && <ErrorNote error={state.error} />}
+      </form>
+    </Modal>
+  )
+}
+
+/** Importing goes through J.8's ingest surface and nowhere else.
+ *
+ *  The console does not parse the file, does not infer a schema and does
+ *  not plant: an importer that understood `.xlsx` would be a converter
+ *  living where nobody can extend it, and it would disagree with the
+ *  Gardener the first time either of them changed. What it sends is bytes
+ *  and a destination; what comes back is a job (J.9), announced by the
+ *  pill every console carries. */
+function ImportDataset({ forest, grant, onClose, onQueued, t }) {
+  // J.8 names a destination by BRANCH, not by its index node — the same
+  // value the ingest console sends, because two consoles disagreeing about
+  // the shape of `dest` is one of them silently planting at the root.
+  const [dest, setDest] = useState(branchOf(rootsOf(grant)[0] || '_index'))
+  const [files, setFiles] = useState([])
+  const [refused, setRefused] = useState([])
+  const [state, setState] = useState({})
+  const picker = useRef(null)
+
+  const tree = useForestTree(forest, grant, api.call)
+  const parents = tree.data?.branches || rootsOf(grant).map((r) => ({ id: r }))
+
+  async function take(list) {
+    const picked = []
+    const bad = []
+    setState({ reading: true })
+    for (const file of Array.from(list || [])) {
+      if (!IMPORTABLE.test(file.name)) {
+        bad.push({ name: file.name, why: t('data.import_type') })
+        continue
+      }
+      if (file.size > IMPORT_MAX_BYTES) {
+        bad.push({ name: file.name, why: t('data.import_size') })
+        continue
+      }
+      picked.push({ name: file.name, b64: await toBase64(await file.arrayBuffer()),
+                    bytes: file.size })
+    }
+    setState({})
+    setFiles((prev) => {
+      const byName = new Map(prev.map((f) => [f.name, f]))
+      for (const f of picked) byName.set(f.name, f)
+      return [...byName.values()]
+    })
+    setRefused(bad)
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!files.length) return
+    setState({ busy: true })
+    try {
+      // `bytes` is display-only; the wire contract is J.8's {name, text|b64}.
+      const r = await api.ingest(forest, {
+        mode: 'upload',
+        files: files.map(({ bytes, ...rest }) => rest),
+        dest: dest || undefined,
+      })
+      // J.9.3: the pill reads the job board, so the batch this console
+      // started has to be put on it — otherwise the announcement waits for
+      // the next poll and the operator watches nothing happen.
+      noteJob(forest, r.job)
+      setState({ job: r.job || r })
+      onQueued?.()
+    } catch (error) { setState({ busy: false, error }) }
+  }
+
+  const total = files.reduce((n, f) => n + f.bytes, 0)
+
+  return (
+    <Modal open onClose={onClose} title={t('data.import')} subtitle={t('data.import_sub')}
+           footer={<>
+             <button className="btn" onClick={onClose}>
+               {state.job ? t('common.close') : t('common.cancel')}
+             </button>
+             {!state.job && (
+               <button className="btn btn-primary" onClick={submit}
+                       disabled={!files.length || state.busy || state.reading}>
+                 <ImportIcon size={14} />
+                 {state.busy ? t('common.working') : t('data.import_start')}
+               </button>
+             )}
+           </>}>
+      <form onSubmit={submit} className="space-y-4">
+        <Select label={t('data.dest')} value={dest} hint={t('data.dest_hint')}
+                onChange={(e) => setDest(e.target.value)}>
+          {/* J.8: a principal whose scope is not the whole forest MUST name
+              a destination, so the root is not theirs to choose. */}
+          {rootsOf(grant).includes('_index')
+            && <option value="">{t('ingest.dest_root')}</option>}
+          {parents.map((p) => {
+            const name = branchOf(p.id)
+            return name ? <option key={p.id} value={name}>{name}</option> : null
+          })}
+        </Select>
+
+        <div>
+          <input ref={picker} type="file" multiple accept={IMPORT_ACCEPT} className="hidden"
+                 onChange={(e) => { take(e.target.files); e.target.value = '' }} />
+          <button type="button" className="btn w-full" onClick={() => picker.current?.click()}>
+            <Plus size={14} /> {t('data.import_pick')}
+          </button>
+          <p className="mt-1.5 text-[11.5px] text-text-3">{t('data.import_formats')}</p>
+        </div>
+
+        {state.reading && <Spinner label={t('common.working')} />}
+
+        {files.length > 0 && (
+          <ul className="space-y-1">
+            {files.map((f) => (
+              <li key={f.name}
+                  className="flex items-center gap-2 rounded-md border border-line
+                             bg-surface-2 px-2.5 py-1.5">
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-text-2">
+                  {f.name}
+                </span>
+                <span className="shrink-0 text-[11px] tabular-nums text-text-3">
+                  {Math.max(1, Math.round(f.bytes / 1024))} KB
+                </span>
+                <button type="button" className="btn btn-sm btn-ghost"
+                        aria-label={t('common.cancel')}
+                        onClick={() => setFiles((fs) => fs.filter((x) => x.name !== f.name))}>
+                  <X size={13} />
+                </button>
+              </li>
+            ))}
+            <li className="pt-1 text-[11.5px] text-text-3">
+              {t('data.import_total', { n: files.length,
+                                        kb: Math.max(1, Math.round(total / 1024)) })}
+            </li>
+          </ul>
+        )}
+
+        {refused.length > 0 && (
+          <Note tone="warn">
+            {refused.map((r) => `${r.name} — ${r.why}`).join('; ')}
+          </Note>
+        )}
+
+        {state.job
+          ? <Note>{t('data.import_queued')}</Note>
+          : <Note>{t('data.import_note')}</Note>}
+        {state.error && <ErrorNote error={state.error} />}
+      </form>
+    </Modal>
+  )
+}
+
+/* Chunked so a large upload does not blow the argument limit of
+ * String.fromCharCode with one spread of the whole array. */
+async function toBase64(buffer) {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192))
+  }
+  return btoa(binary)
 }
 
 /** The new-row form takes the column's word for what it holds: a number

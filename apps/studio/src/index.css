@@ -200,6 +200,14 @@
   .syn-link { color: rgb(var(--syntax-link)); }
   .syn-heading { color: rgb(var(--syntax-heading)); @apply font-semibold; }
 
+  /* The editable code surface (design/ui.jsx `CodeArea`, spec J.5.10) types
+     into a transparent textarea over a coloured mirror. The selection is
+     painted by the textarea, which sits ON TOP — so an opaque highlight
+     would hide the very characters being selected. Translucent lets the
+     colour through, and it is the same trick every in-browser editor uses. */
+  .codearea::selection { background: rgb(var(--accent) / 0.28); }
+  .codearea::-moz-selection { background: rgb(var(--accent) / 0.28); }
+
   /* Rendered markdown. Written as element rules rather than as classes on
      the nodes because the markup comes from a parser, not from JSX — the
      styling has to attach to what markdown produces. */

@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -35,8 +36,13 @@ import yaml
 
 from monkeyllm import indexer
 from monkeyllm.errors import E_SCHEMA, VineError
-from monkeyllm.models import validate_summary
-from monkeyllm.parser import extract_section, serialize_node
+from monkeyllm.models import (
+    MANUAL_SECTION, MAX_DATASET_TABLES, SAMPLE_ROWS, SAMPLE_SECTION,
+    dataset_map, rows_label, validate_summary,
+)
+from monkeyllm.parser import (
+    append_section, extract_section, replace_section, serialize_node,
+)
 from monkeyllm.tokens import estimate_tokens
 from monkeyllm.vine import Vine
 
@@ -64,13 +70,23 @@ PAYLOAD_TYPE_BY_EXT = {
 
 @dataclass
 class Conversion:
-    """What a converter hands back: markdown OR a dataset description."""
+    """What a converter hands back: markdown, a dataset description, or —
+    for a format the forest already speaks — the payload itself (G.2.2).
 
-    kind: str  # "markdown" | "dataset"
+    `tables`/`samples`/`counts` describe a `payload` conversion for the
+    G.2.3 map: the structure read from the source, three rows per table,
+    and the row counts. They are never the data — a payload conversion
+    reads the shape of a database, never the whole of it.
+    """
+
+    kind: str  # "markdown" | "dataset" | "payload"
     title: str
     markdown: str = ""
     schema: dict | None = None          # C.7.1 declarative schema
     rows: dict[str, list[list]] | None = None
+    tables: dict[str, dict[str, str]] | None = None
+    samples: dict[str, list[list]] | None = None
+    counts: dict[str, int] | None = None
 
 
 class Converter(Protocol):
@@ -92,20 +108,32 @@ class MarkdownConverter:
 
 
 def _infer_column_type(values: list[str]) -> str:
-    """INTEGER < REAL < TEXT, judged over the sampled non-empty values."""
+    """INTEGER < REAL < TEXT, judged over the sampled non-empty values.
+
+    A native `float` is never INTEGER, whatever its fractional part: a
+    spreadsheet hands over `99.5` as a number, and `int(99.5)` truncates
+    silently where `int("99.5")` raises — so a column typed from strings
+    and the same column typed from a workbook would disagree, and the
+    workbook's version would lose money by rounding it.
+    """
     kind = "INTEGER"
     seen = False
     for v in values:
         if v is None or v == "":
             continue
         seen = True
+        if isinstance(v, (bool, int)):
+            continue
+        if isinstance(v, float):
+            kind = "REAL" if kind != "TEXT" else kind
+            continue
         try:
-            int(v)
+            int(str(v))
             continue
         except (TypeError, ValueError):
             pass
         try:
-            float(v)
+            float(str(v))
             kind = "REAL" if kind != "TEXT" else kind
         except (TypeError, ValueError):
             return "TEXT"
@@ -132,10 +160,9 @@ def slugify(text: str) -> str:
     return slug or "node"
 
 
-def _tabular_conversion(title: str, table: str, header: list[str],
-                        records: list[list]) -> Conversion:
-    cols = []
-    used = set()
+def _column_names(header: list[str]) -> list[str]:
+    cols: list[str] = []
+    used: set[str] = set()
     for i, name in enumerate(header):
         col = slugify(str(name) or f"col{i}").replace(".", "_").replace("-", "_")[:48]
         if not re.match(r"^[a-z_]", col):
@@ -144,21 +171,74 @@ def _tabular_conversion(title: str, table: str, header: list[str],
             col += "_"
         used.add(col)
         cols.append(col)
-    types = {
-        col: _infer_column_type([r[i] if i < len(r) else None for r in records])
-        for i, col in enumerate(cols)
-    }
-    rows = [
-        [_coerce(r[i] if i < len(r) else None, types[col]) for i, col in enumerate(cols)]
-        for r in records
-    ]
-    schema = {table: {"columns": types}}
-    return Conversion(kind="dataset", title=title, schema=schema, rows={table: rows})
+    return cols
+
+
+def _tables_conversion(title: str,
+                       tables: list[tuple[str, list[str], list[list]]]) -> Conversion:
+    """One `dataset` conversion out of one or more (name, header, records)
+    tables — a workbook's sheets (G.2.4) or a single delimited file."""
+    schema: dict = {}
+    rows: dict[str, list[list]] = {}
+    for table, header, records in tables:
+        cols = _column_names(header)
+        types = {
+            col: _infer_column_type([r[i] if i < len(r) else None for r in records])
+            for i, col in enumerate(cols)
+        }
+        schema[table] = {"columns": types}
+        rows[table] = [
+            [_coerce(r[i] if i < len(r) else None, types[col])
+             for i, col in enumerate(cols)]
+            for r in records
+        ]
+    return Conversion(kind="dataset", title=title, schema=schema, rows=rows)
+
+
+def _tabular_conversion(title: str, table: str, header: list[str],
+                        records: list[list]) -> Conversion:
+    return _tables_conversion(title, [(table, header, records)])
 
 
 def _table_name(path: Path) -> str:
-    name = slugify(path.stem).replace(".", "_").replace("-", "_")[:48]
+    return _sql_name(path.stem)
+
+
+def _sql_name(text: str) -> str:
+    """A table name out of arbitrary text — a filename, a sheet's tab."""
+    name = slugify(text).replace(".", "_").replace("-", "_")[:48]
     return name if re.match(r"^[a-z_]", name) else f"t_{name}"
+
+
+def _sheet_tables(sheets: list[tuple[str, list[list]]], path: Path,
+                  ) -> list[tuple[str, list[str], list[list]]]:
+    """G.2.4: every sheet becomes a table. Empty sheets are skipped; a
+    workbook with more sheets than C.7.1 allows is refused by name, because
+    taking sheet one and dropping the rest is how a spreadsheet arrives in
+    a forest missing the data somebody adopted it for."""
+    tables: list[tuple[str, list[str], list[list]]] = []
+    used: set[str] = set()
+    for sheet_name, data in sheets:
+        data = [row for row in data if any(v not in (None, "") for v in row)]
+        if len(data) < 2:
+            continue
+        table = _sql_name(sheet_name) or _table_name(path)
+        while table in used:
+            table += "_"
+        used.add(table)
+        header = [str(v) if v not in (None, "") else f"col{i}"
+                  for i, v in enumerate(data[0])]
+        tables.append((table, header, data[1:]))
+    if not tables:
+        raise VineError(E_SCHEMA, f"workbook has no data rows: {path.name}")
+    if len(tables) > MAX_DATASET_TABLES:
+        raise VineError(
+            E_SCHEMA,
+            f"workbook has {len(tables)} sheets with data: {path.name}",
+            hint=f"A dataset holds at most {MAX_DATASET_TABLES} tables "
+                 f"(C.7.1). Split the workbook, or drop the sheets that "
+                 f"are not data.")
+    return tables
 
 
 class CsvConverter:
@@ -200,7 +280,7 @@ class JsonConverter:
 
 
 class XlsxConverter:
-    """Built-in when openpyxl is importable: first sheet -> dataset."""
+    """Built-in when openpyxl is importable: one table per sheet (G.2.4)."""
 
     extensions = {".xlsx"}
 
@@ -208,15 +288,125 @@ class XlsxConverter:
         from openpyxl import load_workbook  # optional dependency
 
         wb = load_workbook(path, read_only=True, data_only=True)
-        ws = wb.worksheets[0]
-        data = [list(row) for row in ws.iter_rows(values_only=True)
-                if any(v is not None for v in row)]
-        wb.close()
-        if len(data) < 2:
-            raise VineError(E_SCHEMA, f"xlsx has no data rows: {path.name}")
-        header = [str(v) if v is not None else f"col{i}" for i, v in enumerate(data[0])]
-        return _tabular_conversion(path.stem.replace("-", " ").replace("_", " "),
-                                   _table_name(path), header, data[1:])
+        try:
+            sheets = [(ws.title, [list(row) for row in ws.iter_rows(values_only=True)])
+                      for ws in wb.worksheets]
+        finally:
+            wb.close()
+        return _tables_conversion(path.stem.replace("-", " ").replace("_", " "),
+                                  _sheet_tables(sheets, path))
+
+
+class XlsConverter:
+    """Built-in when xlrd is importable (G.2.4; xlrd is BSD-3, optional
+    `ingest` extra — same gating as the openpyxl and python-docx built-ins).
+    xlrd 2.x reads the legacy `.xls` format and only that, which is exactly
+    the gap openpyxl leaves."""
+
+    extensions = {".xls"}
+
+    def convert(self, path: Path) -> Conversion:
+        import xlrd  # optional dependency (ingest extra)
+
+        book = xlrd.open_workbook(str(path))
+        try:
+            sheets = [
+                (sheet.name,
+                 [[sheet.cell_value(r, c) for c in range(sheet.ncols)]
+                  for r in range(sheet.nrows)])
+                for sheet in book.sheets()
+            ]
+        finally:
+            if hasattr(book, "release_resources"):
+                book.release_resources()
+        return _tables_conversion(path.stem.replace("-", " ").replace("_", " "),
+                                  _sheet_tables(sheets, path))
+
+
+SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+class SqliteConverter:
+    """Built-in (G.2.2): a SQLite file IS a dataset payload, so it is
+    adopted rather than converted.
+
+    Nothing here reads the data: the structure of every table and its first
+    `SAMPLE_ROWS` rows are what the G.2.3 map needs, and the largest thing
+    this holds is `3 x columns` values per table. The bytes themselves are
+    the Gardener's to install — copying a database is O(bytes), while
+    rebuilding it row by row is unbounded in the source's size and lossy
+    wherever its declared types, views, indexes or BLOBs do not survive a
+    TEXT|INTEGER|REAL|BLOB round trip.
+    """
+
+    extensions = {".db", ".sqlite", ".sqlite3"}
+
+    def convert(self, path: Path) -> Conversion:
+        with path.open("rb") as fh:
+            if fh.read(len(SQLITE_MAGIC)) != SQLITE_MAGIC:
+                raise VineError(
+                    E_SCHEMA, f"not a SQLite database: {path.name}",
+                    hint="The file's header is not 'SQLite format 3'. An "
+                         "encrypted or truncated database reads the same way.")
+        tables, samples, counts = read_sqlite_map(path)
+        if not tables:
+            raise VineError(E_SCHEMA, f"database has no tables: {path.name}")
+        return Conversion(
+            kind="payload", title=path.stem.replace("-", " ").replace("_", " "),
+            tables=tables, samples=samples, counts=counts)
+
+
+def read_sqlite_map(db: Path) -> tuple[dict, dict, dict]:
+    """The G.2.3 map of a SQLite file: structure, first rows, row counts.
+
+    Tables only, and in name order: `look`'s `query_manual` (C.2) reads the
+    payload the same way, and a body claiming a view the digest never
+    mentions is two answers to "what is in this dataset". Name order also
+    keeps the map stable, so a `sync` rewrites it only when the data moved.
+
+    Read-only (`mode=ro`), and every per-table read is guarded on its own:
+    one unreadable table (a virtual table whose module is not loaded here)
+    costs its own row, never the whole map.
+    """
+    conn = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+    conn.text_factory = bytes_or_str
+    tables: dict[str, dict[str, str]] = {}
+    samples: dict[str, list[list]] = {}
+    counts: dict[str, int] = {}
+    try:
+        names = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        for name in names:
+            quoted = '"' + str(name).replace('"', '""') + '"'
+            try:
+                info = list(conn.execute(f"PRAGMA table_info({quoted})"))
+            except sqlite3.Error:
+                continue
+            if not info:
+                continue
+            tables[str(name)] = {str(c[1]): str(c[2] or "") for c in info}
+            try:
+                cur = conn.execute(f"SELECT * FROM {quoted} LIMIT {SAMPLE_ROWS}")
+                samples[str(name)] = [list(r) for r in cur.fetchall()]
+                counts[str(name)] = conn.execute(
+                    f"SELECT COUNT(*) FROM {quoted}").fetchone()[0]
+            except sqlite3.Error:
+                samples[str(name)] = []
+    finally:
+        conn.close()
+    return tables, samples, counts
+
+
+def bytes_or_str(raw: bytes):
+    """SQLite's text factory for a foreign database: decode when it is text,
+    keep the bytes when it is not. A source nobody in this project created
+    may hold any encoding, and a UnicodeDecodeError inside the map would
+    lose a table that reads perfectly well through `query`."""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw
 
 
 class DocxConverter:
@@ -320,11 +510,20 @@ class CommandConverter:
 
 
 def builtin_converters() -> list:
-    convs: list = [MarkdownConverter(), CsvConverter(), JsonConverter()]
+    # SQLite needs no optional dependency: it is the standard library and it
+    # is already this project's payload format (G.2.2).
+    convs: list = [MarkdownConverter(), CsvConverter(), JsonConverter(),
+                   SqliteConverter()]
     try:
         import openpyxl  # noqa: F401
 
         convs.append(XlsxConverter())
+    except ImportError:
+        pass
+    try:
+        import xlrd  # noqa: F401
+
+        convs.append(XlsConverter())
     except ImportError:
         pass
     try:
@@ -815,14 +1014,29 @@ class Gardener:
                 "rows": conversion.rows,
                 "summary": self._dataset_summary(conversion),
             })
+        elif conversion.kind == "payload":
+            # G.2.2: the source IS the payload. The body carries the map
+            # here rather than letting C.7.1 generate it — plant is not
+            # creating this database and has never read it.
+            draft.update({
+                "type": "dataset",
+                "payload_type": "sqlite",
+                "body": f"# {conversion.title}\n\n"
+                        + dataset_map(conversion.tables or {}, conversion.samples,
+                                      conversion.counts),
+                "summary": self._dataset_summary(conversion),
+            })
         else:
             draft.update({
                 "type": "note" if is_text_source else "document",
                 "body": conversion.markdown,
                 "summary": derive_summary(conversion.markdown, conversion.title),
             })
-        # G.7 archive policy: durable sources are referenced, not copied
-        if not is_text_source and self.config.get("archive", "never") == "always":
+        # G.7 archive policy: durable sources are referenced, not copied.
+        # A payload conversion's original IS its payload (G.2.2 rule 6) —
+        # archiving it would store the same bytes twice under two hashes.
+        if (not is_text_source and conversion.kind != "payload"
+                and self.config.get("archive", "never") == "always"):
             payload, ptype, phash = self._archive(f, branch_id)
             # dataset payload is its own .db; unknown payload types are
             # archived but not referenced (the A.3 enum stays honest)
@@ -833,17 +1047,63 @@ class Gardener:
         # curation sees the FULL converted text (G.7.4)…
         draft = self._curate(draft, report)
         # …and only then the content policy slims the node (G.7)
-        if conversion.kind != "dataset":
+        if conversion.kind == "markdown":
             draft = self._apply_content_policy(draft, conversion.title,
                                                is_text_source)
         if self.dry_run:
             report.drafts.append(draft)
             return
+        installed: Path | None = None
         try:
+            if conversion.kind == "payload":
+                installed = self._install_payload(node_id, f)
+                draft["payload"] = installed.name
+                draft["payload_hash"] = source_hash
             self.vine.plant(draft)
             report.planted.append(node_id)
         except VineError as e:
+            # C.7's atomicity extends to the copy (G.2.2 rule 5): a payload
+            # whose passport was refused is a file nothing references.
+            if installed is not None:
+                installed.unlink(missing_ok=True)
             report.errors.append(f"{rel.as_posix()}: {e.message}")
+        except Exception:
+            if installed is not None:
+                installed.unlink(missing_ok=True)
+            raise
+
+    def _install_payload(self, node_id: str, source: Path) -> Path:
+        """G.2.2 rule 2: the source database, copied beside its passport
+        under the bare `<leaf>.db` name a C.7.1 birth would have used."""
+        node_path = self.forest.path_for(node_id)
+        db = node_path.parent / f"{node_path.stem}.db"
+        if db.exists():
+            raise VineError(
+                E_SCHEMA, f"payload already exists: {db.name}",
+                hint="An adopted database never overwrites a payload.")
+        db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, db)
+        return db
+
+    @staticmethod
+    def _refresh_map(body: str, tables: dict, samples: dict | None,
+                     counts: dict | None) -> str:
+        """G.2.3 rule 4: rewrite the two generated sections and only those.
+
+        A payload that changed under a sample that did not is a stale claim
+        with a commit behind it — and a curator's own headings in the same
+        body are not the Gardener's to overwrite, so this replaces section
+        by section instead of replacing the body.
+        """
+        fresh = dataset_map(tables, samples, counts)
+        manual = extract_section(fresh, MANUAL_SECTION) or ""
+        sample = extract_section(fresh, SAMPLE_SECTION) or ""
+        for header, section in ((MANUAL_SECTION, manual), (SAMPLE_SECTION, sample)):
+            content = "\n".join(section.splitlines()[1:]).strip()
+            updated = replace_section(body, header, content)
+            body = updated if updated is not None else append_section(
+                body, header, content)
+        return body
 
     def _apply_content_policy(self, draft: dict, title: str,
                               is_text_source: bool) -> dict:
@@ -873,11 +1133,30 @@ class Gardener:
 
     @staticmethod
     def _dataset_summary(conversion: Conversion) -> str:
-        table, spec = next(iter(conversion.schema.items()))
-        n = len((conversion.rows or {}).get(table) or [])
-        cols = ", ".join(list(spec["columns"])[:6])
-        return (f"Tabular data '{conversion.title}': table {table} with "
-                f"{n} rows ({cols}). Adopted from source; pending curation.")
+        """G.2.3 rule 5: the scent names the tables, not just the first one.
+
+        A twelve-table database summarised as "table X with 6 rows" is a
+        scent for the wrong thing — `locate` reads this and nothing else
+        about the node.
+        """
+        if conversion.kind == "payload":
+            tables = conversion.tables or {}
+            counts = conversion.counts or {}
+        else:
+            tables = {t: spec["columns"] for t, spec in (conversion.schema or {}).items()}
+            counts = {t: len(rows) for t, rows in (conversion.rows or {}).items()}
+        named = [f"{t} ({rows_label(counts.get(t, 0))})" for t in list(tables)[:4]]
+        more = len(tables) - len(named)
+        listing = ", ".join(named) + (f", +{more} more" if more > 0 else "")
+        noun = "table" if len(tables) == 1 else f"{len(tables)} tables"
+        summary = (f"Tabular data '{conversion.title}': {noun} "
+                   f"{listing}. Adopted from source; pending curation.")
+        try:
+            validate_summary(summary)
+        except VineError:
+            summary = (f"Tabular data '{conversion.title}' with {len(tables)} "
+                       f"table(s). Adopted from source; pending curation.")
+        return summary
 
     # -- sync (G.3) ----------------------------------------------------------
 
@@ -1041,6 +1320,20 @@ class Gardener:
             finally:
                 conn.close()
             fm["payload_hash"] = hashlib.sha256(db.read_bytes()).hexdigest()
+            body = self._refresh_map(
+                body,
+                {t: {c: ty.upper() for c, ty in s["columns"].items()}
+                 for t, s in conversion.schema.items()},
+                conversion.rows,
+                {t: len(r) for t, r in (conversion.rows or {}).items()})
+        elif conversion.kind == "payload":
+            # G.2.2 rule 5: the source replaces the payload whole.
+            db = self.forest.payload_path(node)
+            db.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(f, db)
+            fm["payload_hash"] = new_hash
+            body = self._refresh_map(body, conversion.tables or {},
+                                     conversion.samples, conversion.counts)
         elif fm.get("content") == "cached":
             self._write_body_cache(node_id, conversion.markdown)  # body stays a stub
         elif fm.get("content") == "reference":
