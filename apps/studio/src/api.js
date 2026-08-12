@@ -155,6 +155,10 @@ export const api = {
     request('/v1/admin/canopy', { method: 'POST', body: { forest } }),
   setCanopy: (forest, enabled) =>
     request('/v1/admin/canopy', { method: 'POST', body: { forest, enabled } }),
+  // J.13.4: embed what changed. Not a build — a model change needs the
+  // whole index rebuilt, because a partial re-embed spans two spaces (K.4).
+  refreshCanopy: (forest) =>
+    request('/v1/admin/canopy', { method: 'POST', body: { forest, refresh: true } }),
 
   // maintenance (J.13): the Ranger's report, and Part I over REST.
   // NOT `health` — that name belongs to the Station's own liveness probe

@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.41.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.42.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -89,6 +89,20 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 - **locate/sniff contract split** (spec C.6b): `locate` searches curated
   metadata only; `sniff` searches bodies only (literal grep, no regex).
   Never mix the two.
+- **A read embeds the query and nothing else (spec K.2 + K.6 + J.13.4,
+  v0.42)**: lazy re-embedding used to run inside `locate`, so the question
+  arriving after an ingest paid to embed every document of it — unbounded
+  work in the primitive with the tightest budget (F.6); one measured
+  `locate` cost 2.67 s. The vector scan was never the problem (0.044 ms
+  per dim-1024 dot product). Now: reads embed only the query, through the
+  **K.6 memo** (`embed(model, text)` is pure → `_derived`, keyed by model
+  + normalized text, LRU-bounded); node vectors are refreshed **only** by
+  `build_canopy` or `POST /v1/admin/canopy {refresh: true}` (J.13.4, in
+  Studio's Optimize tab). The debt is visible: `canopy_status` carries
+  `stale`. A node not yet embedded is still found by BM25 — the catalog
+  upsert is synchronous — so the cost is dense-half recall, never
+  findability. A refresh against an absent/mismatched index REFUSES
+  (K.4: a partial re-embed spans two spaces and fails silently).
 - **The repair is on the console (spec J.13.3, v0.41)**: `POST
   /v1/admin/reindex` rebuilds one forest's catalog — `admin` on that
   forest AND an unrestricted scope (the count IS the forest's size and

@@ -88,5 +88,11 @@
   "ingest.rebuild_hint": "Os arquivos são a verdade e o índice é derivado deles, então este é o reparo para tudo que parecer desatualizado: uma entrada que falta, uma busca que não acha um nó que você consegue ler, uma floresta que veio de um snapshot ou de uma versão anterior. Ele lê todos os nós e reescreve o índice. Nada é escrito na floresta em si e nenhum histórico muda.",
   "ingest.rebuild_start": "Reconstruir",
   "ingest.rebuild_running": "Reconstruindo…",
-  "ingest.rebuild_done": "{n} nós reconstruídos em {ms} ms."
+  "ingest.rebuild_done": "{n} nós reconstruídos em {ms} ms.",
+  "ingest.dense_title": "Atualizar a camada vetorial",
+  "ingest.dense_sub": "Embeda o que mudou desde que o índice foi construído.",
+  "ingest.dense_behind": "{n} nó(s) foram escritos desde a última construção, então a busca híbrida ordena sem eles. Continuam sendo encontrados por palavra-chave — só a metade vetorial está atrasada. Atualizar embeda exatamente esses.",
+  "ingest.dense_current": "Em dia: os {n} vetores correspondem ao que está na floresta.",
+  "ingest.dense_start": "Atualizar",
+  "ingest.dense_running": "Embedando…"
 }

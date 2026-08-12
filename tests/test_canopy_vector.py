@@ -106,9 +106,11 @@ class TestLocateContract:
         finally:
             v.close()
 
-    def test_lazy_reembed_after_plant(self, forest_rw):
-        """Spec Fase 1, exit criterion 4: write → stale → next hybrid search
-        reflects the change, without an offline rebuild."""
+    def test_a_new_node_is_found_before_it_is_embedded(self, forest_rw):
+        """K.2 as amended (v0.42): the read path embeds the query and nothing
+        else. A node written a second ago is found by BM25 immediately and
+        joins the dense half when somebody refreshes — the debt costs recall
+        in one half, never findability."""
         emb = HashEmbedder()
         v = Vine(forest_rw, writable=True, embedder=emb, hybrid_locate=True)
         try:
@@ -118,22 +120,29 @@ class TestLocateContract:
                 "id": "notes/quantum-buzz",
                 "type": "note",
                 "title": "Quantum buzz",
-                "summary": "Fictional quantum buzz phenomenon used to test lazy re-embedding of the vector layer.",
+                "summary": "Fictional quantum buzz phenomenon used to test the vector layer's refresh.",
                 "parent": "notes/_index",
                 "body": "# Quantum buzz\n\n## Content\n\nTest.",
                 "source": "agent",
             })
             assert "notes/quantum-buzz" in v.catalog.stale_ids()
+
             out = v.locate("quantum buzz phenomenon", k=5)
-            ids = [r["id"] for r in out["results"]]
-            assert "notes/quantum-buzz" in ids
-            # vector layer grew and stale flags were consumed
+            assert "notes/quantum-buzz" in [r["id"] for r in out["results"]]
+            # The question paid for the question, and for nothing anybody
+            # else wrote: no node was embedded by that read.
+            assert len(v.canopy) == n0
+            assert v.canopy_status["stale"] == 1
+
+            out = v.refresh_canopy()
+            assert out["refreshed"] == 1
             assert len(v.canopy) > n0
             assert v.catalog.stale_ids() == []
+            assert v.canopy_status["stale"] == 0
         finally:
             v.close()
 
-    def test_lazy_reembed_after_graft_summary_change(self, forest_rw):
+    def test_refresh_reembeds_a_changed_summary(self, forest_rw):
         emb = HashEmbedder()
         v = Vine(forest_rw, writable=True, embedder=emb, hybrid_locate=True)
         try:
@@ -143,10 +152,37 @@ class TestLocateContract:
             v.graft(target, {"set_frontmatter": {
                 "summary": "FAQ now covering the stellar xylophone protocol and the planting routine."
             }})
-            v.locate("stellar xylophone protocol", k=5)  # triggers the refresh
-            new_vec = v.canopy.vectors[v.canopy.ids.index(target)]
-            assert new_vec != old_vec
+            v.locate("stellar xylophone protocol", k=5)
+            assert v.canopy.vectors[v.canopy.ids.index(target)] == old_vec, \
+                "a read re-embedded a node"
+
+            v.refresh_canopy()
+            assert v.canopy.vectors[v.canopy.ids.index(target)] != old_vec
             assert v.catalog.stale_ids() == []
+        finally:
+            v.close()
+
+    def test_the_query_is_embedded_once_per_distinct_text(self, forest_rw):
+        """K.6: embed(model, text) is pure, so the round trip is owed once
+        per question rather than once per asking."""
+        emb = HashEmbedder()
+        calls = []
+        original = emb.embed
+        emb.embed = lambda texts: (calls.append(list(texts)), original(texts))[1]
+        v = Vine(forest_rw, writable=True, embedder=emb, hybrid_locate=True)
+        try:
+            v.build_canopy()
+            calls.clear()
+            v.locate("stellar xylophone protocol", k=5)
+            assert calls == [["stellar xylophone protocol"]]
+            v.locate("stellar xylophone protocol", k=5)
+            assert len(calls) == 1, "the same question paid twice"
+            v.locate("a different question entirely", k=5)
+            assert len(calls) == 2
+
+            v.catalog.embed_memo_clear()
+            v.locate("stellar xylophone protocol", k=5)
+            assert len(calls) == 3, "dropping the memo must cost latency only"
         finally:
             v.close()
 

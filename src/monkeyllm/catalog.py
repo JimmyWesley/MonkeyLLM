@@ -13,6 +13,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import struct
+from collections.abc import Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 
 from monkeyllm.forest import Forest, tune_derived
@@ -77,6 +80,17 @@ CREATE TABLE IF NOT EXISTS sniff_memo (
     PRIMARY KEY (term, node_id)
 );
 CREATE INDEX IF NOT EXISTS idx_sniff_memo_node ON sniff_memo(node_id);
+
+-- K.6: one text embedded by one model. Caller-supplied texts only —
+-- queries and `toward` goals. A node's vector lives in the Canopy index,
+-- and storing it here too would be a second answer to the same question.
+CREATE TABLE IF NOT EXISTS embed_memo (
+    model TEXT NOT NULL,
+    text TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    used TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (model, text)
+);
 
 CREATE TABLE IF NOT EXISTS edges (
     src TEXT NOT NULL,
@@ -187,6 +201,56 @@ class Catalog:
 
     def sniff_memo_clear(self) -> None:
         self.conn.execute("DELETE FROM sniff_memo")
+        self.conn.commit()
+
+    # -- the embedding memo (K.6) -------------------------------------------
+
+    def embed_memo(self, model: str, text: str) -> list[float] | None:
+        """One text's vector under one model, or None.
+
+        The model is half the key because a vector from another model's
+        space is the meaningless comparison K.4 exists to prevent — and it
+        fails silently, since a dot product always returns a number.
+        """
+        row = self.conn.execute(
+            "SELECT vector FROM embed_memo WHERE model = ? AND text = ?",
+            (model, text)).fetchone()
+        if row is None:
+            return None
+        blob = row["vector"]
+        return list(struct.unpack(f"<{len(blob) // 4}f", blob))
+
+    def embed_memo_store(self, model: str, text: str, vector: Sequence[float],
+                         bound: int = 2000) -> None:
+        """Keep the vector, and keep the table from growing forever.
+
+        Eviction is least-recently-used by the same reasoning as H.6: the
+        memo is a saving, and a saving that consumes the volume it lives on
+        stopped being one.
+        """
+        self.conn.execute(
+            "INSERT INTO embed_memo (model, text, vector, used) VALUES (?,?,?,?) "
+            "ON CONFLICT(model, text) DO UPDATE SET vector = excluded.vector, "
+            "used = excluded.used",
+            (model, text,
+             struct.pack(f"<{len(vector)}f", *[float(x) for x in vector]),
+             datetime.now(timezone.utc).isoformat()))
+        self.conn.execute(
+            "DELETE FROM embed_memo WHERE rowid NOT IN "
+            "(SELECT rowid FROM embed_memo ORDER BY used DESC LIMIT ?)",
+            (int(bound),))
+        self.conn.commit()
+
+    def embed_memo_touch(self, model: str, text: str) -> None:
+        """A hit is a use — otherwise the eviction above would drop exactly
+        the entries that are earning their keep."""
+        self.conn.execute(
+            "UPDATE embed_memo SET used = ? WHERE model = ? AND text = ?",
+            (datetime.now(timezone.utc).isoformat(), model, text))
+        self.conn.commit()
+
+    def embed_memo_clear(self) -> None:
+        self.conn.execute("DELETE FROM embed_memo")
         self.conn.commit()
 
     def reindex(self) -> int:

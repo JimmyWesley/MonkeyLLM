@@ -1906,6 +1906,16 @@ def build_app(
                     return {"error": VineError(
                         E_SCHEMA, "no embedding model is bound to this forest",
                         hint="Bind one under Models, then build the index.").to_dict()["error"]}
+                # J.13.4: refresh embeds what changed, build embeds
+                # everything. They are not interchangeable — a model change
+                # requires the build, because a partial re-embed would leave
+                # the index in two spaces at once (K.4).
+                if body.get("refresh"):
+                    try:
+                        return {**vine.refresh_canopy(),
+                                "enabled": registry.setting(forest, "gauntlet", True)}
+                    except VineError as e:
+                        return e.to_dict()
                 vine.build_canopy()
             return {**vine.canopy_status,
                     "enabled": registry.setting(forest, "gauntlet", True)}

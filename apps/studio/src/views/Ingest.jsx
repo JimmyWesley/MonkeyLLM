@@ -520,7 +520,10 @@ export default function Ingest({ forest, grant, goto }) {
             offering any way to. Its own card because it is not an ingest —
             it plants nothing, joins no queue and takes no destination. */}
         {mode === 'optimize' && has(grant, 'admin') && (
-          <Rebuild forest={forest} />
+          <>
+            <Rebuild forest={forest} />
+            <DenseLayer forest={forest} />
+          </>
         )}
         {state.busy && <Card><Spinner label={t('ingest.running')} /></Card>}
         {state.error && <Card><ErrorNote error={state.error} /></Card>}
@@ -1002,6 +1005,53 @@ function Rebuild({ forest }) {
                 onClick={run}>
           <Refresh size={14} />
           {state.busy ? t('ingest.rebuild_running') : t('ingest.rebuild_start')}
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+/** The dense layer's freshness (J.13.4, K.4).
+ *
+ *  Until v0.42 this happened by itself, inside whichever `locate` arrived
+ *  after somebody's ingest — so a question paid to embed two hundred
+ *  documents it never asked about, in the primitive with the tightest
+ *  budget in the spec. It is a choice now, and the number that says what
+ *  the choice costs is printed above the button. */
+function DenseLayer({ forest }) {
+  const { t } = useI18n()
+  const [state, setState] = useState({})
+  const status = useAsync(() => api.canopy(forest), [forest])
+  const now = state.done || status.data
+
+  // Nothing to say to a forest that never built an index: Models is where
+  // that conversation belongs, and repeating it here would send the
+  // operator to a second console to do the first thing.
+  if (status.busy || !now || !now.vectors) return null
+
+  const refresh = async () => {
+    setState({ busy: true })
+    try {
+      setState({ done: await api.refreshCanopy(forest) })
+    } catch (error) {
+      setState({ error })
+    }
+  }
+
+  return (
+    <Card title={t('ingest.dense_title')} subtitle={t('ingest.dense_sub')}
+          icon={Refresh}>
+      <Note>
+        {now.stale
+          ? t('ingest.dense_behind', { n: now.stale })
+          : t('ingest.dense_current', { n: now.vectors })}
+      </Note>
+      {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
+      <div className="mt-4 flex justify-end">
+        <button type="button" className="btn"
+                disabled={state.busy || !now.stale} onClick={refresh}>
+          <Refresh size={14} />
+          {state.busy ? t('ingest.dense_running') : t('ingest.dense_start')}
         </button>
       </div>
     </Card>

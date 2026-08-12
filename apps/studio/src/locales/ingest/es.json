@@ -88,5 +88,11 @@
   "ingest.rebuild_hint": "Los archivos son la verdad y el índice se deriva de ellos, así que esta es la reparación para todo lo que parezca desactualizado: una entrada que falta, una búsqueda que no encuentra un nodo que sí puedes leer, un bosque que llegó de un snapshot o de una versión anterior. Lee todos los nodos y reescribe el índice. No se escribe nada en el bosque en sí y ningún historial cambia.",
   "ingest.rebuild_start": "Reconstruir",
   "ingest.rebuild_running": "Reconstruyendo…",
-  "ingest.rebuild_done": "{n} nodos reconstruidos en {ms} ms."
+  "ingest.rebuild_done": "{n} nodos reconstruidos en {ms} ms.",
+  "ingest.dense_title": "Actualizar la capa vectorial",
+  "ingest.dense_sub": "Embebe lo que cambió desde que se construyó el índice.",
+  "ingest.dense_behind": "{n} nodo(s) se escribieron desde la última construcción, así que la búsqueda híbrida ordena sin ellos. Siguen encontrándose por palabra clave — solo la mitad vectorial está atrasada. Actualizar embebe exactamente esos.",
+  "ingest.dense_current": "Al día: los {n} vectores corresponden a lo que hay en el bosque.",
+  "ingest.dense_start": "Actualizar",
+  "ingest.dense_running": "Embebiendo…"
 }

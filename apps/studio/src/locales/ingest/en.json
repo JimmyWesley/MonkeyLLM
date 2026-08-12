@@ -88,5 +88,11 @@
   "ingest.rebuild_hint": "The files are the truth and the index is derived from them, so this is the repair for anything that looks out of date: a missing entry, a search that misses a node you can read, a forest that arrived from a snapshot or an older version. It reads every node and rewrites the index. Nothing is written to the forest itself and no history changes.",
   "ingest.rebuild_start": "Rebuild",
   "ingest.rebuild_running": "Rebuilding…",
-  "ingest.rebuild_done": "Rebuilt {n} nodes in {ms} ms."
+  "ingest.rebuild_done": "Rebuilt {n} nodes in {ms} ms.",
+  "ingest.dense_title": "Refresh the vector layer",
+  "ingest.dense_sub": "Embed what changed since the index was built.",
+  "ingest.dense_behind": "{n} node(s) have been written since the last build, so hybrid search ranks without them. They are still found by keyword — only the vector half is behind. Refreshing embeds exactly those.",
+  "ingest.dense_current": "Up to date: all {n} vectors match what is in the forest.",
+  "ingest.dense_start": "Refresh",
+  "ingest.dense_running": "Embedding…"
 }

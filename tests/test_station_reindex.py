@@ -178,3 +178,21 @@ def test_an_unknown_forest_is_not_invented(station):
     r = client.post("/v1/admin/reindex", json={"forest": "nope"},
                     headers={"Authorization": f"Bearer {key}"})
     assert r.status_code == 404
+
+
+# -- the dense layer's refresh (J.13.4) -------------------------------------
+
+
+def test_refresh_without_an_index_is_refused_not_half_done(station):
+    """K.4 stands ahead of J.13.4: a partial re-embed against an absent or
+    mismatched index would leave it in two spaces at once, and a dot product
+    never says so — it just returns a number."""
+    client, registry, _ = station
+    head = _admin(registry)
+    r = client.post("/v1/admin/canopy",
+                    json={"forest": FOREST, "refresh": True}, headers=head)
+    assert r.status_code in (200, 400)
+    body = r.json()
+    # No embedder is bound in this Station, so it must say so rather than
+    # report a refresh that embedded nothing.
+    assert "error" in body, body

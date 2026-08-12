@@ -355,7 +355,12 @@ class Vine:
             state = "active"
         return {"state": state, "active": state == "active",
                 "index_model": index_model, "query_model": query_model,
-                "vectors": len(self.canopy) if self.canopy is not None else 0}
+                "vectors": len(self.canopy) if self.canopy is not None else 0,
+                # K.4 (v0.42): what a refresh would cost, before it runs. A
+                # layer quietly behind is indistinguishable from a current
+                # one, and since v0.42 no read pays this debt down by
+                # surprise — somebody has to choose to.
+                "stale": len(self.catalog.stale_ids())}
 
     # -- the Gauntlet (Part K) ---------------------------------------------
 
@@ -370,16 +375,17 @@ class Vine:
         if enabled is False or not self.dense_ready:
             return None
         if toward:
-            # An explicit goal costs its own embedding. That is the price of
-            # testability, and it is why it is not the default path.
-            return self.embedder.embed([toward])[0], toward
+            # An explicit goal costs its own embedding — once per distinct
+            # text, since v0.42 (K.6). That is the price of testability, and
+            # it is why it is not the default path.
+            return self.embed_query(toward), toward
         if self._goal_text is None:
             return None
         if self._goal is None:
             # Paid once, on the first hop of the hunt — not in `locate`, and
             # never at all for a hunt that only ever reads the entry list.
-            self._refresh_canopy()
-            self._goal = self.embedder.embed([self._goal_text])[0]
+            # Nothing is re-embedded here but the goal itself (K.2, v0.42).
+            self._goal = self.embed_query(self._goal_text)
         return self._goal, self._goal_text
 
     def _rank_frontier(self, items, goal, id_of=lambda x: x["id"],
@@ -415,10 +421,49 @@ class Vine:
         self.catalog.clear_stale(self.catalog.stale_ids())
         return {"nodes": len(idx), "model": idx.model, "dim": idx.dim}
 
+    def embed_query(self, text: str) -> list[float]:
+        """Embed ONE caller-supplied text, through the K.6 memo.
+
+        `embed(model, text)` is pure, so the round trip is owed once per
+        distinct question rather than once per asking. Node vectors do not
+        come through here: the Canopy index is their home, and a second
+        copy would be a second answer to "what is this node's vector".
+        """
+        key = " ".join(str(text).split())
+        model = self.embedder.model
+        cached = self.catalog.embed_memo(model, key)
+        if cached is not None:
+            self.catalog.embed_memo_touch(model, key)
+            return cached
+        vec = self.embedder.embed([text])[0]
+        self.catalog.embed_memo_store(model, key, vec)
+        return vec
+
+    def refresh_canopy(self) -> dict:
+        """Embed the nodes marked stale by plant/graft/ingest (J.13.4).
+
+        Maintenance, never a read: this used to run inside `locate`, which
+        meant the question that happened to arrive after an ingest paid for
+        every document of it — unbounded work inside the primitive with the
+        tightest budget in the spec (F.6). It is triggered now, and what it
+        will cost is reported before it runs (K.4's `stale`).
+        """
+        if self.embedder is None:
+            raise VineError(E_SCHEMA, "refreshing the dense layer needs an embedder",
+                            hint="Bind an embedding model, then refresh.")
+        if not self.dense_ready:
+            raise VineError(
+                E_SCHEMA, "the dense layer is not usable, so a partial "
+                          "re-embed would leave it in two spaces at once",
+                hint="Build the index first (K.4): a model change requires a "
+                     "full build, never a refresh.")
+        stale = self.catalog.stale_ids()
+        self._refresh_canopy()
+        return {"refreshed": len(stale), **self.canopy_status}
+
     def _refresh_canopy(self) -> None:
-        """Lazy re-embedding (spec Phase 1): nodes marked stale by plant/graft
-        get their vectors refreshed before the next hybrid search, so the
-        dense layer reflects writes without an offline rebuild."""
+        """The re-embed itself. Called by `refresh_canopy` and by nothing in
+        a read path — see K.2 as amended in v0.42."""
         stale = self.catalog.stale_ids()
         if not stale:
             return
@@ -516,8 +561,9 @@ class Vine:
         # and would charge it to every hunt that never leaves the entry list.
         self._goal, self._goal_text = None, query
         if self.hybrid:
-            self._refresh_canopy()
-            qvec = self.embedder.embed([query])[0]
+            # The query, and nothing else (K.2 as amended in v0.42). Node
+            # vectors are refreshed by J.13.4, not by whoever asked next.
+            qvec = self.embed_query(query)
             self._goal = qvec
             vec_hits = self.canopy.search(qvec, k=cand)
             for vid, _cos in vec_hits:
