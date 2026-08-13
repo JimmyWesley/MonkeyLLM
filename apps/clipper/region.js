@@ -561,13 +561,19 @@
     setTimeout(() => input.focus(), 0);
   }
 
+  // Removing a focused <input> fires its own blur, and blur commits — so
+  // both exits release `textInput` BEFORE touching the DOM. Otherwise the
+  // blur re-enters, removes the node the outer call is still removing, and
+  // the outer remove() throws NotFoundError; Escape was worse still, since
+  // the re-entrant commit wrote the very label the discard was refusing.
   function commitTextInput() {
-    if (!textInput) return;
-    const value = textInput.value.trim();
-    const { x, y } = { x: Number(textInput.dataset.x), y: Number(textInput.dataset.y) };
-    const color = textInput.dataset.color;
-    textInput.remove();
+    const input = textInput;
+    if (!input) return;
     textInput = null;
+    const value = input.value.trim();
+    const { x, y } = { x: Number(input.dataset.x), y: Number(input.dataset.y) };
+    const color = input.dataset.color;
+    input.remove();
     if (value) {
       annotations.push({ kind: 'text', x, y, text: value,
                          color: color || annotColor });
@@ -576,9 +582,10 @@
   }
 
   function discardTextInput() {
-    if (!textInput) return;
-    textInput.remove();
+    const input = textInput;
+    if (!input) return;
     textInput = null;
+    input.remove();
   }
 
   // -- layout ----------------------------------------------------------------

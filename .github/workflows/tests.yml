@@ -1,0 +1,54 @@
+# The suite must stay green (CLAUDE.md). This is what the `main` ruleset's
+# required status check points at: without a check to require, "require status
+# checks to pass" is a rule with nothing in it.
+#
+# No GPU and no network: the suite drives scripted models and a deterministic
+# HashEmbedder stands in for the embedder, so a runner is enough.
+name: tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Read-only by default. A public repo's workflow that needs no write should
+# never be handed one.
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject declares requires-python >=3.11; both claimed versions run.
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # plant/graft commit inside the forest (spec C.7/C.8) and the fixture
+      # builds its own embedded git, so the runner needs an identity or every
+      # commit dies on "Please tell me who you are".
+      - name: Give the runner a git identity
+        run: |
+          git config --global user.name  "monkeyllm-ci"
+          git config --global user.email "ci@monkeyllm.invalid"
+          git config --global init.defaultBranch main
+
+      # `ingest` carries the G.2 built-in readers (openpyxl, python-docx,
+      # xlrd) that three test modules import.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,ingest]"
+
+      - name: pytest
+        run: python -m pytest -q

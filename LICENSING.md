@@ -10,6 +10,7 @@ the host is a product meant to be operated.
 | `docs/`, `tests/`, `bench/`, `troop/`, `scripts/`, `examples/`, `forests/scripts/`, `paper/`, `deploy/` | **Apache-2.0** | The spec, the benchmark and the deployment glue are only useful if everyone can copy them. |
 | `apps/station/` the Station (REST, MCP surface, governance) | **AGPL-3.0-only** | Self-hosting stays completely free. Offering it as a managed service means opening your service stack. |
 | `apps/studio/` the Studio web console | **AGPL-3.0-only** | Same reason: it is the operated product, not the contract. |
+| `apps/clipper/` the browser extension | **AGPL-3.0-only** | A client of the Station, distributed by it (spec J.15) — the same product, on the other side of the wire. |
 
 The root [`LICENSE`](LICENSE) is Apache-2.0 and covers everything **except**
 `apps/`. Each package under `apps/` carries its own `LICENSE`.
@@ -49,7 +50,20 @@ stack a commercial license is available. Contact the copyright holder.
 
 ## Contributing
 
-Contributions require a **Developer Certificate of Origin** sign-off
-(`git commit -s`) so that the dual-licensing above remains possible. A
-contribution taken without it would leave a copyright holder who never
-agreed to relicense, and the commercial option would quietly disappear.
+Contributions come in under **Apache-2.0 on every path** — including
+`apps/`, which this project distributes under AGPL-3.0-only. That inbound
+licence is what keeps the dual licensing above possible: Apache-2.0 travels
+one way into an AGPL tree, so a permissively licensed contribution can be
+distributed under the AGPL *and* under commercial terms, while a
+contribution accepted under AGPL alone could be distributed under neither
+without its author's separate permission. It would leave a copyright holder
+who never agreed to relicense, and the commercial option would quietly
+disappear — one merged pull request at a time.
+
+Every commit is also signed off (`git commit -s`) under the **Developer
+Certificate of Origin**, and CI enforces it. The two do different jobs and
+both are required: the DCO certifies where the code came from, the inbound
+licence decides what the project may do with it. A sign-off alone would not
+make the dual licensing possible.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the exact wording of both.

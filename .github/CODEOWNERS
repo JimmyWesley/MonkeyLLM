@@ -1,0 +1,14 @@
+# Every path has one owner. GitHub requests his review on every pull request
+# touching it, and the `main` ruleset can require that review before a merge.
+* @JimmyWesley
+
+# The spec is the truth (CLAUDE.md): a contract change is a spec version, so
+# these two are named explicitly rather than inherited from the catch-all.
+/docs/monkeyllm-spec-*.md @JimmyWesley
+/paper/                   @JimmyWesley
+
+# The licence boundary is legal, not stylistic: Apache-2.0 for the engine,
+# AGPL-3.0-only for the host, and src/monkeyllm must never import from apps/.
+/LICENSE      @JimmyWesley
+/LICENSING.md @JimmyWesley
+/NOTICE       @JimmyWesley

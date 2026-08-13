@@ -31,5 +31,12 @@ scripts/make_dark_logo.py
 scripts/make_rounded_icon.py
 scripts/gen_icons.py
 
+# Agent session state. Untracked but unignored is not the same as ignored: the
+# directory holds worktrees (each a full second copy of the repo, paper
+# included) and session transcripts, so one distracted `git add .` publishes
+# them. Anchored to the repository root — a worktree's own .claude is the
+# same directory seen from inside.
+/.claude/
+
 # macOS Finder
 .DS_Store
