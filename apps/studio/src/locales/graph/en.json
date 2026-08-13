@@ -21,9 +21,9 @@
   "graph.legend_shortcut": "shortcut a hunt discovered",
   "graph.legend_trail": "curated trail",
   "graph.link_width": "Link thickness",
-  "graph.live": "Live",
   "graph.min_heat": "Minimum heat",
   "graph.node_size": "Node size",
+  "graph.now": "Now",
   "graph.open_in_files": "Open in Files",
   "graph.orphans": "Orphans",
   "graph.pause": "Pause",
@@ -35,6 +35,7 @@
   "graph.shortcuts": "Shortcuts",
   "graph.structure": "Structure",
   "graph.text_threshold": "Text fade threshold",
+  "graph.timeline": "Timeline",
   "graph.tip_stats": "{degree} trails · heat {heat}",
   "graph.truncated": "Showing the most connected nodes only",
   "graph.view": "View"

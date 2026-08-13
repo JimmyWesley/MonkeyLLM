@@ -31,7 +31,16 @@
  *    per forest. The address carries the selection, not the taste.
  * 5. **Replay is presentation over the projection already in hand** (J.5.4
  *    v0.38): `created` order, no second call, no write. Under reduced
- *    motion it is a scrubber, not an animation.
+ *    motion it is a scrubber, not an animation — and the scrubber is
+ *    docked under the canvas at all times: drag back to see the forest as
+ *    it stood on a day, press play to watch it grow, and "now" is simply
+ *    the right end of the slider.
+ * 6. **The forest wakes, it is never spat out.** A fresh build starts with
+ *    the camera already framing the seeded layout and births the nodes in
+ *    `created` order over a couple of seconds while the camera eases
+ *    outward with the bloom — no late snap-to-fit. Any hand on the map
+ *    (canvas, slider, filters) ends the wake instantly, and reduced
+ *    motion skips it entirely.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../i18n.jsx'
@@ -309,15 +318,17 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   const canvas = useRef(null)
   const box = useRef(null)
   const sim = useRef({ nodes: [], springs: [], index: {}, order: [],
-                       alpha: 0, alphaTarget: 0, active: false, fitted: false,
-                       rand: Math.random })
+                       alpha: 0, alphaTarget: 0, active: false, autoFit: false,
+                       wake: null, rand: Math.random })
   const view = useRef({ x: 0, y: 0, k: 1 })
   const needsDraw = useRef(true)
 
   const [settings, setSettings] = useState(() => loadSettings(forest))
   const [panel, setPanel] = useState(false)
   const [hover, setHover] = useState(null)
-  const [replay, setReplay] = useState({ on: false, playing: false, t: 0 })
+  // The docked timeline: t counts born nodes, and Infinity means "now"
+  // until the first build says how many nodes now holds.
+  const [timeline, setTimeline] = useState({ t: Infinity, playing: false })
   const [hitCount, setHitCount] = useState(null)
 
   const calm = typeof matchMedia === 'function'
@@ -327,7 +338,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   // loop mounted for the life of the view never sees a stale closure.
   const paramsRef = useRef(settings)
   const focusRef = useRef({ hover: null, selected: null })
-  const replayRef = useRef(replay)
+  const timelineRef = useRef(timeline)
   const paletteRef = useRef(null)
   const drawRef = useRef(() => {})
 
@@ -341,7 +352,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
                            JSON.stringify({ ...settings, query: '' }))
     } catch { /* a full or absent storage costs the tuning, never the map */ }
   }, [settings, forest])
-  useEffect(() => { replayRef.current = replay }, [replay])
+  useEffect(() => { timelineRef.current = timeline }, [timeline])
   useEffect(() => {
     focusRef.current = { hover, selected }
     needsDraw.current = true
@@ -468,6 +479,27 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     needsDraw.current = true
   }, [groups, palette, applyColors])
 
+  /* Any hand on the map ends the wake at once: the intro is a welcome,
+     never a wait. The rest of the forest arrives with the pop ease, so
+     even the interruption reads as growth, not as a cut. */
+  const wakeOff = useCallback(() => {
+    const s = sim.current
+    if (!s.wake) return
+    s.wake = null
+    if (s.alive < s.nodes.length) {
+      const now = performance.now()
+      for (let rank = s.alive; rank < s.nodes.length; rank++) {
+        s.nodes[s.order[rank]].bornAt = now
+      }
+      s.alive = s.nodes.length
+      s.lastAlive = s.nodes.length
+      applyFilters(s)
+      s.alpha = Math.max(s.alpha, 0.3)
+      s.active = true
+    }
+    needsDraw.current = true
+  }, [applyFilters])
+
   const settle = useCallback((ticks) => {
     const el = canvas.current
     const s = sim.current
@@ -568,25 +600,40 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     const s = {
       nodes, springs, index, order,
       alive: nodes.length, lastAlive: nodes.length,
-      alpha: 1, alphaTarget: 0, active: true, fitted: false,
+      alpha: 1, alphaTarget: 0, active: true, autoFit: true, wake: null,
       rand: Math.random,
     }
     seed(s, w, h)
     sim.current = s
+    if (!calm) {
+      // The wake: nothing is alive yet, the camera already frames the
+      // seeded layout (every node still `on`, so `fit` sees them all),
+      // and the loop births the forest in `created` order from here.
+      s.wake = { elapsed: 0,
+                 total: Math.min(2600, Math.max(1200, 700 + nodes.length * 9)) }
+      s.alive = 0
+      s.lastAlive = 0
+      fit(1)
+    }
     applyFilters(s)
     applyColors(s)
-    setReplay({ on: false, playing: false, t: 0 })
-    if (calm) { settle(400); s.fitted = true; fit(); drawRef.current() }
+    setTimeline({ t: nodes.length, playing: false })
+    if (calm) { settle(400); s.autoFit = false; fit(); drawRef.current() }
     needsDraw.current = true
   }, [data, links, calm, applyFilters, applyColors, settle, fit])
 
   useEffect(() => { build() }, [build])
 
   /* Filter or colour tuning re-layouts what remains — motion spent on the
-     operator's hand, which is the settle rule's own exception. */
+     operator's hand, which is the settle rule's own exception. The first
+     run is the mount, where build() has already done all of this and the
+     wake must survive. */
+  const filtersTouched = useRef(false)
   useEffect(() => {
+    if (!filtersTouched.current) { filtersTouched.current = true; return }
     const s = sim.current
     if (!s.nodes.length) return
+    wakeOff()
     applyFilters(s)
     applyColors(s)
     setHitCount(s.searching ? s.matchCount : null)
@@ -596,7 +643,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     needsDraw.current = true
   }, [settings.query, settings.orphans, settings.hiddenTypes,
       settings.hiddenGroups, settings.groupDepth, settings.colorBy,
-      applyFilters, applyColors, calm, settle])
+      applyFilters, applyColors, calm, settle, wakeOff])
 
   /* Force tuning reheats gently; display tuning only repaints. */
   useEffect(() => {
@@ -613,71 +660,78 @@ export default function ForestGraph({ forest, data, selected, onSelect,
              settings.linkWidth, settings.heatOn, settings.proposals,
              settings.shortcuts, settings.structure])
 
-  /* -- replay ------------------------------------------------------------ */
+  /* -- the timeline -------------------------------------------------------
+     Replay (J.5.4 v0.38) with the scrubber always in hand: "now" is the
+     right end of the slider, dragging back shows the forest as it stood,
+     play grows it again. Presentation only — no second call, no write. */
 
-  const enterReplay = useCallback(() => {
+  const play = useCallback(() => {
     const el = canvas.current
     const s = sim.current
     if (!el || !s.nodes.length) return
-    seed(s, el.clientWidth || 720, el.clientHeight || 520)
-    s.alive = 0
-    s.lastAlive = 0
-    s.alpha = 1
-    s.active = true
-    s.fitted = true // replay keeps its own camera
-    applyFilters(s)
-    setReplay({ on: true, playing: !calm, t: 0 })
-    needsDraw.current = true
-  }, [applyFilters, calm])
-
-  const exitReplay = useCallback(() => {
-    const s = sim.current
-    s.alive = s.nodes.length
-    s.lastAlive = s.nodes.length
-    s.alphaTarget = 0
-    s.alpha = Math.max(s.alpha, 0.3)
-    s.active = true
-    applyFilters(s)
-    setReplay({ on: false, playing: false, t: 0 })
-    if (calm) settle(300)
-    needsDraw.current = true
-  }, [applyFilters, calm, settle])
-
-  useEffect(() => {
-    const s = sim.current
-    if (!s.nodes.length || !replay.on) return
-    const count = Math.max(0, Math.min(s.nodes.length, Math.floor(replay.t)))
-    if (count === s.alive) return
-    s.alive = count
-    // A node is born where its parent stands: the forest grows outward the
-    // way it actually grew, instead of teleporting into a finished layout.
-    if (count > s.lastAlive) {
-      for (let rank = s.lastAlive; rank < count; rank++) {
-        const n = s.nodes[s.order[rank]]
-        const parent = n.parent != null ? s.nodes[s.index[n.parent]] : null
-        if (parent && parent.bornRank < rank) {
-          n.x = parent.x + (s.rand() - 0.5) * 26
-          n.y = parent.y + (s.rand() - 0.5) * 26
-          n.vx = 0; n.vy = 0
-        }
-        n.bornAt = performance.now()
-      }
+    s.wake = null
+    if (timelineRef.current.t >= s.nodes.length) {
+      // From "now" the story restarts: reseed, so the forest grows outward
+      // from its nuclei instead of assembling into the settled layout.
+      seed(s, el.clientWidth || 720, el.clientHeight || 520)
+      s.alive = 0
+      s.lastAlive = 0
+      s.alpha = 1
+      s.active = true
+      s.autoFit = false // the playing branch of the loop drives the camera
+      applyFilters(s)
+      setTimeline({ t: 0, playing: true })
+    } else {
+      setTimeline((tl) => ({ ...tl, playing: true }))
     }
-    s.lastAlive = count
-    applyFilters(s)
-    s.alphaTarget = replay.playing ? 0.13 : 0
-    s.alpha = Math.max(s.alpha, 0.25)
-    s.active = true
-    if (calm) settle(60)
     needsDraw.current = true
-  }, [replay, applyFilters, calm, settle])
+  }, [applyFilters])
+
+  const pause = useCallback(() => {
+    setTimeline((tl) => ({ ...tl, playing: false }))
+  }, [])
+
+  const toNow = useCallback(() => {
+    sim.current.wake = null
+    setTimeline({ t: sim.current.nodes.length, playing: false })
+  }, [])
 
   useEffect(() => {
     const s = sim.current
-    if (!replay.on) return
-    s.alphaTarget = replay.playing ? 0.13 : 0
-    if (replay.playing) s.active = true
-  }, [replay.on, replay.playing])
+    if (!s.nodes.length || s.wake) return
+    const count = Math.max(0, Math.min(s.nodes.length, Math.floor(timeline.t)))
+    if (count !== s.alive) {
+      // While playing, a node is born where its parent stands: the forest
+      // grows outward the way it actually grew. A hand-scrub instead keeps
+      // every node exactly where the layout left it — scrubbing consults
+      // the history, it does not restage it.
+      if (count > s.lastAlive) {
+        for (let rank = s.lastAlive; rank < count; rank++) {
+          const n = s.nodes[s.order[rank]]
+          if (timeline.playing) {
+            const parent = n.parent != null ? s.nodes[s.index[n.parent]] : null
+            if (parent && parent.bornRank < rank) {
+              n.x = parent.x + (s.rand() - 0.5) * 26
+              n.y = parent.y + (s.rand() - 0.5) * 26
+              n.vx = 0; n.vy = 0
+            }
+          }
+          // No pop under reduced motion: there is no loop to finish the
+          // ease, so a stamped birth would freeze mid-fade.
+          n.bornAt = calm ? 0 : performance.now()
+        }
+      }
+      s.alive = count
+      s.lastAlive = count
+      applyFilters(s)
+      s.alpha = Math.max(s.alpha, 0.25)
+      s.active = true
+      if (calm) settle(60)
+    }
+    s.alphaTarget = timeline.playing ? 0.13 : 0
+    if (timeline.playing) s.active = true
+    needsDraw.current = true
+  }, [timeline, applyFilters, calm, settle])
 
   /* -- painting ---------------------------------------------------------- */
 
@@ -793,17 +847,16 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     ctx.globalAlpha = 1
 
     const now = performance.now()
-    const replaying = replayRef.current.on
     const labelBase = 11 / k
     ctx.font = `${labelBase}px ui-sans-serif, system-ui, sans-serif`
     ctx.textAlign = 'center'
     for (const n of nodes) {
       if (!n.on || !inView(n)) continue
       const dim = near && !near.has(n.id)
-      // A newborn eases in over a third of a second — visible growth, not a
-      // teleport. Outside replay `bornAt` is 0 and pop is 1.
-      const pop = replaying && n.bornAt
-        ? Math.min(1, (now - n.bornAt) / 350) : 1
+      // A newborn eases in over a third of a second — visible growth, not
+      // a teleport. Wake, replay and scrub all stamp `bornAt`; a node that
+      // never was born (bornAt 0) or was born long ago draws in full.
+      const pop = n.bornAt ? Math.min(1, (now - n.bornAt) / 350) : 1
       const r = n.r0 * p.nodeScale * (0.4 + 0.6 * pop)
       if (p.heatOn && n.heat > 0.05 && !dim) {
         // An ember breathes: the glow swells and fades on the node's own
@@ -874,20 +927,44 @@ export default function ForestGraph({ forest, data, selected, onSelect,
       const dt = Math.min(64, now - last)
       last = now
       if (el && s.nodes.length) {
-        const r = replayRef.current
-        if (r.on && r.playing) {
+        if (s.wake) {
+          // The wake births the forest in `created` order on an ease-out:
+          // the trunk arrives at a stride, the leaves drift in behind it.
+          const wk = s.wake
+          wk.elapsed += dt
+          const prog = Math.min(1, wk.elapsed / wk.total)
+          const eased = 1 - (1 - prog) ** 3
+          const count = prog >= 1 ? s.nodes.length
+            : Math.floor(eased * s.nodes.length)
+          if (count > s.alive) {
+            for (let rank = s.alive; rank < count; rank++) {
+              s.nodes[s.order[rank]].bornAt = now
+            }
+            s.alive = count
+            s.lastAlive = count
+            applyFilters(s)
+            s.alpha = Math.max(s.alpha, 0.4)
+            s.active = true
+            needsDraw.current = true
+          }
+          if (prog >= 1) s.wake = null
+        }
+        const tl = timelineRef.current
+        if (tl.playing) {
           const total = Math.max(6000, Math.min(30000, s.nodes.length * 14))
-          const nextT = r.t + (dt / total) * s.nodes.length
+          const nextT = tl.t + (dt / total) * s.nodes.length
           if (nextT >= s.nodes.length) {
-            setReplay({ on: true, playing: false, t: s.nodes.length })
+            setTimeline({ t: s.nodes.length, playing: false })
           } else {
-            setReplay({ on: true, playing: true, t: nextT })
+            setTimeline({ t: nextT, playing: true })
           }
           fit(0.05) // the camera pulls back as the forest grows
         }
         if (s.active) {
           step(s, el.clientWidth, el.clientHeight, paramsRef.current)
-          if (!s.fitted && s.alpha < 0.35) { s.fitted = true; fit() }
+          // The camera breathes out with the bloom instead of snapping to
+          // fit once — until the first hand takes it over.
+          if (s.autoFit) fit(0.05)
           needsDraw.current = true
         }
       }
@@ -905,7 +982,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     }
     requestAnimationFrame(tick)
     return () => { running = false }
-  }, [calm, fit])
+  }, [calm, fit, applyFilters])
 
   /* Under reduced motion there is no loop: paint when something changed. */
   useEffect(() => { if (calm) drawRef.current() })
@@ -950,6 +1027,8 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   const pinched = useRef(false) // a pinch is never a click, even at 4px
 
   function down(ev) {
+    wakeOff()
+    sim.current.autoFit = false // the hand owns the camera from here on
     pointers.current.set(ev.pointerId, { x: ev.clientX, y: ev.clientY })
     ev.currentTarget.setPointerCapture(ev.pointerId)
     if (pointers.current.size === 2) {
@@ -1050,11 +1129,13 @@ export default function ForestGraph({ forest, data, selected, onSelect,
       origin.current = null
       pinched.current = false
     }
-    sim.current.alphaTarget = replayRef.current.playing ? 0.13 : 0
+    sim.current.alphaTarget = timelineRef.current.playing ? 0.13 : 0
     ev.currentTarget.dataset.dragging = 'false'
   }
   function wheel(ev) {
     ev.preventDefault()
+    wakeOff()
+    sim.current.autoFit = false
     const r = canvas.current.getBoundingClientRect()
     const mx = ev.clientX - r.left
     const my = ev.clientY - r.top
@@ -1096,9 +1177,17 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     ? groups.colors[groupOf(n.id, settings.groupDepth)] || palette.other
     : palette.byType[n.type] || palette.other)
   const s = sim.current
-  const bornCount = Math.min(s.nodes.length, Math.floor(replay.t))
-  const newest = replay.on && bornCount > 0
-    ? s.nodes[s.order[bornCount - 1]] : null
+  // Until the first build lands, the projection's own count keeps the
+  // docked timeline honest for that one frame.
+  const total = s.nodes.length || data.nodes.length
+  const shown = Math.min(total, Math.floor(timeline.t))
+  const atNow = shown >= total
+  const newest = shown > 0 && s.nodes.length
+    ? s.nodes[s.order[shown - 1]] : null
+  // The passport's `created` is a date (models: dt.date) — the day is the
+  // finest truth the forest holds, so the day is what the balloon says.
+  const stamp = newest?.created || newest?.updated || '—'
+  const pct = total ? shown / total : 0
   const toggleIn = (key, value) => set({
     [key]: settings[key].includes(value)
       ? settings[key].filter((x) => x !== value)
@@ -1108,11 +1197,6 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   return (
     <div className="card overflow-hidden">
       <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-2">
-        <button type="button" aria-pressed={replay.on}
-                className={`badge transition ${replay.on ? 'badge-accent' : ''}`}
-                onClick={() => (replay.on ? exitReplay() : enterReplay())}>
-          <Play size={12} /> {t('graph.live')}
-        </button>
         <label className="relative min-w-0 max-w-xs flex-1">
           <Search size={14} className="pointer-events-none absolute left-2.5
                                        top-1/2 -translate-y-1/2 text-text-3" />
@@ -1126,12 +1210,13 @@ export default function ForestGraph({ forest, data, selected, onSelect,
                   const el = canvas.current
                   const st = sim.current
                   if (!el || !st.nodes.length) return
+                  st.wake = null
                   seed(st, el.clientWidth, el.clientHeight)
                   st.alpha = 1
                   st.alphaTarget = 0
                   st.active = true
-                  st.fitted = false
-                  if (calm) { settle(400); st.fitted = true; fit() }
+                  st.autoFit = true // the camera follows the re-bloom
+                  if (calm) { settle(400); st.autoFit = false; fit() }
                   needsDraw.current = true
                 }}
                 title={t('graph.reorganize')}>
@@ -1186,35 +1271,50 @@ export default function ForestGraph({ forest, data, selected, onSelect,
                      onReset={() => set({ ...DEFAULTS })} />
         )}
 
-        {replay.on && (
-          <div className="absolute inset-x-3 bottom-3 flex items-center gap-2
-                          rounded-lg border border-line bg-bg-elev/95 px-3 py-2
-                          shadow-pop backdrop-blur">
-            {!calm && (
-              <button type="button" className="btn btn-sm"
-                      onClick={() => setReplay((r) => ({
-                        ...r,
-                        playing: !r.playing,
-                        t: !r.playing && r.t >= s.nodes.length ? 0 : r.t,
-                      }))}
-                      aria-label={replay.playing ? t('graph.pause') : t('graph.play')}>
-                {replay.playing ? <Pause size={13} /> : <Play size={13} />}
-              </button>
-            )}
-            <input type="range" className="graph-range flex-1" min={0}
-                   max={s.nodes.length} step={1} value={bornCount}
-                   onChange={(ev) => setReplay((r) => ({
-                     ...r, playing: false, t: Number(ev.target.value),
-                   }))} />
-            <span className="min-w-[9.5rem] text-right font-mono text-[11px] text-text-3">
-              {(newest?.created || newest?.updated || '—')} · {bornCount}/{s.nodes.length}
-            </span>
-            <button type="button" className="btn btn-sm btn-ghost"
-                    onClick={exitReplay} aria-label={t('graph.close')}>
-              <X size={13} />
-            </button>
-          </div>
+      </div>
+
+      {/* The timeline lives under the map, always (J.5.4 v0.38's replay,
+          docked): drag back to the day, play to regrow, "now" to return.
+          Under reduced motion it is a scrubber, not an animation. */}
+      <div className="flex items-center gap-2 border-t border-line px-3 py-2">
+        {!calm && (
+          <button type="button" className="btn btn-sm btn-ghost"
+                  onClick={timeline.playing ? pause : play}
+                  aria-label={timeline.playing ? t('graph.pause') : t('graph.play')}>
+            {timeline.playing ? <Pause size={13} /> : <Play size={13} />}
+          </button>
         )}
+        <div className="relative min-w-0 flex-1">
+          <input type="range" className="graph-range block w-full" min={0}
+                 max={total} step={1} value={shown}
+                 aria-label={t('graph.timeline')}
+                 onChange={(ev) => {
+                   sim.current.wake = null
+                   setTimeline({ t: Number(ev.target.value), playing: false })
+                 }} />
+          {/* The day under the thumb, floated as an overlay: it rides the
+              scrub without ever pushing the row around. Hidden at "now",
+              where the readout already says everything. */}
+          {!atNow && (
+            <div className="pointer-events-none absolute bottom-full mb-1.5
+                            -translate-x-1/2 whitespace-nowrap rounded-lg
+                            border border-line bg-bg-elev/95 px-2 py-1
+                            font-mono text-[11px] text-text-2 shadow-pop
+                            backdrop-blur"
+                 style={{ left: `calc(${pct * 100}% + ${(0.5 - pct) * 16}px)` }}>
+              {stamp}
+            </div>
+          )}
+        </div>
+        <span className="min-w-[9.5rem] text-right font-mono text-[11px] text-text-3">
+          {stamp} · {shown}/{total}
+        </span>
+        {/* Always in the row, merely asleep at the present: a button that
+            comes and goes reflows the strip under the operator's hand. */}
+        <button type="button" className="btn btn-sm btn-ghost" onClick={toNow}
+                disabled={atNow}>
+          {t('graph.now')}
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t

@@ -21,9 +21,9 @@
   "graph.legend_shortcut": "atalho que uma caçada descobriu",
   "graph.legend_trail": "trilha curada",
   "graph.link_width": "Grossura dos links",
-  "graph.live": "Live",
   "graph.min_heat": "Calor mínimo",
   "graph.node_size": "Tamanho dos nós",
+  "graph.now": "Agora",
   "graph.open_in_files": "Abrir em Arquivos",
   "graph.orphans": "Órfãos",
   "graph.pause": "Pausar",
@@ -35,6 +35,7 @@
   "graph.shortcuts": "Atalhos",
   "graph.structure": "Estrutura",
   "graph.text_threshold": "Limite de visibilidade do texto",
+  "graph.timeline": "Linha do tempo",
   "graph.tip_stats": "{degree} trilhas · calor {heat}",
   "graph.truncated": "Mostrando apenas os nós mais conectados",
   "graph.view": "Exibição"

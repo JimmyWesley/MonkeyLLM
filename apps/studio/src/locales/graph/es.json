@@ -21,9 +21,9 @@
   "graph.legend_shortcut": "atajo que descubrió una cacería",
   "graph.legend_trail": "sendero curado",
   "graph.link_width": "Grosor de los enlaces",
-  "graph.live": "Live",
   "graph.min_heat": "Calor mínimo",
   "graph.node_size": "Tamaño de los nodos",
+  "graph.now": "Ahora",
   "graph.open_in_files": "Abrir en Archivos",
   "graph.orphans": "Huérfanos",
   "graph.pause": "Pausar",
@@ -35,6 +35,7 @@
   "graph.shortcuts": "Atajos",
   "graph.structure": "Estructura",
   "graph.text_threshold": "Umbral de visibilidad del texto",
+  "graph.timeline": "Línea de tiempo",
   "graph.tip_stats": "{degree} senderos · calor {heat}",
   "graph.truncated": "Mostrando solo los nodos más conectados",
   "graph.view": "Vista"

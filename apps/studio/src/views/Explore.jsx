@@ -34,9 +34,9 @@ export default function Explore({ forest, grant, node, setNode }) {
   const { t } = useI18n()
   // In the address, with the selection (J.5.8): "look at this node on the
   // graph" is a link, and a reload lands on the same view of the same node
-  // rather than back at the tree.
-  const [mode, setMode] = useRouteState('mode', 'tree',
-                                        { allow: ['tree', 'graph', 'files'] })
+  // rather than back at the default.
+  const [mode, setMode] = useRouteState('mode', 'graph',
+                                        { allow: ['graph', 'files', 'tree'] })
   const [editing, setEditing] = useState(null)
 
   const roots = rootsOf(grant)
@@ -59,10 +59,13 @@ export default function Explore({ forest, grant, node, setNode }) {
     )
   }
 
+  // The map leads: the graph is what a person opens a forest to see, the
+  // files are where they go to read, and the tree is the narrow-scope
+  // fallback — still the only mode that never pays for the projection.
   const MODES = [
-    ['tree', Tree, t('explore.mode_tree')],
     ['graph', Graph, t('explore.mode_graph')],
     ['files', Files, t('explore.mode_files')],
+    ['tree', Tree, t('explore.mode_tree')],
   ]
 
   return (
