@@ -22,7 +22,7 @@ every folder and merges them back into one dictionary per language, so no
 
 ## Working on them
 
-Use the tool rather than editing three files by hand — the one mistake worth
+Use the tool rather than editing three files by hand the one mistake worth
 engineering against is adding a key to two languages out of three, and `add`
 cannot make it.
 
@@ -43,7 +43,7 @@ a moving catalogue lies within a month.
 ## What a namespace is
 
 A namespace groups strings by **subject, not by screen.** They are shared on
-purpose — `common.*` is read by twelve components, `cap.*` by ten, and
+purpose `common.*` is read by twelve components, `cap.*` by ten, and
 `editor.*` serves both the node editor and the Ingest composer, because those
 two are one editing surface with two entry points. Splitting by screen would
 duplicate those strings and let the copies drift.

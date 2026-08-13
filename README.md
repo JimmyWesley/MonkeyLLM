@@ -4,12 +4,12 @@
 
 # MonkeyLLM
 
-**This repository is not an application. It is a knowledge engine — a new
+**This repository is not an application. It is a knowledge engine a new
 way to query data.**
 
 Knowledge lives in a **forest**: a git-versioned tree of markdown nodes,
 each carrying a curated, scent-bearing passport. An AI does not get handed
-a retrieval dump — it **navigates**: drops in through search, follows
+a retrieval dump it **navigates**: drops in through search, follows
 typed edges, reads exactly the node it needs, and plants what it learns.
 Successful hunts deposit pheromone and mint shortcut links, so the corpus
 itself learns from use.
@@ -17,14 +17,14 @@ itself learns from use.
 The number that made us write it down: on a benchmark where **every
 question needs ≥3 chained hops**, the *same* 12B local model scores
 **0 / 11 as a classic top-k RAG reader** and **11 / 11 (100%) as a forest
-navigator** — at **0.58×** the token cost per correct answer of an
+navigator** at **0.58×** the token cost per correct answer of an
 iterative-RAG baseline, on a single consumer GPU. If your first reaction
-is *"I need to test whether this actually serves my case"* — good. Every
+is *"I need to test whether this actually serves my case"* good. Every
 number is reproducible from committed scripts, and the whole design is
 written down in [the paper](paper/monkeyllm-paper.md).
 
 Everything else in this repository exists *around* that engine. The
-**Studio** console you will see in screenshots is not the product — it is
+**Studio** console you will see in screenshots is not the product it is
 the **management layer**: the window where people watch, govern and teach
 what the engine serves.
 
@@ -57,8 +57,8 @@ vine.locate("where does this brain begin?")   # ranked entry points, BM25, zero 
 harvest(vine, "first note")                   # one-shot retrieval: evidence + snippets, zero LLM
 ```
 
-Every primitive an agent uses rides that same object — `locate`, `look`,
-`move`, `pick`, `scan`, `sniff`, `query`, `plant`, `graft`, `tend` — each
+Every primitive an agent uses rides that same object `locate`, `look`,
+`move`, `pick`, `scan`, `sniff`, `query`, `plant`, `graft`, `tend` each
 token-budgeted, each truncation explicit. The Gardener (`vine adopt` /
 `vine sync`) mirrors an existing document tree into a forest, and the
 Ranger (`vine ranger`) keeps it healthy over time.
@@ -86,23 +86,23 @@ python -m monkeyllm.cli validate --forest forests/forest-fixture
 
 When a forest must be a **shared, governed asset** instead of a personal
 directory, the **Station** (spec Part J) wraps the untouched engine with
-identity, per-forest policy, audit and model bindings — REST under `/v1`,
-MCP under `/mcp` — and serves the **Studio**, the web console:
+identity, per-forest policy, audit and model bindings REST under `/v1`,
+MCP under `/mcp` and serves the **Studio**, the web console:
 
 <div align="center">
-  <img src="docs/guide/assets/overview.png" alt="The Studio console — the management layer over the engine" width="720"/>
+  <img src="docs/guide/assets/overview.png" alt="The Studio console the management layer over the engine" width="720"/>
 </div>
 
 Ask questions that arrive with their sources, walk the tree as a living
 graph, query datasets in SQL, feed the forest from uploads and the browser
 Clipper, grant scoped access, and hand your own AI the skill that makes
 the forest its persistent memory. The console is where the engine's
-possibilities become visible — but whatever it shows, an API client
+possibilities become visible but whatever it shows, an API client
 holding the same key could fetch: there is no privileged path.
 
 ## Documentation
 
-**[The MonkeyLLM Handbook](docs/guide/README.md)** — install it, sign in
+**[The MonkeyLLM Handbook](docs/guide/README.md)** install it, sign in
 for the first time, use and feed the forest, connect your own AI over MCP
 (including the Claude Code skill the Studio generates), and govern the
 deployment. English, Português and Español, with screenshots.
@@ -112,7 +112,7 @@ deployment. English, Português and Español, with screenshots.
 **[MonkeyLLM: Stigmergic Navigation of Knowledge Forests](paper/monkeyllm-paper.md)**
 — replacing retrieval-augmented generation with agentic foraging by small
 language models. The forest, the scent contract, the ten budgeted
-primitives, the pheromone economy, and the **Forest Principle** — *spend
+primitives, the pheromone economy, and the **Forest Principle** *spend
 intelligence on the environment so you can spend less on the model* —
 with every benchmark number reproducible from this repository.
 
@@ -125,7 +125,7 @@ with every benchmark number reproducible from this repository.
 | `apps/studio/` | the web console (React/Vite, built into the Station image) |
 | `apps/clipper/` | the browser extension: clip the page you are reading into a forest |
 | `paper/` | the paper: design, vocabulary, benchmarks, authorship |
-| `forests/` | generated forests (gitignored except `forests/scripts/`) — rebuild, never edit |
+| `forests/` | generated forests (gitignored except `forests/scripts/`) rebuild, never edit |
 | `bench/` | Monkey Bench: chunker, RAG baselines, runner |
 | `scripts/` | infra + measurement (local models, bench, curation metrics) |
 | `docs/` | the spec, the handbook (`docs/guide/`) and design notes |

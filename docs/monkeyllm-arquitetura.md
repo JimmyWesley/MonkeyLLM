@@ -1,4 +1,4 @@
-# MonkeyLLM — Agent-Navigable Knowledge Forest Architecture
+# MonkeyLLM Agent-Navigable Knowledge Forest Architecture
 
 **Domain:** monkeyllm.com
 **Concept:** A memory system for LLMs where knowledge lives in markdown files organised as a hierarchical forest of indexes. The agent (monkey) does not scan the forest: it reads indexes (branches), jumps between nodes (hops), and collects only the target information (bananas).
@@ -12,7 +12,7 @@
 |---|---|
 | **Forest** | The full corpus (Docker volume or S3/R2 bucket) |
 | **Branch** | Index file (`_index.md`) for a folder |
-| **Master branch** | Root index of the forest (`/_index.md`) — top-of-tree view |
+| **Master branch** | Root index of the forest (`/_index.md`) top-of-tree view |
 | **Banana** | Atomic unit of knowledge (a final `.md` file) |
 | **Hop** | One navigation operation (open an index or follow a link) |
 | **Trail** | Sequence of hops from the root to the banana |
@@ -71,7 +71,7 @@ forest/
 
 Rules:
 - Recommended maximum depth: **4 levels** (keeps any trail within ≤5 hops).
-- A folder "explodes" (gains subfolders) when its `_index.md` exceeds ~150 entries or ~3k tokens — analogous to a B-tree page split, but guided by semantics.
+- A folder "explodes" (gains subfolders) when its `_index.md` exceeds ~150 entries or ~3k tokens analogous to a B-tree page split, but guided by semantics.
 - File names are stable slugs (`jimmy-wesley.md`), never renamed; titles change in the frontmatter.
 
 ---
@@ -85,7 +85,7 @@ Rules:
 id: projects/mixerllm/architecture  # stable identity (slug)
 type: document                       # type from schema.md
 title: MixerLLM Architecture
-summary: >                           # THE SCENT — 1-3 sentences, decides hops
+summary: >                           # THE SCENT 1-3 sentences, decides hops
   Inference architecture with a hot and cold model collaborating
   via compressed symbolic language (mixer-lang), with block-loop
   and inverse delegation.
@@ -105,7 +105,7 @@ source: manual                     # manual | ingest | agent
 
 # MixerLLM Architecture
 
-(full content here — the agent ONLY reads this after deciding
+(full content here the agent ONLY reads this after deciding
 this is the right banana)
 
 ## Relations
@@ -131,13 +131,13 @@ updated: 2026-06-10
 > see [[people/_index]]. For theoretical foundations, [[concepts/_index]].
 
 ## Sub-branches
-- [[mixerllm/_index]] — Hot/cold inference architecture with
+- [[mixerllm/_index]] Hot/cold inference architecture with
   mixer-lang. 8 bananas. Active.
-- [[monkeyllm/_index]] — Navigable knowledge bank (this
+- [[monkeyllm/_index]] Navigable knowledge bank (this
   system). 4 bananas. Active.
 
 ## Direct bananas
-- [[pipeline-audio]] — Transcription/diarisation pipeline on the 3090;
+- [[pipeline-audio]] Transcription/diarisation pipeline on the 3090;
   pyannote → NeMo Sortformer migration. Completed.
 
 ## Cross trails (lateral links)
@@ -145,12 +145,12 @@ updated: 2026-06-10
 - Reference hardware → [[infra/workstation-3090]]
 ```
 
-Three fixed sections: **sub-branches** (descent), **direct bananas** (leaves), **cross trails** (lateral shortcuts — this is what turns the tree into a graph and dramatically reduces hops).
+Three fixed sections: **sub-branches** (descent), **direct bananas** (leaves), **cross trails** (lateral shortcuts this is what turns the tree into a graph and dramatically reduces hops).
 
 ### 4.3 Master branch (`/_index.md`)
 
 Same as a regular branch, but includes:
-- **Landmarks:** the 10–20 nodes with the highest degree/importance, with digests — direct entry points without descending the hierarchy.
+- **Landmarks:** the 10–20 nodes with the highest degree/importance, with digests direct entry points without descending the hierarchy.
 - **Region map:** one sentence per top-level folder.
 - **Conventions:** link to `_meta/schema.md` so the agent learns the dialect in 1 hop.
 
@@ -207,7 +207,7 @@ standard names; `value` in USD.
 | ... | | | | |
 ```
 
-Principle: **tables do not become text — tables become queryable databases.** The agent never loads 14,000 rows into context; it reads the manual (1 hop, ~400 tokens) and queries the spreadsheet with SQL (1 query, ~50 tokens of response). This is what makes the system viable for large tabular data, where RAG-by-chunking fails structurally.
+Principle: **tables do not become text tables become queryable databases.** The agent never loads 14,000 rows into context; it reads the manual (1 hop, ~400 tokens) and queries the spreadsheet with SQL (1 query, ~50 tokens of response). This is what makes the system viable for large tabular data, where RAG-by-chunking fails structurally.
 
 
 
@@ -232,7 +232,7 @@ Principle: **tables do not become text — tables become queryable databases.** 
 └─────────────────────────────────────────────────┘
 ```
 
-The golden rule: **L0 and L1 are the product. L2 is cache. L3 is the interface. L4 is the user.** If you delete all of L2, the system keeps working (slower on `locate`, identical elsewhere). This is what differentiates MonkeyLLM from a vector database: RAG without a vector index dies; MonkeyLLM without a vector index becomes a wiki — that still navigates.
+The golden rule: **L0 and L1 are the product. L2 is cache. L3 is the interface. L4 is the user.** If you delete all of L2, the system keeps working (slower on `locate`, identical elsewhere). This is what differentiates MonkeyLLM from a vector database: RAG without a vector index dies; MonkeyLLM without a vector index becomes a wiki that still navigates.
 
 ---
 
@@ -241,7 +241,7 @@ The golden rule: **L0 and L1 are the product. L2 is cache. L3 is the interface. 
 Exposed as MCP tools. Conceptual signatures:
 
 ### `locate(query, k=5) → [entry_points]`
-The **helicopter**: the monkey never starts from the trunk — it is dropped in the region closest to the target. Fuses vector search (digests) + BM25 (exact terms, IDs, SKUs) via RRF, at **two levels**: bananas (leaves) and branches (landing zones — for broad questions, landing in the right region and navigating locally outperforms landing on a wrong leaf). Returns id, trail, summary, and score for each candidate. **The only place in the system where vectors exist.**
+The **helicopter**: the monkey never starts from the trunk it is dropped in the region closest to the target. Fuses vector search (digests) + BM25 (exact terms, IDs, SKUs) via RRF, at **two levels**: bananas (leaves) and branches (landing zones for broad questions, landing in the right region and navigating locally outperforms landing on a wrong leaf). Returns id, trail, summary, and score for each candidate. **The only place in the system where vectors exist.**
 
 ### `look(id) → digest`
 The most-used operation. Returns in compact format:
@@ -256,7 +256,7 @@ Harvests the banana: returns the body (or just one section). The agent only call
 ### `query(id, sql) → rows`
 Read-only query against a SQLite payload (tabular datasets). The agent learns the schema from the passport (`look`) and asks the data instead of loading it. Guard-rails: `SELECT` only, forced `LIMIT` (e.g. 200 rows), 2s timeout. Response in compact table form.
 
-### `plant(node) / graft(id, patch)` — writes
+### `plant(node) / graft(id, patch)` writes
 Create a new banana / edit an existing one. Every write: (a) validates against `schema.md`; (b) updates the folder's `_index.md`; (c) records a Git commit; (d) marks derived embeddings as stale. Entity merge is **soft**: a `same_as` edge + entry in `aliases.md`; periodic compaction physically merges them.
 
 ---
@@ -272,7 +272,7 @@ Create a new banana / edit an existing one. Every write: (a) validates against `
 | 5 | **Vine** | MCP server exposing the 6 primitives | Python MCP SDK (`MCPServer`) |
 | 6 | **Monkey Bench** | Evaluation harness: corpus + multi-hop questions + metrics (hops-to-banana, tokens-to-banana, precision) vs RAG baseline | Python |
 
-Build order: **1 → 5 (with L2 empty, pure file navigation) → 6 → 2 → 4 → 3.** Note: the MCP server comes before the ingest pipeline — validate navigation on a hand-built forest (e.g. your own notes vault) before automating ingestion.
+Build order: **1 → 5 (with L2 empty, pure file navigation) → 6 → 2 → 4 → 3.** Note: the MCP server comes before the ingest pipeline validate navigation on a hand-built forest (e.g. your own notes vault) before automating ingestion.
 
 ## 8. Deploy
 
@@ -288,7 +288,7 @@ Build order: **1 → 5 (with L2 empty, pure file navigation) → 6 → 2 → 4 �
 ```
 
 - Local-first: reads/writes always on the local volume; R2 is an async mirror (R2 has zero egress, good for multi-machine).
-- The `_derived/` folder does **not** sync — each node rebuilds its own canopy.
+- The `_derived/` folder does **not** sync each node rebuilds its own canopy.
 - Git bare repo on the volume = compounding knowledge audit log.
 
 ## 9. Validation Roadmap (and the Paper)
@@ -297,34 +297,34 @@ Build order: **1 → 5 (with L2 empty, pure file navigation) → 6 → 2 → 4 �
 
 **Phase 1 (3–4 weeks):** `locate` with embeddings + BM25. Monkey Bench with 50–100 multi-hop questions. Baseline: classic top-k RAG on the same corpus. Paper hypothesis: **MonkeyLLM answers multi-hop questions with higher accuracy and lower token cost than flat RAG.**
 
-**Phase 2 (4–6 weeks):** Gardener — automatic ingest of PDF/DOCX/MD. Measure the quality of SLM-generated summaries (they are the heart of the system). Compounding: `plant/graft` + Git.
+**Phase 2 (4–6 weeks):** Gardener automatic ingest of PDF/DOCX/MD. Measure the quality of SLM-generated summaries (they are the heart of the system). Compounding: `plant/graft` + Git.
 
-**Phase 3:** If (and only if) the protocol proves value and the Python stack bottlenecks, rewrite Canopy/Vine in Rust — now with measured requirements, not imagined ones.
+**Phase 3:** If (and only if) the protocol proves value and the Python stack bottlenecks, rewrite Canopy/Vine in Rust now with measured requirements, not imagined ones.
 
 **Paper skeleton:** (1) problem: agents waste context with flat RAG; (2) proposal: hierarchical navigation through self-describing indexes; (3) 6-primitive protocol; (4) Monkey Bench vs RAG/GraphRAG; (5) hops/tokens/precision metrics; (6) compounding via versioned filesystem. Positioning against: classic RAG, GraphRAG (Microsoft), RAPTOR, MemGPT/Letta.
 
-## 10. Pheromone Trails — the Living Bank (Stigmergy)
+## 10. Pheromone Trails the Living Bank (Stigmergy)
 
-MonkeyLLM is not static: it **learns from its own use**. The mechanism is stigmergy — indirect communication via the environment, like ant pheromone trails. Every successful navigation makes the next ones cheaper. Two complementary mechanisms:
+MonkeyLLM is not static: it **learns from its own use**. The mechanism is stigmergy indirect communication via the environment, like ant pheromone trails. Every successful navigation makes the next ones cheaper. Two complementary mechanisms:
 
-### 10.1 Whisper (pheromone — derived layer, volatile)
+### 10.1 Whisper (pheromone derived layer, volatile)
 - Each edge traversal in a trail that ended successfully (the banana answered the question) increments a `heat` weight on the edge and the destination node.
 - `heat` lives in `_derived/trails.db` (high write frequency; does not pollute Git).
-- Effect: `locate()` and `look()` re-rank results by `score × f(heat)` — hot bananas and branches rise in rankings.
+- Effect: `locate()` and `look()` re-rank results by `score × f(heat)` hot bananas and branches rise in rankings.
 - **Evaporation:** the Ranger applies exponential decay (e.g. half-life of 30 days). Without evaporation, the system becomes addicted to old paths and new bananas never compete.
 
-### 10.2 Shout (shortcut — canonical layer, permanent)
+### 10.2 Shout (shortcut canonical layer, permanent)
 - **Policy: reinforce before creating.** When the banana is found, the cascade is: (1) shortcut already exists in the trail? → fortify (heat + confidence rise, nothing new is created); (2) does not exist and the trail was long (≥4 hops)? → `graft` creates the lateral wikilink (`rel: discovered-shortcut`, `confidence: 0.5`); (3) did the monkey notice new meaningful lateral connections? → proposes `related-to` with `confidence: 0.3`, which the Ranger confirms or prunes.
 - Case (1) is the common path: the system converges on a stable mesh of fortified shortcuts instead of accumulating redundant links.
 - Shortcuts become Git commits → auditable, reversible, visible to humans in Obsidian.
 - The Ranger prunes shortcuts and proposals that were never reused.
 
 ### 10.3 Why this matters for the paper
-Neither RAG, GraphRAG, nor RAPTOR improve with use — they index once and stay static. MonkeyLLM converges: **hops-to-banana decreases over time for recurring question distributions.** That convergence curve (average hops per week of use) is a novel result graph and is the materialisation of "compounding knowledge".
+Neither RAG, GraphRAG, nor RAPTOR improve with use they index once and stay static. MonkeyLLM converges: **hops-to-banana decreases over time for recurring question distributions.** That convergence curve (average hops per week of use) is a novel result graph and is the materialisation of "compounding knowledge".
 
 ## 11. Latency Budget
 
-Latency per hop is dominated by agent inference, not storage — and the design exploits this:
+Latency per hop is dominated by agent inference, not storage and the design exploits this:
 
 | Operation | Typical cost (local, NVMe) |
 |---|---|
@@ -335,7 +335,7 @@ Latency per hop is dominated by agent inference, not storage — and the design 
 
 Design conclusions from this table:
 1. Optimising storage below ~10ms is irrelevant; optimising **number of hops** and **tokens per hop** is everything. Pheromone, shortcuts, ≤500-token digests, and landmarks exist for this reason.
-2. S3/R2 sync never enters the read path (it is an async mirror). In remote-only deploy, byte-range requests on R2 add 30–80ms per hop — acceptable, but local-first remains the target.
+2. S3/R2 sync never enters the read path (it is an async mirror). In remote-only deploy, byte-range requests on R2 add 30–80ms per hop acceptable, but local-first remains the target.
 3. End-to-end target: a multi-hop question answered in **< 5 s** with a local SLM (≈ 4–6 hops × SLM decision), versus tens of seconds from an iterative RAG agent that loads fat chunks each round.
 
 ## 12. Known Risks

@@ -1,4 +1,4 @@
-# Inference — runbook (local and online)
+# Inference runbook (local and online)
 
 How to run MonkeyLLM end to end with local models via **llama.cpp** on the
 RTX 3090, downloading weights from Hugging Face. Everything under `models/`
@@ -50,7 +50,7 @@ python scripts/bench_locate.py
 ```
 
 Without step 3/4, everything works in **BM25-only** mode (Phase 0 is
-designed this way — zero embeddings). Step 6's benchmark runs with no
+designed this way zero embeddings). Step 6's benchmark runs with no
 server at all for the `bm25` row; with `MONKEYLLM_EMBED_ENDPOINT` + a built
 canopy it adds the `hybrid` row alongside.
 
@@ -58,7 +58,7 @@ canopy it adds the `hybrid` row alongside.
 
 The same scripts work on a Mac. `setup_models.py --only bin` downloads the
 official `macos-arm64` build, but those are compiled against the latest
-macOS — on older systems (e.g. macOS 14) they fail with a Metal dyld error.
+macOS on older systems (e.g. macOS 14) they fail with a Metal dyld error.
 Fallback: `brew install llama.cpp`; `serve_llm.py` probes each candidate
 with `--version` and falls back to the PATH `llama-server` automatically
 when the one under `bin/llamacpp/` is missing or does not run on this OS.
@@ -73,11 +73,11 @@ export MONKEYLLM_LLM_ENDPOINT=http://localhost:8090/v1
 export MONKEYLLM_LLM_MODEL=minicpm5-1b
 ```
 
-Use the official `openbmb/MiniCPM5-1B-GGUF` — the community
+Use the official `openbmb/MiniCPM5-1B-GGUF` the community
 "Agentic-toolUse" fine-tune needs a custom raw prompt format and does not
 speak the OpenAI chat/tools interface this stack relies on.
 
-## Online model (OpenRouter) — no local GPU
+## Online model (OpenRouter) no local GPU
 
 If you don't want (or can't) run a local model, use OpenRouter: the same
 OpenAI interface, small and cheap hosted models, zero VRAM. Just the key —
@@ -100,7 +100,7 @@ Notes:
 
 - Provider resolution order: `MONKEYLLM_LLM_ENDPOINT` (explicit) >
   `OPENROUTER_API_KEY` (OpenRouter) > `HF_TOKEN` (HF serverless).
-- The client already retries with backoff on 429/5xx — important on
+- The client already retries with backoff on 429/5xx important on
   OpenRouter's free tier (~20 req/min).
 - Hybrid `locate` still requires the local embedder (OpenRouter does not
   serve embeddings); without one it gracefully falls back to BM25-only —
@@ -118,7 +118,7 @@ Notes:
 | `MONKEYLLM_LLM_MAX_TOKENS` | `600` | completion budget (raise for reasoning models) |
 | `MONKEYLLM_EMBED_ENDPOINT` | (empty = BM25-only) | embedder's OpenAI base_url |
 | `MONKEYLLM_EMBED_MODEL` | `bge-m3` | embedder id/alias |
-| `HF_TOKEN` | — | HF token (download + serverless) |
+| `HF_TOKEN` | | HF token (download + serverless) |
 
 ## Notes
 

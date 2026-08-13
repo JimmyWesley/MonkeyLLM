@@ -1,6 +1,6 @@
-# T07 — Station: self-hostable host (REST + MCP over the forest registry)
+# T07 Station: self-hostable host (REST + MCP over the forest registry)
 
-status: in-progress (Phases A and B DONE 2026-08-08 — REST + auth +
+status: in-progress (Phases A and B DONE 2026-08-08 REST + auth +
 ScopedVine seam, governed writes with principal-stamped commits, the MCP
 mount, per-forest models with catalogue-driven model selection, forest
 creation (J.7), the ingest surface (J.8), and the credential lifecycle
@@ -19,7 +19,7 @@ multi-forest registry, deployable with `docker compose up`.
 ## Context
 
 - `vine serve --root` already resolves a registry and speaks MCP over
-  HTTP (`src/monkeyllm/server.py`) — the Station wraps that machinery,
+  HTTP (`src/monkeyllm/server.py`) the Station wraps that machinery,
   it does not reimplement it.
 - Engine stays forest-agnostic; the Station is a new package under
   `apps/station/` (own pyproject; monorepo reorg beyond adding `apps/`
@@ -29,7 +29,7 @@ multi-forest registry, deployable with `docker compose up`.
 
 ## Steps
 
-1. **Phase A (read-only REST) — DONE 2026-08-08** (`apps/station/`):
+1. **Phase A (read-only REST) DONE 2026-08-08** (`apps/station/`):
    Starlette app (not FastAPI: `starlette`/`uvicorn` already ship with
    `mcp`, so the host adds zero runtime dependencies and J.6's
    one-image/no-external-database promise survives); API-key authn with
@@ -56,9 +56,9 @@ multi-forest registry, deployable with `docker compose up`.
       2026-08-08: health, 401 without key, granted-forest listing,
       `locate`, dataset `query`, 404 on ungranted. MCP pending Phase B;
       the image itself is written but not yet built in CI.)*
-- [x] No surface can reach an unscoped `Vine` — the `ScopedVine` seam
+- [x] No surface can reach an unscoped `Vine` the `ScopedVine` seam
       landed in Phase A rather than being retrofitted in Phase B.
-- [x] Engine suite passes with zero engine edits (F.18) — `git status
+- [x] Engine suite passes with zero engine edits (F.18) `git status
       src/` clean; suite 310 green (294 engine + 16 Station).
 - [x] Station test suite (authn, capability gates, endpoint contracts,
       error-envelope mapping, forest-level existence oracle).

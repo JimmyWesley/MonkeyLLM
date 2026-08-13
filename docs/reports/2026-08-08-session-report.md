@@ -1,13 +1,13 @@
-# Session report — 2026-08-08
+# Session report 2026-08-08
 
 Lab session on entry-search ranking, triggered by an engineering question
 ("are we using the SQLite FTS5 techniques from the video, and is there
 anything left on the table?"). Answer: we already ship FTS5+BM25 in-process
-(`catalog.py`), but `bm25()` was being called *flat* — a title hit ranked no
+(`catalog.py`), but `bm25()` was being called *flat* a title hit ranked no
 higher than the same hit in summary prose. This session implements
 scent-weighted BM25, measures it at fixture and paper-benchmark scale,
 validates end-to-end with `qwen3.5-flash` (OpenRouter), and lands the result
-in the paper as §6.4. No commits were made — everything below is in the
+in the paper as §6.4. No commits were made everything below is in the
 working tree, uncommitted, for review.
 
 ## TL;DR
@@ -26,7 +26,7 @@ working tree, uncommitted, for review.
 - **Two real bugs found in passing, both fixed**:
   1. `examples/demo/questions-buried.json` was an untranslated Portuguese
      remnant whose `expected_nodes` pointed at pre-translation node IDs
-     (`projetos/mixerllm/log-experimentos`) that no longer exist — every
+     (`projetos/mixerllm/log-experimentos`) that no longer exist every
      bench run against it measured a structural 0.0. Translated and
      retargeted; each answer re-verified against the actual node bodies.
   2. `forests/scripts/build_bench_forest.py` never wrote
@@ -86,11 +86,11 @@ in a single call? Measured on the fixture (14 questions = 10 demo +
   at p50 ≈ 50 ms (locate itself ~1 ms); >95% of the agent's 4.9 s is LLM
   inference across hops, not searching.
 - **Failure audit (bundle-level, zero-LLM)**: the one-shot misses are
-  exactly the questions whose bundle lacked the answer — reading accuracy
+  exactly the questions whose bundle lacked the answer reading accuracy
   was 12/12 when the answer was present. The two failure classes are
   structural, not tuning artifacts:
   1. *Dataset-only facts* (q02: "Southeast" exists in no `.md`, only inside
-     the SQLite dataset) — impossible for any text-retrieval one-shot;
+     the SQLite dataset) impossible for any text-retrieval one-shot;
      the agent answers via `query`.
   2. *Short numeric needles* (b02 "73%" → seed 1013; b03 run 27 → "127")
      buried in a 4k-token body: harvest's derived sniff terms require ≥4
@@ -106,14 +106,14 @@ in a single call? Measured on the fixture (14 questions = 10 demo +
   agent when the bundle comes back dry or the question is aggregate
   (SQL-shaped). Added to the paper's §8 trade-offs paragraph with numbers.
 
-## Addendum — MiniCPM5-1B local A/B (aborted: MacBook too slow)
+## Addendum MiniCPM5-1B local A/B (aborted: MacBook too slow)
 
 Does the scent-weighting raise the tiny navigator's correct count?
 Setup: MiniCPM5-1B Q8_0 via `llama-server` (Metal), `--ctx 32768`
 (the 8192 default overflows the demo conversation: HTTP 400
 `exceed_context_size` at ~9.7k tokens), temp 0.1, fixture demo set.
 Completed 4 flat + 3 weighted runs (~65 s/question here; one question
-pegged ~310 s in every run) before stopping — this eval belongs on the
+pegged ~310 s in every run) before stopping this eval belongs on the
 3090 box.
 
 | Arm | Correct (runs) | Mean | Precision (mean) | Tok-to-banana |
@@ -121,12 +121,12 @@ pegged ~310 s in every run) before stopping — this eval belongs on the
 | flat | 9, 8, 8, 10 | 8.75 | ~0.29 | ~2,550 |
 | weighted | 8, 8, 7 | 7.67 | ~0.35 | ~2,170 |
 
-**No correct-count gain** — the difference is within this model's
+**No correct-count gain** the difference is within this model's
 documented run-to-run swings. Weighted was consistently better on
 harvest precision (+0.06) and ~15% cheaper in observation tokens.
 Reading: the fixture set is near-saturated at locate level even flat
 (R@1 0.9), and the 1B's failures are protocol collapse (locate-repetition
-loops, stall rescues, forced synthesis) — not entry-search misses. Better
+loops, stall rescues, forced synthesis) not entry-search misses. Better
 scent cannot substitute for navigation discipline below the capability
 floor; this is §6.3's substitution thesis seen from the other side. The
 weighting's end-to-end payoff should be sought where flat BM25 actually

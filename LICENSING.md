@@ -6,10 +6,10 @@ the host is a product meant to be operated.
 
 | Path | License | Why |
 |---|---|---|
-| `src/monkeyllm/` — the engine, the 10 primitives, `harvest` | **Apache-2.0** | The MCP contract is the asset. Embed it, ship it, build on it; the explicit patent grant is what lets a company do that without a legal review. |
+| `src/monkeyllm/` the engine, the 10 primitives, `harvest` | **Apache-2.0** | The MCP contract is the asset. Embed it, ship it, build on it; the explicit patent grant is what lets a company do that without a legal review. |
 | `docs/`, `tests/`, `bench/`, `troop/`, `scripts/`, `examples/`, `forests/scripts/`, `paper/`, `deploy/` | **Apache-2.0** | The spec, the benchmark and the deployment glue are only useful if everyone can copy them. |
-| `apps/station/` — the Station (REST, MCP surface, governance) | **AGPL-3.0-only** | Self-hosting stays completely free. Offering it as a managed service means opening your service stack. |
-| `apps/studio/` — the Studio web console | **AGPL-3.0-only** | Same reason: it is the operated product, not the contract. |
+| `apps/station/` the Station (REST, MCP surface, governance) | **AGPL-3.0-only** | Self-hosting stays completely free. Offering it as a managed service means opening your service stack. |
+| `apps/studio/` the Studio web console | **AGPL-3.0-only** | Same reason: it is the operated product, not the contract. |
 
 The root [`LICENSE`](LICENSE) is Apache-2.0 and covers everything **except**
 `apps/`. Each package under `apps/` carries its own `LICENSE`.
@@ -43,9 +43,9 @@ those users the Corresponding Source of your modified version. Running an
 ## Commercial licensing
 
 The copyright is held by a single author, so the AGPL is not the only way to
-get this software. If AGPL-3.0 does not fit — you want to embed the Station
+get this software. If AGPL-3.0 does not fit you want to embed the Station
 in a closed product, or offer it as a managed service without opening your
-stack — a commercial license is available. Contact the copyright holder.
+stack a commercial license is available. Contact the copyright holder.
 
 ## Contributing
 

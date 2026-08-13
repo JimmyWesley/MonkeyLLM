@@ -1,4 +1,4 @@
-# MonkeyLLM — Technical Specification v0.26 (Phase 0/1/2 + host layer)
+# MonkeyLLM Technical Specification v0.26 (Phase 0/1/2 + host layer)
 
 **Audience:** development team.
 **Scope:** normative specification of the forest dialect (`schema.md`), the I/O contracts of the Vine protocol's primitives (MCP), the host layer that serves them to many principals (Part J), and the Phase 0 acceptance criteria.
@@ -9,7 +9,7 @@
 > document is English. As of v0.5 every **contract token** (type/rel/enum
 > values, parsed section headings) is English regardless of prose language.
 
-**Changelog v0.25 → v0.26 — ingest grows a perimeter: every source is
+**Changelog v0.25 → v0.26 ingest grows a perimeter: every source is
 named, vetted, and contained.**
 
 A forest created through the console and then refreshed from it ingested
@@ -18,8 +18,8 @@ defensible alone: `sync` defaults to the source root a prior `adopt`
 recorded (G.3); a forest that has never adopted has no such root; and an
 absent root was read as the empty path, which every filesystem API resolves
 to *the working directory of the process*. So the one mode J.8 exempts from
-the `admin` requirement — exempt precisely because its directory was vetted
-at adopt time — became the one mode that walked a directory nobody had ever
+the `admin` requirement exempt precisely because its directory was vetted
+at adopt time became the one mode that walked a directory nobody had ever
 vetted, on behalf of a principal who was never asked for `admin`.
 
 Three more escapes of the same shape were open beside it. The walk had no
@@ -29,8 +29,8 @@ tenant boundary. A targeted `sync` joined its caller's path onto the source
 root and checked containment with `relative_to`, which is lexical: `../../x`
 survived the join and came back out as a "relative" path, so the file was
 read and planted. And `content: reference` resolved `source_root/source_path`
-without checking the result stayed underneath it, which turned `pick` — a
-*read* primitive — into a reader for any file the host process could open.
+without checking the result stayed underneath it, which turned `pick` a
+*read* primitive into a reader for any file the host process could open.
 
 None of the four was a missing check inside a feature. They were the same
 absent idea, four times: **an ingest source is a boundary, and a boundary
@@ -41,7 +41,7 @@ has to be stated somewhere.** This version states it.
   directory. A source MUST NOT be, contain, or sit inside the forest, and
   any directory that is itself a forest is pruned from every walk.
 - **G.8 amended: a targeted `sync` path is contained after resolution**,
-  not by string inspection — `..` collapses and symlinks are followed
+  not by string inspection `..` collapses and symlinks are followed
   before the comparison, because the lexical check is the bug.
 - **G.7 amended: a `reference` body MUST resolve underneath the source
   root.** `source_path` is ordinary frontmatter that anything able to
@@ -58,19 +58,19 @@ has to be stated somewhere.** This version states it.
   forest reading the volume that holds every forest is the tenant boundary
   failing in the only direction that counts.
 - **J.6 amended**: a Station's working directory MUST NOT be its own
-  install tree — defence in depth, so that the next path bug lands
+  install tree defence in depth, so that the next path bug lands
   somewhere empty.
 - **J.8 amended**: a console MUST NOT offer a refresh without naming the
   directory it will re-read. A blind button is how this shipped.
 - New acceptance criterion **F.29**.
 
-**Changelog v0.24 → v0.25 — the first boot: a deployment that has nobody
+**Changelog v0.24 → v0.25 the first boot: a deployment that has nobody
 yet must still be able to acquire somebody.**
 
 Every version so far assumed the registry already had an administrator. It
 does not on the day it is installed. A Station started on an empty volume
 grants the environment super-admin `admin` on every forest *in the registry*
-— of which there are none — so it authenticates and governs nothing, and
+— of which there are none so it authenticates and governs nothing, and
 J.7 then refuses it the first forest because creating one requires `admin`
 on a forest that already exists. The two rules are individually sound and
 jointly a deadlock: the product cannot be reached through its own front
@@ -82,7 +82,7 @@ authority somewhere to live.
 
 - **J.2.4 First-run setup.** While the registry holds no credential, the
   Station offers exactly one unauthenticated route that creates the
-  **owner** — and it closes permanently, in the same transaction that
+  **owner** and it closes permanently, in the same transaction that
   creates them. This is the one place a second authentication path could
   hide, so its closing condition is normative and its race is specified,
   not left to implementation.
@@ -95,7 +95,7 @@ authority somewhere to live.
   **or** the owner bit. An unprivileged principal still never can.
 - **J.2.1 amended.** The environment super-admin is demoted to what it was
   always described as: break-glass. It is no longer the documented way in,
-  and while it is configured the setup route does not exist — one door at a
+  and while it is configured the setup route does not exist one door at a
   time, so the two can never race for the same first identity.
 - **J.5.6 The setup screen**, pre-identity like the Gate, and the optional
   seeded forest that makes an empty console teach something. The seed is
@@ -103,7 +103,7 @@ authority somewhere to live.
   that only calls public primitives.
 - New acceptance criterion **F.28**.
 
-**Changelog v0.23 → v0.24 — composing with review: the author sees the
+**Changelog v0.23 → v0.24 composing with review: the author sees the
 passport before the forest keeps it.**
 
 `compose` (v0.22) let a person post prose and have the Curator make a node
@@ -113,7 +113,7 @@ the Ranger's working set, were facts before anyone had read them. Undoing
 them meant editing a node that already existed.
 
 - **J.8.1 Two-phase compose.** `stage: true` runs the whole pipeline —
-  converter, curation, G.4.2.1 candidate proposals — and stops at the
+  converter, curation, G.4.2.1 candidate proposals and stops at the
   plant, returning the draft. A second call carrying `draft` accepts it.
   Nothing is planted, grafted or committed by the staging call.
 - **Accepting re-runs the same pipeline, with the approval pinned.** The
@@ -124,7 +124,7 @@ them meant editing a node that already existed.
 - **The reviewer's edits are re-validated, not trusted.** A returned draft
   is a client payload: summaries are re-clipped to the A.4 budget, tags
   re-cleaned and capped, and every link re-checked against the closed-
-  candidate rules of G.4.2.1 — `related-to` only, existing and in-scope
+  candidate rules of G.4.2.1 `related-to` only, existing and in-scope
   targets, never a branch, never self or parent, capped at 3, and pinned at
   confidence 0.3 whoever kept it.
 - **Staging is not planting, and dry-run is a property of the Gardener.**
@@ -133,20 +133,20 @@ them meant editing a node that already existed.
   a call so no path can forget it.
 - New acceptance criterion **F.27**.
 
-**Changelog v0.22 → v0.23 — the maintenance surface: the Ranger reports to
+**Changelog v0.22 → v0.23 the maintenance surface: the Ranger reports to
 somebody.**
 
 Part H gave the forest a Ranger and Part I gave it snapshots, and both have
 been reachable only from a shell. The operator who most needs to know a
 branch has grown too wide, or that a hundred link proposals are waiting, is
-the one running a hosted Station — and they have a browser.
+the one running a hosted Station and they have a browser.
 
 - **J.13 Maintenance surface.** `GET /v1/admin/health` returns the Ranger's
   H.3 report unchanged; snapshots can be created and listed over REST.
   Neither is a primitive and neither invents a number: the report is what
   `Ranger.health()` already computes.
 - **Health is an owner's view, and says so.** The report counts and names
-  things across the WHOLE forest — lint errors, fat nodes, stale passports —
+  things across the WHOLE forest lint errors, fat nodes, stale passports —
   so it requires `admin` *and* an unrestricted scope. A scoped principal is
   refused with the reason rather than handed a filtered half-report whose
   numbers would quietly describe a forest they cannot see.
@@ -156,7 +156,7 @@ the one running a hosted Station — and they have a browser.
   worse answer than no button. Disaster recovery is not a web workflow.
 - New acceptance criterion **F.26**.
 
-**Changelog v0.21 → v0.22 — Forest Views: the map becomes visible.**
+**Changelog v0.21 → v0.22 Forest Views: the map becomes visible.**
 
 Everything the Station serves has been legible to an agent and illegible to
 a person. `look` returns a digest, `scan` returns a page, and neither ever
@@ -164,20 +164,20 @@ shows the shape of the thing being navigated. A forest is a graph with
 heat on it; a console that can only render lists is describing a map by
 reading out street names.
 
-- **J.11 Map projections.** Two read-only endpoints — `GET /graph` and
-  `GET /trails` — that project the Catalog (C.6.1) and the pheromone layer
+- **J.11 Map projections.** Two read-only endpoints `GET /graph` and
+  `GET /trails` that project the Catalog (C.6.1) and the pheromone layer
   (Part D/H.1) as whole-of-region payloads. They add no primitive and no
   engine capability: everything they return is already reachable one node
   at a time through `look`/`move`/`scan`, and they are subject to the same
   J.3 filtering, including the recomputation of every derived count.
 - **J.5.4 Forest Views.** The Explore console gains modes over one
-  selection — graph, tree, files — and the file view renders each file as
+  selection graph, tree, files and the file view renders each file as
   what it is: markdown rendered by default with the stored source one click
   away, a dataset payload as a browsable table, an HTML body as a page.
   Presentation only: no request, response or permission changes.
 - **J.8's fourth mode, `compose`.** A person writes prose in the console
   and it enters the forest through the ingest pipeline that already exists
-  — same converters, same curation, same commits — rather than through a
+  same converters, same curation, same commits rather than through a
   second, unaudited door.
 - **Editing is a write, not a save.** A console MAY offer rich editing of a
   node, and MUST express the result as `graft`/`tend` operations. Writing
@@ -185,7 +185,7 @@ reading out street names.
 - New acceptance criterion **F.25** (a map projection discloses nothing a
   node-by-node walk would not).
 
-**Changelog v0.20 → v0.21 — the Gauntlet: the vector layer moves from the
+**Changelog v0.20 → v0.21 the Gauntlet: the vector layer moves from the
 entry to the hand:**
 
 Measurement (2026-08-08, bge-m3 on a local Ollama) established where the
@@ -197,7 +197,7 @@ dense layer helps and where it hurts, and the two answers are opposite:
 | forest-fixture, 10 demo queries | **1.000** | **0.400** |
 
 RRF rewards *agreement*, not correctness. Fusing a fuzzy ranker into one
-that is already right can only pull the answer away from rank 1 — on the
+that is already right can only pull the answer away from rank 1 on the
 fixture it dropped `block-loop` from 1st to 4th while the vector list
 surfaced the topically-adjacent `speculative-decoding`. So the published
 hybrid row does not survive scent-weighted BM25, and v0.19's own
@@ -206,16 +206,16 @@ hybrid row does not survive scent-weighted BM25, and v0.19's own
 The same rule points at where the layer *does* pay. Entry search already
 has a strong query-dependent ranker. **Navigation has none**: `look` orders
 edges by heat (past usefulness), `scan` by degree (connectivity), `move`
-not at all — every one of them blind to what is being hunted right now.
+not at all every one of them blind to what is being hunted right now.
 Adding a query-dependent signal there is not fusion; it is the first such
 signal, with nothing to dilute.
 
-- **Part K — the Gauntlet.** The forager carries the query vector and the
+- **Part K the Gauntlet.** The forager carries the query vector and the
   *frontier* is ordered by proximity to it: which neighbours `look` shows
   within its edge cap, which children `scan` returns under its budget,
   which way `move` points. Cost is one query embedding per hunt, reused
   across every hop; per hop it is a dot product over vectors already in the
-  Canopy — no HTTP, **no tokens**.
+  Canopy no HTTP, **no tokens**.
 - **Strictly optional, and identical when absent.** No embedder, or no
   index, or a stale index ⇒ every primitive behaves exactly as in v0.20.
   Not degraded: identical. The Gauntlet MUST NOT become a dependency of
@@ -229,26 +229,26 @@ signal, with nothing to dilute.
   to v0.20; conditioning is visible in the response; mismatch disables and
   reports).
 
-**Also in v0.21 — J.10.1, the provider the deployment already declared:**
+**Also in v0.21 J.10.1, the provider the deployment already declared:**
 
 A Station started with `MONKEYLLM_LLM_ENDPOINT` and its key has already
 been told everything the console's provider form would ask for. Asking
 again makes an operator copy a secret out of the place that governs it —
-the environment, which the deployment rotates and never backs up — into a
+the environment, which the deployment rotates and never backs up into a
 place that does not.
 
 - **J.10.1 Environment-declared providers.** They appear configured at
   boot, marked `origin: "env"`. The key is resolved from the environment at
   call time and **MUST NOT be written to the registry**. The console MUST
-  refuse to edit or remove one — accepting would be undone by the next
+  refuse to edit or remove one accepting would be undone by the next
   restart. A row whose declaration is withdrawn becomes an ordinary console
   row rather than being deleted with its bindings.
 
-**Changelog v0.19 → v0.20 — one person, several forests, one decision:**
+**Changelog v0.19 → v0.20 one person, several forests, one decision:**
 
 v0.19 made the *person* the unit of administration but left the grant step
 naming a single forest, so a registry hosting six forests turned "give this
-service read access to everything" into six visits to the same form — six
+service read access to everything" into six visits to the same form six
 requests, six chances to stop halfway, and a token whose real reach was
 never visible in one place. The person was one thought; their access was
 still shaped like one row of the grants table.
@@ -259,26 +259,26 @@ still shaped like one row of the grants table.
   one-element list, so every existing client keeps working.
 - **A list is not a relaxation.** Each named forest is authorised on its
   own (`admin` on *that* forest), applied on its own, and refused on its
-  own — a refusal names the forest and MUST NOT discard the forests the
+  own a refusal names the forest and MUST NOT discard the forests the
   caller was entitled to grant. This is J.2.3's partial-application rule
   applied within a step rather than only between steps.
 - **Scope prefixes are forest-local.** `allow`/`deny` apply to every forest
   named in the same grant, because a grant is one policy. Branch names are
   not portable between forests, so the console offers the branch picker only
   when exactly one forest is selected and grants the whole forest otherwise
-  (J.5.5) — the API does not second-guess a caller that knows better.
+  (J.5.5) the API does not second-guess a caller that knows better.
 - **What did NOT change:** the escalation rule (J.2.2). A key still
   authenticates a principal, so minting one still requires `admin` on
-  **every** forest that principal holds — which is precisely why the grant
+  **every** forest that principal holds which is precisely why the grant
   step has to be able to say "these forests" in one request that the
   administrator of all of them can make.
 - Criterion **F.23** extended: a multi-forest grant lands on every forest
   the caller administers, refuses the ones it does not by name, and the
   resulting token reads in each granted forest.
 
-**Changelog v0.18 → v0.19 — governance is organised around people:**
+**Changelog v0.18 → v0.19 governance is organised around people:**
 
-The host grew three governance objects — grants, passwords, API keys — and
+The host grew three governance objects grants, passwords, API keys and
 the console grew one screen per object. That is the storage model wearing a
 navigation bar. Nobody administers a *grant*; they onboard a **person**, and
 onboarding is one thought: this is who they are, this is what they may see,
@@ -286,14 +286,14 @@ here is how they sign in, here is a token for their script. Splitting that
 across three destinations made the operator hold the model in their head
 instead of the interface holding it for them.
 
-- **J.2.3 `POST /v1/admin/people`** — one call applies any combination of
+- **J.2.3 `POST /v1/admin/people`** one call applies any combination of
   grant, revoke-access, password and token changes to one person, so the
   console can offer onboarding as a single form. It is a **composite, not a
   new authority**: each part re-checks the rule that already governed it,
   and the parts apply in an order that makes a first-time grant usable
   (grant first, so a brand-new principal becomes administrable and can then
   receive a password and a key in the same request).
-- **`GET /v1/admin/people`** — the person-shaped read the console needs:
+- **`GET /v1/admin/people`** the person-shaped read the console needs:
   identity, grants, password presence, tokens and last-seen in one object,
   filtered by J.3.2. Assembling this client-side from three endpoints made
   the console's shape depend on the registry's.
@@ -311,11 +311,11 @@ instead of the interface holding it for them.
   parts it may; onboarding in one call yields a working sign-in and a
   working token).
 
-**Changelog v0.17 → v0.18 — administration stops being global:**
+**Changelog v0.17 → v0.18 administration stops being global:**
 
 Asking "should the console hide what a person cannot do?" turned into an
 audit of every host route, and the audit found the real defect. Every
-`/v1/admin/*` route correctly refuses a non-administrator — but it treated
+`/v1/admin/*` route correctly refuses a non-administrator but it treated
 `admin` **on any forest** as a licence to read **every** forest's
 governance data. An administrator of one forest could list every principal
 in the registry with their exact branch prefixes, and read the complete
@@ -327,7 +327,7 @@ API keys; the same reasoning was never carried to the rest.
   they do not administer. Every host route MUST filter its result to those
   forests, and a route that cannot be filtered MUST require admin
   everywhere instead.
-- **J.5.1 revised** — a console the principal cannot use is now **omitted
+- **J.5.1 revised** a console the principal cannot use is now **omitted
   from navigation** rather than shown with an explanation. Corporate
   operators read a menu as a list of what they may do, and an entry that
   only ever refuses teaches nothing that a support conversation would not
@@ -341,7 +341,7 @@ API keys; the same reasoning was never carried to the rest.
   partial administrator; navigation contains exactly the permitted
   consoles).
 
-**Changelog v0.16 → v0.17 — credentials get a front door and a lifecycle:**
+**Changelog v0.16 → v0.17 credentials get a front door and a lifecycle:**
 
 v0.16 made the console usable; it left the credential that opens it with no
 story at all. A key was minted by a CLI or hidden inside the grant form,
@@ -355,18 +355,18 @@ console could not govern.
   key with a short lifetime. Machines keep pasting keys. Both arrive at the
   same `authenticate()` and the same J.3 policy, so there is exactly one
   authorization path no matter which door was used.
-- **The environment super-admin** — `MONKEYLLM_STATION_ADMIN` and
-  `MONKEYLLM_STATION_PASSWORD` — is verified against the environment and
+- **The environment super-admin** `MONKEYLLM_STATION_ADMIN` and
+  `MONKEYLLM_STATION_PASSWORD` is verified against the environment and
   never stored: it is break-glass, and hashing a value that already sits in
   the environment protects nothing while giving a rotation two places to go
   wrong.
-- **J.2.2 Token lifecycle** — label, expiry, revocation, last use, and a
+- **J.2.2 Token lifecycle** label, expiry, revocation, last use, and a
   non-secret prefix so a token can be recognised in a list without being
   disclosed. Expired and revoked keys MUST fail authentication, which is
   where a lifecycle either exists or does not.
 - **The escalation rule that makes delegated token issuance safe:** minting
   or revoking a key for a principal requires `admin` on **every** forest
-  that principal holds a grant on — not merely on one of them.
+  that principal holds a grant on not merely on one of them.
 - **J.5.4 Tokens console**, and the explicit ruling that there is **no
   second, super-admin panel**: one console over one API, with capabilities
   deciding what appears. A second panel needs a second authentication path,
@@ -374,7 +374,7 @@ console could not govern.
 - New acceptance criterion **F.21** (login, session expiry, revocation,
   last-use, prefix-only listing, and the cross-forest escalation refusal).
 
-**Changelog v0.15 → v0.16 — the console becomes usable by someone who has
+**Changelog v0.15 → v0.16 the console becomes usable by someone who has
 not read this document:**
 
 v0.14 and v0.15 gave the Station a front door and a choice of reader. Both
@@ -385,19 +385,19 @@ spoke one language in one theme. A governed knowledge base that only its
 own author can operate is not a product. v0.16 specifies the console as a
 first-class contract rather than a rendering of the registry.
 
-- **J.5 rewritten** — a normative information architecture (nine consoles
+- **J.5 rewritten** a normative information architecture (nine consoles
   in three groups), the rule that **the console MUST address the operator
   in the operator's vocabulary**, not the policy model's, and two
   requirements the previous version left to taste: localisation
   (English, Portuguese, Spanish) and both light and dark presentation.
   The no-side-channel rule is unchanged and now explicitly covers strings:
   a translation MUST NOT alter what a surface returns.
-- **J.7 Forest lifecycle** — `POST /v1/admin/forests`, so a deployment can
+- **J.7 Forest lifecycle** `POST /v1/admin/forests`, so a deployment can
   reach its second forest without shell access to the volume. Creation is
   A.5 `init_forest` and nothing else; the id is validated against path
   escape before it is a path, and the creator is granted the forest so a
   newly created forest is never orphaned.
-- **J.8 Ingest surface** — the Gardener (Part G) reached over REST, with
+- **J.8 Ingest surface** the Gardener (Part G) reached over REST, with
   `adopt`, `sync` and a **staged upload** for operators who have a browser
   and no shell. Requires the `ingest` capability; the destination branch is
   scope-checked, so ingest cannot be used to write where reads are denied.
@@ -409,7 +409,7 @@ first-class contract rather than a rendering of the registry.
   scoped world; forest creation refuses path escape; ingest refuses to
   write outside scope).
 
-**Changelog v0.14 → v0.15 — J.10, per-forest inference (the forest picks its
+**Changelog v0.14 → v0.15 J.10, per-forest inference (the forest picks its
 own model):**
 
 Part J gave forests a front door; v0.15 lets each one choose who reads it.
@@ -419,12 +419,12 @@ follows instructions. One global `MONKEYLLM_LLM_*` cannot express that, and
 it cannot express "this corpus stays on a local endpoint while that one uses
 a hosted model" either.
 
-- **J.10 Providers and role bindings** — operators register any
+- **J.10 Providers and role bindings** operators register any
   OpenAI-compatible `/v1` (OpenRouter, LiteLLM, vLLM, local llama.cpp) in
   the host registry, then bind a model per `(forest, role)` with
   `role ∈ {ingest, answer}`. Credentials are write-only across every
   surface: the API accepts a key and reports only whether one is set.
-- **J.10.3 Model-backed composites** — `answer` (retrieval + the forest's
+- **J.10.3 Model-backed composites** `answer` (retrieval + the forest's
   answering model, returning a grounded reply with its evidence) and
   `curate` (re-summarise a node through the ingest model, under the A.4
   scent rules). Both are host composites, not primitives: the engine gains
@@ -437,45 +437,45 @@ a hosted model" either.
   refuse unknown providers/roles; the answering model receives only
   in-scope material).
 
-**Changelog v0.13 → v0.14 — Part J, the Station (the forest gets a front
+**Changelog v0.13 → v0.14 Part J, the Station (the forest gets a front
 door):**
 
 Everything up to v0.13 assumes one operator who owns the filesystem.
 Corporate self-hosting needs the shape the database products converged on:
 an untouched engine wrapped by a host that adds identity, policy, audit and
-a friendly surface. Part J specifies that host — and specifies it as a
+a friendly surface. Part J specifies that host and specifies it as a
 **privileged client**, not an extension: the engine gains nothing, loses
 nothing, and its test suite MUST pass unedited.
 
-- **J.1 The Station** — one self-hostable service mounting a forest
+- **J.1 The Station** one self-hostable service mounting a forest
   registry (the `--root` resolution that already exists) and exposing
-  three surfaces — REST, MCP, Studio — over exactly one enforcement core.
+  three surfaces REST, MCP, Studio over exactly one enforcement core.
   No surface may reach an unscoped `Vine`.
-- **J.2 Identity** — principals (users and service tokens), per-forest
+- **J.2 Identity** principals (users and service tokens), per-forest
   roles, API keys now and OIDC later. Identity and policy live in the
   **host registry**, never inside a forest: forests are content.
-- **J.3 Policy (`ScopedVine`)** — deny-by-default grants over **branch
+- **J.3 Policy (`ScopedVine`)** deny-by-default grants over **branch
   prefixes** plus a capability set, with one enforcement rule per
   primitive. Two invariants make it trustworthy rather than merely
   configured: scope filtering MUST precede budgeting (no truncation
   oracle) and out-of-scope MUST be indistinguishable from absent (no
-  existence oracle) — including through `move`'s edges, which would
+  existence oracle) including through `move`'s edges, which would
   otherwise leak a forbidden node's existence.
-- **J.4 Audit** — writes stay git commits, now stamped with the acting
+- **J.4 Audit** writes stay git commits, now stamped with the acting
   principal; reads extend the Part D telemetry with principal identity.
-- **J.5 Studio** — the web console, itself a plain REST client with no
+- **J.5 Studio** the web console, itself a plain REST client with no
   privileged side-channel.
 - New acceptance criterion **F.18** (the leak suite: one test per
   primitive per surface, plus the two oracle invariants).
 
-**Changelog v0.12 → v0.13 — branch rollup + Landmarks (the map grows a
+**Changelog v0.12 → v0.13 branch rollup + Landmarks (the map grows a
 sense of place):**
 
 The branch hierarchy already occupies the position that graph-RAG systems
 pay dearly to discover (hierarchical communities); what it lacked was
 synthesized content at each level. Two additions, zero new primitives:
 
-- **G.4.4 Branch rollup** — after adopt/sync curation, the Gardener MAY
+- **G.4.4 Branch rollup** after adopt/sync curation, the Gardener MAY
   synthesize branch (`_index.md`) frontmatter summaries bottom-up (deepest
   branch first) from the children's entry lines. Scope is strictly
   branches with `source: ingest` (hand-authored branch summaries are never
@@ -484,12 +484,12 @@ synthesized content at each level. Two additions, zero new primitives:
   summary and never blocks (same posture as G.4.2). Writes go through the
   C.8 `graft` path, so verbatim propagation into parent index entries and
   `.md`-only commits are inherited, not reimplemented. Rollup cost is
-  O(branches), not O(nodes) — the lazy end of the graph-RAG spectrum.
-- **A.5 entry-sync rule tightened** — when a summary change propagates
+  O(branches), not O(nodes) the lazy end of the graph-RAG spectrum.
+- **A.5 entry-sync rule tightened** when a summary change propagates
   into a `## Sub-branches` entry, the entry's trailing coverage suffix
   (`. N bananas, M sub-branches.`) MUST be preserved (previously it was
   silently dropped by the sync rewrite).
-- **A.5 `## Landmarks` implemented as a Ranger duty (H.7)** — the master
+- **A.5 `## Landmarks` implemented as a Ranger duty (H.7)** the master
   `_index.md`'s Landmarks section (already normative since v0.5) is now
   populated mechanically: top 10-20 highest-degree non-branch nodes from
   the catalog's edges table, entry lines with summaries, idempotent
@@ -498,12 +498,12 @@ synthesized content at each level. Two additions, zero new primitives:
 - New acceptance criterion **F.17** (rollup scope/fallback/propagation +
   Landmarks idempotence).
 
-**Changelog v0.11 → v0.12 — Gardener v2: native DOCX + edge proposals (the
+**Changelog v0.11 → v0.12 Gardener v2: native DOCX + edge proposals (the
 forest starts weaving itself):**
 
 Two Gardener extensions, both strictly inside the edges-only surface (G.2):
 
-- **G.2.1 DOCX built-in converter** — `.docx` joins the built-ins when
+- **G.2.1 DOCX built-in converter** `.docx` joins the built-ins when
   `python-docx` (MIT; lxml, BSD) is importable, mirroring the `openpyxl`
   pattern. Single-pass `w:t` traversal in document order: body paragraphs
   (style-mapped headings), tables (→ pipe tables), and text inside embedded
@@ -512,51 +512,51 @@ Two Gardener extensions, both strictly inside the edges-only surface (G.2):
   EXCLUDED (page-number/letterhead boilerplate is scent noise). Technique
   derived from the owner's pdf-replace project (MIT-clean reading side).
   No `python-docx` → `.docx` files report `unsupported`, never a crash.
-- **G.4.2.1 Edge proposals** — LLM curation MAY now propose `related-to`
+- **G.4.2.1 Edge proposals** LLM curation MAY now propose `related-to`
   links from the adopted node to EXISTING nodes, each carrying link-level
   `confidence: 0.3` (the C.8 ladder's bottom rung). Candidates come from
   the catalog (BM25 over curated metadata); the model can only pick from
-  the offered list — a hallucinated target is structurally impossible.
+  the offered list a hallucinated target is structurally impossible.
   This closes the loop with Part H: the Gardener proposes, usage heats,
   the Ranger promotes (0.8) or prunes. Entity EXTRACTION (creating new
   `entity` nodes) stays deferred: it needs a placement policy and a
   `same-as` dedup story first.
 - New acceptance criterion **F.16** (DOCX fidelity + proposal guard rails).
 
-**Changelog v0.10 → v0.11 — the map is not the territory (tiered storage,
+**Changelog v0.10 → v0.11 the map is not the territory (tiered storage,
 big sources, S3-ready):**
 
 A 2 TB source must not require 4 TB locally. The forest splits into three
-tiers — SCENT (passports: summaries/outlines/links, ~0.1% of source size,
+tiers SCENT (passports: summaries/outlines/links, ~0.1% of source size,
 always local, in git), FLESH (converted full text, ~1-5%, local, git or
 derived cache), BONE (raw binaries, 95%+, stay at the source / object
 storage, fetched rarely). New normative items:
 
-- **G.7 Content & archive policies** — per-adoption `content:
+- **G.7 Content & archive policies** per-adoption `content:
   inline | cached | reference` and `archive: never (default) | always`.
   Non-inline bodies are resolved lazily by `pick`/`sniff`; the map
   (locate/look/scan, heat, curation) never needed the body and is
   unaffected. `archive: never` kills the redundant `_assets/` copy when
   the source is durable.
-- **G.8 Targeted sync & triggers** — `sync(path=...)` reprocesses a single
+- **G.8 Targeted sync & triggers** `sync(path=...)` reprocesses a single
   source file; an mtime+size fast-path avoids re-hashing unchanged trees.
   Event sources (filesystem watchers, S3/Drive push notifications) are
   EDGES that call targeted sync; **events trigger, the hash-diff
   reconciler stays authoritative** (lost events are healed by the next
   full sync).
-- **G.9 Payload fetchers** — `payload`/`source_path` MAY carry a scheme
+- **G.9 Payload fetchers** `payload`/`source_path` MAY carry a scheme
   (`file://` implicit; `s3://` via optional MIT extra). Remote payloads
   download on first use into `_derived/payloads/` (hash-validated cache).
   Dataset `.db` files are **local-first by design** (SQLite cannot be
-  queried remotely; hot knowledge bases need sub-ms reads) — object
+  queried remotely; hot knowledge bases need sub-ms reads) object
   storage holds them only as backup/cold tiers.
-- **H.6 Cache eviction** — the Ranger evicts cold entries from
+- **H.6 Cache eviction** the Ranger evicts cold entries from
   `_derived/payloads/` (LRU by last access; config `payload_cache_gb`).
-- **Part I — Snapshots**: `vine snapshot create|restore` packages the
+- **Part I Snapshots**: `vine snapshot create|restore` packages the
   forest as a `git bundle` (full commit history travels along) +
   compression, optionally uploaded to object storage; payload sidecar
   optional. The Ranger MAY schedule snapshots (backup policy).
-- Informative (G.4 note): **progressive curation** — adopt the skeleton
+- Informative (G.4 note): **progressive curation** adopt the skeleton
   deterministically first (the engine answers immediately with weak
   scent), then LLM-curate as a background queue prioritized by heat: the
   pheromone tells the Gardener where to polish first. Querying an
@@ -565,7 +565,7 @@ storage, fetched rarely). New normative items:
 - New acceptance criterion **F.15** (policies + targeted sync; fetcher/
   snapshot coverage lands with their implementations).
 
-**Changelog v0.9 → v0.10 — Part H: the Ranger (long-term maintenance — the
+**Changelog v0.9 → v0.10 Part H: the Ranger (long-term maintenance the
 forest forgets, confirms and warns):**
 
 The pheromone layer only compounds if it can also FORGET: without
@@ -573,14 +573,14 @@ evaporation every trail saturates at 1.0 and heat stops carrying signal;
 without pruning, agent proposals (confidence 0.3/0.5) accumulate as noise.
 New normative items:
 
-- **Part H (Ranger)** — the maintenance daemon: heat evaporation with a
+- **Part H (Ranger)** the maintenance daemon: heat evaporation with a
   configurable half-life over `_derived/trails.db` (H.1); promotion and
-  pruning of uncertain links — links born with link-level
+  pruning of uncertain links links born with link-level
   `confidence < 1.0` are the ONLY Ranger-managed edges (H.2); a read-only
   health report: `needs_split`, fat nodes, lint issues, stale passports,
   low-confidence inventory (H.3); on-demand run + service loop (H.4).
 - Ranger is **trusted infrastructure** (like the Gardener): evaporation
-  touches only the derived layer (no commits — `_derived/` is disposable);
+  touches only the derived layer (no commits `_derived/` is disposable);
   promotion/pruning write through the audited `.md`-only path with commit
   messages `ranger(promote): …` / `ranger(prune): …`.
 - The Ranger NEVER deletes nodes, never touches structural edges or any
@@ -589,15 +589,15 @@ New normative items:
 - New acceptance criterion **F.14** (synthetic-clock evaporation,
   promotion/pruning safety, health report).
 
-**Changelog v0.8 → v0.9 — Part G: the Gardener (brownfield ingest, the
+**Changelog v0.8 → v0.9 Part G: the Gardener (brownfield ingest, the
 forest learns to grow itself):**
 
 The dominant real-world scenario is **adoption**: the engine is pointed at a
 directory tree already full of documents ("mata alta") and must curate all
-of it — then notice when source files change. New normative items:
+of it then notice when source files change. New normative items:
 
-- **Part G (Gardener)** — the ingest pipeline: passport policy (G.1),
-  public converter contract with three discovery sources — forest-config
+- **Part G (Gardener)** the ingest pipeline: passport policy (G.1),
+  public converter contract with three discovery sources forest-config
   command hooks, `monkeyllm.converters` entry points, built-ins (G.2);
   `adopt` (mirror an existing tree: folders → branches, files → passports,
   deterministic placement) and `sync` (hash-diff incremental update) (G.3);
@@ -605,66 +605,66 @@ of it — then notice when source files change. New normative items:
   the only LLM-dependent stage, always skippable (G.4); media via the same
   converter contract: transcript/description is the body, the raw asset is
   the payload (G.5).
-- **C.7.1 extension: initial `rows` at birth** — `plant` of a dataset MAY
+- **C.7.1 extension: initial `rows` at birth** `plant` of a dataset MAY
   carry `rows` per table, inserted **parameterized** (never SQL text) before
   `payload_hash` is computed. Bulk loads bypass neither the schema
-  validation nor A.3.1 — and avoid `tend`'s keyword scanner false-positives
+  validation nor A.3.1 and avoid `tend`'s keyword scanner false-positives
   on arbitrary data.
 - **Extension surface is edges-only (normative)**: plugins exist for what
   goes IN (converters, curation hooks). The primitives' semantics, budgets
   and security guards are NOT extensible. UIs/automations (dashboards,
-  upload bots) are *clients* of the MCP server or the library — they need
+  upload bots) are *clients* of the MCP server or the library they need
   no plugin API.
 - New acceptance criterion **F.13** (adopt/sync end-to-end).
 
-**Changelog v0.7 → v0.8 — dataset birth: declarative schema in `plant`
+**Changelog v0.7 → v0.8 dataset birth: declarative schema in `plant`
 (Phase 2, the living bank grows its own organs):**
 
 `tend` (C.10) writes rows into datasets that already exist; until now no
-primitive could *create* a dataset — the `.db` was born only in offline
+primitive could *create* a dataset the `.db` was born only in offline
 generators. v0.8 closes the loop so an agent can collect data (web, PDFs,
-conversations), give it a structured home, and fill it — all through the
+conversations), give it a structured home, and fill it all through the
 primitives. Normative items:
 
-- **C.7.1 Dataset planting** — `plant` of a `type: dataset` node accepts an
+- **C.7.1 Dataset planting** `plant` of a `type: dataset` node accepts an
   optional **declarative `schema`** object (tables → columns → types). The
   Vine generates the DDL itself (names regex-validated, types from an
   allowlist), creates the SQLite payload, computes `payload_hash`, and
   auto-generates the `## Query manual` body section from the schema. **No
-  raw DDL ever comes from the model** — creation-time structure is data,
+  raw DDL ever comes from the model** creation-time structure is data,
   not SQL.
 - **`tend` is unchanged**: DDL stays forbidden there forever. The separation
-  is temporal — creation (rare, structured, validated whole) vs operation
+  is temporal creation (rare, structured, validated whole) vs operation
   (frequent, single-statement DML). `ALTER TABLE` after birth is out of
   scope (plant a new dataset and migrate, or wait for the Gardener).
 - A.3.1 holds with zero new machinery: the payload is created on the
   filesystem, only the `.md` (with `payload` + `payload_hash`) is committed.
 - New acceptance criterion **F.12** (schema validation, payload creation,
-  auto manual, atomic rollback — covered by tests).
+  auto manual, atomic rollback covered by tests).
 
-**Changelog v0.6 → v0.7 — `tend`: dataset writes (Phase 2 entry, the living
+**Changelog v0.6 → v0.7 `tend`: dataset writes (Phase 2 entry, the living
 bank):**
 
 `query` stays read-only by design; agent writes to dataset payloads get
 their own primitive with a hard guard rail. New normative items:
 
-- **C.10 `tend(id, sql)`** — the 10th primitive: single-statement
+- **C.10 `tend(id, sql)`** the 10th primitive: single-statement
   INSERT/UPDATE/DELETE on a `type:dataset` node's SQLite payload, with an
-  audit commit of the node's `.md` (`payload_hash` refresh) — the binary
+  audit commit of the node's `.md` (`payload_hash` refresh) the binary
   still never enters git (A.3.1 unchanged). Full contract in C.10.
-- **Lint: payload drift warning** — `vine validate` MUST warn when a node's
+- **Lint: payload drift warning** `vine validate` MUST warn when a node's
   `payload_hash` no longer matches the payload file's sha256 (completes the
   A.3 drift-detection promise; `tend` keeps the hash fresh, out-of-band
   edits become visible).
 - New acceptance criterion **F.11** (tend guard rails + audit, covered by
   tests).
 
-**Changelog v0.5 → v0.6 — shout trigger measures the real trail (Part D):**
+**Changelog v0.5 → v0.6 shout trigger measures the real trail (Part D):**
 
 The shout never fired in practice: 39 successful hunts across the fixture and
 the bench forest produced zero shortcut suggestions. Root cause: the trigger
 reused `hops-to-banana`, which counts only `look`+`move` calls before the
-FIRST `pick`/`query` — but agents traverse deep chains with **pick chains**
+FIRST `pick`/`query` but agents traverse deep chains with **pick chains**
 (`locate → pick → pick → pick`), so the counter stays at 0–2 even on long
 winning trails. Normative changes:
 
@@ -679,7 +679,7 @@ winning trails. Normative changes:
   it stays a Monkey Bench metric for longitudinal comparability; it is no
   longer the shout trigger.
 
-**Changelog v0.4 → v0.5 — canonical English vocabulary (normative):**
+**Changelog v0.4 → v0.5 canonical English vocabulary (normative):**
 
 The tool's vocabulary is English. Every contract token that was Portuguese
 is renamed; the Portuguese tokens are **removed** (clean break, pre-release —
@@ -728,7 +728,7 @@ structural tokens above change there.
   an optional trailing `forest: string` parameter selecting the target forest;
   a new `forests()` tool lists what the registry serves. Forests open lazily
   on first touch (auto-index included). Single-forest mode (`--forest`) keeps
-  the previous behavior — `forest` is optional there — so v0.3 clients are
+  the previous behavior `forest` is optional there so v0.3 clients are
   not broken.
 - New acceptance criterion F.10 (registry: selection, lazy open, path safety,
   single-forest backward compatibility).
@@ -738,7 +738,7 @@ structural tokens above change there.
 - New composite MCP tool **C.6c `harvest`**: zero-LLM, one-shot retrieval for
   clients that bring their own model. Fuses `locate` + `sniff` (RRF), returns
   ranked bananas with full body or matched sections plus exact snippets.
-  It is an orchestration over existing primitives — the nine primitive
+  It is an orchestration over existing primitives the nine primitive
   contracts are untouched.
 - Three integration modes documented (C.6c intro): direct navigation
   (client LLM drives the primitives), harvest (one call, evidence back),
@@ -748,14 +748,14 @@ structural tokens above change there.
 
 **Changelog v0.1 → v0.2:**
 
-- New read primitive **C.6b `sniff`** (the sniffer): literal search over node **bodies**, returning node + section + snippet. Complements `locate` (which stays restricted to curated metadata — C.1 contract intact) covering the case "exact term buried in the body, invisible to summary/tags".
-- **A.3.1 Binary payload policy**: binaries never enter the forest's Git — Vine versions `.md` only (enforced at the commit layer); payloads are referenced by `payload` + `payload_hash` and excluded by the forest's `.gitignore`.
+- New read primitive **C.6b `sniff`** (the sniffer): literal search over node **bodies**, returning node + section + snippet. Complements `locate` (which stays restricted to curated metadata C.1 contract intact) covering the case "exact term buried in the body, invisible to summary/tags".
+- **A.3.1 Binary payload policy**: binaries never enter the forest's Git Vine versions `.md` only (enforced at the commit layer); payloads are referenced by `payload` + `payload_hash` and excluded by the forest's `.gitignore`.
 - Acceptance criterion F.1 updated to include C.6b; new criteria F.7 (sniff quality) and F.8 (payloads outside Git).
 - Nothing else changes: every other contract is identical to v0.1 (which stays archived for history).
 
 ---
 
-## Part A — The Forest Dialect (`_meta/schema.md`)
+## Part A The Forest Dialect (`_meta/schema.md`)
 
 `schema.md` is a living file inside the forest that declares the valid types. The Vine MUST validate every write (`plant`/`graft`) against it. The agent MAY read it via `look("_meta/schema")` to learn the dialect in 1 hop.
 
@@ -763,13 +763,13 @@ structural tokens above change there.
 
 | `type` | Description | Payload | Harvest verb |
 |---|---|---|---|
-| `branch` | Index file (`_index.md`) of a folder | — | `look` |
-| `note` | Free-text knowledge (default banana) | — | `pick` |
+| `branch` | Index file (`_index.md`) of a folder | | `look` |
+| `note` | Free-text knowledge (default banana) | | `pick` |
 | `document` | Converted document (PDF/DOCX origin) | original in `_assets/` | `pick` |
 | `dataset` | Tabular data | sibling SQLite (`.db`) | `query` |
-| `entity` | Person, organization, product, place (subtype in `entity_kind`) | — | `pick` |
-| `concept` | Definition / technical term | — | `pick` |
-| `event` | Dated fact (meeting, decision, release) | — | `pick` |
+| `entity` | Person, organization, product, place (subtype in `entity_kind`) | | `pick` |
+| `concept` | Definition / technical term | | `pick` |
+| `event` | Dated fact (meeting, decision, release) | | `pick` |
 | `media` | Image/audio/video with description or transcript | original in `_assets/` | `pick` |
 
 Rules:
@@ -789,7 +789,7 @@ Edges are directed, typed, and declared in the source node's frontmatter (`links
 | `compared-with` | `compared-with` | Technical contrast (symmetric) |
 | `derived-from` | `origin-of` | Provenance (note derived from document, dataset from export, etc.) |
 | `same-as` | `same-as` | **Soft merge** of duplicate entities (symmetric) |
-| `discovered-shortcut` | — | The monkey's shout (created by `graft`, see Part C.8) |
+| `discovered-shortcut` | | The monkey's shout (created by `graft`, see Part C.8) |
 | `succeeds` | `precedes` | Temporal order between events/versions |
 
 Rules:
@@ -835,7 +835,7 @@ Binaries **never enter the forest's Git**. Normative:
 1. The Vine MUST NOT version anything beyond `.md`: `plant`/`graft` stage only markdown files (hard guard at the commit layer, not convention).
 2. The forest's `.gitignore` MUST exclude binary payloads (`*.db`, `*.sqlite`, `_assets/`), plus `_derived/` and `.vine.lock`.
 3. The payload lives on the filesystem next to the node (or in external storage, in future phases) and the **node** versions only the reference: `payload` (name) + `payload_hash` (sha256). Binary drift is detected by hash, not diff.
-4. Rationale: Git delta-compresses text, not binaries — frequently updated payloads would blow up the repository. The versioned knowledge is the distilled layer (markdown); heavy data is referenced, not embedded.
+4. Rationale: Git delta-compresses text, not binaries frequently updated payloads would blow up the repository. The versioned knowledge is the distilled layer (markdown); heavy data is referenced, not embedded.
 
 ### A.4 The `summary` specification (the most critical component)
 
@@ -866,10 +866,10 @@ updated: <date>
 > <1-2 sentences: what lives here + where to go if not here>
 
 ## Sub-branches
-- [[<id>]] — <sub-branch summary>. <coverage>.
+- [[<id>]] <sub-branch summary>. <coverage>.
 
 ## Direct bananas
-- [[<id>]] — <summary copied from the banana's frontmatter>
+- [[<id>]] <summary copied from the banana's frontmatter>
 
 ## Cross trails
 - <reason> → [[<id>]]
@@ -877,26 +877,26 @@ updated: <date>
 
 Rules:
 - Entries replicate the child nodes' `summary` VERBATIM (the Gardener/Vine keeps sync; humans do not hand-edit these lines).
-- Sync rewrites of a `## Sub-branches` entry MUST preserve the trailing coverage suffix (`. N bananas, M sub-branches.`) — v0.13.
+- Sync rewrites of a `## Sub-branches` entry MUST preserve the trailing coverage suffix (`. N bananas, M sub-branches.`) v0.13.
 - A branch's frontmatter `summary` MAY be synthesized bottom-up by the Gardener from the children's entries (G.4.4) when the branch was born from ingest; hand-authored branch summaries are never rewritten.
 - A branch with > 150 entries or > 3,000 tokens → `needs_split` flag for the Ranger.
 - The master branch (`/_index.md`) MUST additionally contain a `## Landmarks` section (10-20 highest-degree nodes, with summary). The Ranger keeps it fresh mechanically (H.7, v0.13): top non-branch nodes by degree over the typed-edge table, idempotent, audited `.md`-only commit.
 
 ---
 
-## Part B — Identity, Trail and Addressing
+## Part B Identity, Trail and Addressing
 
 - **Canonical ID:** path relative to the root, without extension. E.g.: `projects/mixerllm/architecture`.
 - **Trail:** list of IDs from the root to the node. E.g.: `["_index", "projects/_index", "projects/mixerllm/_index", "projects/mixerllm/architecture"]`.
-- Wikilinks in the body use `[[id]]` or `[[id|text]]`. The parser resolves `[[...]]` only against canonical IDs (no fuzzy match — ambiguity is a Ranger lint error, not runtime guessing).
+- Wikilinks in the body use `[[id]]` or `[[id|text]]`. The parser resolves `[[...]]` only against canonical IDs (no fuzzy match ambiguity is a Ranger lint error, not runtime guessing).
 
 ---
 
-## Part C — Primitive Contracts (Vine server, MCP)
+## Part C Primitive Contracts (Vine server, MCP)
 
 Transport: MCP (stdio for dev; HTTP/SSE on Docker). All responses in JSON. Errors follow `{error: {code, message, hint}}` with codes `E_NOT_FOUND`, `E_SCHEMA`, `E_FRONTMATTER`, `E_READONLY`, `E_QUERY_FORBIDDEN`, `E_TIMEOUT`, `E_LOCKED`.
 
-### C.0 Forest registry — multi-forest serving (v0.4)
+### C.0 Forest registry multi-forest serving (v0.4)
 
 The product is filesystem-native: a folder is a forest, its `_index.md` is
 the door. One server therefore serves N forests; the request picks one.
@@ -930,13 +930,13 @@ Rules (normative):
 {"tool": "locate", "args": {"query": "...", "forest": "clients/acme"}}
 ```
 
-Cross-cutting principle: **every response MUST fit the declared token budget**. The Vine truncates with an explicit `"truncated": true` marker — never silently.
+Cross-cutting principle: **every response MUST fit the declared token budget**. The Vine truncates with an explicit `"truncated": true` marker never silently.
 
 ### C.1 `locate(query: string, k: int = 5, scope: "all"|"branches"|"bananas" = "all", type_filter?: string) → LocateResult`
 
-The **helicopter**: a location engine that drops the monkey in the region closest to the target — it never starts from the trunk. RRF fusion of vector search (over summaries) + BM25 (over title, aliases, tags, summary). In Phase 0, MAY be BM25-only (SQLite FTS5); the interface does not change once vectors land.
+The **helicopter**: a location engine that drops the monkey in the region closest to the target it never starts from the trunk. RRF fusion of vector search (over summaries) + BM25 (over title, aliases, tags, summary). In Phase 0, MAY be BM25-only (SQLite FTS5); the interface does not change once vectors land.
 
-The index covers **two levels**: bananas (leaves) and branches (regions — every branch has its own summary, hence indexable). A branch result = **landing zone**: the monkey lands in the right region and navigates 1-2 hops with local context, instead of dropping onto a possibly wrong leaf. `scope: "branches"` is useful for broad questions ("what do we know about sales?"); `scope: "bananas"` for pointed ones.
+The index covers **two levels**: bananas (leaves) and branches (regions every branch has its own summary, hence indexable). A branch result = **landing zone**: the monkey lands in the right region and navigates 1-2 hops with local context, instead of dropping onto a possibly wrong leaf. `scope: "branches"` is useful for broad questions ("what do we know about sales?"); `scope: "bananas"` for pointed ones.
 
 ```json
 {
@@ -973,7 +973,7 @@ Budget: <= 800 tokens. Ordering: `score_final = rrf_score x (1 + alpha*heat)`, a
 
 The central operation. Hard budget: **<= 500 tokens**.
 
-`fields` (optional): list of desired fields (e.g. `["summary", "edges_out"]`). When present, the response contains ONLY those fields (+ `id`, always). Typical use: a monkey in scan mode asking only for `summary` of several nodes — cost drops from ~400 to ~70 tokens per look.
+`fields` (optional): list of desired fields (e.g. `["summary", "edges_out"]`). When present, the response contains ONLY those fields (+ `id`, always). Typical use: a monkey in scan mode asking only for `summary` of several nodes cost drops from ~400 to ~70 tokens per look.
 
 Response for a **banana** (`note`/`document`/`concept`/`entity`/`event`):
 
@@ -1052,7 +1052,7 @@ Without `rel`: all neighbors. Budget: <= 600 tokens. `move(id, "children")` is s
 }
 ```
 
-Columnar format (`columns` + `rows` as arrays) — not objects repeating the keys; saves ~40% of the tokens.
+Columnar format (`columns` + `rows` as arrays) not objects repeating the keys; saves ~40% of the tokens.
 
 ### C.6 `scan(parent_id: string, filter?: Filter, fields?: [string], recursive: bool = false, limit: int = 50) → [PartialNode]`
 
@@ -1071,20 +1071,20 @@ Columnar format (`columns` + `rows` as arrays) — not objects repeating the key
 
 Response: list of partial nodes (only the requested `fields`), ordered by `heat` desc. Budget: <= 800 tokens, with explicit `truncated`.
 
-Canonical use case: "I only want the sales datasets updated this quarter" → 1 call, ~3ms, ~200 tokens — instead of descending the hierarchy opening indexes.
+Canonical use case: "I only want the sales datasets updated this quarter" → 1 call, ~3ms, ~200 tokens instead of descending the hierarchy opening indexes.
 
 #### C.6.1 The Catalog (`_derived/catalog.db`)
 
-SQLite in the derived layer with one row per forest node: every frontmatter field + trail + degree + heat. Rebuildable from scratch by a full scan (`vine reindex`); updated incrementally on every `plant`/`graft`. It's what serves `scan()` and `locate`'s lexical side (FTS5 over title/aliases/tags/summary in the same base). **Not the source of truth** — if it diverges from the files, the files win and the catalog rebuilds.
+SQLite in the derived layer with one row per forest node: every frontmatter field + trail + degree + heat. Rebuildable from scratch by a full scan (`vine reindex`); updated incrementally on every `plant`/`graft`. It's what serves `scan()` and `locate`'s lexical side (FTS5 over title/aliases/tags/summary in the same base). **Not the source of truth** if it diverges from the files, the files win and the catalog rebuilds.
 
 ### C.6b `sniff(terms: string | [string], scope?: string, k: int = 5, type_filter?: string) → SniffResult`
 
-The **sniffer**: **literal** search over nodes' markdown bodies, returning node + section + occurrence snippet. It complements `locate`: the helicopter flies over curated metadata (summary/tags/title); the sniffer goes down to ground level and follows the trail of an exact term — error code, proper name, invoice number, identifier — that nobody bothered (or was obligated) to lift into the summary. The contract split is normative: **`locate` MUST NOT index bodies; `sniff` MUST NOT query curated metadata** (except to display the result).
+The **sniffer**: **literal** search over nodes' markdown bodies, returning node + section + occurrence snippet. It complements `locate`: the helicopter flies over curated metadata (summary/tags/title); the sniffer goes down to ground level and follows the trail of an exact term error code, proper name, invoice number, identifier that nobody bothered (or was obligated) to lift into the summary. The contract split is normative: **`locate` MUST NOT index bodies; `sniff` MUST NOT query curated metadata** (except to display the result).
 
 Parameters:
 
 - `terms`: 1 to 8 **literal** terms (a single string is promoted to a 1-item list). Substring matching, case- and diacritic-insensitive (NFD, combining marks stripped). A term with a space = exact phrase. A normalized term with < 2 characters → `E_SCHEMA`. **Regex is NOT accepted** (Phase 0): SLMs write fragile regex, and arbitrary regex opens unpredictable cost; literal terms give 95% of the value with a simple contract.
-- `scope` (optional): id of **any node**. A branch (`sales/_index` or `sales`) restricts the search to the matching physical subtree; a banana restricts it to that single node's body (grep-within-node — the natural chaining after a `locate`/`look` that already found the target). Without `scope`, the whole forest. Nonexistent node → `E_NOT_FOUND`.
+- `scope` (optional): id of **any node**. A branch (`sales/_index` or `sales`) restricts the search to the matching physical subtree; a banana restricts it to that single node's body (grep-within-node the natural chaining after a `locate`/`look` that already found the target). Without `scope`, the whole forest. Nonexistent node → `E_NOT_FOUND`.
 - `k`: max nodes in the result (default 5, cap 20).
 - `type_filter`: as in `locate`.
 
@@ -1123,11 +1123,11 @@ Budget: <= 800 tokens, explicit truncation (`truncated: true`) dropping nodes of
 
 Canonical use (the monkey's decision, taught in the orchestrator's system prompt):
 
-1. Question contains an exact/rare term → `sniff` directly: lands in the right section and harvests with `pick(id, section)` — cuts hops-to-banana.
+1. Question contains an exact/rare term → `sniff` directly: lands in the right section and harvests with `pick(id, section)` cuts hops-to-banana.
 2. Conceptual question → `locate` (unchanged).
 3. Chained: `locate` finds the region, `sniff(terms, scope=branch)` hunts the snippet within it.
 
-Phase 0 implementation: direct file scan on every call (grep-like, no new index) — always fresh by construction, no extra derived state. MAY gain an index (body FTS5 in a separate table) in a future phase **with no interface change**, as long as the contract split with `locate` holds.
+Phase 0 implementation: direct file scan on every call (grep-like, no new index) always fresh by construction, no extra derived state. MAY gain an index (body FTS5 in a separate table) in a future phase **with no interface change**, as long as the contract split with `locate` holds.
 
 ### C.6c `harvest(query: string, terms?: [string], k: int = 3) → HarvestResult`
 
@@ -1138,12 +1138,12 @@ evidence in one call and decides the next steps itself.
 
 The three integration modes (informative):
 
-1. **Direct navigation** — the client's LLM drives the primitives itself.
+1. **Direct navigation** the client's LLM drives the primitives itself.
    Best when reasoning must happen *during* navigation. Token cost is bounded
    by the per-primitive budgets; the real cost is round-trips.
-2. **Harvest (this tool)** — one call, evidence back, zero tokens spent on
+2. **Harvest (this tool)** one call, evidence back, zero tokens spent on
    the server side. Best default for capable client models.
-3. **Concierge** — a local SLM hunts and returns a synthesized answer
+3. **Concierge** a local SLM hunts and returns a synthesized answer
    (orchestrator-side, e.g. `examples/demo/run_demo.py`); for thin clients.
 
 Parameters:
@@ -1158,7 +1158,7 @@ Semantics (normative):
 1. Candidates = RRF fusion of `locate(query, k*2)` and `sniff(terms, k*2)`
    rankings (same RRF as C.1's hybrid mode).
 2. Match refinement by **term scarcity**: per-term `sniff` scoped to each
-   selected node, rarest term first — a rare exact term ("1045") MUST NOT be
+   selected node, rarest term first a rare exact term ("1045") MUST NOT be
    drowned by common co-occurring terms under the per-node match cap.
 3. Content policy per node: full body when <= 1200 tokens; otherwise the
    matched sections (max 2) via `pick(section)`; otherwise outline + hint.
@@ -1200,7 +1200,7 @@ Atomic operation (in this order; failure at any step = full rollback):
 
 Returns: `{id, commit, trail}`.
 
-#### C.7.1 Dataset planting — declarative schema (v0.8)
+#### C.7.1 Dataset planting declarative schema (v0.8)
 
 A `NodeSpec` with `type: dataset` MAY carry a `schema` object describing the
 payload to be **born** with the node:
@@ -1237,27 +1237,27 @@ Rules (normative):
 3. **Payload birth**: `payload` defaults to `<leaf-of-id>.db`,
    `payload_type` to `sqlite` (explicit values are honored; `payload` MUST
    be a bare filename ending in `.db`). The target file MUST NOT already
-   exist (`E_SCHEMA` — never silently overwrite a payload). The Vine
+   exist (`E_SCHEMA` never silently overwrite a payload). The Vine
    creates the SQLite file, applies the generated DDL, and computes
    `payload_hash` (sha256) into the frontmatter.
 4. **Auto manual**: when the body lacks a `## Query manual` section, the
-   Vine appends one generated from the schema — each table with its column
+   Vine appends one generated from the schema each table with its column
    list, plus example queries (`` `SELECT * FROM <t> LIMIT 5` ``,
-   `` `SELECT COUNT(*) FROM <t>` ``) — so C.2 `look`'s `query_manual`
+   `` `SELECT COUNT(*) FROM <t>` ``) so C.2 `look`'s `query_manual`
    contract works from birth. A caller-provided manual is kept verbatim.
-5. **Atomicity**: the C.7 rollback covers the payload — any failure after
+5. **Atomicity**: the C.7 rollback covers the payload any failure after
    the `.db` is created MUST remove it along with the `.md`. A.3.1 intact:
    the commit carries only markdown; one dataset node = one `.db` = one
    database (several tables = several keys in `schema`; there is no
    separate "create database" concept).
-6. After birth, rows enter exclusively via `tend` (C.10) — multi-row
+6. After birth, rows enter exclusively via `tend` (C.10) multi-row
    `INSERT INTO t VALUES (...), (...)` is a single statement and therefore
    already legal there. Schema evolution (`ALTER`) is NOT available to
    agents in v0.8.
 7. **Initial rows (v0.9)**: the `NodeSpec` MAY carry `rows`, a mapping
    `table → list of rows` loaded at birth, after the DDL and BEFORE
    `payload_hash` is computed. Normative: rows are inserted **parameterized**
-   (`executemany` with placeholders — row values are data, never SQL text,
+   (`executemany` with placeholders row values are data, never SQL text,
    so no keyword scanning applies and injection is impossible by
    construction); every `rows` table MUST exist in `schema` and every row
    MUST have exactly the table's column count (`E_SCHEMA` otherwise); the
@@ -1268,22 +1268,22 @@ Rules (normative):
 Canonical uses (informative): an agent collecting external data plants the
 dataset then fills it with `tend`, for later harvest by `query`/humans; an
 agent finding a large markdown table in a `document` plants a dataset twin,
-loads the rows, and `graft`s a `related-to` link from the document — prose
+loads the rows, and `graft`s a `related-to` link from the document prose
 stays as source, the data becomes filterable SQL.
 
 ### C.8 `graft(id: string, patch: GraftPatch) → GraftResult`
 
 `GraftPatch` supports three operations (combinable):
-- `set_frontmatter: {field: value}` — mutable fields only (`title`, `summary`, `tags`, `confidence`); `id`, `type`, `created` are immutable (`E_READONLY`);
+- `set_frontmatter: {field: value}` mutable fields only (`title`, `summary`, `tags`, `confidence`); `id`, `type`, `created` are immutable (`E_READONLY`);
 - `add_links: [{rel, target}]` / `remove_links: [...]`;
 - `append_section: {header, body}` or `replace_section: {header, body}`.
 
 Special rules:
 - A `summary` change propagates to every `_index.md` that replicates it (same transaction).
-- **Reinforce-before-create policy (shortcuts):** at the end of a successful hunt, the decision cascade is: (1) if a shortcut already covers the entry→banana connection on the trail, do NOT create one — just increment the existing one's `heat` and `confidence` (fortification, no commit); (2) if none exists and the trail was >= 4 hops, `graft` a new `discovered-shortcut` with `confidence: 0.5` and `discovered_by: agent`; (3) new lateral connections the agent notices (`related-to` between the banana and semantic neighbors) enter as a **proposal** with `confidence: 0.3`, subject to confirmation or pruning by the Ranger. The Vine MUST implement step 1's check inside `graft` itself (shortcut idempotence): grafting a duplicate link automatically becomes fortification, never an error or a duplicate.
+- **Reinforce-before-create policy (shortcuts):** at the end of a successful hunt, the decision cascade is: (1) if a shortcut already covers the entry→banana connection on the trail, do NOT create one just increment the existing one's `heat` and `confidence` (fortification, no commit); (2) if none exists and the trail was >= 4 hops, `graft` a new `discovered-shortcut` with `confidence: 0.5` and `discovered_by: agent`; (3) new lateral connections the agent notices (`related-to` between the banana and semantic neighbors) enter as a **proposal** with `confidence: 0.3`, subject to confirmation or pruning by the Ranger. The Vine MUST implement step 1's check inside `graft` itself (shortcut idempotence): grafting a duplicate link automatically becomes fortification, never an error or a duplicate.
 - Commit: `graft(<id>): <patch summary>`.
 
-### C.10 `tend(id: string, sql: string) → TendResult` (v0.7 — Phase 2)
+### C.10 `tend(id: string, sql: string) → TendResult` (v0.7 Phase 2)
 
 The dataset-write primitive: the forest stops being a smart reader and
 becomes memory that learns. `query` (C.5) remains read-only forever; `tend`
@@ -1293,13 +1293,13 @@ Preconditions:
 
 - Writable Vine (read-only server → `E_READONLY`).
 - Node is `type: dataset` with `payload_type: sqlite` and an existing
-  payload file — anything else → `E_QUERY_FORBIDDEN` / `E_NOT_FOUND`.
+  payload file anything else → `E_QUERY_FORBIDDEN` / `E_NOT_FOUND`.
 
 Statement rules (normative, mirror of C.5's paranoia):
 
 - Exactly ONE statement, and it MUST start with `INSERT`, `UPDATE` or
   `DELETE`. Reads belong to `query`; schema changes (CREATE/ALTER/DROP)
-  belong to the Gardener — all rejected with `E_QUERY_FORBIDDEN`.
+  belong to the Gardener all rejected with `E_QUERY_FORBIDDEN`.
 - Forbidden anywhere in the statement: `ATTACH`, `DETACH`, `PRAGMA`,
   `DROP`, `ALTER`, `CREATE`, `VACUUM`, `REINDEX`, `BEGIN`, `COMMIT`,
   `TRANSACTION` → `E_QUERY_FORBIDDEN`.
@@ -1317,7 +1317,7 @@ Audit trail (A.3.1 compliant):
    The what/when history lives in the markdown commit stream; the binary
    never enters git.
 4. If step 2-3 fails after step 1 committed, the `.md` is restored and the
-   error surfaces — the resulting hash drift is exactly what
+   error surfaces the resulting hash drift is exactly what
    `vine validate` now warns about (self-healing: the next successful
    `tend` refreshes the hash).
 
@@ -1331,45 +1331,45 @@ Response:
 ### C.9 Concurrency and consistency (Phase 0)
 
 - **One writer, N readers:** `plant`/`graft` go through a single queue (global mutex in the Vine). Reads never block.
-- Readers MAY see state up to 1 write behind (eventual consistency of seconds) — acceptable by design.
+- Readers MAY see state up to 1 write behind (eventual consistency of seconds) acceptable by design.
 - The `.vine.lock` file at the root prevents two writer Vines on the same forest (`E_LOCKED`).
 
 ---
 
-## Part D — Telemetry (feeds the pheromone and the Monkey Bench)
+## Part D Telemetry (feeds the pheromone and the Monkey Bench)
 
 Every navigation session generates a trace in `_derived/traces/<session>.jsonl`, one event per primitive call: `{ts, session, primitive, id, tokens_in, tokens_out, elapsed_ms}`.
 
 At the end, the orchestrator MUST close the session with `outcome: {success: bool, answer_nodes: [ids]}`. This closing is what:
 1. Increments `heat` along the whole winning trail (whisper);
-2. Evaluates the shout (v0.6): when the session metric `trail_len` — read
-   calls made before the first harvest of an answer node — is `>= 4`, the
+2. Evaluates the shout (v0.6): when the session metric `trail_len` read
+   calls made before the first harvest of an answer node is `>= 4`, the
    answer nodes come back in `suggest_shortcuts`, and the orchestrator MAY
    `graft` a `discovered-shortcut` from the hunt's entry node (C.8 applies);
 3. Feeds the Monkey Bench metrics: **hops-to-banana** = number of `look`+`move` calls before the answer's first `pick`/`query`; **tokens-to-banana** = sum of session tokens_out; **banana precision** = correct answer_nodes / harvested answer_nodes; **trail_len** (v0.6) = read calls before the first harvest of an answer_node.
 
 ---
 
-## Part E — The Troop (Parallel Swarm Navigation)
+## Part E The Troop (Parallel Swarm Navigation)
 
-N monkeys (navigator SLM instances) hunt the same banana in parallel, coordinated by **intra-session stigmergy**: they never exchange messages — they smell each other's trails. The Vine is already N-readers by design (C.9); the Troop is an **orchestrator**-side component (the MCP client side), not the bank.
+N monkeys (navigator SLM instances) hunt the same banana in parallel, coordinated by **intra-session stigmergy**: they never exchange messages they smell each other's trails. The Vine is already N-readers by design (C.9); the Troop is an **orchestrator**-side component (the MCP client side), not the bank.
 
 ### E.1 Hunt protocol
 
 1. **Frontier partition:** `locate(query, k=N)` → each monkey gets a distinct entry point (top-N results). Without partitioning, everyone explores the same trail and the parallelism is wasted.
-2. **Session pheromone:** each monkey, upon judging a node promising (the SLM's own call: "relevant to the question? yes/no"), deposits `session_heat` in the hunt's scope (`_derived/trails.db`, session namespace). `locate`/`look`/`scan` inside the session apply `score x (1 + beta*session_heat)` — monkeys gravitate toward regions where others found signal.
+2. **Session pheromone:** each monkey, upon judging a node promising (the SLM's own call: "relevant to the question? yes/no"), deposits `session_heat` in the hunt's scope (`_derived/trails.db`, session namespace). `locate`/`look`/`scan` inside the session apply `score x (1 + beta*session_heat)` monkeys gravitate toward regions where others found signal.
 3. **Shared visited set:** `look`/`scan` digests already made in the session land in a shared cache; a monkey that would touch an already-visited node gets the cached digest instead (zero cost), and the orchestrator redirects it to unexplored frontier.
 4. **Stop:** the hunt ends when (a) a monkey harvests a banana with high confidence (self-assessment above threshold), (b) the troop's hop budget runs out, or (c) the frontier empties. A **judge** (may be the main model itself) aggregates the harvests and synthesizes the answer.
-5. **Post-session:** only the winning trail(s) convert `session_heat` into persistent `heat` (Part D). Losing trails evaporate with the session — the swarm does not pollute long-term pheromone.
+5. **Post-session:** only the winning trail(s) convert `session_heat` into persistent `heat` (Part D). Losing trails evaporate with the session the swarm does not pollute long-term pheromone.
 
 ### E.2 Implementation notes
 
 - **Concurrency:** asyncio in the orchestrator; the monkeys spend ~95% of their time waiting on inference. On the 3090, serving the N monkeys through the same inference server with *continuous batching* (vLLM/llama.cpp parallel slots) makes N=3-5 cost nearly the same wall-clock as N=1.
 - **Sizing:** N=3 is the default; above N~5 returns diminish (frontiers overlap in small forests). N is a Monkey Bench parameter, not a constant.
-- **New metric:** *troop speedup* = wall-clock hops (parallel rounds) vs the solo monkey's total hops, and total token cost (the troop spends more tokens in aggregate — the speed x cost trade-off MUST be measured, not assumed).
-- **Phase:** Troop is Phase 1.5 — requires the full Vine + telemetry (Part D) working. Nothing in Phase 0 changes, except ensuring `trails.db` supports session namespacing (already anticipated in the trace schema).
+- **New metric:** *troop speedup* = wall-clock hops (parallel rounds) vs the solo monkey's total hops, and total token cost (the troop spends more tokens in aggregate the speed x cost trade-off MUST be measured, not assumed).
+- **Phase:** Troop is Phase 1.5 requires the full Vine + telemetry (Part D) working. Nothing in Phase 0 changes, except ensuring `trails.db` supports session namespacing (already anticipated in the trace schema).
 
-## Part F — Phase 0 Acceptance Criteria
+## Part F Phase 0 Acceptance Criteria
 
 Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches, >=1 SQLite dataset) + test suite.
 
@@ -1379,23 +1379,23 @@ Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches,
 4. `query` rejects all write SQL (injection suite: `;DROP`, `ATTACH`, multi-statement, PRAGMA).
 5. Demo: a local SLM (Qwen 7-14B Q4), given only the MCP tools and the master branch, answers 10 multi-hop questions about the test forest, with recorded traces and computed metrics.
 6. Latency: p95 of `look`/`move`/`pick` < 10ms, `query` < 50ms, `locate` < 100ms, `sniff` < 100ms (local forest, NVMe).
-7. `sniff`: finds a fact present ONLY in the body (invisible to `locate`), attributes the correct section, respects `scope`, normalizes case/diacritics, and rejects empty terms (`E_SCHEMA`) — all covered by test.
-8. Payloads outside Git (A.3.1): the Vine's commit ignores non-`.md` files even if requested, and the test forest's `git ls-files` contains no binary — both verified by test.
-9. `harvest` (C.6c): buried fact returns the right matched section under term-scarcity refinement; small bodies come whole; `k` and the 4000-token budget are honored with explicit truncation — all covered by tests.
-10. Forest registry (C.0): per-request forest selection works across two forests with isolated results; lazy first-touch open auto-indexes; path escape and non-forest directories are rejected; single-forest mode serves v0.3 clients unchanged — all covered by tests.
+7. `sniff`: finds a fact present ONLY in the body (invisible to `locate`), attributes the correct section, respects `scope`, normalizes case/diacritics, and rejects empty terms (`E_SCHEMA`) all covered by test.
+8. Payloads outside Git (A.3.1): the Vine's commit ignores non-`.md` files even if requested, and the test forest's `git ls-files` contains no binary both verified by test.
+9. `harvest` (C.6c): buried fact returns the right matched section under term-scarcity refinement; small bodies come whole; `k` and the 4000-token budget are honored with explicit truncation all covered by tests.
+10. Forest registry (C.0): per-request forest selection works across two forests with isolated results; lazy first-touch open auto-indexes; path escape and non-forest directories are rejected; single-forest mode serves v0.3 clients unchanged all covered by tests.
 11. `tend` (C.10): accepts only single-statement INSERT/UPDATE/DELETE (its own
     injection suite: DDL, ATTACH/PRAGMA, multi-statement, WHERE-less
     UPDATE/DELETE all rejected); refreshes `payload_hash` and commits only the
     `.md`; read-only Vine rejected; failed SQL leaves the payload untouched;
-    `vine validate` warns on payload hash drift — all covered by tests.
+    `vine validate` warns on payload hash drift all covered by tests.
 12. Dataset planting (C.7.1): declarative schema births a queryable payload
     (`look` shows the auto query manual, `query`/`tend` work immediately);
     name/type/limit validation rejects bad schemas (`E_SCHEMA`), including
     injection attempts via table/column names; existing payload is never
     overwritten; rollback removes the newborn `.db`; the commit carries only
-    the `.md` — all covered by tests.
+    the `.md` all covered by tests.
 13. Gardener (Part G): `adopt` of a mixed source tree (markdown, text,
-    tabular) produces a forest that lints with zero errors — folders
+    tabular) produces a forest that lints with zero errors folders
     mirrored as branches, passports carrying `source_path` + `source_hash`,
     non-text originals archived under `_assets/`, datasets born with rows
     loaded, no binary in the forest git; `sync` classifies new / changed /
@@ -1403,22 +1403,22 @@ Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches,
     passports through the audited write path, and never deletes; converter
     discovery honors the config-hook > entry-point > built-in order; an
     external command hook converts a file end-to-end; an `on_curate` hook
-    can enrich a draft and a crashing hook does not abort the ingest — all
+    can enrich a draft and a crashing hook does not abort the ingest all
     covered by tests.
 14. Ranger (Part H): under a synthetic clock, one half-life halves heat and
     dust rows vanish; stale session scopes are cleared; promotion raises a
     well-used proposal's link confidence with an audited commit; pruning
-    removes only cold, low-confidence links — links with confidence 1.0 or
+    removes only cold, low-confidence links links with confidence 1.0 or
     without a link-level confidence are NEVER touched; the health report
     flags an oversized branch (`needs_split`), an over-linked node and a
-    stale passport; repeated runs are idempotent — all covered by tests.
+    stale passport; repeated runs are idempotent all covered by tests.
 15. Tiered storage (G.7/G.8): a `cached` adoption keeps node `.md`s body-
     free with the flesh in `_derived/bodies/` and OUT of git, while `pick`
     and `sniff` resolve it transparently; a `reference` adoption reads the
     source live; an unresolvable body fails with `E_NOT_FOUND` + hint
     while `locate`/`look` keep working (degraded map); `archive: never`
     creates no `_assets/` copies; `sync(path=...)` reconciles exactly one
-    file; the mtime+size fast-path skips hashing unchanged files — all
+    file; the mtime+size fast-path skips hashing unchanged files all
     covered by tests. (Fetcher cache, H.6 eviction and Part I snapshots
     are covered by tests as their implementations land.)
 16. Gardener v2 (G.2.1 + G.4.2.1): the DOCX built-in extracts headings,
@@ -1430,7 +1430,7 @@ Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches,
     related-to` (hallucinated ids, self-links, duplicates and over-cap
     picks are dropped; branches are never candidates), the planted node
     carries the proposed links, and the Ranger's H.2 machinery manages
-    them (promotable, prunable) — all covered by tests.
+    them (promotable, prunable) all covered by tests.
 17. Rollup + Landmarks (G.4.4 + H.7): rollup replaces only `source: ingest`
     branch summaries (hand-authored branches untouched unless `--all`),
     runs deepest-first so parents see fresh child summaries, falls back
@@ -1439,12 +1439,12 @@ Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches,
     WITH the coverage suffix preserved; the Ranger populates the master
     `## Landmarks` with top-degree non-branch nodes, a second run with an
     unchanged graph produces no new commit, and degree-0 nodes never
-    appear — all covered by tests.
+    appear all covered by tests.
 18. Station + ScopedVine (Part J): a fresh deployment plus one API key
     serves REST, MCP and Studio against a registry of two forests; the
     **leak suite** proves a principal granted only `projects/` cannot
     obtain the id, title, summary, body, edge or snippet of any node
-    outside `projects/` through ANY primitive on ANY surface — one test
+    outside `projects/` through ANY primitive on ANY surface one test
     per primitive per surface, `harvest` and `move` included; an
     out-of-scope `look`/`pick` is byte-identical to the genuinely-absent
     `E_NOT_FOUND`; a scoped `locate`/`scan`/`sniff` returns the same
@@ -1453,16 +1453,16 @@ Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches,
     principal in the commit message and the audit log reconstructs a
     session's full trail; capability gates reject `query`/`tend`/`plant`/
     `graft` without the matching cap; and the engine suite passes with
-    zero edits under `src/monkeyllm/` — all covered by tests.
+    zero edits under `src/monkeyllm/` all covered by tests.
 19. Per-forest inference (J.10): a provider's key is never returned by any
     surface (create, list, or re-edit) and an empty key on update keeps the
     stored one; a binding is refused for an unknown provider or an unknown
     role; removing a provider removes the bindings that pointed at it; the
     two roles can hold different models on the same forest; `answer` and
     `curate` refuse politely when no model is bound, and enforce the `read`
-    and `write` capabilities respectively; and — the load-bearing one — for
+    and `write` capabilities respectively; and the load-bearing one for
     a principal scoped to a subtree, the material handed to the answering
-    model contains no node outside that subtree — all covered by tests.
+    model contains no node outside that subtree all covered by tests.
 20. Console, lifecycle and ingest (J.5/J.7/J.8): every user-facing string
     resolves in all three languages, with a test that fails on the first
     key missing from any of them; the console renders in both themes and
@@ -1474,7 +1474,7 @@ Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches,
     that escapes its staging directory is rejected, and a forest with no
     `ingest` binding still ingests with G.4-derived summaries; and a
     `projects/`-scoped principal's console offers only `projects/` in its
-    tree, its scope picker and its dataset list — all covered by tests.
+    tree, its scope picker and its dataset list all covered by tests.
 21. Credentials (J.2.1/J.2.2/J.5.4): a username and password exchange for a
     session token that authorises exactly what the same principal's API key
     would and no more; a Station with no `MONKEYLLM_STATION_PASSWORD` set
@@ -1484,19 +1484,19 @@ Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches,
     are all rejected identically; `last_used_at` advances on a successful
     call; listing returns prefixes and never a secret, and a secret is
     returned exactly once at creation; session tokens do not appear in the
-    token console; and — the load-bearing one — an administrator of one
+    token console; and the load-bearing one an administrator of one
     forest is refused when minting or revoking a key for a principal that
     also holds a grant on a forest they do not administer, so a token
-    cannot be used to reach across the registry — all covered by tests.
+    cannot be used to reach across the registry all covered by tests.
 22. Per-forest administration and navigation (J.3.2/J.5.1): every
     `/v1/admin/*` route refuses a principal without `admin`, proven by a
     sweep that enumerates the routes rather than a hand-written list that
     a new route can quietly escape; and on a two-forest registry, an
     administrator of one forest sees **no** principal, branch prefix or
-    audit entry belonging to the other — while an administrator of both
+    audit entry belonging to the other while an administrator of both
     sees everything. Navigation lists exactly the permitted consoles for
     the selected forest, and each console still guards itself when reached
-    with the capability missing — all covered by tests.
+    with the capability missing all covered by tests.
 23. Person-shaped governance (J.2.3/J.5.5): one `POST /v1/admin/people`
     creates a principal, grants it, sets its password and mints its key,
     and the resulting password logs in while the resulting key reads —
@@ -1506,45 +1506,45 @@ Deliverable: Vine (MCP, Python) + a manual test forest (~100 nodes, 10 branches,
     entitled to make still applies**, and the response names what was
     refused; clearing a password removes the sign-in; revoking all of a
     person's keys stops all of them at once; and `GET /v1/admin/people`
-    returns only administered forests' grants and tokens — all covered by
+    returns only administered forests' grants and tokens all covered by
     tests. A grant naming **several** forests lands on each of them, so the
     key minted in the same request reads in every one; naming a forest the
     caller does not administer refuses that forest **by id** while the rest
     still apply; and a multi-forest `revoke_access` removes exactly the
-    grants named — also covered by tests.
+    grants named also covered by tests.
 
 24. The Gauntlet (Part K): with no embedder, an empty index, or an index
     whose recorded model differs from the embedder's, `look`, `move` and
     `scan` return **byte-identical** responses to the same calls made with
-    the feature absent entirely — proven by comparing the two, not by
+    the feature absent entirely proven by comparing the two, not by
     inspecting a flag; a mismatched index also turns hybrid `locate` off
     and is reported by validation rather than silently ranking across two
     vector spaces; when active, the frontier order changes, the response
     says it was conditioned and toward what, and the per-call opt-out
     restores the unconditioned order within the same session; and the goal
-    is embedded once per hunt rather than once per hop — all covered by
+    is embedded once per hunt rather than once per hop all covered by
     tests.
 
 25. Map projections (J.11): for a scoped principal, `GET /graph` returns no
     id the same principal cannot `look` at, every edge it returns has both
     endpoints in scope, and every `degree` it reports equals the degree
-    computed from the returned edges alone — proven by recomputing, not by
+    computed from the returned edges alone proven by recomputing, not by
     trusting the field; `GET /trails` exposes persistent heat only, never a
     session scope; both flag `truncated` when a bound cut the answer; and
     the Explore console's graph, tree and file modes read only these
-    endpoints and the Part C primitives — all covered by tests.
+    endpoints and the Part C primitives all covered by tests.
 
-Out of scope for Phase 0 (do not implement): embeddings/vectors, `same-as` compaction, S3/R2 sync, multi-writer, Troop (Part E — Phase 1.5; only ensure session namespacing in trails.db). Automatic ingest left this list in v0.9 (Part G); evaporation and promotion/pruning left it in v0.10 (Part H).
+Out of scope for Phase 0 (do not implement): embeddings/vectors, `same-as` compaction, S3/R2 sync, multi-writer, Troop (Part E Phase 1.5; only ensure session namespacing in trails.db). Automatic ingest left this list in v0.9 (Part G); evaporation and promotion/pruning left it in v0.10 (Part H).
 
 ---
 
-## Part G — The Gardener (ingest pipeline, spec v0.9)
+## Part G The Gardener (ingest pipeline, spec v0.9)
 
 The Gardener turns raw directories into forest. It is **trusted
 infrastructure** (it runs with the operator's authority, not an agent's),
 but it writes through the same audited mechanics as everything else: nodes
 are born via C.7 `plant`, datasets via C.7.1, and only `.md` ever reaches
-git (A.3.1). Four stages — only one of them needs an LLM:
+git (A.3.1). Four stages only one of them needs an LLM:
 
 ```text
 0 archive  →  1 convert  →  2 curate  →  3 plant
@@ -1572,7 +1572,7 @@ passport first; the native file is payload.
   sources are NOT archived (the body is lossless).
 - Node ids are deterministic slugs of the source-relative path (lowercase,
   ASCII-folded, `[a-z0-9._-]`); a slug collision appends a short hash. The
-  id mirrors the source layout — placement in `adopt` mode is structural,
+  id mirrors the source layout placement in `adopt` mode is structural,
   not an LLM decision (ids are immutable; deciding placement at birth is
   mandatory, see A.3).
 
@@ -1592,7 +1592,7 @@ Conversion = markdown(title, body)            # → note/document/media
 
 Discovery order (first converter claiming the extension wins):
 
-1. **Command hooks** from the forest's Gardener config (G.6) — an external
+1. **Command hooks** from the forest's Gardener config (G.6) an external
    command template (`"{input}"`/`"{output}"` placeholders) that must write
    markdown; lets operators plug ANY tool (including copyleft-licensed
    ones) without it ever becoming a dependency of this project.
@@ -1604,7 +1604,7 @@ Discovery order (first converter claiming the extension wins):
    types; `.docx` → markdown when `python-docx` is present (G.2.1).
    Built-ins MUST keep the core dependency-light and MIT-clean.
 
-A file with no claiming converter is reported as `unsupported` — never a
+A file with no claiming converter is reported as `unsupported` never a
 crash, never a silent skip.
 
 #### G.2.1 DOCX built-in converter (v0.12)
@@ -1618,9 +1618,9 @@ python-docx is MIT, its lxml dependency BSD; same gating pattern as the
 2. **Paragraph text = the join of ALL descendant `w:t` elements.** This
    captures runs fragmented mid-word by Word (joining merges them for
    free) AND text living inside embedded text boxes (`wps:txbx`, legacy
-   `v:textbox`) — content invisible to naive `paragraph.text` readers.
+   `v:textbox`) content invisible to naive `paragraph.text` readers.
 3. **Headings**: paragraphs styled `Heading N` (or `Title`) map to
-   markdown `#`-headings (`Title`/`Heading 1` → `##` and deeper — `#` is
+   markdown `#`-headings (`Title`/`Heading 1` → `##` and deeper `#` is
    reserved for the node title line). Everything else is a plain
    paragraph.
 4. **Tables** become GitHub pipe tables: first row = header, cells take
@@ -1640,7 +1640,7 @@ MarkItDown wrapper), which keeps priority over this built-in.
 hooks extend what goes INTO the forest. Nothing extends the primitives'
 semantics, token budgets, or security guards (`query`/`tend` validation,
 A.3.1, C.9 locking). UIs, upload receivers and automations are clients of
-the MCP server or of the Python library — they require no plugin API.
+the MCP server or of the Python library they require no plugin API.
 
 ### G.3 `adopt` and `sync` (the brownfield engine)
 
@@ -1654,7 +1654,7 @@ the MCP server or of the Python library — they require no plugin API.
   - **new** file → adopt it;
   - **changed** hash → re-convert; the passport's body, `source_hash`,
     `payload_hash` (datasets are rebuilt) and `updated` are refreshed
-    through the Gardener's audited write path — a git commit
+    through the Gardener's audited write path a git commit
     `gardener(sync): <id>` of only the `.md`. Curated frontmatter
     (summary, tags, links, confidence) is PRESERVED;
   - **deleted** source → the passport is reported `stale`. The Gardener
@@ -1667,7 +1667,7 @@ the MCP server or of the Python library — they require no plugin API.
 source through one gate, because two gates drift:
 
 1. **A source is always named.** `adopt` requires one; `sync` takes the one
-   `adopt` recorded. When neither exists the call is `E_SCHEMA` — an
+   `adopt` recorded. When neither exists the call is `E_SCHEMA` an
    absent source MUST NOT fall back to the process's working directory,
    to a default, or to anything else. "The usual place" for a forest that
    has no usual place is not a location, and every filesystem API in wide
@@ -1686,10 +1686,10 @@ source through one gate, because two gates drift:
 The Gardener is trusted infrastructure running with the operator's
 authority (see the head of this Part), so these rules bound *what a walk
 may reach*, not who may ask for it. Who may ask, and which directories a
-**host** will open on a caller's behalf, is J.8.2 — a shell user is
+**host** will open on a caller's behalf, is J.8.2 a shell user is
 already standing on the filesystem and is not subject to it.
 
-### G.4 Curation (the only LLM stage — always skippable)
+### G.4 Curation (the only LLM stage always skippable)
 
 Stage 2 enriches the draft node before planting:
 
@@ -1699,7 +1699,7 @@ Stage 2 enriches the draft node before planting:
    tags from config. The pipeline never blocks on a missing GPU.
 2. **With an LLM** (Gardener v2): A.4 summary with validate-and-retry,
    tags, edge proposals at link-level `confidence: 0.3` (G.4.2.1), guided
-   by the **curation directives** in the forest config — free-text criteria
+   by the **curation directives** in the forest config free-text criteria
    the operator wants the Gardener to "keep an eye on" (e.g. "prioritize
    contract numbers and client names in summaries"). Entity EXTRACTION
    (minting new `entity` nodes) is deferred past v0.12: it needs a
@@ -1707,7 +1707,7 @@ Stage 2 enriches the draft node before planting:
 3. **`on_curate` hooks**: plugins (entry-point group `monkeyllm.hooks`,
    name `on_curate`) and/or locally registered callables receive the draft
    (dict) and may mutate it. Hooks run in discovery order; a raising hook
-   is logged into the report and SKIPPED — a broken plugin never aborts an
+   is logged into the report and SKIPPED a broken plugin never aborts an
    ingest.
 
 #### G.4.2.1 Edge proposals (v0.12)
@@ -1722,14 +1722,14 @@ cheap and a fabricated one is impossible:
    (`id`, `title`, `summary`). Excluded from candidacy: the draft itself,
    `branch` nodes (a link to a folder carries no scent), and the draft's
    own parent.
-2. **The model picks from the list — or picks nothing.** Anything outside
+2. **The model picks from the list or picks nothing.** Anything outside
    the offered ids is dropped (the hallucination guard is structural, not
    a prompt instruction). Picking nothing is a valid, common answer:
    relatedness must be visible in the two summaries.
-3. **Every proposal is `rel: related-to`** (symmetric, generic — A.2) with
+3. **Every proposal is `rel: related-to`** (symmetric, generic A.2) with
    **link-level `confidence: 0.3`** and MAY carry a short free-text `note`
    (kept out of the summary budget; helps the Ranger's audit trail). Other
-   rels (`mentioned-in`, `same-as`, …) are NOT proposable in v0.12 — they
+   rels (`mentioned-in`, `same-as`, …) are NOT proposable in v0.12 they
    assert ontology, not navigational adjacency.
 4. **Caps and dedup**: at most 3 proposals per node; self-links and
    duplicates of existing links (same `rel` + `target`) are dropped.
@@ -1749,7 +1749,7 @@ Curation gives every banana a scent; rollup gives every REGION one. After
 the per-node curation stage of an `adopt`/`sync` (or on demand), the
 Gardener MAY rewrite branch frontmatter summaries bottom-up:
 
-1. **Scope**: only branches with `source: ingest` — the Gardener rewrites
+1. **Scope**: only branches with `source: ingest` the Gardener rewrites
    what the Gardener planted, nothing else. An explicit operator override
    (`--all`) MAY widen the scope to every non-`_meta` branch.
 2. **Order**: deepest branch first (by id depth), so a parent's rollup
@@ -1759,13 +1759,13 @@ Gardener MAY rewrite branch frontmatter summaries bottom-up:
    the curation content budget. The model never reads child bodies —
    rollup is O(branches) LLM calls with bounded prompts.
 4. **Output contract**: an A.4-valid summary (1-3 sentences, ≤ 60 tokens)
-   answering the A.5 blockquote question — what lives here + where to go
+   answering the A.5 blockquote question what lives here + where to go
    if it is not here. Validate-and-retry as in G.4.2.
 5. **Fallback**: any failure (bad JSON, invalid summary after retries,
    transport error) falls back to a deterministic summary composed from
-   child titles and counts — the pipeline never blocks and never leaves a
+   child titles and counts the pipeline never blocks and never leaves a
    branch worse than the template it had. Counted in the Curator's stats.
-6. **Write path**: C.8 `graft` on the frontmatter `summary` — atomic,
+6. **Write path**: C.8 `graft` on the frontmatter `summary` atomic,
    `.md`-only commit, catalog upsert, and VERBATIM propagation of the new
    summary into the parent's `## Sub-branches` entry (coverage suffix
    preserved, A.5). No new write machinery.
@@ -1777,17 +1777,17 @@ Gardener MAY rewrite branch frontmatter summaries bottom-up:
 ### G.5 Media (multimodal by proxy)
 
 Audio/image/video go through the SAME converter contract: the converter
-(e.g. a Whisper transcriber, a vision-model describer — extras or hooks,
+(e.g. a Whisper transcriber, a vision-model describer extras or hooks,
 never core dependencies) returns markdown that becomes the `media`
 passport's body. The forest's job is **finding** media fast: `locate`/
 `sniff` search the textual proxy; a multimodal client that wants full
 fidelity follows `payload` to the raw file. Text to find, binary to
 consume. (Serving payload bytes over MCP to multimodal clients is a
-possible future extension — not normative here.)
+possible future extension not normative here.)
 
 ### G.6 Gardener config (`_meta/gardener.yaml`)
 
-Operator-level configuration, read by the Gardener (not a node — `_meta/`
+Operator-level configuration, read by the Gardener (not a node `_meta/`
 non-markdown files are not indexed):
 
 ```yaml
@@ -1806,15 +1806,15 @@ archive: never                   # never (default) | always (G.7)
 
 ### G.7 Content & archive policies (v0.11)
 
-The forest's three tiers: SCENT (passport frontmatter — always local, in
-git), FLESH (full converted text), BONE (raw binaries — stay at the
+The forest's three tiers: SCENT (passport frontmatter always local, in
+git), FLESH (full converted text), BONE (raw binaries stay at the
 source). The `content` policy decides where the FLESH lives:
 
 - **`inline`** (default): the converted body lives in the node `.md`
-  (v0.9 behavior — git-versioned content; right for normal corpora).
+  (v0.9 behavior git-versioned content; right for normal corpora).
 - **`cached`**: the node `.md` holds only the title stub and the
   frontmatter marker `content: cached`; the converted body is written to
-  `_derived/bodies/<id>.md` — OUT of git. Right for huge corpora.
+  `_derived/bodies/<id>.md` OUT of git. Right for huge corpora.
   Regenerable: re-running `sync` while sources are reachable rebuilds the
   cache (the body is a function of source + converter).
 - **`reference`**: no local body at all; the body IS the source file,
@@ -1826,7 +1826,7 @@ Normative semantics:
 1. **Lazy resolution**: `pick` (and `sniff`, when it reaches such a node)
    resolves the body from the cache file (`cached`) or from
    `source_root/source_path` (`reference`). The resolution is transparent
-   — same response shape, same budgets.
+   same response shape, same budgets.
 2. **Degraded mode is explicit**: when the body cannot be resolved
    (source share down, cache purged), the read fails with `E_NOT_FOUND`
    and a hint naming the missing backing file. The MAP keeps working —
@@ -1835,18 +1835,18 @@ Normative semantics:
    from the catalog; spending I/O to outline a remote body would break
    the <= 500-token cheapness contract).
 4. Summary derivation and LLM curation (G.4) always see the FULL
-   converted text at ingest time — the scent quality does not depend on
+   converted text at ingest time the scent quality does not depend on
    the content policy.
-5. **`archive`**: `never` (default) — durable sources are not copied into
+5. **`archive`**: `never` (default) durable sources are not copied into
    `_assets/`; `source_path` + `source_hash` are the reference. `always`
-   — inbox mode: the source will vanish after ingest, archive the
+   inbox mode: the source will vanish after ingest, archive the
    original (v0.9 behavior). Datasets keep their local `.db` payload
    under every policy (G.9).
 6. **Containment (normative, v0.26)**: the resolved backing file MUST lie
    underneath `source_root`; otherwise the read fails as rule 2's
    `E_NOT_FOUND` and the hint MUST NOT quote what was found there.
-   `source_path` is ordinary frontmatter — the Gardener writes it, and
-   `plant` accepts it like any other extra field — so a node can name a
+   `source_path` is ordinary frontmatter the Gardener writes it, and
+   `plant` accepts it like any other extra field so a node can name a
    path its author chose. Without this rule `pick`, a read primitive
    available to any principal holding `read`, resolves arbitrary host
    files with the Vine's authority and reports them as the node's own
@@ -1856,19 +1856,19 @@ Normative semantics:
 ### G.8 Targeted sync & triggers (v0.11)
 
 - **`sync(path=...)`** reconciles a single source-relative path (new,
-  changed or deleted) without walking the whole tree — the building block
+  changed or deleted) without walking the whole tree the building block
   for event-driven updates.
 - **Containment (normative, v0.26)**: `path` is relative to the source
   root and MUST resolve underneath it; an absolute path or one that
   escapes is `E_SCHEMA`. The comparison MUST be made on the **resolved**
-  path. A lexical check passes `../../etc/passwd` — joined onto the root
+  path. A lexical check passes `../../etc/passwd` joined onto the root
   it still *starts* with the root, so a purely textual "is it relative to"
   answers yes, the file is read, and its slugified `..` segments become a
   branch. Events arrive from watchers, webhooks and queues (below), which
   is to say from outside; this path is caller input like any other.
 - **Fast-path (normative)**: passports record `source_size` and
   `source_mtime`; a sync visit MUST skip hashing when both match the
-  stored values (rsync's trick — re-hashing 2 TB per cycle is the real
+  stored values (rsync's trick re-hashing 2 TB per cycle is the real
   bottleneck). Hash remains the authority whenever the fast-path misses.
 - **Events trigger, the reconciler decides**: filesystem watchers, S3
   event notifications, Drive `changes.watch` and upload webhooks are
@@ -1887,32 +1887,32 @@ as an optional MIT-licensed extra) resolve through a fetcher registry:
    `_derived/payloads/`, validated against `payload_hash`/`source_hash`
    before use (a corrupted or tampered download never reaches the agent).
 2. **Datasets are local-first by design**: SQLite needs a local file, and
-   a hot knowledge base needs sub-millisecond reads — object storage
+   a hot knowledge base needs sub-millisecond reads object storage
    holds `.db` files only as backup or cold-archive tiers. A cold
    dataset's first `query` pays one download; the cache absorbs the rest.
 3. Remote sync uses the store's own change signals (ETag listings)
    instead of downloading to hash.
 4. **`tend` rejects remote payloads** (`E_QUERY_FORBIDDEN` with hint):
-   writes belong to the local-first tier — editing a cached copy of a
+   writes belong to the local-first tier editing a cached copy of a
    remote database would fork it silently. Reads (`query`, `look`'s
    dataset digest) work through the cache transparently.
 5. **Region prefetch (the parachute warms the camp)**: `prefetch(scope)`
-   downloads every remote payload under a branch in one sweep — the
+   downloads every remote payload under a branch in one sweep the
    orchestrator calls it right after `locate` drops the monkey, so the
    subsequent `sniff`/`query` hops run at local speed. Combined with H.6
    eviction, the payload cache converges to the shape of the pheromone:
    hot regions stay warm, cold regions evaporate from disk.
 
 The MAP itself (passports + the forest git) stays local to wherever the
-Vine runs — it is the truth, it is ~0.1% of the source, and remote
+Vine runs it is the truth, it is ~0.1% of the source, and remote
 clients reach it through the MCP server, not by replicating it. Moving a
 map between machines is what snapshots are for (Part I). `catalog.db` and
-`trails.db` remain disposable caches OF the local map (C.6.1) — they are
+`trails.db` remain disposable caches OF the local map (C.6.1) they are
 never the only local copy of anything.
 
 ---
 
-## Part H — The Ranger (maintenance, spec v0.10)
+## Part H The Ranger (maintenance, spec v0.10)
 
 The Ranger keeps the forest healthy over time. The compounding loop only
 works if the pheromone can also **forget**: without evaporation every trail
@@ -1922,7 +1922,7 @@ infrastructure (operator authority): evaporation lives entirely in the
 derived layer; every node edit goes through the audited `.md`-only commit
 path.
 
-### H.1 Heat evaporation (derived layer only — no commits)
+### H.1 Heat evaporation (derived layer only no commits)
 
 - Persistent heat decays exponentially:
   `heat' = heat × 0.5^(Δt / half_life)`, where `Δt` is the time since the
@@ -1930,17 +1930,17 @@ path.
 - Rows whose decayed heat falls below **0.01** are deleted (dust removal —
   the table stays proportional to what is actually warm).
 - Session scopes (`scope != ''`) older than `session_ttl_hours` (default
-  24) are cleared — crash leftovers from Troop hunts must not survive.
+  24) are cleared crash leftovers from Troop hunts must not survive.
 - Evaporation re-stamps `updated` at decay time (the decay is applied, not
   re-derived); running the Ranger twice in a row is a no-op within clock
   precision (idempotence under the synthetic-clock test).
 - `_derived/` remains disposable: deleting `trails.db` loses memory but
-  breaks nothing (A.3 spirit) — therefore evaporation never commits.
+  breaks nothing (A.3 spirit) therefore evaporation never commits.
 
 ### H.2 Promotion and pruning of uncertain links
 
 **Scope rule (normative): the Ranger manages ONLY links that carry a
-link-level `confidence < 1.0`** — i.e. edges born as proposals
+link-level `confidence < 1.0`** i.e. edges born as proposals
 (`related-to` at 0.3, C.8) or discovered shortcuts (0.5, C.8). Structural
 edges (`part-of`, etc.), links without a confidence field and links at
 `confidence: 1.0` are NEVER touched.
@@ -1950,11 +1950,11 @@ edges (`part-of`, etc.), links without a confidence field and links at
   link confidence is raised to `promoted_confidence` (default 0.8). Audited
   commit `ranger(promote): <id> <rel>-><target> 0.8` of only the `.md`.
 - **Pruning**: a managed link with `confidence <= prune_below` (default
-  0.5) whose BOTH endpoints have fully evaporated (heat 0 — no
+  0.5) whose BOTH endpoints have fully evaporated (heat 0 no
   reinforcement within memory) is removed. Audited commit
   `ranger(prune): <id> <rel>-><target>`.
 - A link that is neither hot enough to promote nor cold enough to prune is
-  left alone — patience is a feature.
+  left alone patience is a feature.
 - The Ranger NEVER deletes nodes. Stale passports (G.3) stay reported until
   a human (or a future tombstone policy) decides.
 
@@ -1965,7 +1965,7 @@ CLI:
 
 - **`needs_split`**: branches with > 150 entries or > 3.000 body tokens
   (A.5 rule).
-- **`fat_nodes`**: nodes with degree > 50 (A.2 rule — branch candidates).
+- **`fat_nodes`**: nodes with degree > 50 (A.2 rule branch candidates).
 - **`lint`**: error/warning counts from `vine validate`'s engine (includes
   payload drift, C.10).
 - **`stale_passports`**: passports whose `source_path` no longer exists
@@ -1977,11 +1977,11 @@ CLI:
 
 ### H.4 Execution model
 
-- `vine ranger [--forest DIR]` — one full cycle: evaporate → tend links →
+- `vine ranger [--forest DIR]` one full cycle: evaporate → tend links →
   health report.
-- `vine ranger --every N` — service mode: repeat every N seconds until
+- `vine ranger --every N` service mode: repeat every N seconds until
   interrupted (Docker-friendly; the deploy doc's `ranger (cron)` box).
-- The Ranger takes an injectable clock (`now`) — the synthetic-clock tests
+- The Ranger takes an injectable clock (`now`) the synthetic-clock tests
   of F.14 depend on it.
 
 ### H.5 Ranger config (`_meta/ranger.yaml`)
@@ -2000,19 +2000,19 @@ payload_cache_gb: 5        # H.6 (v0.11)
 The Ranger evicts `_derived/payloads/` entries least-recently-used first
 when the cache exceeds `payload_cache_gb`. Eviction is always safe: every
 cached entry is re-fetchable from its source URI and hash-validated on
-return (G.9.1). Evaporation for bytes — same philosophy as H.1.
+return (G.9.1). Evaporation for bytes same philosophy as H.1.
 
 ### H.7 Landmarks refresh (v0.13)
 
 The Ranger keeps the master `_index.md`'s `## Landmarks` section (A.5)
-populated — the forest's hubs, discovered mechanically:
+populated the forest's hubs, discovered mechanically:
 
 1. **Selection**: top 10-20 nodes by degree over the catalog's typed-edge
    table (frontmatter `links`, both directions). Excluded: `branch` nodes
    (a landmark must carry scent), `_meta/*`, and degree-0 nodes. The
-   folder hierarchy (`parent`) does NOT count toward degree — landmarks
+   folder hierarchy (`parent`) does NOT count toward degree landmarks
    measure how woven a node is, not how filed.
-2. **Rendering**: A.5 entry lines (`- [[id]] — <summary>`) inside the
+2. **Rendering**: A.5 entry lines (`- [[id]] <summary>`) inside the
    `## Landmarks` section of the master branch only. The section is
    created if the heading is missing.
 3. **Idempotence**: the section is rebuilt in full and compared; an
@@ -2023,11 +2023,11 @@ populated — the forest's hubs, discovered mechanically:
 
 ---
 
-## Part I — Snapshots (v0.11)
+## Part I Snapshots (v0.11)
 
 A forest snapshot is ONE file: the forest's git repository packaged as a
-`git bundle` (the full commit history — every plant/tend/gardener/ranger
-audit trail — travels along), compressed.
+`git bundle` (the full commit history every plant/tend/gardener/ranger
+audit trail travels along), compressed.
 
 - `vine snapshot create [--out FILE]` → `<forest>-<date>.bundle.zst` (or
   `.bundle` when zstd is unavailable). Payload `.db` files are NOT inside
@@ -2039,19 +2039,19 @@ audit trail — travels along), compressed.
   interval + retention), config in `_meta/ranger.yaml`.
 
 Use cases (informative): backup/DR, distribution (a team pulls the whole
-MAP in one small download — the scent tier is ~0.1% of the source),
+MAP in one small download the scent tier is ~0.1% of the source),
 frozen releases of a knowledge base ("the forest as of Q2 close").
 
 ---
 
-## Part J — The Station (host layer: self-host, governance, scoped access)
+## Part J The Station (host layer: self-host, governance, scoped access)
 
 ### J.0 Position
 
 Parts A-I describe a forest and the Vine that reads it, for one operator
 who owns the filesystem. Part J describes the **Station**: the service that
-serves forests to *many* principals — with identity, policy, audit and a
-web console — so that a forest becomes a governed corporate asset instead
+serves forests to *many* principals with identity, policy, audit and a
+web console so that a forest becomes a governed corporate asset instead
 of a personal directory.
 
 The Station is a **privileged client**, never an extension (G.0):
@@ -2060,14 +2060,14 @@ The Station is a **privileged client**, never an extension (G.0):
   awareness. Primitive semantics, budgets and guards are identical whether
   a call arrives through the Station or through `vine serve`.
 - Forests remain content. Principals, tokens and policies MUST live in the
-  **host registry** (host-side storage), never inside a forest — a forest
+  **host registry** (host-side storage), never inside a forest a forest
   handed to another operator carries no credentials.
 - Every write remains a git commit inside the forest (A.3), and binaries
   remain outside that git (A.3.1).
 
 ### J.1 The Station
 
-The Station mounts a **forest registry** — a root directory whose valid
+The Station mounts a **forest registry** a root directory whose valid
 forests are resolved exactly as C.0 registry mode already resolves them —
 and exposes three surfaces:
 
@@ -2103,11 +2103,11 @@ A human should not have to paste a 43-character secret to open a web
 console, and a machine should not have to hold a password. So there are two
 doors:
 
-- **Password** — `POST /v1/auth/login {username, password}` returns a
+- **Password** `POST /v1/auth/login {username, password}` returns a
   **session token**: an ordinary API key with a short lifetime and a
   `session` kind. Sessions MUST NOT appear in the token console; they are
   the by-product of a login, not a credential an operator manages.
-- **API key** — pasted directly, as before.
+- **API key** pasted directly, as before.
 
 Both MUST converge on the same `authenticate()` and the same J.3 policy
 resolution. There is exactly **one** authorization path; the door only
@@ -2118,10 +2118,10 @@ decides how the principal was established, never what it may do.
 the environment with a constant-time comparison and **never stored**.
 Hashing a value that already sits in the environment protects nothing, and
 storing it would give a rotation two places to go wrong. It carries the
-owner bit (J.2.4), so it governs a registry that holds no forest yet — the
+owner bit (J.2.4), so it governs a registry that holds no forest yet the
 grant-per-forest reading of this rule is what made an empty deployment
 unreachable before v0.25. If the variables are absent, the door simply does
-not exist — a deployment that never sets them has no default password,
+not exist a deployment that never sets them has no default password,
 which is the only safe default.
 
 It is **break-glass and MUST NOT be the documented way in**. A deployment
@@ -2155,7 +2155,7 @@ which is shown exactly once, at creation.
 **The escalation rule.** A key authenticates a *principal*, and a principal
 may hold grants on several forests. Minting or revoking a key for a
 principal therefore requires `admin` on **every forest that principal is
-granted**, not merely on one of them — otherwise the administrator of one
+granted**, not merely on one of them otherwise the administrator of one
 forest could mint a credential that opens another. For the same reason, the
 token console MUST list only principals the caller fully administers.
 
@@ -2166,11 +2166,11 @@ somebody is not three tasks performed in three places; it is one decision
 with three consequences. `POST /v1/admin/people` therefore applies, for a
 single principal and in this order:
 
-1. **grant** — create or replace their access on one or more forests
-2. **revoke access** — remove their access to one or more forests
-3. **password** — set, replace or clear it (absent field means "leave it")
-4. **issue key** — mint one, returned exactly once
-5. **revoke keys** — one, or all of theirs
+1. **grant** create or replace their access on one or more forests
+2. **revoke access** remove their access to one or more forests
+3. **password** set, replace or clear it (absent field means "leave it")
+4. **issue key** mint one, returned exactly once
+5. **revoke keys** one, or all of theirs
 
 The order is normative because it is what makes first-time onboarding work
 in a single request: the grant lands before the credential steps, so a
@@ -2178,7 +2178,7 @@ principal that did not exist a moment ago is administrable by the time its
 password and key are created.
 
 **A composite is not an authority.** Each step MUST re-check the rule that
-governs it on its own — `admin` on the forest for (1) and (2),
+governs it on its own `admin` on the forest for (1) and (2),
 `administers_fully` for (3), (4) and (5), and the environment account's
 refusal to hold a stored password. A step the caller may not perform MUST
 be refused **without abandoning the steps they may**: the response reports
@@ -2196,7 +2196,7 @@ A set MUST NOT weaken the per-forest rule. Each named forest is authorised,
 applied and refused **individually**: an administrator of two forests out of
 three who names all three grants two and is told, by forest id, why the
 third was refused. Partial application within the step follows the same
-reasoning as partial application between steps — the operator gets what they
+reasoning as partial application between steps the operator gets what they
 were entitled to, and an explicit account of what they were not. The step
 counts as applied when at least one forest landed.
 
@@ -2233,7 +2233,7 @@ per forest, and is not re-derived at startup:
 
 - authority that must be able to create the first forest cannot be derived
   from a forest, or the deadlock simply moves;
-- re-granting at boot drifts — every forest created later needs the same
+- re-granting at boot drifts every forest created later needs the same
   loop to run again, and the one time it does not is a support ticket;
 - a grant can be revoked forest by forest, which would silently produce a
   half-owner. The bit is atomic: an owner is one or is not.
@@ -2247,14 +2247,14 @@ creates the owner and returns a session token, exactly as a login would.
 
 - It MUST be **unauthenticated**, because there is nobody to authenticate.
 - It MUST exist **only while the registry holds no credential of any kind**
-  — no password, no non-session API key. That is the one condition under
+  no password, no non-session API key. That is the one condition under
   which an open route creates no privilege escalation: there is no
   privilege yet to escalate from.
 - It MUST NOT exist while an environment super-admin is configured. That
   deployment has already declared its first identity, and two open doors
   competing for it is the race this section exists to forbid.
 - Once it has run it MUST close **permanently**. A closed route MUST answer
-  exactly as an unrouted path does — not "already configured", which
+  exactly as an unrouted path does not "already configured", which
   publishes the deployment's state to anyone who asks.
 - The check and the creation MUST be **one atomic transaction**. Two
   simultaneous requests MUST produce one owner and one refusal, never two
@@ -2265,20 +2265,20 @@ creates the owner and returns a session token, exactly as a login would.
   NOT be transmitted anywhere. A setup step that depends on a network call
   cannot complete on an air-gapped host, and asking for an address in
   exchange for nothing is a poor first sentence for a product to say.
-- The password is stored under the J.2.1 rules — memory-hard KDF, salted.
+- The password is stored under the J.2.1 rules memory-hard KDF, salted.
   The owner is an ordinary principal that happens to carry a bit.
 
 **The first forest.** Setup MAY create one, and the choice MUST be the
 operator's: an empty forest, or a **seeded demo** whose only purpose is that
 `Ask` and `Explore` have something to answer on the first visit. Neither is
-required — an owner with no forest is now a valid, workable state, which is
+required an owner with no forest is now a valid, workable state, which is
 precisely what v0.24 could not represent.
 
 The seed MUST be **generated, never shipped as content**: a generator that
 calls only public primitives, living outside `src/monkeyllm/` because the
 engine carries no vocabulary of its own (a forest is content, and content
 is not the engine's business). A demo forest MUST NOT be committed to the
-repository — the generator is the artifact, the forest is its output.
+repository the generator is the artifact, the forest is its output.
 
 **F.28 (acceptance).** On a registry with no credential and no environment
 super-admin, `GET /v1/health` reports setup is required and the setup route
@@ -2286,17 +2286,17 @@ creates an owner whose session **immediately** reports `admin`, holds
 `admin` on a forest created *after* the owner existed, and is refused by
 nothing that `admin` permits; the same route, called a second time, answers
 byte-identically to an unrouted path, and two concurrent first calls produce
-exactly **one** owner and one refusal — proven by running them against one
+exactly **one** owner and one refusal proven by running them against one
 registry, not by inspecting the code. With an environment super-admin
 configured, the route MUST NOT exist at all. An owner MUST be able to create
 the first forest on an empty registry, and a non-owner without grants MUST
 still be refused it. Clearing every credential MUST NOT reopen setup while
-the owner principal exists — all covered by tests.
+the owner principal exists all covered by tests.
 
-### J.3 Policy and enforcement — `ScopedVine`
+### J.3 Policy and enforcement `ScopedVine`
 
 **Unit of scope: the branch prefix.** The hierarchy that Part A already
-maintains is the policy surface — a grant names a subtree, not a node list.
+maintains is the policy surface a grant names a subtree, not a node list.
 
 A policy binds one principal to one forest:
 
@@ -2360,7 +2360,7 @@ result to the forests the caller administers:
 |---|---|
 | `/v1/admin/principals` | principals holding a grant on an administered forest, with `grants_detail` reduced to those forests |
 | `/v1/admin/audit` | entries whose forest is administered |
-| `/v1/admin/keys` | principals the caller administers **fully** (J.2.2 — a key spans forests, so partial administration is not enough) |
+| `/v1/admin/keys` | principals the caller administers **fully** (J.2.2 a key spans forests, so partial administration is not enough) |
 | `/v1/admin/grant`, `/v1/admin/models` | already per forest; unchanged |
 
 A branch prefix is a description of somebody's world, and an audit entry
@@ -2391,7 +2391,7 @@ than as an implementation detail here.
 
 A web console served by the Station. Studio MUST consume only the
 documented REST surface. It MUST NOT hold a privileged side-channel:
-whatever Studio can do, an API client with the same principal can do — and
+whatever Studio can do, an API client with the same principal can do and
 whatever a principal cannot do, Studio cannot show. Localisation and
 theming are presentation: they MUST NOT change any request, response or
 permission.
@@ -2419,7 +2419,7 @@ weak target.
 
 Navigation MUST list exactly the consoles the principal's capabilities
 permit on the selected forest, and MUST re-evaluate when that forest
-changes — capabilities are per forest, so the menu is too. `Ask` is the
+changes capabilities are per forest, so the menu is too. `Ask` is the
 default landing console for a principal holding `read`; a principal
 without it lands on the first console they do have.
 
@@ -2427,8 +2427,8 @@ without it lands on the first console they do have.
 its own capability guard, because a hidden entry is still reachable by
 anyone who can set application state, and the API remains the authority: it
 already refuses, and it would refuse a request the console never sent.
-Where a console is *partly* available — `Access`, which shows a principal
-its own grant whether or not it may administer others — it stays listed and
+Where a console is *partly* available `Access`, which shows a principal
+its own grant whether or not it may administer others it stays listed and
 explains the missing half rather than disappearing.
 
 #### J.5.2 The vocabulary rule
@@ -2458,7 +2458,7 @@ policy model of J.3 is storage, not interface:
   the operating system preference until told otherwise, and persist an
   explicit choice.
 - Content is not chrome. Node ids, titles, summaries, bodies, SQL and
-  model output are forest data and MUST be rendered as stored — the
+  model output are forest data and MUST be rendered as stored the
   console translates its own words only.
 
 #### J.5.4 Credentials, and the panel that does not exist
@@ -2467,7 +2467,7 @@ Issuing, listing and revoking API keys follows J.2.2: label, principal,
 expiry, last use, prefix. The secret appears once, at creation, and the
 console MUST say so at the moment it is shown rather than afterwards.
 
-The access **levels** MUST be documented in the console itself — the named
+The access **levels** MUST be documented in the console itself the named
 roles, what each one can do, and what it cannot. An operator choosing a
 level should not have to leave the screen to learn what the choice means.
 
@@ -2476,7 +2476,7 @@ level should not have to leave the screen to learn what the choice means.
 Governance is presented **per person**, not per table:
 
 - **Onboarding is one form.** Who they are, what they may see, how they
-  sign in, and a token if they need one — submitted together, because that
+  sign in, and a token if they need one submitted together, because that
   is one decision. Splitting it across screens makes the operator hold the
   model that the interface should be holding for them.
 - **Forests are chosen as a set, not one at a time.** The form MUST offer
@@ -2498,7 +2498,7 @@ Governance is presented **per person**, not per table:
 - **Credentials stay visible as credentials too.** A second view lists
   tokens across people, for the operator auditing what exists rather than
   who exists. Two views over one truth; not two places to maintain it.
-- Secrets — a generated password, a new key — appear once, at the moment
+- Secrets a generated password, a new key appear once, at the moment
   they are created, in the same place the operator was already looking.
 
 **There is no separate super-administrator panel, and there MUST NOT be
@@ -2506,7 +2506,7 @@ one.** One console over one API, with capabilities deciding what appears: a
 principal without `admin` does not see Tokens, and a principal with `admin`
 on one forest does not see the credentials of another. A second panel would
 require a second authentication path, and a second authentication path is
-where the backdoor goes — this is the same reasoning as J.5's
+where the backdoor goes this is the same reasoning as J.5's
 no-side-channel rule, applied to the console's own front door.
 
 #### J.5.4 Forest Views
@@ -2514,7 +2514,7 @@ no-side-channel rule, applied to the console's own front door.
 A forest is a graph of nodes and typed trails with heat on it, and a tree
 of files on disk. Both are the same truth; a console MUST be able to show
 either without the operator changing consoles. The Explore console
-therefore carries **modes over one selection** — the selected node survives
+therefore carries **modes over one selection** the selected node survives
 a mode change, because the operator did not stop looking at it.
 
 | Mode | Shows | Reads |
@@ -2530,7 +2530,7 @@ fact the forest actually holds, and MUST NOT invent one:
   A console MUST NOT hardcode the type list: a forest that added a type
   gets a legend entry, not an unlabelled colour.
 - Heat is the pheromone value of Part D, and a console that shows heat MUST
-  show the value it received rather than a rank — heat is comparable across
+  show the value it received rather than a rank heat is comparable across
   nodes and a rank is not.
 - Link-level `confidence` below 1.0 MUST be visually distinct from curated
   links: it is a proposal under the Ranger's management (H.2), not an
@@ -2546,7 +2546,7 @@ is, and its stored form MUST remain reachable:
   page, sanitised; it MUST NOT be able to script the console, and it MUST
   NOT be able to reach the console's credentials.
 - A `type: dataset` node's payload is a database: its tables MUST be
-  listable and browsable through `query` and nothing else — the same single
+  listable and browsable through `query` and nothing else the same single
   SELECT, the same injected LIMIT, the same timeout (C.5). A console
   browsing a payload is a `query` client, not a second access path.
 - Frontmatter shown beside a body is the passport as the Catalog holds it.
@@ -2555,7 +2555,7 @@ is, and its stored form MUST remain reachable:
   returned rather than pretending to have the whole text.
 
 **Editing.** A console MAY offer editing, and every edit MUST leave as a
-Part C write — `graft` for a node, `tend` for a dataset row. No surface,
+Part C write `graft` for a node, `tend` for a dataset row. No surface,
 the console included, may write a node file or a payload directly: the
 commit, the validation, the index propagation and the audit record are the
 write, and a "save" that skips them is a forest that no longer describes
@@ -2567,7 +2567,7 @@ keystroke.
 
 The console has exactly two pre-identity screens. The Gate (sign in) is one;
 the setup screen is the other, and which one appears is not the console's
-choice — `GET /v1/health` already says whether a password door exists, and
+choice `GET /v1/health` already says whether a password door exists, and
 it MUST also say whether setup is required. The console asks and renders the
 answer. A console that decided this locally would eventually show a sign-in
 form on a Station nobody can sign in to, which is the bug this whole section
@@ -2575,7 +2575,7 @@ exists to remove.
 
 - It MUST collect a username and a password, MAY collect an email, and MUST
   label the email as optional in the interface rather than only in the API.
-- It MUST offer the first-forest choice of J.2.4 — empty or seeded demo —
+- It MUST offer the first-forest choice of J.2.4 empty or seeded demo —
   and MUST let it be skipped. An owner with no forest is a valid state and
   the console MUST render it without looking broken: the existing "no
   forest" empty state already carries the create action for an
@@ -2593,7 +2593,7 @@ decided by capabilities (J.5.4).
 ### J.6 Deployment
 
 A Station deployment MUST be reducible to one container image plus two
-volumes — the forest registry and the host registry — with no external
+volumes the forest registry and the host registry with no external
 database required. Snapshots (Part I) remain the backup unit; the host
 registry is backed up alongside them.
 
@@ -2610,7 +2610,7 @@ own volume, mounted for that purpose and named in `MONKEYLLM_INGEST_ROOTS`
 
 A deployment that can only serve forests placed on its volume by hand is
 not self-service. `POST /v1/admin/forests {id, title, summary?}` creates
-one, and creation is exactly A.5 `init_forest` — the same skeleton,
+one, and creation is exactly A.5 `init_forest` the same skeleton,
 dialect and embedded git a local `vine init` produces. The Station adds no
 second way to make a forest.
 
@@ -2619,7 +2619,7 @@ second way to make a forest.
   no separators, no relative segments. Rejecting after joining is too
   late.
 - Creating requires the `admin` capability on some existing forest **or the
-  owner bit (J.2.4)** — the authority to govern a forest is the authority
+  owner bit (J.2.4)** the authority to govern a forest is the authority
   to start another, and the owner is the authority that precedes every
   forest. A bootstrapped deployment therefore reaches its second forest
   through the API, an empty one reaches its **first**, and an unprivileged
@@ -2677,8 +2677,8 @@ Common rules:
   escape, and stage under a directory inside the forest that is not itself
   forest content. Uploaded bytes are a source, not a node: they become
   nodes only through the same converters, curation and commits as `adopt`.
-- The response is the Part G `IngestReport` — created, updated, unchanged,
-  unsupported, errors — unabridged. A partially successful ingest that
+- The response is the Part G `IngestReport` created, updated, unchanged,
+  unsupported, errors unabridged. A partially successful ingest that
   reports success is worse than one that fails.
 - Curation uses the forest's `ingest` binding (J.10) when one exists and
   the deterministic G.4 derivation when it does not. Ingest MUST NOT
@@ -2686,8 +2686,8 @@ Common rules:
   summaries.
 
 - `compose` is `upload` with one authored document and a title instead of a
-  filename. It exists because the alternative — a console that plants a node
-  directly — would be a second write path with its own idea of what a
+  filename. It exists because the alternative a console that plants a node
+  directly would be a second write path with its own idea of what a
   passport is. Authored prose MUST go through the same converters, the same
   curation (G.4) and the same commits as an adopted file, and the
   edge proposals it receives MUST be the closed-candidate ones of G.4.2.1.
@@ -2705,7 +2705,7 @@ node that already exists, has a commit, and may already have been read.
 
 | Call | Body | Does |
 |---|---|---|
-| stage | `{mode: "compose", title, text, dest?, stage: true}` | converts, curates, proposes — and stops at the plant |
+| stage | `{mode: "compose", title, text, dest?, stage: true}` | converts, curates, proposes and stops at the plant |
 | accept | `{mode: "compose", title, text, dest?, draft: {…}}` | runs the same pipeline with the approved passport pinned |
 
 Normative rules:
@@ -2737,7 +2737,7 @@ Normative rules:
 - **A returned draft is a client payload and MUST be re-validated**, exactly
   as if the reviewer had authored every field: the summary re-clipped to the
   A.4 budget, tags re-cleaned and capped at the G.4 maximum, and each link
-  re-checked against G.4.2.1 — `rel: related-to` only, target existing and
+  re-checked against G.4.2.1 `rel: related-to` only, target existing and
   in scope, never a branch, never the node itself or its parent, capped at
   the proposal maximum. Trusting the round-trip would make the hallucination
   guard a client-side one, which is to say none.
@@ -2765,8 +2765,8 @@ link at confidence 0.3; and the planted node's summary MUST be the approved
 text, not a re-curated one.
 
 *Attribution boundary (informative):* J.4 stamps the acting principal by
-amending the commit a write produced. An ingest produces many — one per
-node — and amending would rewrite only the last while claiming the batch.
+amending the commit a write produced. An ingest produces many one per
+node and amending would rewrite only the last while claiming the batch.
 The Station therefore records the resulting commit **range** in the audit
 log and returns it, rather than rewriting history it did not author.
 
@@ -2777,8 +2777,8 @@ which directories a **host** will open at all, because the two questions
 have different answers: a person at a shell already holds the filesystem,
 and a request arriving over HTTP does not.
 
-A Station MUST hold a list of **ingest roots** — absolute directories it is
-willing to read on a caller's behalf — configured out of band
+A Station MUST hold a list of **ingest roots** absolute directories it is
+willing to read on a caller's behalf configured out of band
 (`MONKEYLLM_INGEST_ROOTS`, OS path-separated). Every host path a request
 names, in any mode, MUST resolve to a location at or underneath one of
 them, compared **after** resolution so `..` and symlinks are collapsed
@@ -2796,7 +2796,7 @@ first.
 - **`admin` is not a bypass.** The capability answers *who may ask*; the
   roots answer *what exists to be asked for*. Collapsing the two puts the
   host's whole filesystem one grant away, and in a self-hosted deployment
-  the operator holds that grant by construction — which is exactly the
+  the operator holds that grant by construction which is exactly the
   reader who is not protected by a rule addressed to attackers.
 - **The registry root is never an ingest root**, listed or not, nor is any
   ancestor of it. G.3 already prunes a forest met inside a walk; this rule
@@ -2808,7 +2808,7 @@ first.
   boot rather than from an ingest that quietly refuses months later.
 - The list bounds host paths only. Staged uploads live under the forest's
   own `_derived/` (J.8) and are generated, not named by the caller, so
-  they are outside this rule — as is a targeted `sync` path, which is
+  they are outside this rule as is a targeted `sync` path, which is
   relative to an already-vetted source root and contained by G.8.
 
 **F.29 (acceptance).** With `MONKEYLLM_INGEST_ROOTS` unset, an `adopt`
@@ -2829,7 +2829,7 @@ node from it. All covered by tests.
 
 **Providers.** An operator registers named endpoints in the host registry:
 a name, an OpenAI-compatible `/v1` base URL, and an optional key. Any
-compatible gateway qualifies — OpenRouter, LiteLLM, vLLM, a local
+compatible gateway qualifies OpenRouter, LiteLLM, vLLM, a local
 llama.cpp. Credentials are **write-only across every surface**: the API
 accepts a key and reports only whether one is set (`has_key`), and an
 update with an empty key MUST preserve the stored one so an endpoint can
@@ -2845,20 +2845,20 @@ Its key **MUST NOT be persisted in the registry**: it is held for the life
 of the process and resolved when a call is made. The registry file is a
 backup target and the environment is not; a deployment that chose the
 environment for its secret MUST NOT have it copied elsewhere as a side
-effect of starting the host. Write-only still holds — `has_key` is the only
+effect of starting the host. Write-only still holds `has_key` is the only
 thing any surface reports.
 
 Such a row is **read-only to the console**: an edit or a removal MUST be
 refused, because the environment would reinstate it at the next restart and
 the operator would meanwhile be looking at a configuration the deployment
 does not have. Withdrawing the variables is the way to remove it; at the
-next boot the row becomes an ordinary console provider — keyless, visibly
-so — rather than being deleted, which would silently take its bindings with
+next boot the row becomes an ordinary console provider keyless, visibly
+so rather than being deleted, which would silently take its bindings with
 it.
 
 **Model discovery.** A provider already publishes what it serves, at
 `/models`. The console MUST offer that catalogue when choosing a model —
-with the per-token prices when the provider states them — rather than
+with the per-token prices when the provider states them rather than
 asking an operator to type an identifier. Typing invites the failure this
 rule exists to prevent: a model name from one provider bound to another,
 which is well-formed, accepted, and wrong until the first call fails.
@@ -2877,17 +2877,17 @@ max_tokens, reasoning)` with `role ∈ {ingest, answer}`:
 | `answer` | `answer` | speed and instruction-following over already-retrieved material |
 
 A binding MUST be refused if the provider or the role is unknown, and
-removing a provider MUST remove the bindings that pointed at it — a
+removing a provider MUST remove the bindings that pointed at it a
 dangling binding would fail at the worst possible moment.
 
 ### J.10.3 Model-backed composites
 
 Two host composites, neither a primitive (the engine gains nothing):
 
-- **`answer(question, k)`** — runs the scoped `harvest`, hands the result
+- **`answer(question, k)`** runs the scoped `harvest`, hands the result
   to the forest's `answer` model, and returns `{answer, model, model_ms,
   evidence, harvest, trace}` (J.10.4). Requires the `read` capability.
-- **`curate(id)`** — re-summarises one node through the `ingest` model
+- **`curate(id)`** re-summarises one node through the `ingest` model
   under the A.4 scent rules (validate-and-retry), returning the proposed
   summary rather than writing it. Requires the `write` capability, because
   it spends the operator's tokens.
@@ -2902,13 +2902,13 @@ question, not an implementation shortcut.
 *Known boundary (informative):* `answer` reads text. Facts that live only
 inside a `type:dataset` payload are reached with `query`, so a question
 whose answer is an aggregate over rows will be honestly refused rather
-than guessed — unless the model is given the primitives and allowed to run
+than guessed unless the model is given the primitives and allowed to run
 `query` itself, which is J.10.5.
 
 ### J.10.5 The answer that navigates
 
 `answer`'s default is a sweep: `harvest`, one model call, done. Cheap,
-predictable — and blind to anything not reachable from the entry list. It
+predictable and blind to anything not reachable from the entry list. It
 is retrieval-augmented generation with a forest underneath, and it uses
 none of what the forest is for.
 
@@ -2923,13 +2923,13 @@ composite.
 - **Read-only, by whitelist, not by capability.** The loop offers `locate`,
   `sniff`, `look`, `move`, `pick`, `scan`, `query` and nothing else. The
   policy would already refuse a write to a principal without the capability
-  — but a principal who *has* `write` asked a question, and a loop that
+  but a principal who *has* `write` asked a question, and a loop that
   could `plant` would turn a question into an edit.
 - **Every call goes through `ScopedVine`**, exactly as a client's would.
   The loop is a client with no privileges of its own; J.10.3's invariant is
   unchanged, not re-argued.
 - **A spent budget still answers.** Running out MUST force one closing turn
-  over what was already read, rather than discarding the hunt — the tokens
+  over what was already read, rather than discarding the hunt the tokens
   are spent either way.
 - **Evidence is what was opened.** Cited ids that the loop never read MUST
   NOT be returned as evidence: that is a claim about the forest rather than
@@ -2938,7 +2938,7 @@ composite.
 The response carries `hops` alongside the `trace` of J.10.4, so the path and
 its cost are both visible. A hop MUST report more than its tool name: the
 arguments the model chose, one number for what came back (results, rows,
-tokens, or the refusal code), and **two clocks** — the forest call and the
+tokens, or the refusal code), and **two clocks** the forest call and the
 model turn that decided to make it. "sniff, sniff, locate" and "sniff → 0,
 sniff → 0, locate → 5" are the same list of verbs and opposite stories, and
 one combined duration would hide which half a slow hunt is spending.
@@ -2950,7 +2950,7 @@ question, over results the scope already filtered.
 
 Steps in the `trace` that a hop caused SHOULD carry that hop's number, so a
 console can show a timing and the decision behind it in one place. The entry
-`locate` is not a hop — the forager did not choose it.
+`locate` is not a hop the forager did not choose it.
 
 **And it carries what it read.** The sweep can show the material because
 `harvest` returns it in one bundle; a forager has a walk instead, so the
@@ -2965,13 +2965,13 @@ this answer built from" is the same question in both modes.
 
 A composite is opaque from the outside: `answer` is one request, several
 forest calls and a provider round trip, and a single elapsed number cannot
-say which of them to fix. The usual suspicion — "the forest is slow" — is
+say which of them to fix. The usual suspicion "the forest is slow" is
 almost always wrong, and there is no way to find that out from a total.
 
 Calls that are several calls (`answer`, `harvest`) MUST therefore return a
 `trace`: the ordered steps the call performed, each with its primitive, its
-elapsed milliseconds, the tokens it emitted and — only for primitives that
-take one — the node id; plus `retrieval_ms`, `total_ms`, and the provider
+elapsed milliseconds, the tokens it emitted and only for primitives that
+take one the node id; plus `retrieval_ms`, `total_ms`, and the provider
 round trip as a `model` step. Consoles that answer questions MUST show it.
 
 The engine already times every primitive it runs (Part D), so this is a
@@ -2979,7 +2979,7 @@ slice of that trace and not a second instrumentation: the events the call
 appended, and nothing else.
 
 **A trace reports shape, never content.** No arguments, no queries, no
-snippets — a step names what ran and what it cost. Node ids appear only for
+snippets a step names what ran and what it cost. Node ids appear only for
 primitives the caller's own policy already admitted, since scoping happens
 before the call the trace is describing; a trace therefore cannot disclose
 what a scoped response withheld.
@@ -2989,8 +2989,8 @@ MUST report the tokens the provider itself metered (`usage`) and, when that
 provider publishes rates, the money: `cost: {prompt_tokens,
 completion_tokens, calls, priced, usd}`. Two rules make it trustworthy.
 Counting tokens locally is an estimate of somebody else's meter and MUST
-NOT be substituted for it. And a provider that publishes no rate — a local
-Ollama, a llama.cpp — MUST be reported as **unpriced**, never as free:
+NOT be substituted for it. And a provider that publishes no rate a local
+Ollama, a llama.cpp MUST be reported as **unpriced**, never as free:
 `priced: false` with no `usd`, because rendering silence as $0.00 is a
 claim about money made from the absence of one.
 
@@ -3012,7 +3012,7 @@ Part C. They are a *shape* the same authority can be asked for in one call.
 
 Normative rules:
 
-- **A node out of scope is absent**, exactly as in J.3 — never a stub,
+- **A node out of scope is absent**, exactly as in J.3 never a stub,
   never a count. An edge is included only when **both** endpoints survive
   filtering; an edge with one visible end would disclose the other.
 - **Every derived number is recomputed from what survived.** `degree` MUST
@@ -3025,7 +3025,7 @@ Normative rules:
   reindexes rather than reconciling.
 - **Bounded, and honest about it.** Both accept `scope` (a branch prefix,
   itself scope-checked) and `limit`. When a bound is reached the response
-  MUST carry `truncated: true` — the same always-explicit rule as every
+  MUST carry `truncated: true` the same always-explicit rule as every
   primitive budget (C.1). A projection MUST NOT silently sample.
 - The payloads carry no bodies. A map is scent, not flesh: `pick` remains
   the only way to a body, with its own budget.
@@ -3044,7 +3044,7 @@ Station's operator has a browser rather than a shell.
 |---|---|
 | `GET /v1/admin/health?forest=` | the H.3 report, unchanged |
 | `GET /v1/admin/snapshots?forest=` | the bundles taken so far |
-| `POST /v1/admin/snapshots` | `{forest, with_payloads?}` — takes one |
+| `POST /v1/admin/snapshots` | `{forest, with_payloads?}` takes one |
 
 Normative rules:
 
@@ -3061,7 +3061,7 @@ Normative rules:
   remain the Ranger's own run (H.1/H.2), which is a scheduled job and not a
   side effect of somebody opening a console.
 - **Snapshots are host state, not forest content.** Bundles MUST be written
-  outside every forest — a `.bundle` inside a forest would be a binary in
+  outside every forest a `.bundle` inside a forest would be a binary in
   the tree A.3.1 keeps binaries out of, and the next snapshot would package
   the last one.
 - **Restore is NOT exposed.** Part I restores into an empty destination, so
@@ -3085,13 +3085,13 @@ billing and metering beyond per-token quotas.
 
 *Documented boundary (informative):* scoping is per node, and node bodies
 are author-written prose. A body that names an out-of-scope node discloses
-that id to anyone who may read the body — the remedy is to keep such
+that id to anyone who may read the body the remedy is to keep such
 references in the same scope, not to redact prose, which would corrupt the
 content the forest exists to serve.
 
 ---
 
-## Part K — The Gauntlet (query-conditioned frontier, v0.21)
+## Part K The Gauntlet (query-conditioned frontier, v0.21)
 
 ### K.0 Why it is not the entry search
 
@@ -3101,7 +3101,7 @@ looking for: `look` sorts edges by heat, `scan` sorts children by degree,
 `move` does not sort. Heat is the memory of past hunts and degree is the
 shape of the graph; neither is about **this** question.
 
-The Gauntlet is the instrument that closes that gap — a query-conditioned
+The Gauntlet is the instrument that closes that gap a query-conditioned
 ordering of the *frontier*, i.e. the set of nodes reachable in one step
 from where the forager stands. In information-foraging terms it makes
 proximal cue assessment conditional on the goal, which is what a real
@@ -3143,7 +3143,7 @@ The Gauntlet is active only when all of the following hold:
 4. the call did not opt out (K.3).
 
 If any fails, the primitive MUST behave exactly as it does without the
-Gauntlet — the same order, the same fields, the same bytes. Absence is not
+Gauntlet the same order, the same fields, the same bytes. Absence is not
 a degraded mode; it is the Phase 0 contract, unchanged.
 
 ### K.2 The goal, and why it costs nothing
@@ -3151,14 +3151,14 @@ a degraded mode; it is the Phase 0 contract, unchanged.
 The goal vector is the embedding of the most recent `locate`/`harvest`
 query in the session: the forager picks the instrument up when the hunt
 starts and carries it for every hop after. `locate` MUST embed the query
-whenever the layer is ready — **for the goal**, whether or not it also
+whenever the layer is ready **for the goal**, whether or not it also
 fuses the result into its own ranking. That is one embedding per hunt, not
 per hop, and it is the entire running cost.
 
 The separation matters for exactly the reason K.1 gives: the query is
 embedded so the forager can *navigate* with it, not so entry search can
 re-rank with it. Each subsequent hop is a dot
-product over vectors already stored in the Canopy — no network call, no
+product over vectors already stored in the Canopy no network call, no
 model call, and no tokens in either direction.
 
 A caller MAY override the goal per call with an explicit `toward` string;
@@ -3166,7 +3166,7 @@ the implicit goal is what makes the feature free, and the explicit one is
 what makes it testable.
 
 The goal is session state and MUST be observable, never silent: a response
-whose order was conditioned MUST say so — the primitive reports that its
+whose order was conditioned MUST say so the primitive reports that its
 frontier was ranked and toward what. A reordering the reader cannot see is
 a reordering the reader cannot audit, which is the same objection this
 specification raises to every other invisible transformation.
@@ -3186,14 +3186,14 @@ somebody else's.
 
 **The entry-search switch is a different switch.** `answer` composes
 `harvest`, which is `locate` + `sniff` and never hops, so a *Gauntlet*
-control on an answering console would change nothing — and a control that
+control on an answering console would change nothing and a control that
 changes nothing is worse than no control. What does change an answer is
 K.1's other consumer: whether the vector layer is fused into entry search.
 Calls that perform entry search (`locate`, `harvest`, `answer`) MUST
 therefore accept an optional `hybrid` boolean, **defaulting to false on
 every call**, for the same reason the opt-out exists: the published
 degradation (R@1 1.00 → 0.40) has to be reproducible on the operator's own
-corpus. It MUST NOT be sticky — a request that omits it is a BM25 request,
+corpus. It MUST NOT be sticky a request that omits it is a BM25 request,
 whatever the previous request asked for.
 
 *Deployment note (informative):* whether the Gauntlet is available at all
@@ -3209,8 +3209,8 @@ spaces: the result is not worse ranking, it is meaningless ranking, and it
 fails silently because a dot product always returns a number.
 
 Therefore: when the embedder's model differs from the index's recorded
-model, the dense layer MUST be treated as **absent** — hybrid `locate` off,
-Gauntlet off, Phase 0 behaviour — and the mismatch MUST be reported by the
+model, the dense layer MUST be treated as **absent** hybrid `locate` off,
+Gauntlet off, Phase 0 behaviour and the mismatch MUST be reported by the
 forest's validation and by any surface that shows index status. Rebuilding
 is the only resolution; a partial re-embed would leave the index in two
 spaces at once.

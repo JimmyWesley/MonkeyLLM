@@ -6,7 +6,7 @@
 
 Esta é a página que todo o resto do manual veio preparando. Tudo até aqui —
 [instalar a Station](./install.md), [entrar](./first-access.md),
-[fazer perguntas](./using.md), [alimentar documentos](./feeding.md) — aconteceu
+[fazer perguntas](./using.md), [alimentar documentos](./feeding.md) aconteceu
 pelo Studio. Mas o Studio é uma janela. O produto é a floresta atrás dele,
 e a floresta foi feita para ser lida e cultivada pela *sua própria IA*.
 
@@ -16,23 +16,23 @@ Quando você conecta um agente a uma floresta, ele ganha algo que uma
 transcrição de chat nunca lhe dá: uma **memória persistente, governada e
 citável**.
 
-- **Persistente** — a floresta sobrevive a toda conversa. O que uma sessão
+- **Persistente** a floresta sobrevive a toda conversa. O que uma sessão
   planta, a sessão seguinte lembra. Outras pessoas e outros agentes também a
   alimentam, e ela continua crescendo enquanto você a mantiver.
-- **Governada** — o agente segura uma chave, a chave carrega as suas
+- **Governada** o agente segura uma chave, a chave carrega as suas
   concessões, e toda leitura e toda escrita passam pelo mesmo ponto de
   controle por onde o console passa. O que a chave não alcança não existe
   para o agente.
-- **Citável** — tudo que o agente lê carrega um id de nó. Respostas
+- **Citável** tudo que o agente lê carrega um id de nó. Respostas
   fundamentadas na floresta podem dizer exatamente sobre quais nós se apoiam.
 
 E não há nada de segunda classe nessa conexão. A Station não tem canal
 lateral privilegiado: o que quer que o Studio mostre a você, um cliente de
 API ou MCP segurando a mesma chave também poderia buscar. A página Perguntar
 do console chama o mesmo `answer` que o seu agente vai chamar. Conectar uma
-IA não é uma integração aparafusada do lado — é a porta da frente.
+IA não é uma integração aparafusada do lado é a porta da frente.
 
-> **Nota** — os snippets abaixo usam `https://station.example.com` como
+> **Nota** os snippets abaixo usam `https://station.example.com` como
 > espaço reservado. Você raramente precisa substituir algo à mão: os
 > consoles de Skills e de Integrações renderizam exatamente estes snippets
 > já com o endereço real da sua Station e a floresta preenchidos.
@@ -45,19 +45,19 @@ todo acesso a floresta passa pela mesma aplicação de escopo.
 
 | Superfície | A quem serve | Onde |
 |---|---|---|
-| **Studio** | Humanos — este console web | `https://station.example.com/` |
+| **Studio** | Humanos este console web | `https://station.example.com/` |
 | **REST** | Apps, scripts e integrações | `https://station.example.com/v1/…` |
 | **MCP** | Qualquer harness de agente (HTTP streamable) | `https://station.example.com/mcp/` |
 
 A superfície MCP é idêntica em contrato a um `vine serve` local: um agente
 que funciona contra uma floresta no seu próprio disco funciona contra uma
 floresta servida pela Station sem nenhuma mudança além do endpoint e de uma
-credencial. O escopo só estreita *conteúdo* — ele nunca muda a forma de uma
+credencial. O escopo só estreita *conteúdo* ele nunca muda a forma de uma
 resposta.
 
 ## Pareie uma chave
 
-O seu agente precisa de uma credencial que seja *sua* — não uma que um
+O seu agente precisa de uma credencial que seja *sua* não uma que um
 administrador tenha que cunhar. O pareamento é essa porta: `POST
 /v1/auth/pair` é não autenticada como o login, recebe o seu usuário e a sua
 senha, e responde com uma chave de API.
@@ -79,11 +79,11 @@ acrescentar**:
   continuam sendo o que um administrador cunha deliberadamente.
 - **Concessões ∩ máscara, no momento do uso.** A autoridade efetiva da
   chave são as suas próprias concessões filtradas pela máscara, calculadas
-  ao vivo — uma concessão revogada depois do pareamento some da chave
+  ao vivo uma concessão revogada depois do pareamento some da chave
   imediatamente. Uma chave pareada nas mãos de um dono continua recusada em
   toda rota admin.
 - **Ela sempre expira.** 90 dias por padrão, 365 no máximo; não existe
-  "ilimitado". A chave é mostrada uma única vez — só o digest dela é
+  "ilimitado". A chave é mostrada uma única vez só o digest dela é
   guardado.
 - **Autosserviço por construção.** O pareamento não alcança nada que a sua
   senha já não alcançasse, então nenhum portão de admin fica na frente
@@ -112,7 +112,7 @@ valem saber na primeira chamada:
   as raízes por onde começar.
 - A superfície MCP só responde a hosts listados em
   `MONKEYLLM_STATION_ALLOWED_HOSTS`. Se você serve através de um domínio,
-  nomeie-o lá (ou `*` para pular a verificação) — toda requisição continua
+  nomeie-o lá (ou `*` para pular a verificação) toda requisição continua
   precisando de uma chave.
 
 ## O console de Skills
@@ -128,8 +128,8 @@ leu.
 
 *(As capturas de tela mostram o console em inglês.)*
 
-O console conduz você pelos mesmos três passos desta página — parear uma
-chave, apontar o Claude Code para a Station, entregar a ele o arquivo — e
+O console conduz você pelos mesmos três passos desta página parear uma
+chave, apontar o Claude Code para a Station, entregar a ele o arquivo e
 cada snippet nele já carrega o endereço da Station e o nome da floresta
 aberta. A skill é gerada no seu navegador, para exatamente aquela
 implantação; a Station não ganha nenhum endpoint para isso. Ela está
@@ -147,29 +147,29 @@ Vale espiar as próprias palavras do arquivo, porque elas são o contrato que
 o seu agente vai seguir. Sob o título **"This forest is your memory"**, ele
 ensina três seções:
 
-- **Recall before you answer** — para qualquer pergunta que a floresta
+- **Recall before you answer** para qualquer pergunta que a floresta
   possa responder, lembre primeiro e raciocine depois: `answer` quando a
   resposta da floresta *é* a resposta; `harvest` quando o agente vai
   raciocinar sobre o material por conta própria; `locate` → `look` → `pick`
   para navegar; `sniff` para texto literal dentro dos corpos; `query` para
-  datasets, se a chave carrega `query` — depois de um `look`, porque as
+  datasets, se a chave carrega `query` depois de um `look`, porque as
   `notes` de um dataset dizem o que as colunas significam. E: cite ids de
   nós para qualquer coisa afirmada a partir da floresta.
-- **Save what is worth keeping** — quando o usuário declara algo durável
+- **Save what is worth keeping** quando o usuário declara algo durável
   (uma decisão, um fato, uma preferência, uma correção), ofereça-se para
-  guardar, com a escrita que a chave de fato permite: `ingest` — um
-  documento markdown através do Gardener — é a escrita que uma chave
+  guardar, com a escrita que a chave de fato permite: `ingest` um
+  documento markdown através do Gardener é a escrita que uma chave
   pareada carrega por padrão; `plant` e `graft` são ensinados só para
   chaves que carregam `write`. Escreva em inglês e mantenha o resumo
-  honesto — o resumo é como a nota será encontrada.
-- **Respect the contract** — a chave decide o que o agente vê e o que ele
-  pode escrever; nunca contorne uma recusa — diga o que foi recusado e
+  honesto o resumo é como a nota será encontrada.
+- **Respect the contract** a chave decide o que o agente vê e o que ele
+  pode escrever; nunca contorne uma recusa diga o que foi recusado e
   qual capacidade seria necessária. Toda leitura tem orçamento, e
   `truncated: true` significa pergunte mais estreito, não insista mais
   forte. Datasets mudam através de `tend` só onde a chave o carrega, uma
   instrução por vez, nunca DDL.
 
-> **Nota** — o corpo do arquivo da skill é em inglês independentemente do
+> **Nota** o corpo do arquivo da skill é em inglês independentemente do
 > idioma do console, de propósito: ele fala com o modelo, não com você. O
 > passo a passo em volta dele é traduzido como qualquer outra parte do
 > console.
@@ -183,12 +183,12 @@ o resto é guardado como mostrado.
 | Tool | Exige | O que faz |
 |---|---|---|
 | `forests` | qualquer chave | Lista as florestas que esta chave pode usar, com capacidades e raízes de partida. |
-| `locate` | `read` | Pontos de entrada ordenados sobre os metadados curados — onde cair dentro da floresta. |
+| `locate` | `read` | Pontos de entrada ordenados sobre os metadados curados onde cair dentro da floresta. |
 | `look` | `read` | Um apanhado barato de um nó: resumo, arestas, filhos, estatísticas. |
 | `move` | `read` | Vizinhos de um nó ao longo de arestas tipadas. |
 | `pick` | `read` | Lê o corpo, ou uma seção dele. |
 | `scan` | `read` | Filtra os nós de um galho por metadados. |
-| `sniff` | `read` | Busca literal dentro dos corpos — os fatos que os resumos não carregam. |
+| `sniff` | `read` | Busca literal dentro dos corpos os fatos que os resumos não carregam. |
 | `harvest` | `read` | Recuperação de um golpe só: evidência ordenada com trechos exatos, sem saltos. |
 | `answer` | `read` | Uma resposta fundamentada escrita pelo modelo ligado à floresta, com a sua evidência. |
 | `view` | `read` | O payload de imagem de um nó media, como conteúdo de imagem que um cliente multimodal lê para o próprio contexto. |
@@ -207,8 +207,8 @@ cresce.
 
 Scripts e aplicações falam com as mesmas florestas por HTTP/JSON puro.
 Envie a chave como bearer token em toda requisição. Se em vez disso você
-tem usuário e senha, um login devolve um **token de sessão** — uma chave
-comum com vida de 12 horas — então, passada a porta, existe exatamente um
+tem usuário e senha, um login devolve um **token de sessão** uma chave
+comum com vida de 12 horas então, passada a porta, existe exatamente um
 caminho de autorização:
 
 ```bash
@@ -245,7 +245,7 @@ curl -sX POST https://station.example.com/v1/forests/handbook/ingest \
 ```
 
 Falhas são um único envelope, mapeado em códigos HTTP, e o `hint` é escrito
-para quem chama — mostre-o:
+para quem chama mostre-o:
 
 ```json
 {
@@ -257,7 +257,7 @@ para quem chama — mostre-o:
 }
 ```
 
-> **Nota** — fora de escopo é indistinguível de inexistente. Um nó que a
+> **Nota** fora de escopo é indistinguível de inexistente. Um nó que a
 > chave não pode ver reporta `E_NOT_FOUND`, byte a byte igual a um nó que
 > não existe. Isso é deliberado: um erro que dissesse "proibido" revelaria,
 > ele mesmo, o nó.
@@ -266,7 +266,7 @@ para quem chama — mostre-o:
 
 Nada acima é particular ao Claude Code além do caminho de instalação.
 Qualquer runtime capaz de MCP conecta com o mesmo endpoint e a mesma chave
-pareada — registre-o onde quer que o seu runtime configure servidores MCP:
+pareada registre-o onde quer que o seu runtime configure servidores MCP:
 
 ```json
 {
@@ -286,7 +286,7 @@ modelo, então ele viaja.
 
 ## O que o seu agente nunca pode fazer
 
-Conectar uma IA não abre um buraco na governança — o agente é um principal
+Conectar uma IA não abre um buraco na governança o agente é um principal
 como qualquer outro, e o contrato vale em toda superfície.
 
 **Escopos valem.** Uma concessão vincula um principal a uma floresta com
@@ -305,12 +305,12 @@ acesso. As capacidades são exatamente seis:
 
 O filtro de escopo é aplicado *antes* da ordenação e do orçamento, então um
 agente não consegue inferir conteúdo escondido a partir de contagens de
-resultados ou de marcadores de truncamento — e um nó fora de escopo
+resultados ou de marcadores de truncamento e um nó fora de escopo
 responde exatamente como um que não existe.
 
 **Orçamentos valem.** Toda primitiva de leitura responde dentro de um
 orçamento de tokens declarado, e um resultado cortado sempre diz
-`truncated: true` — nunca um corte silencioso:
+`truncated: true` nunca um corte silencioso:
 
 | Chamada | Orçamento (tokens) |
 |---|---|
@@ -322,7 +322,7 @@ orçamento de tokens declarado, e um resultado cortado sempre diz
 
 Um corpo acima do orçamento do `pick` volta como o seu sumário de seções
 mais uma dica para pedir uma seção. Os orçamentos são o motivo de uma
-floresta continuar navegável por um modelo pequeno — e de a skill ensinar
+floresta continuar navegável por um modelo pequeno e de a skill ensinar
 "ask narrower, not retry harder" (pergunte mais estreito, não insista mais
 forte).
 
@@ -333,15 +333,15 @@ Não existe rota pela qual um agente apague um nó.
 
 **A auditoria vê tudo.** Toda leitura com escopo cai no registro do host:
 principal, floresta, primitiva, um digest dos argumentos, tamanho do
-resultado e timestamp — nunca corpos. Toda escrita é um commit git
+resultado e timestamp nunca corpos. Toda escrita é um commit git
 carimbado com o principal que agiu. Qual agente leu quais nós, em qual
-ordem, é reconstruível depois do fato — veja
+ordem, é reconstruível depois do fato veja
 [Gerenciar a Station](./managing.md).
 
 ## Onde vive o manual completo
 
-Esta página é o caminho do operador. A referência exaustiva — cada rota,
-cada tool, cada ajuste de implantação e variável de ambiente — vive dentro
+Esta página é o caminho do operador. A referência exaustiva cada rota,
+cada tool, cada ajuste de implantação e variável de ambiente vive dentro
 do próprio Studio, no console **MCP / API / Integrações**. Ele fica atrás
 de admin, porque fala o vocabulário do administrador: credenciais, hosts, o
 contêiner.
@@ -350,7 +350,7 @@ contêiner.
 
 Ele é um console, e não um site estático, de propósito: cada exemplo lá
 carrega o origin daquela Station, então cada snippet está pronto para
-copiar para o host que o administrador está de fato olhando — documentação
+copiar para o host que o administrador está de fato olhando documentação
 que não consegue descolar da implantação que documenta. Quando algo nesta
 página e algo naquele console discordarem, confie no console: ele está
 descrevendo a si mesmo.

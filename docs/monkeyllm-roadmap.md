@@ -1,4 +1,4 @@
-# MonkeyLLM — Development Roadmap (Phases 0 → 4)
+# MonkeyLLM Development Roadmap (Phases 0 → 4)
 
 **Audience:** development team and project management.
 **Companion documents:** `monkeyllm-arquitetura.md` (vision), `monkeyllm-spec-v0.1.md` (Phase 0 normative contracts).
@@ -15,13 +15,13 @@
 | 1.5 | Troop | Does parallel swarm cut wall-clock at acceptable cost? | 1-2 weeks | Protocol in the spec, Part E |
 | 2 | Living Bank | Does knowledge compound and navigation converge with use? | 4-6 weeks | Scope defined below |
 | 3 | Own Engine (conditional) | Where does the Python stack actually choke? | to be measured | Only if the data demands it |
-| 4 | Product & Paper | MonkeyLLM as a publishable, usable system | ongoing | — |
+| 4 | Product & Paper | MonkeyLLM as a publishable, usable system | ongoing | |
 
 ---
 
-## Phase 0 — Navigable Forest
+## Phase 0 Navigable Forest
 
-**Goal:** prove that a local SLM navigates a real forest using only the primitives and the indexes — zero embeddings.
+**Goal:** prove that a local SLM navigates a real forest using only the primitives and the indexes zero embeddings.
 
 **Scope:** the full spec v0.1. Vine (MCP, Python) with `locate` (BM25-only via the FTS5 Catalog), `look` (+`fields`), `move`, `pick`, `query`, `scan`, `plant`, `graft` (with reinforce-before-create). Manual test forest (~100 nodes, 10 branches, >=1 SQLite dataset). Telemetry (JSONL traces).
 
@@ -38,13 +38,13 @@
 
 ---
 
-## Phase 1 — Full Helicopter
+## Phase 1 Full Helicopter
 
 **Goal:** activate `locate`'s vector layer (two levels: branches and bananas) and prove the central thesis against baselines.
 
 **Scope:**
 - Summary embeddings (bananas AND branches) with **bge-m3** (multilingual PT/EN), Matryoshka truncation 1024->256, **binary quantization + rescore top-100** with full vectors.
-- Storage: embedded LanceDB (Apache 2.0) or a custom numpy index if <50k nodes — team decision, `locate`'s interface does not change.
+- Storage: embedded LanceDB (Apache 2.0) or a custom numpy index if <50k nodes team decision, `locate`'s interface does not change.
 - RRF fusing vector + BM25; pheromone in the ranking (configurable `alpha`).
 - Lazy re-embedding of stale nodes (flagged by `plant`/`graft`).
 - **Monkey Bench v1:** evaluation corpus (suggestion: a forest generated from a real domain + multi-hop questions in a HotpotQA-adapted style), a harness running the agent + baselines, automatic report.
@@ -54,7 +54,7 @@
 
 **Exit criteria:**
 1. Vector `locate`: recall@5 >= 0.85 on the bench questions (target answer among the 5 landing points).
-2. MonkeyLLM >= the RAG baseline on *banana precision* AND <= 60% of iterative RAG's *tokens-to-banana* on multi-hop questions. (On failure: investigate the summaries before blaming the architecture — they ARE the system.)
+2. MonkeyLLM >= the RAG baseline on *banana precision* AND <= 60% of iterative RAG's *tokens-to-banana* on multi-hop questions. (On failure: investigate the summaries before blaming the architecture they ARE the system.)
 3. `locate` p95 < 100ms with vectors active.
 4. Lazy re-embedding pipeline tested (graft -> stale -> search reflects the change in < 60s).
 
@@ -62,7 +62,7 @@
 
 ---
 
-## Phase 1.5 — Troop
+## Phase 1.5 Troop
 
 **Goal:** parallel hunting by intra-session stigmergy (spec, Part E).
 
@@ -77,12 +77,12 @@
 
 ---
 
-## Phase 2 — Living Bank
+## Phase 2 Living Bank
 
 **Goal:** the compounding: automatic ingest, agent writes, long-term pheromone, autonomous maintenance. This is where MonkeyLLM stops being a smart reader and becomes memory that learns.
 
 **Scope:**
-- **Gardener v1 (ingest):** PDF/DOCX -> markdown (docling or marker); tabular XLSX/CSV/JSON -> SQLite + passport with a query manual; SLM-generated `summary` validated against A.4 (generous compute — it's offline); entity and edge extraction with `confidence` per origin; `payload_hash` and passport regeneration on drift.
+- **Gardener v1 (ingest):** PDF/DOCX -> markdown (docling or marker); tabular XLSX/CSV/JSON -> SQLite + passport with a query manual; SLM-generated `summary` validated against A.4 (generous compute it's offline); entity and edge extraction with `confidence` per origin; `payload_hash` and passport regeneration on drift.
 - **Ranger v1 (maintenance):** heat evaporation (configurable half-life); promotion/pruning of shortcuts and proposals (reuse confirms, abandonment prunes); `needs_split` detection and assisted branch splitting; continuous lint (broken links, off-spec summaries, desynced indexes); `same-as` candidate blocking by embedding similarity (physical merge = compaction, still manual/approved).
 - **Closed compounding loop:** hunt sessions record learning (fortification, shortcuts, proposals) and the bench measures convergence.
 - Adaptive troop (optional, if the 1.5 data justifies it): starts with 1 monkey, recruits if the frontier stalls.
@@ -99,14 +99,14 @@
 
 ---
 
-## Phase 3 — Own Engine (CONDITIONAL)
+## Phase 3 Own Engine (CONDITIONAL)
 
-**Trigger — this phase only exists if telemetry shows at least one of these:**
+**Trigger this phase only exists if telemetry shows at least one of these:**
 - `locate`/`scan` p95 blowing past budgets with the target forest (>100k nodes);
 - serialization/IPC cost between Python components dominating the read path;
 - the single write queue becoming a real bottleneck (measured, not imagined).
 
-**Scope (if triggered):** profile-driven rewrite — first the component profiling points to (likely Catalog+Canopy as a Rust lib with Python bindings via PyO3; the Vine/MCP and the orchestrator stay in Python). Never a big-bang rewrite.
+**Scope (if triggered):** profile-driven rewrite first the component profiling points to (likely Catalog+Canopy as a Rust lib with Python bindings via PyO3; the Vine/MCP and the orchestrator stay in Python). Never a big-bang rewrite.
 
 **Exit criterion:** the same benchmarks as previous phases, with budgets restored and zero contract regression (spec v0.1 is the truth; clients never notice the engine swap).
 
@@ -114,12 +114,12 @@
 
 ---
 
-## Phase 4 — Product & Paper (parallel to phases 2-3)
+## Phase 4 Product & Paper (parallel to phases 2-3)
 
 **Paper track:**
 - Thesis: hierarchical navigation through self-descriptive indexes + stigmergy beats flat RAG in efficiency and converges with use.
 - Key results: (1) MonkeyLLM x RAG x GraphRAG x RAPTOR table (precision, hops, tokens); (2) convergence curve (Phase 2); (3) Troop trade-off (Phase 1.5).
-- Bilingual glossary: playful terms presented once next to the technical term — *shortcut grafting (the "shout")*, *session-scoped pheromone (the "whisper")*, *troop (parallel foragers)* — free use afterward.
+- Bilingual glossary: playful terms presented once next to the technical term *shortcut grafting (the "shout")*, *session-scoped pheromone (the "whisper")*, *troop (parallel foragers)* free use afterward.
 - Related work to position against: RAG, GraphRAG (Microsoft), RAPTOR, MemGPT/Letta, stigmergy/ACO (Grassé; Dorigo), Hebbian learning, spreading activation.
 
 **Product track (monkeyllm.com):**

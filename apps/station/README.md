@@ -2,7 +2,7 @@
 
 The host layer (spec Part J): serves a **forest registry** to many
 principals with identity, subtree-scoped policy, audit, a web console, and
-a per-forest choice of which model does the reading — the untouched engine
+a per-forest choice of which model does the reading the untouched engine
 wrapped by a front door, so a forest can be a governed corporate asset
 instead of a personal directory.
 
@@ -11,7 +11,7 @@ instead of a personal directory.
 `starlette` and `uvicorn` already ship with `mcp`, the engine's own
 dependency, so the Python side adds none. The Studio is a static React
 bundle built at image time. J.6 holds: one image, two volumes, no external
-database — the host registry is a single SQLite file.
+database the host registry is a single SQLite file.
 
 ## Run it
 
@@ -22,7 +22,7 @@ station serve --root forests --registry ./station.db --port 8800 --writable
 ```
 
 First run mints a bootstrap `admin` key with full capabilities on every
-forest in the root and prints it once — only its digest is stored. You do
+forest in the root and prints it once only its digest is stored. You do
 not need it to reach the console: open the Studio and the **setup screen**
 (J.2.4) creates the owner.
 
@@ -44,7 +44,7 @@ the same consoles as everybody, with the same capability rules.
 ### Signing in (J.2.1)
 
 Two doors, one identity. A super-administrator in the environment is
-**break-glass** — setting it replaces the setup screen rather than
+**break-glass** setting it replaces the setup screen rather than
 complementing it, so the two never race for the first identity:
 
 ```bash
@@ -52,7 +52,7 @@ export MONKEYLLM_STATION_ADMIN=jimmy
 export MONKEYLLM_STATION_PASSWORD='something long and unguessable'
 ```
 
-That account is compared against the environment and **never stored** — it
+That account is compared against the environment and **never stored** it
 is break-glass, and hashing a value that already sits in the environment
 protects nothing while giving a rotation two places to go wrong. Rotate it
 by changing the variable and restarting. If the variables are absent there
@@ -84,14 +84,14 @@ All three route through one `ScopedVine`. There is no unscoped path.
 Navigation lists exactly the consoles the caller's capabilities permit on
 the selected forest, and re-evaluates when the forest changes. That is
 presentation, not enforcement: each console guards itself, and the API
-refuses regardless — including for a request the console never sent.
+refuses regardless including for a request the console never sent.
 
-The Studio (J.5) is nine consoles in three groups — **Use** (Overview, Ask,
+The Studio (J.5) is nine consoles in three groups **Use** (Overview, Ask,
 Explore, Playground, Data), **Build** (Ingest, Models) and **Govern**
-(People, Audit) — in English, Portuguese and Spanish, light and dark. It
+(People, Audit) in English, Portuguese and Spanish, light and dark. It
 addresses the operator in the operator's vocabulary: access is granted by
-ticking the **forests** it covers, picking a **role**, and — for a single
-forest — **branches from the actual tree**, with the resulting capability set
+ticking the **forests** it covers, picking a **role**, and for a single
+forest **branches from the actual tree**, with the resulting capability set
 shown as a consequence and the whole grant restated in a sentence before it
 is saved. A policy an operator cannot read back is one they cannot audit.
 
@@ -113,16 +113,16 @@ uses. Failures are the spec's error envelope mapped onto HTTP codes.
 ### The answer store (J.10.7)
 
 `answer` is fronted by a per-forest cache of answers already bought,
-governed by two hashes with two jobs (v0.35). The first — normalised
+governed by two hashes with two jobs (v0.35). The first normalised
 question, effective terms, effective `k`, entry-search mode, resolved
-binding, caller scope — finds the entry. The second is the **reading
+binding, caller scope finds the entry. The second is the **reading
 fingerprint**: the sweep's retrieval runs on every ask (it is the cheap
 half), and the stored reply is served only when the material the model
 would read is the material it already answered. Invalidation is therefore
 exact, not indiscriminate: an edit to a node the question reads is a
 miss; a write anywhere else invalidates nothing; there is no staleness
 window to tune. (A `hops` walk cannot be re-run without paying the model,
-so walk entries are pinned to the forest's HEAD instead — any commit
+so walk entries are pinned to the forest's HEAD instead any commit
 invalidates them.) A hit says so on every surface: the body carries
 `cached: true` and the time of the original run (`cached_at`) over fresh
 retrieval fields, the `Server-Timing` header carries `cache` and no
@@ -144,9 +144,9 @@ curl -sX POST localhost:8800/v1/forests/forest-fixture/answer \
 The MCP `answer` tool takes the same parameter. Settings and economy live
 at `GET|POST /v1/admin/cache?forest=` (requires `admin` on that forest):
 `enabled` (default on), `max_entries` (the stated bound, evicting
-oldest-served-first), `ttl_hours` (hygiene only — the key already
+oldest-served-first), `ttl_hours` (hygiene only the key already
 invalidates), and `clear: true` to empty the store. The stats report hits,
-misses, entries held against the bound, and the money not spent — counted
+misses, entries held against the bound, and the money not spent counted
 only over runs the provider priced, because an unpriced saving is unpriced,
 never $0.00.
 
@@ -174,13 +174,13 @@ curl -s localhost:8800/v1/forests/forest-fixture/graph \
 ```
 
 `GET /v1/forests/{forest}/graph` returns `{nodes, edges, types, rels,
-truncated}` — the Catalog joined with persistent heat — and
+truncated}` the Catalog joined with persistent heat and
 `GET .../trails` returns `{heat, stats, truncated}`. Both take `scope`
 (a branch) and `limit`, both need `read`, and both are scoped exactly like
 the primitives: **an edge appears only when both of its endpoints do**, and
 `degree` is recomputed from the edges that survived rather than reported
 from the Catalog, because a count taken over the whole forest is itself a
-disclosure. They add no authority — everything in them is reachable node by
+disclosure. They add no authority everything in them is reachable node by
 node through `look`/`move`/`scan`; what they add is a shape you can ask for
 in one call. Like the Catalog itself they are **derived**: a consumer that
 finds one stale reindexes rather than reconciling.
@@ -209,22 +209,22 @@ quietly become arbitrary read access to the container. `upload` needs no
 such privilege because the caller supplies the bytes.
 
 `compose` takes two calls (J.8.1). Send `stage: true` and the whole pipeline
-runs — converter, curation, closed-candidate proposals — and stops at the
+runs converter, curation, closed-candidate proposals and stops at the
 plant, returning the draft it *would* have planted, each proposed link named
 by the title of what it points at. Send that draft back as `draft` and it is
 accepted: the approved passport enters as an `on_curate` hook, so the plant
 and the commit are the ones every adopted file gets, and the model is not
 asked to curate the document twice. A returned draft is a client payload, so
-every field is re-validated — summary re-clipped to the A.4 budget, tags
+every field is re-validated summary re-clipped to the A.4 budget, tags
 re-cleaned, and each link re-checked against G.4.2.1 (`related-to` only,
 existing and in-scope targets, never a branch, capped at three, and pinned at
 confidence 0.3 whoever kept it).
 
-Uploads stage under the forest's `_derived/uploads/` — outside git, one
+Uploads stage under the forest's `_derived/uploads/` outside git, one
 stable directory per forest, so re-sending a filename is an *update* (the
 G.8 hash diff) rather than a second node beside the first.
 
-### MCP — pointing an existing harness at a governed forest
+### MCP pointing an existing harness at a governed forest
 
 Add the Station as a streamable-HTTP MCP server with an `Authorization:
 Bearer <key>` header. The tools are the Part C primitives plus `answer`,
@@ -262,13 +262,13 @@ curl -sX POST localhost:8800/v1/admin/people \
 The response reports `applied` and `refused` per step. It is a composite,
 **not a new authority**: every step re-checks the rule that already governed
 it, and a step the caller may not perform is refused without abandoning the
-steps they may — silently dropping half a submitted form is worse than
+steps they may silently dropping half a submitted form is worse than
 doing it or failing it. The order is normative: the grant lands first, so a
 principal that did not exist a moment ago is administrable by the time its
 password and key are created.
 
 Access is rarely forest-shaped, so `grant` takes `forests` and
-`revoke_access` takes a list — one request for a group of forests or for all
+`revoke_access` takes a list one request for a group of forests or for all
 of them, and one token that reads in each:
 
 ```bash
@@ -283,16 +283,16 @@ The scalar `forest` still works and means a one-element list. A set is a
 convenience, never a relaxation: each forest is authorised, applied and
 refused **on its own**, so an administrator of two of the three grants those
 two and gets the third back in `refused` with its `forest` named.
-`allow`/`deny` apply to every forest in the grant — branch names are
+`allow`/`deny` apply to every forest in the grant branch names are
 forest-local, which is why Studio offers the branch picker only when a single
 forest is ticked and grants each forest whole otherwise.
 
 `GET /v1/admin/people` returns the person-shaped read the console uses:
-identity, grants, whether a password exists, tokens, and last-seen — already
+identity, grants, whether a password exists, tokens, and last-seen already
 filtered by J.3.2.
 
 A token carries the permissions of the principal it belongs to and has none
-of its own — so "what can this token do" is answered by that person's
+of its own so "what can this token do" is answered by that person's
 access, never by the token. Two consequences worth knowing:
 
 - Minting or revoking a key for a principal requires `admin` on **every**
@@ -313,18 +313,18 @@ caller into a host route; it never entitles them to rows about forests they
 do not administer. `/v1/admin/people`, `/v1/admin/principals` and `/v1/admin/audit` filter to
 the administered set, so an administrator of one forest sees neither the
 branch prefixes nor the read history of another. `/v1/admin/keys` is
-stricter still — a key spans forests, so issuing one needs `admin` on
+stricter still a key spans forests, so issuing one needs `admin` on
 *every* forest its principal holds.
 
 *Known boundary:* providers (J.10) are a host resource shared by all
-forests, so any administrator can edit them — and removing one removes the
+forests, so any administrator can edit them and removing one removes the
 bindings of forests they may not administer.
 
 Two properties worth knowing, because they are what make the scoping
 trustworthy rather than decorative:
 
 - **Out of scope is indistinguishable from absent.** A node you may not
-  see reports the engine's own `E_NOT_FOUND`, byte for byte — including
+  see reports the engine's own `E_NOT_FOUND`, byte for byte including
   through `move`, whose edges would otherwise disclose a hidden neighbour.
   The same reasoning applies to forests: an ungranted forest answers
   exactly like a nonexistent one, or the API becomes a registry
@@ -342,7 +342,7 @@ then bind a model per role:
 
 | Role | Used by | Optimise for |
 |---|---|---|
-| `ingest` | curation, `curate` | care — its output is the scent every later hop navigates by |
+| `ingest` | curation, `curate` | care its output is the scent every later hop navigates by |
 | `answer` | `answer` | speed and instruction-following over retrieved material |
 
 Provider keys are **write-only**: the API accepts one and afterwards
@@ -360,13 +360,13 @@ export MONKEYLLM_LLM_PROVIDER=openrouter      # optional; host name if unset
 export MONKEYLLM_EMBED_ENDPOINT=http://ollama.local/v1   # same, for the Gauntlet
 ```
 
-Nobody is asked to paste that key into a form — and it is **not copied into
+Nobody is asked to paste that key into a form and it is **not copied into
 the registry**: it lives in the process for as long as the process does and
 is read when a call is made. The registry file is something you back up;
 the environment is not. Rotation stays where it already was: change the
 variable, restart.
 
-Consequently these rows are read-only in the console — an edit would be
+Consequently these rows are read-only in the console an edit would be
 undone by the next restart. Unset the variables to remove one; at the next
 boot it becomes an ordinary console provider, keyless and visibly so,
 rather than vanishing and taking its bindings with it.
@@ -374,37 +374,37 @@ rather than vanishing and taking its bindings with it.
 **Choosing the model** uses the provider's own `/models`: pick from a
 searchable list showing per-token prices where the provider states them
 (OpenRouter does; Ollama and llama.cpp do not, and silence is reported as
-silence rather than as free). Typing a name is still allowed — catalogues
-under-report — but a model the provider does not advertise is flagged,
+silence rather than as free). Typing a name is still allowed catalogues
+under-report but a model the provider does not advertise is flagged,
 because a model id from *another* provider is the usual cause and it fails
 only at the first call.
 
 Binding a model cannot widen access: retrieval runs through `ScopedVine`
 *before* the model is called, so it only ever sees what the caller could
 already read. A `projects/`-scoped principal asking where the MixerLLM
-author lives gets "the material does not contain that" — the fact lives in
+author lives gets "the material does not contain that" the fact lives in
 `people/`.
 
 ## Audit (J.4)
 
 Reads land in the host registry (principal, forest, primitive, argument
-**digest**, size, timestamp — never bodies). Writes are git commits inside
+**digest**, size, timestamp never bodies). Writes are git commits inside
 the forest, amended to carry `station-principal: <id>`; the amended sha is
 what the API returns, so the caller never holds one that no longer exists.
 
 ## How it is built
 
-- **`policy.py`** — `Policy` + `ScopedVine`, the single enforcement seam.
+- **`policy.py`** `Policy` + `ScopedVine`, the single enforcement seam.
   The scoped read methods keep the engine's signatures, so the `harvest`
   composite inherits scoping instead of reimplementing it.
-- **`registry.py`** — principals, API keys (digests only), grants,
+- **`registry.py`** principals, API keys (digests only), grants,
   providers, model bindings, audit. Never inside a forest (J.0).
-- **`app.py`** — Starlette routes; forest resolution reuses the engine's
+- **`app.py`** Starlette routes; forest resolution reuses the engine's
   `ForestPool` (C.0) unchanged, path-escape guard included.
-- **`mcp_surface.py`** — the MCP mount. Stateless mode is a correctness
+- **`mcp_surface.py`** the MCP mount. Stateless mode is a correctness
   choice: with sessions, a tool call can run in a task created during an
   earlier request, and the principal `ContextVar` would be the wrong one.
-- **`inference.py`** — the per-binding chat client and the composites.
+- **`inference.py`** the per-binding chat client and the composites.
 
 All forest access is confined to one dedicated thread: SQLite connections
 belong to the thread that opened them and the engine rightly does not
@@ -415,7 +415,7 @@ weaken that. A worker per forest is the scale-out step.
 | Missing | Where it goes |
 |---|---|
 | Curation review queue for the 0.3-confidence proposals a *batch* ingest made (a composed post reviews before it lands, J.8.1) | T04 |
-| Binary uploads (`.docx`, `.xlsx`) — today they take the folder-mirror route | T09 |
+| Binary uploads (`.docx`, `.xlsx`) today they take the folder-mirror route | T09 |
 | OIDC/SSO, per-token quotas, rate limits | T07 Phase C |
 | `answer` over datasets (a tool-calling loop; today it honestly refuses aggregate questions) | J.10 follow-up |
 | Per-node ACLs finer than the branch prefix | out of scope (J.12) |

@@ -1,4 +1,4 @@
-# T13 — The Clipper: a browser extension that feeds the Gardener
+# T13 The Clipper: a browser extension that feeds the Gardener
 
 status: in-progress (2026-08-13: spec v0.48 + full implementation on
 `develop`, uncommitted. Station: pair route + caps mask threaded through
@@ -16,7 +16,7 @@ the one shared build at `GET /clipper.zip` (J.15 amendment; ETag'd,
 rebuilt when a file changes, `MONKEYLLM_STATION_CLIPPER_DIR` override)
 and the Studio rail offers "Get the Clipper" to every signed-in person
 — never admin-gated. ROUND 2 (2026-08-13, from a real-browser test):
-spec v0.48 amended in place — J.8 `source_url` on upload entries
+spec v0.48 amended in place J.8 `source_url` on upload entries
 (provenance map in the Gardener, surviving refreshes), G.5.1 describer
 timeout ≤60s (a convert stage holds the forest lane; 180s froze every
 console on the forest), J.14 console SHOULD render media images, J.15
@@ -40,29 +40,29 @@ A Manifest V3 browser extension (`apps/clipper/`, AGPL) that clips what a
 person is reading into a forest through the Station's existing surfaces:
 the readable article or the selection as markdown through `compose`, a
 screenshot as a `media` node through `upload`, a typed note through
-`compose` — with a forest picker, a destination branch picker, and a
+`compose` with a forest picker, a destination branch picker, and a
 pairing flow (server origin + username/password, once) that stores only a
 narrowed key (J.2.6), never the password.
 
 ## Context
 
 The ingest console (J.8) already covers the operator at their desk; the
-Clipper covers the same person mid-browse — "this page belongs in my
+Clipper covers the same person mid-browse "this page belongs in my
 forest" as one click instead of a copy-paste round trip. Three host
 contracts were missing and are now spec v0.48:
 
-- **J.2.6 pairing** — `POST /v1/auth/pair` turns a password into a key
+- **J.2.6 pairing** `POST /v1/auth/pair` turns a password into a key
   carrying a capability mask (`{read, ingest}` by default); effective
   authority is grants ∩ mask wherever the requesting principal's
   authority is read (REST and MCP, admin/owner bits included). Login and
   pair gain a rate limiter.
-- **G.5.1 stub + describer** — image/audio sources plant as `media`
+- **G.5.1 stub + describer** image/audio sources plant as `media`
   (never `unsupported`): a built-in stub converter in the engine, plus a
   host-injected describer when the forest binds the new `vision` role
   (J.10). Media staged under `_derived/` (uploads) is archived into
   `_assets/` regardless of archive policy. New `extra_converters` seam
   in the Gardener (public API v1, additive).
-- **J.14 payload bytes** — `GET /v1/forests/{forest}/payload/{node}`
+- **J.14 payload bytes** `GET /v1/forests/{forest}/payload/{node}`
   serves the payload file of an in-scope node (read cap, byte-identical
   `E_NOT_FOUND` out-of-scope, containment, local payloads only), so a
   clipped screenshot is visible in a console at all.
@@ -84,7 +84,7 @@ contracts were missing and are now spec v0.48:
    client-side `E_LOCKED` queue, `_locales` en/pt/es, icons from the
    project logo.
 7. Tests: F.47 (pair narrows, rate limit), F.48 (stub/describer/staging
-   archive), F.49 (payload bytes) — suite stays green.
+   archive), F.49 (payload bytes) suite stays green.
 
 ## Acceptance criteria
 
@@ -93,7 +93,7 @@ contracts were missing and are now spec v0.48:
       expiry mandatory; `/v1/me` reports masked caps.
       (`tests/test_station_pair.py`, 14 tests)
 - [x] F.48: `.png` never `unsupported`; stub without binding, description
-      with one; describer failure falls back to stub — on adopt AND sync;
+      with one; describer failure falls back to stub on adopt AND sync;
       upload-staged media archived under `_assets/` even with
       `archive: never`, and RE-archived when a staged file is re-synced;
       operator command hook outranks the describer.
@@ -115,7 +115,7 @@ contracts were missing and are now spec v0.48:
 - Full-page scroll-stitched screenshots (visible viewport only in v1).
 - Audio transcription (a `transcribe` role is G.5's named future, not
   this task).
-- Automatic branch routing ("the Gardener picks the branch") — the
+- Automatic branch routing ("the Gardener picks the branch") the
   Clipper suggests via `locate`, the person confirms; auto-routing would
   be a G.4 spec change.
 - Serving payload bytes over MCP to multimodal clients (G.5's parked

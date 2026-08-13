@@ -1,6 +1,6 @@
-status: done (2026-08-09 — spec v0.22 first, then code; full suite green and verified against a live Station. The last partial criterion, review before planting, was closed by T10.1 on the same day)
+status: done (2026-08-09 spec v0.22 first, then code; full suite green and verified against a live Station. The last partial criterion, review before planting, was closed by T10.1 on the same day)
 
-# T10 — Studio Forest Views: graph mode, files mode, governed editing, Write tab
+# T10 Studio Forest Views: graph mode, files mode, governed editing, Write tab
 
 ## Goal
 
@@ -20,23 +20,23 @@ item 11 (trails dashboard) along the way. The Data console is untouched.
 
 ## Steps
 
-1. ~~**Spec bump first**~~ — done as **v0.22**: J.11 map projections, J.5.4
+1. ~~**Spec bump first**~~ done as **v0.22**: J.11 map projections, J.5.4
    Forest Views, J.8 `compose`, criterion F.25, and the T09 WYSIWYG exception
    recorded. CLAUDE.md now points at v0.22, resolving the v0.20/v0.21 drift.
-2. ~~**F1 — Canopy**~~ done: `GET /graph` through `ScopedVine` (edges need
+2. ~~**F1 Canopy**~~ done: `GET /graph` through `ScopedVine` (edges need
    both endpoints, degree recomputed); Explore mode switcher; a hand-written
    force simulation on canvas (drag, zoom, hover, reorganize, reduced-motion
    settles immediately); legend built from the dialect the payload carries;
    click selects, and "Open in Files" carries the selection across.
-3. ~~**F2 — Living trails**~~ done: `GET /trails`; pheromone glow, dashed
+3. ~~**F2 Living trails**~~ done: `GET /trails`; pheromone glow, dashed
    `confidence < 1`, amber `discovered-shortcut`, each channel toggleable.
-4. ~~**F3 — Grove**~~ done: tree from the projection; `.md` Reading (default)
+4. ~~**F3 Grove**~~ done: tree from the projection; `.md` Reading (default)
    with a Source view that labels passport and stored body separately;
    wikilinks followed inside the console; `.db` browser opening on its first
    table with Query-manual shortcuts, reading only through `query`; HTML
    bodies rendered as a sanitised page; outline for oversized bodies;
    inspector tabs Passport / Index / Trails.
-5. ~~**F4 — Governed writing**~~ done: TipTap editor serialising to `graft`
+5. ~~**F4 Governed writing**~~ done: TipTap editor serialising to `graft`
    (locked immutables, live 60-token summary counter, patch shown before it
    is sent, one section per commit); Ingest **Write** tab composing into
    J.8's `compose`, which walks the existing Gardener pipeline.
@@ -57,7 +57,7 @@ item 11 (trails dashboard) along the way. The Data console is untouched.
 - [x] No Studio code path writes a file directly: every mutation is a
       `graft`/`tend`/`plant` commit stamped with the principal.
 - [x] Write tab: link proposals only ever target catalog-offered candidates
-      (cap 3, conf 0.3) — inherited from the pipeline, so it holds. Review
+      (cap 3, conf 0.3) inherited from the pipeline, so it holds. Review
       before planting now holds too, closed by **T10.1** (spec v0.24 J.8.1):
       composing stages and returns the draft, and a second call accepts it.
 - [x] Data console behavior unchanged; i18n test green; `api.js` remains the
@@ -94,11 +94,11 @@ what `graft` replaces atomically; the inspector has three tabs, not four (a
 Git tab would have needed a history endpoint nobody had asked for); HTML
 renders at body level, since there is no file-serving endpoint by design.
 
-**Follow-up — review before planting: closed by T10.1** (2026-08-09, spec
+**Follow-up review before planting: closed by T10.1** (2026-08-09, spec
 v0.24 J.8.1). Composing now stages, and the accepting call pins the approved
 passport as an `on_curate` hook so the plant and the commit stay the ones
 every adopted file gets. See `tasks/T10.1-compose-review.md`.
 
 **Not a follow-up after all:** this task's branch hit `mcp` 2.0 having removed `mcp.server.fastmcp`, and flagged the unbounded `mcp>=1.2` pin as a
-defect. `develop` had already fixed it forward — the MCP surface is migrated
+defect. `develop` had already fixed it forward the MCP surface is migrated
 to 2.x and the pin is `mcp>=2,<3`. Resolved on merge, nothing to do.

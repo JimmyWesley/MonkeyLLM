@@ -1,4 +1,4 @@
-# Ingest tools — the Gardener's converter and hook surface
+# Ingest tools the Gardener's converter and hook surface
 
 How the Gardener (`vine adopt` / `vine sync`, spec Part G) turns files into
 forest nodes, and how to plug in your own converters or curation hooks
@@ -10,7 +10,7 @@ without touching MonkeyLLM's source.
 0 archive  ->  1 convert  ->  2 curate  ->  3 plant
 ```
 
-Only stage 2 ever calls an LLM, and stage 1 runs fully without one — `vine
+Only stage 2 ever calls an LLM, and stage 1 runs fully without one `vine
 adopt` on a plain markdown/csv/json dump needs no `MONKEYLLM_LLM_ENDPOINT`
 at all. `--curate` opts into stage 2 (`src/monkeyllm/curator.py`): A.4
 summaries, tags, and edge proposals (G.4.2.1).
@@ -19,17 +19,17 @@ summaries, tags, and edge proposals (G.4.2.1).
 
 | Extension | Converter | Needs |
 | --- | --- | --- |
-| `.md` | `MarkdownConverter` | — |
-| `.txt` | `MarkdownConverter` | — |
-| `.csv` | `CsvConverter` -> dataset (C.7.1 schema + rows) | — |
-| `.json` (tabular array) | `JsonConverter` -> dataset | — |
-| `.db` / `.sqlite` / `.sqlite3` | `SqliteConverter` -> dataset **adopted whole** (G.2.2) | — |
+| `.md` | `MarkdownConverter` | |
+| `.txt` | `MarkdownConverter` | |
+| `.csv` | `CsvConverter` -> dataset (C.7.1 schema + rows) | |
+| `.json` (tabular array) | `JsonConverter` -> dataset | |
+| `.db` / `.sqlite` / `.sqlite3` | `SqliteConverter` -> dataset **adopted whole** (G.2.2) | |
 | `.xlsx` | `XlsxConverter` -> dataset, one table per sheet (G.2.4) | `pip install monkeyllm[ingest]` (openpyxl) |
 | `.xls` | `XlsConverter` -> dataset, one table per sheet (G.2.4) | `pip install monkeyllm[ingest]` (xlrd) |
 | `.docx` | `DocxConverter` (spec v0.12 G.2.1) | `pip install monkeyllm[ingest]` (python-docx) |
 
 `.xls`/`.xlsx`/`.docx` silently report `unsupported` when the extra isn't
-installed — sync never crashes on a missing optional dependency. SQLite
+installed sync never crashes on a missing optional dependency. SQLite
 needs no extra: it is the standard library and already the payload format.
 Anything without a matching converter is reported `unsupported` in the
 adopt/sync report; nothing is dropped silently.
@@ -38,12 +38,12 @@ A SQLite source is **not** rebuilt row by row. The converter reads the
 structure of every table and its first 3 rows; the Gardener copies the file
 into place as the node's payload and plants a passport with no `schema`
 (G.2.2). Rebuilding would be unbounded in the source's size and lossy in
-its types — and the result would be byte-for-byte what the source already
+its types and the result would be byte-for-byte what the source already
 was. A file whose header is not `SQLite format 3` is an error naming the
 file, never a crash.
 
-Every dataset passport — from `.csv`, from a workbook, from a `.db`, and
-from a C.7.1 birth carrying rows — gets the **sample map** (G.2.3) in its
+Every dataset passport from `.csv`, from a workbook, from a `.db`, and
+from a C.7.1 birth carrying rows gets the **sample map** (G.2.3) in its
 body: `## Query manual` (tables and columns) followed by `## Sample rows`
 (each table's first 3 rows as a pipe table, ≤12 columns wide, saying how
 many it left out). That map is the only thing `sniff` can see inside a
@@ -65,7 +65,7 @@ The `DocxConverter` does a single-pass `w:t` traversal in document order:
 heading-styled paragraphs become `##`+ headings, pipe tables keep their
 rows (nested tables flatten into cell text), fragmented runs are merged per
 paragraph, and text-box content is captured. Headers/footers are excluded
-by design — letterhead is scent noise, not content.
+by design letterhead is scent noise, not content.
 
 ## Discovery order (G.2)
 
@@ -79,7 +79,7 @@ built-in (e.g. run your own `.docx` pipeline) without forking the package.
 
 ### 1. Command hooks (no dependency, any license)
 
-Add a `converters:` map to `_meta/gardener.yaml` in the forest — a shell
+Add a `converters:` map to `_meta/gardener.yaml` in the forest a shell
 template with `{input}`/`{output}` placeholders:
 
 ```yaml
@@ -91,7 +91,7 @@ The command must write markdown to `{output}` (or print it to stdout) and
 exit 0; a `# Title` heading on the first line becomes the node title. This
 is the escape hatch for copyleft or heavyweight tools (e.g. a PyMuPDF/AGPL
 PDF extractor) that can never be an installed dependency of MonkeyLLM
-itself — the license rule (MIT-clean built-ins/extras only) stays intact
+itself the license rule (MIT-clean built-ins/extras only) stays intact
 because the tool lives outside the process, invoked by `subprocess.run`.
 A non-zero exit or empty output raises `E_SCHEMA` and aborts adopting that
 one file (the Gardener never plants a broken node); the rest of the batch
@@ -154,7 +154,7 @@ curation:
 ```
 
 `curation.directives` is free text passed straight to the LLM system
-prompt (`src/monkeyllm/curator.py`) — use it for house style, domain
+prompt (`src/monkeyllm/curator.py`) use it for house style, domain
 vocabulary, or things the model should watch for, not for contract
 changes (those still require a spec version bump, per the project's
 "the spec is the truth" rule).
@@ -168,5 +168,5 @@ changes (those still require a spec version bump, per the project's
   declarative `schema` (C.7.1); Vine generates the `CREATE TABLE`s.
 - **Never mint new node ids from thin air for edges.** Edge proposals
   (G.4.2.1) only ever target existing nodes drawn from a closed
-  catalog-search candidate list — a hallucinated target is structurally
+  catalog-search candidate list a hallucinated target is structurally
   impossible to plant.

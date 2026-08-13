@@ -28,7 +28,7 @@ docker compose up --build -d
 
 Then open `http://localhost:8800`. A Station with nobody in it shows the
 **setup screen** (spec J.2.4): pick a username and password and you are the
-**owner** — administrator of every forest, present and future, including
+**owner** administrator of every forest, present and future, including
 before the first one exists. The screen also offers to start you with a
 demo forest, an empty one, or nothing at all.
 
@@ -46,7 +46,7 @@ is rotated by restarting.
 ### The first forest on a clean deployment
 
 Setup will offer to create it. If you skipped that, the owner creates one
-from *Studio → the empty state*, or over the API — `POST /v1/admin/forests`
+from *Studio → the empty state*, or over the API `POST /v1/admin/forests`
 accepts the owner on an empty registry precisely so no deployment needs a
 shell to become usable.
 
@@ -63,10 +63,10 @@ docker compose exec station station key --principal admin --forest handbook --ca
 ```
 
 prints a fresh full-capability API key; or, if the break-glass account is
-set, `docker compose restart station` — the environment account is
+set, `docker compose restart station` the environment account is
 re-granted on every boot, so the new forest is covered and the Studio login
 works. From here on, forests are created from *Studio → Overview* or
-`POST /v1/admin/forests` — no shell needed again.
+`POST /v1/admin/forests` no shell needed again.
 
 ## Dokploy
 
@@ -75,10 +75,10 @@ There is **one compose file** and it is the same one you run on a laptop
 between the two lives in variables, so a deployment cannot drift away from
 the file that gets tested.
 
-1. **Create the service** — in your Dokploy project: *Create Service →
+1. **Create the service** in your Dokploy project: *Create Service →
    Compose*, pick this repository and branch, and leave **Compose Path** at
    `./docker-compose.yml`.
-2. **Environment** — in the *Environment* tab, set what you use (the full
+2. **Environment** in the *Environment* tab, set what you use (the full
    catalogue with commentary is [.env.example](../.env.example)):
 
    ```dotenv
@@ -93,11 +93,11 @@ the file that gets tested.
    ```
 
    Without those first two the containers come up on a private network of
-   their own and Traefik has nothing to route to — the deploy succeeds and
+   their own and Traefik has nothing to route to the deploy succeeds and
    the domain answers 502, which is the one failure here that does not
    explain itself.
 
-3. **Domain** — in the *Domains* tab add your domain pointing at service
+3. **Domain** in the *Domains* tab add your domain pointing at service
    `station`, container port `8800`, HTTPS on. Traefik reaches the container
    over `dokploy-network`. The host port stays bound to loopback, so the
    Station is never answering in the clear on the public IP.
@@ -105,12 +105,12 @@ the file that gets tested.
    the owner, choose whether to start with a demo forest, and you are in.
    No container terminal, no key from the logs, no `vine init`.
 
-   Note the ordering — setup is open until somebody uses it, so point the
+   Note the ordering setup is open until somebody uses it, so point the
    domain at the service and complete it yourself before announcing the URL.
    The deploy log says as much on first boot: it prints the console URL and
    nothing else, because starting a Station mints no credential (J.2.5).
-   If you would rather have a key than a browser — scripted access, an MCP
-   client, no domain yet — set `MONKEYLLM_STATION_BOOTSTRAP_KEY=1` for the
+   If you would rather have a key than a browser scripted access, an MCP
+   client, no domain yet set `MONKEYLLM_STATION_BOOTSTRAP_KEY=1` for the
    first boot and the log carries the key instead. It is shown once, it
    carries full authority, and it closes the setup screen: the two are one
    window, and whichever you use spends it.
@@ -123,24 +123,24 @@ rotate by editing the variable and redeploying.
 
 Point any MCP harness at `https://<your-domain>/mcp/` (streamable HTTP)
 with an `Authorization: Bearer <key>` header. The MCP surface only answers
-hosts listed in `MONKEYLLM_STATION_ALLOWED_HOSTS` — set it to your domain
+hosts listed in `MONKEYLLM_STATION_ALLOWED_HOSTS` set it to your domain
 as above (the compose file defaults it to `*`, which skips the host check;
 every request still needs an API key). REST and the Studio are unaffected.
 
 ## Updates, restarts, persistence
 
-- **Update**: redeploy (Dokploy) or `docker compose up --build -d` — the
+- **Update**: redeploy (Dokploy) or `docker compose up --build -d` the
   image is rebuilt, the volumes are untouched, work continues where it was.
 - **Crash**: `restart: unless-stopped` brings the container back; state is
   in the volumes, not the container.
 - **Backup**: per forest, `vine snapshot create` produces a git bundle with
   full history (spec Part I); back up the `registry` volume (one SQLite
-  file) together with the snapshots — grants and key digests belong with
+  file) together with the snapshots grants and key digests belong with
   the forests they govern.
 
 ## Optional local inference
 
-No external LLM provider needed — two llama.cpp sidecars are included
+No external LLM provider needed two llama.cpp sidecars are included
 behind compose profiles:
 
 ```bash
@@ -149,7 +149,7 @@ docker compose --profile local-llm --profile local-embed up -d
 
 First start downloads the weights from Hugging Face into the `models`
 volume (defaults: Qwen2.5-7B-Instruct Q4_K_M for chat, bge-m3 Q8_0 for
-embeddings — override with `LLAMA_CHAT_HF` / `LLAMA_EMBED_HF`); later
+embeddings override with `LLAMA_CHAT_HF` / `LLAMA_EMBED_HF`); later
 starts reuse them. Then point the Station at the sidecars in `.env` /
 Dokploy environment:
 
@@ -160,7 +160,7 @@ MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1
 
 On Dokploy there is no `--profile` flag to pass: the UI runs a plain
 `docker compose up`, which starts every service **except** the profiled
-ones — so a deploy that shows only `station` is the profiles working as
+ones so a deploy that shows only `station` is the profiles working as
 designed, not a failed sidecar. Turn them on by adding this to the
 Environment tab, which Compose reads on its own:
 
@@ -170,7 +170,7 @@ COMPOSE_PROFILES=local-embed        # or: local-llm,local-embed
 
 Deleting the `profiles:` lines from the compose file has the same effect
 and is the fallback if the variable does not take. Either way the sidecar
-is only half the job — the Station reads `MONKEYLLM_EMBED_ENDPOINT` at
+is only half the job the Station reads `MONKEYLLM_EMBED_ENDPOINT` at
 startup, so it needs the variable above **and** a restart before `locate`
 goes hybrid. The first start is slow and quiet while it pulls the GGUF
 into the `models` volume; `docker compose logs embed` shows the progress.

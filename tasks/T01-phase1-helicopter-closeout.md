@@ -1,4 +1,4 @@
-# T01 — Phase 1 closeout: official Monkey Bench run
+# T01 Phase 1 closeout: official Monkey Bench run
 
 status: in-progress
 
@@ -36,21 +36,21 @@ proving the four exit criteria.
 
 ## Acceptance criteria
 
-- [x] recall@5 >= 0.85 (hybrid) on bench questions — **1.0** (recall@3 also 1.0, MRR 0.88; bm25-only was 0.611)
-- [x] monkey banana precision >= topk arm — **1.0 vs 0.68** (correct answers: 18/18 vs 12/18)
-- [ ] monkey tokens <= 60% of iter arm on multi-hop questions — **re-measured
+- [x] recall@5 >= 0.85 (hybrid) on bench questions **1.0** (recall@3 also 1.0, MRR 0.88; bm25-only was 0.611)
+- [x] monkey banana precision >= topk arm **1.0 vs 0.68** (correct answers: 18/18 vs 12/18)
+- [ ] monkey tokens <= 60% of iter arm on multi-hop questions **re-measured
       on questions-v3 (T06, all min_hops >= 3)**: raw median ratio is ~1.04
-      (1433 vs 1384) — still fails AS WRITTEN, but the raw comparison is now
+      (1433 vs 1384) still fails AS WRITTEN, but the raw comparison is now
       structurally misleading: iter "saves" tokens by *failing* (it answers
       only 7/11; its failures cost as little as 607 tokens because it gives
       up). **Tokens per CORRECT answer: monkey 1382 vs iter 2385 = 0.58 ✓**
       (and monkey is 11/11 vs iter 7/11, p95 8.4s vs 17.5s, total 62.5s vs
       115.9s). DECISION NEEDED (spec/roadmap owner): restate the criterion as
-      tokens-per-correct-answer <= 60%, which v3 meets — or keep the raw form
+      tokens-per-correct-answer <= 60%, which v3 meets or keep the raw form
       and accept that an arm can pass it by failing cheaply.
-- [x] locate p95 < 100ms with vectors active — **61.5ms** (p50 48ms; p99 2.1s is first-call embedder warmup)
-- [x] lazy re-embed criterion — covered by tests/test_canopy_vector.py (graft -> stale -> next hybrid search re-embeds; in-process, well under 60s)
-- [x] results table committed — below + bench/_artifacts/report-bench-forest.json
+- [x] locate p95 < 100ms with vectors active **61.5ms** (p50 48ms; p99 2.1s is first-call embedder warmup)
+- [x] lazy re-embed criterion covered by tests/test_canopy_vector.py (graft -> stale -> next hybrid search re-embeds; in-process, well under 60s)
+- [x] results table committed below + bench/_artifacts/report-bench-forest.json
 
 ## Results (2026-06-11, gemma-4 12B Q4 local, bge-m3 embedder, bench-forest 153 nodes)
 
@@ -62,7 +62,7 @@ proving the four exit criteria.
 
 locate (18 questions, 40 repeats): bm25 recall@5 0.611 / p95 5.9ms; hybrid recall@5 **1.0** / p95 61.5ms.
 
-## Re-measurement on questions-v3 (2026-06-11, T06 — 11 questions, 100% min_hops >= 3)
+## Re-measurement on questions-v3 (2026-06-11, T06 11 questions, 100% min_hops >= 3)
 
 | arm | correct | precision | tokens (med) | s/question (med) | s/question (p95) | total s |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -78,7 +78,7 @@ report-bench-forest-v2.json).
 
 Verdict: 3 of 4 exit criteria pass cleanly; the 4th passes under the
 tokens-per-correct-answer reading (0.58 <= 0.60) and fails under the raw
-median reading (1.04) — see the criterion note above for the pending decision.
+median reading (1.04) see the criterion note above for the pending decision.
 Accuracy story is decisive: monkey is the only arm that gets everything right,
 at bounded latency (no wandering tail).
 
