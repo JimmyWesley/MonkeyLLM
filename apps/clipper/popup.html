@@ -141,14 +141,34 @@
          purpose. Empty, the file speaks for itself (a bound vision model
          reads an image and indexes what it finds); written, the words
          travel as a paired note naming the file (J.15's two-nodes rule). -->
+    <!-- The SAME surface as the question box, deliberately: one bordered
+         box, the textarea breathing inside it, mic on the bar beneath and
+         the actions on its right — the shape this popup already taught. -->
     <section id="file-view" hidden>
-      <p id="file-name" class="hint" style="margin:8px 0 4px"></p>
-      <textarea id="file-note" rows="3" data-i18n-ph="regionComment"></textarea>
-      <p class="hint" data-i18n="uploadNoteHint"></p>
-      <div class="row buttons">
-        <button id="file-send" class="primary" data-i18n="send"></button>
-        <button id="file-cancel" data-i18n="cancel"></button>
+      <p id="file-name" class="hint file-name"></p>
+      <div class="askbox">
+        <textarea id="file-note" rows="2" data-i18n-ph="regionComment"></textarea>
+        <!-- Stands in for the textarea while dictating — the ask box's
+             exact grammar: preparing, recording with a timer, processing,
+             and the box only returns when every word has landed. -->
+        <button id="file-live" type="button" hidden>
+          <span class="dot" aria-hidden="true"></span>
+          <span id="file-live-text"></span>
+        </button>
+        <div class="askbar">
+          <button id="file-mic" class="icon-btn" data-i18n-title="dictate">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                 stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3"/>
+              <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/>
+            </svg>
+          </button>
+          <button id="file-cancel" class="ghost" data-i18n="cancel"></button>
+          <button id="file-send" class="primary slim" data-i18n="send"></button>
+        </div>
       </div>
+      <p class="hint" data-i18n="uploadNoteHint"></p>
     </section>
 
     <p id="status" class="status" data-i18n="statusIdle"></p>

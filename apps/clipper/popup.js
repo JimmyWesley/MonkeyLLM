@@ -348,7 +348,7 @@ function autoGrow(el, max = 160) {
 $('ask-q').addEventListener('input', () => autoGrow($('ask-q')));
 $('note-text').addEventListener('input', () => autoGrow($('note-text'), 220));
 
-// -- dictating the question ---------------------------------------------------
+// -- dictation ----------------------------------------------------------------
 // The same offscreen pipeline the region picker uses; the worker relays
 // everything back here. Four honest states, because the recognizer's
 // lifecycle is not a boolean:
@@ -359,92 +359,120 @@ $('note-text').addEventListener('input', () => autoGrow($('note-text'), 220));
 //   seconds start counting) → processing (stop sent; buffered audio is
 //   still becoming text, and the late finals are exactly the words that
 //   used to get eaten) → idle (stt-end: the box returns, transcript in).
+//
+// TWO boxes can listen — the question and the upload note — through ONE
+// recognizer with one owner at a time: whoever pressed the mic gets the
+// transcript, and the other box's mic is inert until the stream ends.
 
-let askMicState = 'idle'; // idle | preparing | listening | processing
-let askTickTimer = null;
-let askT0 = 0;
+const MIC_BOXES = {
+  ask: { area: 'ask-q', live: 'ask-live', liveText: 'ask-live-text',
+         mic: 'ask-mic',
+         // While the mic runs, the bar is the whole interface: a button
+         // that cannot act yet is noise beside a timer.
+         hide: ['btn-ask'] },
+  file: { area: 'file-note', live: 'file-live', liveText: 'file-live-text',
+          mic: 'file-mic', hide: ['file-send', 'file-cancel'] },
+};
 
-function askLive(text) {
-  $('ask-live-text').textContent = text;
+let micOwner = null;      // which box holds the recognizer, while not idle
+let micState = 'idle';    // idle | preparing | listening | processing
+let micTickTimer = null;
+let micT0 = 0;
+
+function micLive(text) {
+  if (micOwner) $(MIC_BOXES[micOwner].liveText).textContent = text;
 }
 
-function setAskMicState(state) {
-  askMicState = state;
+function setMicState(state) {
+  const box = MIC_BOXES[micOwner];
+  micState = state;
   const busy = state !== 'idle';
-  $('ask-q').hidden = busy;
-  $('ask-live').hidden = !busy;
-  // While the mic runs, the bar is the whole interface: Perguntar only
-  // means something once there is a finished question to carry to the
-  // console, and a button that cannot act yet is noise beside a timer.
-  $('btn-ask').hidden = busy;
-  $('ask-mic').classList.toggle('recording', busy);
-  $('ask-mic').title = t(busy ? 'dictateStop' : 'dictate');
+  $(box.area).hidden = busy;
+  $(box.live).hidden = !busy;
+  for (const id of box.hide) $(id).hidden = busy;
+  $(box.mic).classList.toggle('recording', busy);
+  $(box.mic).title = t(busy ? 'dictateStop' : 'dictate');
   if (state !== 'listening') {
-    clearInterval(askTickTimer);
-    askTickTimer = null;
+    clearInterval(micTickTimer);
+    micTickTimer = null;
   }
-  if (state === 'preparing') askLive(t('sttPreparing'));
-  if (state === 'processing') askLive(t('sttProcessing'));
+  if (state === 'preparing') micLive(t('sttPreparing'));
+  if (state === 'processing') micLive(t('sttProcessing'));
   if (state === 'idle') {
-    const q = $('ask-q');
-    autoGrow(q);
-    q.focus();
-    q.scrollTop = q.scrollHeight;
+    const area = $(box.area);
+    autoGrow(area);
+    area.focus();
+    area.scrollTop = area.scrollHeight;
+    micOwner = null;
   }
 }
 
-function askStartTicking() {
-  askT0 = Date.now();
+function micStartTicking() {
+  micT0 = Date.now();
   const tick = () => {
-    const s = Math.floor((Date.now() - askT0) / 1000);
+    const s = Math.floor((Date.now() - micT0) / 1000);
     const mm = Math.floor(s / 60);
     const ss = String(s % 60).padStart(2, '0');
-    askLive(t('askListening', [`${mm}:${ss}`]));
+    micLive(t('askListening', [`${mm}:${ss}`]));
   };
   tick();
-  clearInterval(askTickTimer);
-  askTickTimer = setInterval(tick, 500);
+  clearInterval(micTickTimer);
+  micTickTimer = setInterval(tick, 500);
 }
 
-function askMicToggle() {
-  if (askMicState === 'idle') {
+function micToggle(owner) {
+  if (micState === 'idle') {
+    micOwner = owner;
     chrome.runtime.sendMessage({ type: 'mkc:stt-start' }).catch(() => {});
-    setAskMicState('preparing');
-  } else if (askMicState === 'processing') {
+    setMicState('preparing');
+  } else if (micState === 'processing') {
     // Already winding down; a second click is impatience, not a command.
-  } else {
+  } else if (micOwner === owner) {
     chrome.runtime.sendMessage({ type: 'mkc:stt-stop' }).catch(() => {});
-    setAskMicState('processing');
+    setMicState('processing');
+  }
+  // The OTHER box's mic while this one runs: ignored. One recognizer,
+  // one owner — stealing a live stream mid-sentence serves nobody.
+}
+$('ask-mic').addEventListener('click', () => micToggle('ask'));
+$('ask-live').addEventListener('click', () => micToggle('ask'));
+$('file-mic').addEventListener('click', () => micToggle('file'));
+$('file-live').addEventListener('click', () => micToggle('file'));
+
+/** Stop the stream if `owner` holds it — for a view being closed under a
+ *  live microphone; the UI resets now, the recognizer winds down alone. */
+function micRelease(owner) {
+  if (micOwner === owner && micState !== 'idle') {
+    chrome.runtime.sendMessage({ type: 'mkc:stt-stop' }).catch(() => {});
+    setMicState('idle');
   }
 }
-$('ask-mic').addEventListener('click', askMicToggle);
-$('ask-live').addEventListener('click', askMicToggle);
 
 chrome.runtime.onMessage.addListener((msg) => {
-  if (!msg || askMicState === 'idle') return;
+  if (!msg || micState === 'idle' || !micOwner) return;
   if (msg.type === 'mkc:stt-live') {
     // Restarts after a breath of silence re-fire audiostart; the timer
     // keeps its zero.
-    if (askMicState === 'preparing') {
-      setAskMicState('listening');
-      askStartTicking();
+    if (micState === 'preparing') {
+      setMicState('listening');
+      micStartTicking();
     }
   } else if (msg.type === 'mkc:stt-result' && msg.final && msg.text) {
-    const q = $('ask-q');
-    q.value = (q.value ? q.value.replace(/\s*$/, ' ') : '') + msg.text;
-    if (!q.hidden) autoGrow(q);
+    const area = $(MIC_BOXES[micOwner].area);
+    area.value = (area.value ? area.value.replace(/\s*$/, ' ') : '') + msg.text;
+    if (!area.hidden) autoGrow(area);
   } else if (msg.type === 'mkc:stt-error') {
-    setAskMicState('idle');
+    setMicState('idle');
     if (msg.error === 'not-allowed') mainWarning(t('regionMicDenied'));
   } else if (msg.type === 'mkc:stt-end') {
-    setAskMicState('idle');
+    setMicState('idle');
   }
 });
 
 // A popup dies on any blur; a microphone must not outlive the button that
 // turned it on. Best-effort — pagehide usually delivers the message.
 window.addEventListener('pagehide', () => {
-  if (askMicState !== 'idle') {
+  if (micState !== 'idle') {
     chrome.runtime.sendMessage({ type: 'mkc:stt-stop' }).catch(() => {});
   }
 });
@@ -531,6 +559,9 @@ const QUICKNOTE_KEY = 'mkc:quicknote';
 async function openQuickNote() {
   closeFileNote(); // the two borrow the same slot and never stack
   pendingUpload = null;
+  // The slot is leaving; a question being dictated must not keep the
+  // microphone running under a hidden bar.
+  micRelease('ask');
   $('ask-block').hidden = true;
   $('note-view').hidden = false;
   const stored = (await chrome.storage.session.get(QUICKNOTE_KEY))[QUICKNOTE_KEY];
@@ -615,6 +646,7 @@ $('file-input').addEventListener('change', async () => {
 
 function openFileNote(name) {
   closeQuickNote();
+  micRelease('ask'); // the ask box yields the slot AND the microphone
   $('ask-block').hidden = true;
   $('file-view').hidden = false;
   $('file-name').textContent = name;
@@ -625,6 +657,9 @@ function openFileNote(name) {
 
 function closeFileNote() {
   if ($('file-view').hidden) return;
+  // Closed under a live microphone (another action clicked): the stream
+  // must not outlive the box it was writing into.
+  micRelease('file');
   $('file-view').hidden = true;
   $('ask-block').hidden = false;
 }

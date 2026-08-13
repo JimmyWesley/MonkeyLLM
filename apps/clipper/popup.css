@@ -123,6 +123,31 @@ header .push { margin-left: auto; }
 }
 button.slim { white-space: nowrap; }
 
+/* The quiet action beside a primary, on the same bar (the upload note's
+   Cancel): bordered, panel-toned, pushed right with its primary — which
+   then needs no push of its own. */
+.askbar .ghost {
+  margin-left: auto;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.askbar .ghost:hover { border-color: var(--accent); }
+.askbar .ghost ~ .primary { margin-left: 0; }
+
+/* The picked file's name above its box: one line, never a wrap. */
+.file-name {
+  margin: 8px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .icon-btn {
   width: 30px;
   height: 30px;
@@ -137,8 +162,9 @@ button.slim { white-space: nowrap; }
 }
 .icon-btn:hover { color: inherit; border-color: var(--accent); }
 
-/* The textarea's stand-in while dictating. */
-#ask-live {
+/* The textarea's stand-in while dictating — one look for every box that
+   can listen (the question, the upload note). */
+#ask-live, #file-live {
   width: 100%;
   min-height: 40px;
   display: flex;
@@ -152,7 +178,7 @@ button.slim { white-space: nowrap; }
   text-align: left;
   padding: 6px 2px;
 }
-#ask-live .dot {
+#ask-live .dot, #file-live .dot {
   width: 9px;
   height: 9px;
   border-radius: 50%;
