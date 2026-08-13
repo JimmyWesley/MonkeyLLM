@@ -83,8 +83,9 @@ machine is that it **can only narrow, never add**:
   `login` and `pair` are rate-limited, and the refusal never reveals whether
   a username exists.
 
-The key lives where every key lives: the Access console lists it, and you can
-revoke it there at any time (see [Managing the Station](./managing.md)).
+The key lives where every key lives: the Access console lists it, and an
+administrator can revoke it there at any time (see
+[Managing the Station](./managing.md)).
 
 ## Claude Code in two commands
 
@@ -137,18 +138,20 @@ teaches three sections:
   recall first and reason after: `answer` when the forest's answer *is* the
   answer; `harvest` when the agent will reason over the material itself;
   `locate` → `look` → `pick` to navigate; `sniff` for literal text inside
-  bodies; `query` for datasets — after a `look`, because a dataset's `notes`
-  say what the columns mean. And: cite node ids for anything asserted from
-  the forest.
+  bodies; `query` for datasets, if the key carries `query` — after a `look`,
+  because a dataset's `notes` say what the columns mean. And: cite node ids
+  for anything asserted from the forest.
 - **Save what is worth keeping** — when the user states something durable (a
-  decision, a fact, a preference, a correction), offer to keep it: `plant` a
-  new note under the branch where it belongs, `graft` to amend a node the
-  agent can already name. Write in English and keep the summary honest — the
-  summary is how the note will be found.
-- **Respect the contract** — the key decides what the agent sees; never work
-  around a refusal. Every read is budgeted, and `truncated: true` means ask
-  narrower, not retry harder. Datasets change through `tend` only, one
-  statement at a time, never DDL.
+  decision, a fact, a preference, a correction), offer to keep it, with the
+  write the key actually allows: `ingest` — one markdown document through
+  the Gardener — is the write a paired key carries by default; `plant` and
+  `graft` are taught only for keys that carry `write`. Write in English and
+  keep the summary honest — the summary is how the note will be found.
+- **Respect the contract** — the key decides what the agent sees and what it
+  may write; never work around a refusal — say what was refused and which
+  capability it needs. Every read is budgeted, and `truncated: true` means
+  ask narrower, not retry harder. Datasets change through `tend` only where
+  the key carries it, one statement at a time, never DDL.
 
 > **Note** — the skill file's body is English regardless of the console
 > language, on purpose: it addresses the model, not you. The walkthrough

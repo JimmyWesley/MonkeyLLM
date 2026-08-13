@@ -6,10 +6,14 @@
 
 A floresta é o produto; esta página é sobre mantê-la governada e saudável.
 Cinco consoles carregam esse trabalho — **Acessos**, **Modelos**, **Saúde**,
-**Auditoria** e a aba **Otimizar** da Ingestão — e todos eles aparecem só
-para uma chave que tenha a capacidade `admin` na floresta. Tudo o que eles
-fazem viaja pelas mesmas rotas `/v1` que qualquer cliente de API poderia
-chamar: não existe canal lateral privilegiado, e deliberadamente não existe
+**Auditoria** e a aba **Otimizar** da Ingestão. Os quatro consoles aparecem
+só para uma chave que tenha a capacidade `admin` na floresta; a aba
+Otimizar é renderizada para qualquer chave que possa `ingest` (uma simples
+releitura da pasta espelhada não exige mais que isso), com apenas os seus
+cartões de Reconstruir e de Atualizar a camada vetorial reservados ao
+`admin`. Tudo o que eles fazem viaja pelas mesmas rotas `/v1` que
+qualquer cliente de API poderia chamar: não existe canal lateral
+privilegiado, e deliberadamente não existe
 um painel separado de superadministrador. Um console, uma API, com
 capacidades decidindo o que aparece.
 
@@ -24,7 +28,7 @@ quando foi vista por último.
 
 ![O console de Acessos: todo mundo que pode alcançar as suas florestas, uma linha por pessoa](../assets/people.png)
 
-*(As capturas de tela mostram a interface em inglês.)*
+*(As capturas de tela mostram o console em inglês.)*
 
 O acesso é concedido como **nível primeiro, capacidades depois**. Um nível
 é um ponto de partida com nome, e o console documenta cada nível na própria
@@ -107,7 +111,7 @@ Enquanto o registro não guarda credencial de espécie alguma, `POST
 /v1/auth/setup` está aberta: a primeira pessoa a abrir o console vira a
 **dona** — o único principal que tem `admin` em toda floresta, presente e
 futura. O primeiro boot anuncia isso na saída padrão — a URL do console, e
-um aviso de que um assento de dono não reivindicado numa interface pública
+um aviso de que um posto de dona não reivindicado numa interface pública
 é uma corrida contra estranhos. Depois que a configuração rodou, a rota se
 fecha permanentemente e responde exatamente como um caminho que nunca
 existiu.
@@ -117,8 +121,8 @@ explicitamente:
 
 - **Máquinas sem navegador** passam `--bootstrap-key` (ou
   `MONKEYLLM_STATION_BOOTSTRAP_KEY=1`) e a primeira chave de API —
-  carregando o bit de dono — é impressa uma vez no boot, dentro daquela
-  mesma janela de um tiro só, e nunca mais.
+  carregando o bit de dona — é impressa uma vez no boot, dentro daquela
+  mesma janela de uso único, e nunca mais.
 - **Implantações break-glass** definem `MONKEYLLM_STATION_ADMIN` e
   `MONKEYLLM_STATION_PASSWORD`: uma conta mantida no ambiente, nunca
   armazenada, rotacionada reiniciando. Configurá-la fecha a configuração
@@ -184,13 +188,13 @@ O que o Ranger cuida, nas passagens dele:
 - **Evaporação de calor.** Toda leitura deposita feromônio; sem
   esquecimento, toda trilha saturaria e o calor deixaria de discriminar. O
   calor decai exponencialmente (meia-vida de 30 dias por padrão), e linhas
-  que esfriam abaixo de 0.01 são removidas como poeira. A evaporação vive
+  que esfriam abaixo de 0,01 são removidas como poeira. A evaporação vive
   inteiramente na camada derivada — ela nunca commita.
 - **Promoção e poda — só de links incertos.** O Ranger gerencia exatamente
   os links nascidos abaixo da confiança total: propostas de agente e
   atalhos descobertos. Uma proposta cujos dois extremos continuam aquecidos
   é confirmada pelo uso e promovida; uma cujos dois extremos esfriaram de
-  vez é podada. Arestas estruturais e links em confiança 1.0 nunca são
+  vez é podada. Arestas estruturais e links em confiança 1,0 nunca são
   tocados, toda mudança é um commit auditado só de `.md`
   (`ranger(promote)`, `ranger(prune)`), e um link que não está nem quente
   nem frio o bastante é deixado em paz — paciência é um recurso. O Ranger
@@ -223,11 +227,11 @@ Um snapshot é a floresta empacotada num **arquivo só** — o repositório git
 dela como um bundle, com todo o histórico, cada plant e cada commit de
 auditoria viajando junto. Do console de Saúde você pode tirar um ("Incluir
 os payloads dos datasets" acrescenta um arquivo sidecar para os `.db` que o
-git nunca guarda), e o **owner** pode baixar o bundle e o sidecar.
+git nunca guarda), e a pessoa **dona** pode baixar o bundle e o sidecar.
 
 A importação passa pelo seletor de florestas: **Importar snapshot** cria
-uma floresta nova a partir de um bundle, com histórico e tudo, só para o
-owner — o bundle entra como está, sem passar pela curadoria, que é
+uma floresta nova a partir de um bundle, com histórico e tudo, só para a
+pessoa dona — o bundle entra como está, sem passar pela curadoria, que é
 exatamente por que só o principal que governa o volume pode plantar um. A
 floresta importada chega servível (a Station a reindexa na chegada) e fria:
 nenhuma chamada de modelo é gasta, e a busca fica só por palavra-chave até
@@ -247,9 +251,9 @@ guardadas onde cada uma pertence:
   um digest dos argumentos, o tamanho do resultado, e quando. Corpos e
   trechos nunca são copiados para lá — o log registra acesso, não conteúdo
   — e o console diz isso na tela.
-- **Escritas** já são commits no histórico git da própria floresta,
-  carimbadas com o principal que agiu (`station(<principal>): <action>`),
-  então a história do que mudou é da própria floresta.
+- **Escritas** já são commits no histórico git da própria floresta, cada
+  um carregando um trailer `station-principal: <name>` que nomeia o
+  principal que agiu, então a história do que mudou é da própria floresta.
 
 Juntas, as duas reconstroem a trilha completa de qualquer resposta depois
 do fato: qual principal, quais primitivas, quais nós, em qual ordem. Uma
@@ -268,7 +272,7 @@ manter a metade densa com a conta em dia. Três botões, e saber qual apertar
 
 | Botão | O que faz | Quando apertar |
 |---|---|---|
-| **Sincronizar** | Relê a pasta que esta floresta espelhou por último e atualiza só o que mudou. | Os documentos de origem seguiram em frente e a floresta deve acompanhar. |
+| **Ingerir** (o botão de envio da aba) | Relê a pasta que esta floresta espelhou por último e atualiza só o que mudou. | Os documentos de origem seguiram em frente e a floresta deve acompanhar. |
 | **Reconstruir** | Reconstrói o índice de busca a partir dos arquivos — os arquivos são a verdade, o índice é derivado. | Qualquer coisa parece desatualizada: uma busca que não acha um nó que você consegue ler, uma floresta que chegou de um snapshot ou de uma versão anterior. |
 | **Atualizar** | Embeda só os nós escritos desde que a camada vetorial foi construída pela última vez. | O console diz "*n* nó(s) foram escritos desde a última construção, então a busca híbrida ordena sem eles." |
 

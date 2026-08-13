@@ -73,12 +73,12 @@ tan autoritativo después del arranque como antes, y el log del primer
 arranque nombra la URL de la consola — `http://localhost:8800`. Ábrela, y
 una Station sin nadie dentro muestra la **pantalla de configuración**
 (spec J.2.4): elige un usuario y una contraseña y eres la persona
-**propietaria** — administradora de cada bosque, presente y futuro,
-incluso antes de que exista el primero. La pantalla también ofrece
+**dueña** del despliegue — administradora de cada bosque, presente y
+futuro, incluso antes de que exista el primero. La pantalla también ofrece
 empezarte con un bosque de demostración ya sembrado, uno vacío o nada en
 absoluto.
 
-![La pantalla de configuración de la primera ejecución, donde la primera persona en llegar crea la cuenta propietaria](../assets/setup.png)
+![La pantalla de configuración de la primera ejecución, donde la primera persona en llegar crea la cuenta del dueño](../assets/setup.png)
 
 *(Las capturas de pantalla muestran la consola en inglés.)*
 
@@ -87,7 +87,7 @@ credencial, y se cierra permanentemente en el momento en que se usa. Desde
 entonces la consola muestra el inicio de sesión ordinario.
 
 > **Nota** — una Station publicada en una URL pública con el asiento de
-> propietario sin reclamar es una carrera contra desconocidos. Apunta tu
+> dueño sin reclamar es una carrera contra desconocidos. Apunta tu
 > dominio hacia ella y completa tú la configuración antes de anunciar la
 > dirección; el log del primer arranque lo dice tal cual.
 
@@ -97,7 +97,7 @@ Un servidor sin interfaz, la CI o un cliente solo-MCP siguen necesitando
 una primera puerta. Arranca la Station una vez con `--bootstrap-key` (o
 define `MONKEYLLM_STATION_BOOTSTRAP_KEY=1` — las UIs de plataformas sin
 campo de argv pueden pedirlo a través del entorno) y el arranque acuña
-**una** clave de API con autoridad plena, con el bit de propietario, y la
+**una** clave de API con autoridad plena, con el bit de dueño, y la
 imprime en el log exactamente una vez — solo se almacena su digest, así
 que guárdala antes de que los logs roten.
 
@@ -116,13 +116,19 @@ forma de entrar no acuña nada.
 
 ## Modelos locales
 
-No se necesita ningún proveedor externo: dos sidecars llama.cpp vienen
-detrás de perfiles de compose, para que el chat y los embeddings puedan
-correr junto a la Station.
+El archivo compose trae un **embedder local** detrás de un perfil, y lleva
+un **sidecar de chat como plantilla comentada** — llama.cpp en ambos
+casos, corriendo junto a la Station.
 
 ```bash
-docker compose --profile local-llm --profile local-embed up -d
+docker compose --profile local-embed up -d   # the embedder (bge-m3)
 ```
+
+Para chat local, abre `docker-compose.yml` y **descomenta el servicio
+`llm`** (perfil `local-llm`) — viene comentado porque los pesos de chat
+son pesados y muchos despliegues apuntan `MONKEYLLM_LLM_ENDPOINT` a un
+proveedor externo compatible con OpenAI en su lugar (para un montaje de
+llama.cpp en tu propia GPU, ver `docs/local-inference.md`).
 
 El primer arranque descarga los pesos desde Hugging Face al volumen
 `models` (por defecto: Qwen2.5-7B-Instruct Q4_K_M para chat, bge-m3 Q8_0
@@ -138,8 +144,8 @@ MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1
 La Station lee estas variables al arrancar, así que el sidecar es solo la
 mitad del trabajo — define la variable **y** reinicia la Station. En una
 plataforma de compose sin bandera `--profile` (Dokploy, Coolify), define
-`COMPOSE_PROFILES=local-llm,local-embed` en el entorno; Compose lo lee por
-su cuenta.
+`COMPOSE_PROFILES=local-embed` (más `local-llm` si descomentaste el
+servicio de chat) en el entorno; Compose lo lee por su cuenta.
 
 > **Nota** — los sidecars corren en CPU por defecto, lo que basta para el
 > navegador 7B Q4. Deja el embedder apagado para mantener la búsqueda de
@@ -228,5 +234,5 @@ un índice que la Station nunca pudiera reparar se degradaría para siempre.
 
 La Station está en marcha y la pantalla de configuración espera. [Primer
 acceso](./first-access.md) recorre la reclamación del asiento de
-propietario, el recorrido de bienvenida y tu primer bosque — y desde ahí,
+dueño, el recorrido de bienvenida y tu primer bosque — y desde ahí,
 [Conectar tu IA](./connecting-ai.md) es donde el cerebro empieza a crecer.

@@ -17,11 +17,11 @@ visita a un despliegue recién hecho cae en la pantalla de configuración:
 **"Configurar esta Station"**. Existe exactamente una vez. Mientras el
 registro no guarda credencial de ningún tipo, `GET /v1/health` informa que
 la configuración es necesaria y la consola muestra esta pantalla; en el
-momento en que existe una persona propietaria, la ruta desaparece
+momento en que existe una persona dueña, la ruta desaparece
 permanentemente y todo el mundo inicia sesión con normalidad — la propia
 pantalla lo dice al pie.
 
-![La pantalla de configuración de una sola vez: cuenta propietaria y elección del primer bosque](../assets/setup.png)
+![La pantalla de configuración de una sola vez: la cuenta del dueño y la elección del primer bosque](../assets/setup.png)
 
 *(Las capturas de pantalla muestran la consola en inglés.)*
 
@@ -30,12 +30,12 @@ Pide tres cosas y una elección:
 | Campo | Qué significa |
 |---|---|
 | **Usuario** | Con él iniciarás sesión, y es el nombre que aparece en el registro de auditoría. |
-| **Contraseña** | Al menos 12 caracteres. Esta cuenta es propietaria del despliegue — gobierna todos los bosques, presentes y futuros — así que hazla larga. |
-| **Correo electrónico** | Opcional, y así etiquetado. Se guarda localmente como contacto de la persona propietaria y nunca se transmite a ninguna parte — la configuración se completa sin problema en un host aislado de la red. |
+| **Contraseña** | Al menos 12 caracteres. Esta cuenta es la dueña del despliegue — gobierna todos los bosques, presentes y futuros — así que hazla larga. |
+| **Correo electrónico** | Opcional, y así etiquetado. Se guarda en el propio registro de la Station como contacto de la persona dueña — nada se envía a ningún servicio externo, y la configuración se completa sin problema en un host aislado de la red. |
 
-La cuenta creada aquí lleva el **bit de propietario**: `admin` sobre cada
+La cuenta creada aquí lleva el **bit de dueño**: `admin` sobre cada
 bosque del registro, incluidos los bosques creados después, incluido
-ninguno en absoluto. Hay exactamente una persona propietaria, y el bit no
+ninguno en absoluto. Hay exactamente una persona dueña, y el bit no
 puede concederse a nadie más después.
 
 Después, la elección del **primer bosque**:
@@ -44,7 +44,7 @@ Después, la elección del **primer bosque**:
 |---|---|
 | **Empezar con un bosque de demostración** | Un bosque pequeño que explica MonkeyLLM siendo uno. Bórralo cuando quieras — existe para que Preguntar y Explorar tengan algo que responder en tu primera visita. |
 | **Empezar con un bosque vacío** | Aún sin nada dentro; tú lo nombras, la consola muestra el id en que se convierte su nombre, y lo llenas desde Ingesta. |
-| **Dejarlo para después** | Un estado válido. Una persona propietaria sin bosque es viable — el estado vacío de la consola lleva la acción de crear, y eres administrador en todas partes. |
+| **Dejarlo para después** | Un estado válido. Una persona dueña sin bosque es viable — el estado vacío de la consola lleva la acción de crear, y eres administrador en todas partes. |
 
 > **Nota** — si la configuración falla porque alguien más llegó primero,
 > la consola no reintenta: la ruta ya no existe, así que cae en la puerta.
@@ -97,8 +97,8 @@ Se titula **"Un cerebro que tus IAs pueden cultivar"**, y su subtítulo es
 la frase a la que todo este manual vuelve una y otra vez: *la consola es
 una ventana; el bosque detrás de ella es el producto*. MonkeyLLM mantiene
 un bosque de conocimiento — nodos markdown curados que una IA puede
-navegar, interrogar y extender. El Studio es cómo las personas lo
-observan, lo gobiernan y le enseñan, pero el bosque está hecho para ser
+navegar, interrogar y extender. El Studio es la forma en que las personas
+lo observan, lo gobiernan y le enseñan, pero el bosque está hecho para ser
 leído y alimentado por tus propios agentes, vía MCP, mientras sigas
 haciéndolo crecer.
 
@@ -107,7 +107,7 @@ La presentación nombra las tres cosas que vale la pena hacer primero:
 - **Conecta una IA** — Claude Code o cualquier agente MCP se conecta a
   esta Station y gana las tools del bosque: recuperación, navegación, SQL,
   plantación.
-- **Aliméntalo** — sube documentos, adopta carpetas enteras, recorta
+- **Aliméntalo** — sube documentos, espeja carpetas enteras, recorta
   páginas desde tu navegador; el Gardener los convierte en conocimiento
   curado y encontrable.
 - **Pregúntale** — respuestas fundamentadas en el bosque, que llegan con
@@ -118,7 +118,7 @@ almacenamiento del navegador, un ajuste personal como tu preferencia de
 tamaño de respuesta — y no gasta nada: mostrarla o descartarla no emite
 ninguna llamada a modelo, ningún commit, ninguna escritura más allá de esa
 bandera. Nunca bloquea la consola, y solo *enlaza* a las consolas que
-hacen el trabajo real. **Enseñar a mi IA** te lleva a Skills; **Echa un
+hacen el trabajo real. **Enseñar a mi IA** te lleva a Skills; **Echar un
 vistazo** simplemente la cierra. Si la descartaste el día uno y necesitas
 la puerta el día treinta, Resumen conserva una pequeña reafirmación
 permanente — *"Tu IA también puede leer esto"* — que apunta a Skills y al
@@ -146,7 +146,7 @@ nunca el control: la API rechaza de todos modos.
 | Construir | **Modelos** | Qué modelo lee este bosque y cuál resume lo que entra | admin |
 | Gobernar | **Accesos** | Quién existe, qué puede ver, cómo entra | admin |
 | Gobernar | **Auditoría** | Quién vio qué | admin |
-| Gobernar | **Salud** | Lo que ve el Ranger, y tome una instantánea | admin |
+| Gobernar | **Salud** | Lo que ve el Ranger, y toma una instantánea | admin |
 | Gobernar | **MCP / API / Integraciones** | Conecta agentes, apps y despliegues a esta Station | admin |
 
 Skills está en *Usar* a propósito: es autoservicio, disponible para

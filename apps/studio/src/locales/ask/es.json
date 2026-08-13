@@ -41,7 +41,7 @@
   "ask.hops": "Dejar que salte (búsqueda agéntica)",
   "ask.hops_hint": "En vez de un barrido determinista, el modelo toma los primitivos y navega locate, look, move, pick hasta poder responder. Cuesta una llamada al modelo por salto.",
   "ask.hybrid": "Búsqueda híbrida en la entrada",
-  "ask.hybrid_hint": "Funde la capa vectorial en la búsqueda que encuentra el material. Apagada por defecto: en nuestros corpus sacó el nodo correcto del primer puesto. Enciéndala para medirlo en el suyo.",
+  "ask.hybrid_hint": "Funde la capa vectorial en la búsqueda que encuentra el material. Apagada por defecto: en nuestros corpus sacó el nodo correcto del primer puesto. Enciéndela para medirlo en el tuyo.",
   "ask.limits": "Las respuestas salen del texto de los nodos. Una pregunta cuya respuesta es un agregado sobre filas de dataset se rechaza en vez de adivinarse usa Datos para eso.",
   "ask.material": "Lo que leyó",
   "ask.material_counts": "{m} fragmento(s) · {s} extracto(s)",

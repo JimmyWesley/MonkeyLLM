@@ -26,7 +26,7 @@ It asks for three things and one choice:
 |---|---|
 | **Username** | How you will sign in, and the name that appears in the audit log. |
 | **Password** | At least 12 characters. This account owns the deployment — it governs every forest, present and future — so make it a long one. |
-| **Email** | Optional, and labeled so. It is stored locally as the owner's contact and is never transmitted anywhere — setup completes fine on an air-gapped host. |
+| **Email** | Optional, and labeled so. It is kept in the Station's own registry as the owner's contact — nothing is sent to any external service, and setup completes fine on an air-gapped host. |
 
 The account created here carries the **owner bit**: `admin` on every forest
 in the registry, including forests created later, including none at all.

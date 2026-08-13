@@ -13,7 +13,7 @@
   "skills.other.p1": "Nothing above is particular to Claude Code beyond the install path. Register the endpoint below wherever your runtime configures MCP servers, and hand it the same instructions.",
   "skills.other.sub": "The same endpoint, the same key, any MCP-capable runtime.",
   "skills.other.title": "Any other agent",
-  "skills.pair.once": "The key is shown once, in the reply. It expires on its own, and Access lists it — revoke it there whenever you want.",
+  "skills.pair.once": "The key is shown once, in the reply. It expires on its own; an administrator can revoke it in Access at any time.",
   "skills.pair.p1": "Your agent needs a credential that is yours, not an administrator's to mint: pairing derives one from your password, carrying your own access narrowed to reading and feeding. Swap in your own username and password; the reply is the key.",
   "skills.pair.snippet": "Pair a key",
   "skills.pair.sub": "Pairing turns your password into a key that can only narrow, never add.",

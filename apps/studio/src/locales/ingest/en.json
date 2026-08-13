@@ -25,7 +25,7 @@
   "ingest.empty": "Nothing ingested yet.",
   "ingest.errors": "Errors",
   "ingest.job_cancel": "Stop after this document",
-  "ingest.job_cancelled": "Stopped on request. The documents already planted stand; Refresh completes the rest.",
+  "ingest.job_cancelled": "Stopped on request. The documents already planted stand; mirroring the folder again completes the rest.",
   "ingest.job_cancelling": "Stopping after the current document…",
   "ingest.job_current": "working on {file}",
   "ingest.job_errors": "{n} error(s) so far",

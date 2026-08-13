@@ -13,7 +13,7 @@
   "skills.other.p1": "Nada de lo de arriba es particular de Claude Code más allá de la ruta de instalación. Registra el endpoint de abajo donde sea que tu runtime configure servidores MCP, y entrégale las mismas instrucciones.",
   "skills.other.sub": "El mismo endpoint, la misma clave, cualquier runtime que hable MCP.",
   "skills.other.title": "Cualquier otro agente",
-  "skills.pair.once": "La clave se muestra una sola vez, en la respuesta. Caduca sola, y Accesos la lista — revócala ahí cuando quieras.",
+  "skills.pair.once": "La clave se muestra una sola vez, en la respuesta. Caduca sola; quien administra puede revocarla en Accesos en cualquier momento.",
   "skills.pair.p1": "Tu agente necesita una credencial que sea tuya, no acuñada por un administrador: el emparejamiento deriva una de tu contraseña, llevando tu propio acceso estrechado a leer y alimentar. Cambia el usuario y la contraseña por los tuyos; la respuesta es la clave.",
   "skills.pair.snippet": "Emparejar una clave",
   "skills.pair.sub": "Emparejar convierte tu contraseña en una clave que solo puede estrechar, nunca añadir.",

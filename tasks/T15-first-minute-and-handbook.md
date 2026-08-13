@@ -1,8 +1,9 @@
-status: in-progress (2026-08-13: spec v0.49 written — J.5.1 label,
-J.5.11 first access, J.5.12 Skills; Studio shipped: renamed door, Welcome,
-Skills console, Overview restatement; docs/guide handbook authored in
-en/pt/es with screenshots. Remaining: the user's real-browser pass and the
-commit, both theirs.)
+status: done (2026-08-13: spec v0.49 + Studio + trilingual handbook
+shipped and committed (fe18600); five-lens adversarial review applied —
+J.5.12 reworded so the skill teaches the write a paired key actually
+carries (`ingest`), J.5.11/F.53 aligned to dismissed-once semantics,
+J.5.1's stale Access example corrected, docs de-drifted from the UI.
+Remaining: the user's real-browser pass, theirs.)
 
 # T15 — The first minute and the handbook: say what this is
 

@@ -20,14 +20,14 @@ da linha de comando. Ele oferece até quatro abas:
 
 ![O console de Ingestão com arquivos preparados para envio](../assets/ingest.png)
 
-(As capturas de tela mostram a interface em inglês.)
+*(As capturas de tela mostram o console em inglês.)*
 
 | Aba | O que faz | Como responde |
 |---|---|---|
 | **Enviar arquivos** | envia arquivos do seu computador; a Station os prepara e adota | um job que você pode acompanhar |
 | **Escrever** | um documento de sua autoria, curado e mostrado a você *antes* de plantar | no lugar, com revisão |
 | **Espelhar uma pasta** | espelha um diretório que o **host da Station** consegue ler | um job que você pode acompanhar |
-| **Otimizar** | relê a pasta espelhada (sync), reconstrói o índice, atualiza a camada vetorial | roda enquanto você espera |
+| **Otimizar** | relê a pasta espelhada (sync), reconstrói o índice, atualiza a camada vetorial | a releitura é um job como qualquer lote; as ações de índice e de vetor rodam enquanto você espera |
 
 Todo modo pergunta **onde colocar**: um galho existente, e tudo aterrissa
 abaixo dele. Adicionar documentos exige a capacidade `ingest`.
@@ -88,11 +88,11 @@ aba Espelhar nem aparece, e a recusa nomeia a configuração — para que um
 operador que *queria mesmo* espelhar uma pasta saiba exatamente o que
 configurar.
 
-Depois que uma pasta foi espelhada, a aba **Otimizar** oferece
-**Atualizar**: ela relê a pasta que você espelhou por último — mostrada
-ao lado do botão, para você sempre ver o que será relido — e atualiza só
-o que mudou, por diff de hash. Uma atualização mantém os resumos que
-alguém já aprovou: a curadoria nunca roda num sync.
+Depois que uma pasta foi espelhada, a aba **Otimizar** reexecuta o
+espelhamento: o botão **Ingerir** dela relê a pasta que você espelhou por
+último — mostrada ao lado do botão, para você sempre ver o que será
+relido — e atualiza só o que mudou, por diff de hash. Um sync mantém os
+resumos que alguém já aprovou: a curadoria nunca roda nele.
 
 ### Lotes são jobs
 
@@ -117,8 +117,9 @@ com um **job** (spec J.9), e o trabalho roda na Station:
   você *parar* um lote, a fila segura e espera por você.
 - **Cancelar é limpo.** Um cancelamento entra em vigor na próxima
   fronteira de documento — um documento é inteiro ou ausente, nunca
-  metade. O que foi plantado permanece (aquilo são commits), e
-  **Atualizar** completa o restante sem duplicar nada.
+  metade. O que foi plantado permanece (aquilo são commits), e espelhar a
+  pasta de novo a partir de **Otimizar** completa o restante sem duplicar
+  nada.
 
 > **Nota** — um reinício da Station esquece *registros* de jobs, nunca o
 > *trabalho*: o trabalho é commits, e o relato da própria floresta é a
@@ -153,7 +154,7 @@ escolher nada é uma resposta válida e comum.
 **"Nada a fazer" não é uma rejeição.** Um lote de arquivos sem mudança,
 ou de datasets (que são resumidos pela própria estrutura), não precisa de
 modelo — e o relatório diz isso: *"Nada neste lote precisava do modelo…
-A ligação está boa."* Uma rejeição de modelo genuína sempre deixa um
+O vínculo está bom."* Uma rejeição de modelo genuína sempre deixa um
 fallback ou uma nova tentativa para trás no relatório; esse é o
 discriminador. Os dois têm consertos opostos — um é outro modelo ou outro
 prompt, o outro é nada — e o console nunca vai mandar você ajustar um
@@ -269,7 +270,7 @@ administradores. Ele só lê uma página quando você clica nele ali.
 
 O mapa de amostra diz o que está *dentro* de um dataset. Ele não consegue
 dizer o que os dados *significam* — que uma coluna é USD enquanto outra é
-BRL, que `status` usa códigos de uma letra, qual join responde a pergunta
+BRL, que `status` usa códigos de uma letra, qual join responde à pergunta
 que as pessoas fazem de verdade. Esse conhecimento vive na cabeça de
 alguém, e um agente escrevendo SQL sem ele escreve SQL que roda e
 responde errado — a pior falha que este sistema pode produzir, porque

@@ -6,12 +6,14 @@ English · [Português](../pt/managing.md) · [Español](../es/managing.md)
 
 The forest is the product; this page is about keeping it governed and
 healthy. Five consoles carry that work — **Access**, **Models**, **Health**,
-**Audit** and the **Optimize** tab of Ingest — and all of them appear only
-to a key that holds the `admin` capability on the forest. Everything they
-do travels through the same `/v1` routes any API client could call: there
-is no privileged side-channel, and there is deliberately no separate
-super-administrator panel. One console, one API, with capabilities deciding
-what appears.
+**Audit** and the **Optimize** tab of Ingest. The four consoles appear only
+to a key that holds the `admin` capability on the forest; the Optimize tab
+renders for any key that may `ingest` (a plain re-read of the mirrored
+folder needs no more), with its Rebuild and vector-Refresh cards reserved
+for `admin`. Everything they do travels through the same `/v1` routes any
+API client could call: there is no privileged side-channel, and there is
+deliberately no separate super-administrator panel. One console, one API,
+with capabilities deciding what appears.
 
 ## People & access
 
@@ -234,9 +236,9 @@ each belongs:
   argument digest, the result size, and when. Bodies and snippets are
   never copied in — the log records access, not content — and the console
   says so on the screen.
-- **Writes** are already commits in the forest's own git history, stamped
-  with the acting principal (`station(<principal>): <action>`), so the
-  history of what changed is the forest's own.
+- **Writes** are already commits in the forest's own git history, each
+  carrying a `station-principal: <name>` trailer naming the acting
+  principal, so the history of what changed is the forest's own.
 
 Together the two reconstruct any answer's full trail after the fact:
 which principal, which primitives, which nodes, in which order. An answer
@@ -256,7 +258,7 @@ skill:
 
 | Button | What it does | When to press it |
 |---|---|---|
-| **Sync** | Re-reads the folder this forest last mirrored and updates only what changed. | The source documents moved on and the forest should follow. |
+| **Ingest** (the tab's submit) | Re-reads the folder this forest last mirrored and updates only what changed. | The source documents moved on and the forest should follow. |
 | **Rebuild** | Rebuilds the search index from the files — the files are the truth, the index is derived. | Anything looks out of date: a search that misses a node you can read, a forest that arrived from a snapshot or an older version. |
 | **Refresh** | Embeds only the nodes written since the vector layer was last built. | The console says "*n* nodes have been written since the last build, so hybrid search ranks without them." |
 

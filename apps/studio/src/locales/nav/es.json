@@ -28,7 +28,7 @@
   "nav.people": "Accesos",
   "nav.people.blurb": "Quién existe, qué puede ver, cómo entra",
   "nav.pin": "Fijar en la barra",
-  "nav.pin_full": "La barra admite {n} quite uno antes.",
+  "nav.pin_full": "La barra admite {n} quita uno antes.",
   "nav.pin_hint": "La estrella fija el acceso en la barra de abajo.",
   "nav.playground": "Playground",
   "nav.playground.blurb": "Mira exactamente lo que ve un agente, llamada a llamada",

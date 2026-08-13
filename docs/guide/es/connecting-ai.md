@@ -4,7 +4,7 @@
 
 [← Manual](./README.md)
 
-Esta es la página hacia la que venía construyendo el resto del manual. Todo
+Esta es la página a la que conduce todo el resto del manual. Todo
 lo anterior — [instalar la Station](./install.md), [iniciar
 sesión](./first-access.md), [hacer preguntas](./using.md), [alimentar
 documentos](./feeding.md) — ocurrió a través del Studio. Pero el Studio es
@@ -90,8 +90,8 @@ añadir**:
   nunca revela si un usuario existe.
 
 La clave vive donde viven todas las claves: la consola de Accesos la lista,
-y ahí puedes revocarla en cualquier momento (ver [Gestionar la
-Station](./managing.md)).
+y quien administra puede revocarla ahí en cualquier momento (ver
+[Administrar la Station](./managing.md)).
 
 ## Claude Code en dos comandos
 
@@ -125,7 +125,7 @@ de los nodos que leyó.
 
 ![La consola de Skills, generando la skill de memoria para esta Station y este bosque](../assets/skills.png)
 
-*(Las capturas de pantalla muestran la interfaz en inglés.)*
+*(Las capturas de pantalla muestran la consola en inglés.)*
 
 La consola te guía por los mismos tres pasos que esta página — empareja una
 clave, apunta Claude Code a la Station, entrégale el archivo — y cada
@@ -151,20 +151,24 @@ memory"** (este bosque es tu memoria), enseña tres secciones:
   después razonar: `answer` cuando la respuesta del bosque *es* la
   respuesta; `harvest` cuando el agente va a razonar él mismo sobre el
   material; `locate` → `look` → `pick` para navegar; `sniff` para texto
-  literal dentro de los cuerpos; `query` para datasets — después de un
-  `look`, porque las `notes` de un dataset dicen qué significan las
-  columnas. Y: citar ids de nodo para todo lo afirmado a partir del bosque.
+  literal dentro de los cuerpos; `query` para datasets, si la clave lleva
+  `query` — después de un `look`, porque las `notes` de un dataset dicen
+  qué significan las columnas. Y: citar ids de nodo para todo lo afirmado a
+  partir del bosque.
 - **"Save what is worth keeping"** (guarda lo que vale la pena conservar) —
   cuando el usuario dice algo durable (una decisión, un hecho, una
-  preferencia, una corrección), ofrecerse a guardarlo: `plant` una nota
-  nueva bajo la rama donde pertenece, `graft` para enmendar un nodo que el
-  agente ya puede nombrar. Escribir en inglés y mantener honesto el resumen
-  — el resumen es cómo se encontrará la nota.
+  preferencia, una corrección), ofrecerse a guardarlo, con la escritura que
+  la clave realmente permite: `ingest` — un documento markdown a través del
+  Gardener — es la escritura que una clave emparejada lleva por defecto;
+  `plant` y `graft` se enseñan solo para claves que llevan `write`.
+  Escribir en inglés y mantener honesto el resumen — el resumen es cómo se
+  encontrará la nota.
 - **"Respect the contract"** (respeta el contrato) — la clave decide lo que
-  el agente ve; nunca rodear un rechazo. Toda lectura tiene presupuesto, y
+  el agente ve y lo que puede escribir; nunca rodear un rechazo — decir qué
+  fue rechazado y qué capacidad necesita. Toda lectura tiene presupuesto, y
   `truncated: true` significa preguntar más estrecho, no reintentar más
-  fuerte. Los datasets cambian solo a través de `tend`, una sentencia a la
-  vez, nunca DDL.
+  fuerte. Los datasets cambian a través de `tend` solo donde la clave lo
+  lleva, una sentencia a la vez, nunca DDL.
 
 > **Nota** — el cuerpo del archivo de la skill está en inglés sin importar
 > el idioma de la consola, a propósito: le habla al modelo, no a ti. El
@@ -335,7 +339,7 @@ registro del host: principal, bosque, primitivo, un digest de los
 argumentos, el tamaño del resultado y la marca de tiempo — nunca cuerpos.
 Toda escritura es un commit de git sellado con el principal que actúa. Qué
 agente leyó qué nodos, y en qué orden, es reconstruible después del hecho —
-ver [Gestionar la Station](./managing.md).
+ver [Administrar la Station](./managing.md).
 
 ## Dónde vive el manual completo
 

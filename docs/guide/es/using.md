@@ -25,7 +25,7 @@ enlazado del bosque lee lo que se encontró y escribe la respuesta.
 
 ![La consola Preguntar: una pregunta, su respuesta y la lista de evidencia con los nodos realmente leídos](../assets/ask.png)
 
-(Las capturas de pantalla muestran la interfaz en inglés.)
+*(Las capturas de pantalla muestran la consola en inglés.)*
 
 **La evidencia no es decoración.** Cada id listado bajo la respuesta fue
 realmente leído para producirla. Haz clic en uno y se abre en Explorar,
@@ -77,7 +77,7 @@ incluye los píxeles.
 
 Puedes llevarte una respuesta contigo — **Copiar cURL** (la misma
 llamada, lista para un script), **Descargar .md** (con las referencias
-`media:` reescritas a direcciones descargables) o **Guardar en PDF**.
+`media:` reescritas a direcciones descargables) o **Guardar como PDF**.
 Cada ejecución queda además en el historial propio de tu navegador —
 solo en esta máquina, nunca enviado a la Station — para que restaures
 una ejecución vieja y la compares con una fresca.
@@ -175,10 +175,10 @@ puntos de partida.
 
 **La lectura tiene presupuesto, y truncado significa estrecha tu
 pregunta.** `query` acepta un único `SELECT` (o `WITH`), inyecta
-`LIMIT 200` cuando no das ninguno, y acota la *respuesta* a 2,000 tokens
+`LIMIT 200` cuando no das ninguno, y acota la *respuesta* a 2000 tokens
 (spec C.5.1). Dos banderas te dicen dos cosas distintas:
 
-| Bandera | Qué pasó | La salida |
+| Bandera | Qué pasó | Cómo seguir |
 |---|---|---|
 | `limited` | se alcanzó el `LIMIT 200` inyectado — la consulta coincidía con más filas | estrecha tu filtro |
 | `truncated` | el presupuesto de tokens descartó filas que la consulta devolvió | estrecha tu proyección — nombra las columnas que necesitas |
@@ -232,7 +232,7 @@ nunca se confunda con el de tu red.
 |---|---|---|
 | `locate` | encuentra puntos de entrada por metadatos curados | 800 |
 | `sniff` | búsqueda literal dentro de los cuerpos | 800 |
-| `harvest` | recuperación de una sola pasada, con fragmentos | 4,000 |
+| `harvest` | recuperación de una sola pasada, con fragmentos | 4000 |
 | `look` | el pasaporte de un nodo | 500 |
 | `move` | los senderos de un nodo | 600 |
 | `answer` | recuperación más el modelo enlazado | — |

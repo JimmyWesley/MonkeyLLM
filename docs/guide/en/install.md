@@ -109,12 +109,19 @@ with the flag on a Station that already has a way in mints nothing.
 
 ## Local models
 
-No external provider is needed: two llama.cpp sidecars ship behind compose
-profiles, so chat and embeddings can run beside the Station.
+The compose file ships a **local embedder** behind a profile, and carries
+a **chat sidecar as a commented template** — llama.cpp in both cases,
+running beside the Station.
 
 ```bash
-docker compose --profile local-llm --profile local-embed up -d
+docker compose --profile local-embed up -d   # the embedder (bge-m3)
 ```
+
+For local chat, open `docker-compose.yml` and **uncomment the `llm`
+service** (profile `local-llm`) — it ships commented because chat weights
+are heavy and many deployments point `MONKEYLLM_LLM_ENDPOINT` at an
+external OpenAI-compatible provider instead (for a llama.cpp setup on
+your own GPU, see `docs/local-inference.md`).
 
 The first start downloads the weights from Hugging Face into the `models`
 volume (defaults: Qwen2.5-7B-Instruct Q4_K_M for chat, bge-m3 Q8_0 for
@@ -129,8 +136,9 @@ MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1
 
 The Station reads these at startup, so the sidecar is only half the job —
 set the variable **and** restart the Station. On a compose platform with
-no `--profile` flag (Dokploy, Coolify), set `COMPOSE_PROFILES=local-llm,local-embed`
-in the environment instead; Compose reads it on its own.
+no `--profile` flag (Dokploy, Coolify), set `COMPOSE_PROFILES=local-embed`
+(plus `local-llm` if you uncommented the chat service) in the environment
+instead; Compose reads it on its own.
 
 > **Note** — the sidecars run on CPU by default, which is fine for the 7B
 > Q4 navigator. Leave the embedder off to keep entry search (`locate`) on

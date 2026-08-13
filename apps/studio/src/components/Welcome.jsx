@@ -19,6 +19,7 @@ import { useI18n } from '../i18n.jsx'
 import { hrefFor, navigate } from '../router.js'
 import { Modal } from '../design/ui.jsx'
 import { Ask, Ingest, Plug, Sparkle } from '../design/icons.jsx'
+import { has } from '../views/shared.jsx'
 
 const WELCOMED = 'monkeyllm.studio.welcomed'
 
@@ -46,8 +47,7 @@ export default function Welcome({ forest, grant }) {
     if (forest) navigate(hrefFor(forest, 'skills'))
   }
 
-  const caps = grant?.caps || []
-  const canRead = caps.includes('read') || caps.includes('admin')
+  const canRead = has(grant, 'read')
 
   return (
     <Modal open={open} onClose={dismiss} wide

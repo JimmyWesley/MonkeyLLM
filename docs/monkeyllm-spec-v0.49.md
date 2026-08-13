@@ -4218,7 +4218,7 @@ questions an operator arrives with:
 | | Skills | how does my own AI learn to use this forest as memory (J.5.12) |
 | **Build** | Ingest | how do I put my documents in |
 | | Models | who reads this forest, and who summarises it |
-| **Govern** | People | who exists, what they may see, how they sign in |
+| **Govern** | Access | who exists, what they may see, how they sign in |
 | | Audit | who saw what |
 | | Health | what the Ranger sees, and how to snapshot |
 | | MCP / API / Integrations | how agents, apps and deployments plug into this Station |
@@ -4247,9 +4247,13 @@ without it lands on the first console they do have.
 its own capability guard, because a hidden entry is still reachable by
 anyone who can set application state, and the API remains the authority: it
 already refuses, and it would refuse a request the console never sent.
-Where a console is *partly* available — `Access`, which shows a principal
-its own grant whether or not it may administer others — it stays listed and
-explains the missing half rather than disappearing.
+Where a console has something for *every* principal — Overview, which
+describes the key itself, its scope and its capabilities — it is always
+listed; an entry that could only ever refuse is hidden instead (the govern
+consoles for a non-admin), because a menu reads as a list of what you may
+do, and an entry that only ever refuses teaches nothing (v0.49 — this
+corrects the earlier example: Access is admin-gated and hidden like its
+group; the principal's own half of that story lives in Overview).
 
 #### J.5.2 The vocabulary rule
 
@@ -4825,10 +4829,12 @@ So the console MUST offer a one-time presentation after the first
 sign-in: what a forest is, that AIs connect to it and feed it through
 MCP, and where to start — ask, feed, connect. It is chrome, wholly:
 
-- **Shown at most once per browser.** The flag lives in browser storage,
-  the same standing as the reply-size preference (J.10.8): a personal
-  setting, never in the address (J.5.8 — the address restores a page,
-  never a call).
+- **Dismissed once, gone for good — per browser.** The flag is written
+  when the person dismisses it, and lives in browser storage, the same
+  standing as the reply-size preference (J.10.8): a personal setting,
+  never in the address (J.5.8 — the address restores a page, never a
+  call). Until it is acknowledged it MAY appear again — an unacknowledged
+  presentation is an unread one, not a delivered one.
 - **It spends nothing.** Rendering or dismissing it MUST NOT issue a
   model call, a commit, or any write beyond that browser-storage flag.
   It may only ever *link* to consoles that do real work.
@@ -4842,10 +4848,11 @@ MCP, and where to start — ask, feed, connect. It is chrome, wholly:
   needs the door on day thirty.
 
 **F.53 (acceptance).** A fresh browser profile signing into a served
-Studio sees the presentation exactly once; dismissing it produces no
-request beyond what the landing console already makes; and the
-integration manual's menu entry renders **MCP / API / Integrations** in
-each of the three languages of J.5.3.
+Studio is shown the presentation; dismissing it produces no request
+beyond what the landing console already makes, and after dismissal it
+never appears again in that browser; and the integration manual's menu
+entry renders **MCP / API / Integrations** in each of the three languages
+of J.5.3.
 
 #### J.5.12 The Skills console (v0.49)
 
@@ -4865,11 +4872,18 @@ instead of asking the person to write it.
   documentation that cannot drift from the deployment it documents.
   Produced client-side, delivered by copy or file download; the Station
   gains **no endpoint** for it.
-- **It teaches only the published surface.** Every operation the skill
-  instructs goes through the MCP tools as documented — recall through
-  `locate`/`harvest`/`answer`, writes through `plant`/`graft` where the
-  key permits — under the person's own paired key. No third write path
-  (J.15), no privileged side-channel (J.0, J.5).
+- **It teaches only the published surface, shaped to the key.** Every
+  operation the skill instructs goes through the MCP tools as documented,
+  under the person's own paired key: recall through
+  `locate`/`harvest`/`answer`, and **saving through `ingest`** — one
+  markdown document through the Gardener — because that is the one write
+  the J.2.6 default mask actually carries. `plant`/`graft`, `query` and
+  `tend` MUST be taught only as conditional on a key that carries
+  `write`/`query`/`tend`: a skill that teaches a write its own credential
+  step cannot perform, to an agent it also teaches "never work around a
+  refusal", is a contradiction obeyed straight into silence (v0.49 — this
+  corrects the earlier wording). No third write path (J.15), no
+  privileged side-channel (J.0, J.5).
 - **The walkthrough names pairing as the credential step.** A person
   installs this against their own password-derived key with the default
   `{read, ingest}`-style narrowing of J.2.6 — never by asking an

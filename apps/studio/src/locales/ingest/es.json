@@ -25,7 +25,7 @@
   "ingest.empty": "Nada ingerido todavía.",
   "ingest.errors": "Errores",
   "ingest.job_cancel": "Detener después de este documento",
-  "ingest.job_cancelled": "Detenido a petición. Los documentos ya plantados permanecen; Actualizar completa el resto.",
+  "ingest.job_cancelled": "Detenido a petición. Los documentos ya plantados permanecen; volver a espejar la carpeta completa el resto.",
   "ingest.job_cancelling": "Deteniendo después del documento actual…",
   "ingest.job_current": "procesando {file}",
   "ingest.job_errors": "{n} error(es) hasta ahora",

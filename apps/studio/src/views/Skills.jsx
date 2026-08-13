@@ -52,8 +52,9 @@ documents, data), recall first and reason after:
 - \`locate\` → \`look\` → \`pick\` — navigate: find nodes by their curated
   scent, read a node's passport, open one section of its body.
 - \`sniff\` — literal text search inside bodies (grep, not regex).
-- \`query\` — read-only SQL over \`type: dataset\` nodes. \`look\` at the
-  dataset first: its \`notes\` say what the columns mean.
+- \`query\` — read-only SQL over \`type: dataset\` nodes, if your key
+  carries the \`query\` capability. \`look\` at the dataset first: its
+  \`notes\` say what the columns mean.
 
 Cite node ids for anything you assert from the forest. If the forest and
 the user disagree, say so: the forest owns its documents, the user owns
@@ -62,22 +63,27 @@ the present.
 ## Save what is worth keeping
 
 When the user states something durable — a decision, a fact, a preference,
-a correction — offer to keep it:
+a correction — offer to keep it. \`forests\` lists what your key carries;
+use the write it actually allows:
 
-- \`plant\` a new note under the branch where it belongs. \`locate\` the
-  branch first; if nothing fits, ask the user where it should live.
-- \`graft\` to extend or amend a node you can already name.
+- \`ingest\` (a paired key carries this by default): send one markdown
+  document — a clear file name, the fact in the body, the destination
+  branch as \`dest\` — and the Gardener gives it its passport.
+- \`plant\` / \`graft\` (only if your key carries \`write\`): plant a new
+  note under the branch where it belongs (\`locate\` the branch first; if
+  nothing fits, ask the user), or graft to extend a node you can name.
 
 Write in English, keep the summary honest (it is how the note will be
 found), and never invent structure the forest does not have.
 
 ## Respect the contract
 
-- Your key decides what you see; what it cannot reach does not exist.
-  Never work around a refusal.
+- Your key decides what you see and what you may write; what it cannot
+  reach does not exist. Never work around a refusal — say what was
+  refused and which capability it needs.
 - Every read is budgeted. \`truncated: true\` means ask narrower, not
   retry harder.
-- Datasets change through \`tend\` only where your key allows it: one
+- Datasets change through \`tend\` only if your key carries it: one
   statement at a time, never DDL.
 `
 

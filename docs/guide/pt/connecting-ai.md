@@ -90,8 +90,8 @@ acrescentar**:
   dele. Tanto `login` quanto `pair` têm limite de taxa, e a recusa nunca
   revela se um usuário existe.
 
-A chave vive onde toda chave vive: o console de Acessos a lista, e você
-pode revogá-la lá a qualquer momento (veja
+A chave vive onde toda chave vive: o console de Acessos a lista, e um
+administrador pode revogá-la lá a qualquer momento (veja
 [Gerenciar a Station](./managing.md)).
 
 ## Claude Code em dois comandos
@@ -126,7 +126,7 @@ leu.
 
 ![O console de Skills, gerando a skill de memória para esta Station e esta floresta](../assets/skills.png)
 
-*(As capturas de tela mostram a interface em inglês.)*
+*(As capturas de tela mostram o console em inglês.)*
 
 O console conduz você pelos mesmos três passos desta página — parear uma
 chave, apontar o Claude Code para a Station, entregar a ele o arquivo — e
@@ -152,18 +152,22 @@ ensina três seções:
   resposta da floresta *é* a resposta; `harvest` quando o agente vai
   raciocinar sobre o material por conta própria; `locate` → `look` → `pick`
   para navegar; `sniff` para texto literal dentro dos corpos; `query` para
-  datasets — depois de um `look`, porque as `notes` de um dataset dizem o
-  que as colunas significam. E: cite ids de nós para qualquer coisa
-  afirmada a partir da floresta.
+  datasets, se a chave carrega `query` — depois de um `look`, porque as
+  `notes` de um dataset dizem o que as colunas significam. E: cite ids de
+  nós para qualquer coisa afirmada a partir da floresta.
 - **Save what is worth keeping** — quando o usuário declara algo durável
   (uma decisão, um fato, uma preferência, uma correção), ofereça-se para
-  guardar: `plant` uma nota nova sob o galho a que ela pertence, `graft`
-  para emendar um nó que o agente já sabe nomear. Escreva em inglês e
-  mantenha o resumo honesto — o resumo é como a nota será encontrada.
-- **Respect the contract** — a chave decide o que o agente vê; nunca
-  contorne uma recusa. Toda leitura tem orçamento, e `truncated: true`
-  significa pergunte mais estreito, não insista mais forte. Datasets mudam
-  só através de `tend`, uma instrução por vez, nunca DDL.
+  guardar, com a escrita que a chave de fato permite: `ingest` — um
+  documento markdown através do Gardener — é a escrita que uma chave
+  pareada carrega por padrão; `plant` e `graft` são ensinados só para
+  chaves que carregam `write`. Escreva em inglês e mantenha o resumo
+  honesto — o resumo é como a nota será encontrada.
+- **Respect the contract** — a chave decide o que o agente vê e o que ele
+  pode escrever; nunca contorne uma recusa — diga o que foi recusado e
+  qual capacidade seria necessária. Toda leitura tem orçamento, e
+  `truncated: true` significa pergunte mais estreito, não insista mais
+  forte. Datasets mudam através de `tend` só onde a chave o carrega, uma
+  instrução por vez, nunca DDL.
 
 > **Nota** — o corpo do arquivo da skill é em inglês independentemente do
 > idioma do console, de propósito: ele fala com o modelo, não com você. O
@@ -185,7 +189,7 @@ o resto é guardado como mostrado.
 | `pick` | `read` | Lê o corpo, ou uma seção dele. |
 | `scan` | `read` | Filtra os nós de um galho por metadados. |
 | `sniff` | `read` | Busca literal dentro dos corpos — os fatos que os resumos não carregam. |
-| `harvest` | `read` | Recuperação de um tiro só: evidência ordenada com trechos exatos, sem saltos. |
+| `harvest` | `read` | Recuperação de um golpe só: evidência ordenada com trechos exatos, sem saltos. |
 | `answer` | `read` | Uma resposta fundamentada escrita pelo modelo ligado à floresta, com a sua evidência. |
 | `view` | `read` | O payload de imagem de um nó media, como conteúdo de imagem que um cliente multimodal lê para o próprio contexto. |
 | `query` | `query` | SQL somente leitura contra um nó de dataset. |
@@ -194,7 +198,7 @@ o resto é guardado como mostrado.
 | `tend` | `tend` | Escrita de dataset em uma instrução única. |
 | `ingest` | `ingest` | Coloca documentos dentro da floresta através do Gardener. |
 
-Um modelo mental razoável: `answer` e `harvest` são os de-um-tiro-só, a
+Um modelo mental razoável: `answer` e `harvest` são os de-um-golpe-só, a
 família `locate`/`look`/`move`/`pick`/`scan`/`sniff` é navegação, `query` e
 `tend` são o par de dataset, e `plant`/`graft`/`ingest` são como a floresta
 cresce.
@@ -285,9 +289,9 @@ modelo, então ele viaja.
 Conectar uma IA não abre um buraco na governança — o agente é um principal
 como qualquer outro, e o contrato vale em toda superfície.
 
-**Escopos valem.** Um grant vincula um principal a uma floresta com
+**Escopos valem.** Uma concessão vincula um principal a uma floresta com
 capacidades e escopo por prefixo de galho: listas allow e deny de prefixos
-de subárvore, deny vence em qualquer profundidade, e sem grant não há
+de subárvore, deny vence em qualquer profundidade, e sem concessão não há
 acesso. As capacidades são exatamente seis:
 
 | Capacidade | Permite |

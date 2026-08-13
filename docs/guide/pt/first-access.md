@@ -31,7 +31,7 @@ Ela pede três coisas e uma escolha:
 |---|---|
 | **Usuário** | É com ele que você entra, e é o nome que aparece no log de auditoria. |
 | **Senha** | No mínimo 12 caracteres. Esta conta é dona da implantação — governa todas as florestas, presentes e futuras — então capriche no tamanho. |
-| **E-mail** | Opcional, e rotulado como tal. Fica armazenado localmente como contato da pessoa dona e nunca é transmitido a lugar nenhum — a configuração se completa bem em um host isolado da internet. |
+| **E-mail** | Opcional, e rotulado como tal. Fica guardado no próprio registro da Station como contato da pessoa dona — nada é enviado a nenhum serviço externo, e a configuração se completa bem em um host isolado da internet. |
 
 A conta criada aqui carrega o **bit de dona**: `admin` em todas as
 florestas do registro, inclusive florestas criadas depois, inclusive
@@ -66,7 +66,7 @@ implantação que o console pergunta à Station, nunca um chute.
   é possível — um super-admin de ambiente está configurado, ou pelo menos
   uma pessoa recebeu uma senha em Acessos. Você entra com usuário e senha;
   o token de sessão que recebe se comporta como uma chave comum dali em
-  diante, então tudo rio abaixo é um único caminho.
+  diante, então tudo o que vem depois é um caminho só.
 - **A porta da chave** (a aba **Chave de API**) sempre existe. Cole uma
   chave (`mk_…`) e conecte. A Station guarda apenas o digest da chave — a
   chave em si nunca é armazenada no servidor.

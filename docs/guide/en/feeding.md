@@ -24,7 +24,7 @@ line uses. It offers up to four tabs:
 | **Send files** | uploads files from your computer; the Station stages and adopts them | a job you can watch |
 | **Write** | one authored document, curated and shown to you *before* planting | in place, with review |
 | **Mirror a folder** | mirrors a directory the **Station host** can read | a job you can watch |
-| **Optimize** | re-reads the mirrored folder (sync), rebuilds the index, refreshes the vector layer | runs while you wait |
+| **Optimize** | re-reads the mirrored folder (sync), rebuilds the index, refreshes the vector layer | the re-read is a job like any batch; the index and vector actions run while you wait |
 
 Every mode asks **where to put them**: an existing branch, and everything
 lands under it. Adding documents needs the `ingest` capability.
@@ -83,11 +83,11 @@ roots are configured, the Mirror tab does not appear at all, and the
 refusal names the setting so an operator who *did* mean to mirror a folder
 learns exactly what to configure.
 
-Once a folder has been mirrored, the **Optimize** tab offers **Refresh**:
-it re-reads the folder you last mirrored — shown beside the button, so you
-always see what will be re-read — and updates only what changed, by hash
-diff. A refresh keeps the summaries somebody already approved: curation
-never runs on a sync.
+Once a folder has been mirrored, the **Optimize** tab re-runs the mirror:
+its **Ingest** button re-reads the folder you last mirrored — shown beside
+the button, so you always see what will be re-read — and updates only what
+changed, by hash diff. A sync keeps the summaries somebody already
+approved: curation never runs on one.
 
 ### Batches are jobs
 
@@ -112,8 +112,8 @@ The batch modes — send, mirror, refresh — answer immediately with a **job**
   *stop* a batch, the queue holds and waits for you.
 - **Cancelling is clean.** A cancel takes effect at the next document
   boundary — a document is whole or absent, never half. What was planted
-  stands (those are commits), and **Refresh** completes the rest without
-  duplicating anything.
+  stands (those are commits), and mirroring the folder again from
+  **Optimize** completes the rest without duplicating anything.
 
 > **Note** — a Station restart forgets job *records*, never the *work*: the
 > work is commits, and the forest's own account is the audit trail and

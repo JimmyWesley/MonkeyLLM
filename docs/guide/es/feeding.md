@@ -22,14 +22,14 @@ pestañas:
 
 ![La consola de ingesta con archivos preparados para subir](../assets/ingest.png)
 
-(Las capturas de pantalla muestran la interfaz en inglés.)
+*(Las capturas de pantalla muestran la consola en inglés.)*
 
 | Pestaña | Qué hace | Cómo responde |
 |---|---|---|
 | **Enviar archivos** | sube archivos desde tu computadora; la Station los deja en preparación y los adopta | un job que puedes seguir |
 | **Escribir** | un documento escrito por ti, curado y mostrado *antes* de plantar | en el lugar, con revisión |
 | **Espejar una carpeta** | espeja un directorio que el **host de la Station** puede leer | un job que puedes seguir |
-| **Optimizar** | relee la carpeta espejada (sync), reconstruye el índice, actualiza la capa vectorial | corre mientras esperas |
+| **Optimizar** | relee la carpeta espejada (sync), reconstruye el índice, actualiza la capa vectorial | la relectura es un job como cualquier lote; las acciones de índice y de vectores corren mientras esperas |
 
 Cada modo pregunta **dónde ponerlos**: una rama existente, y todo
 aterriza debajo de ella. Añadir documentos exige la capacidad `ingest`.
@@ -91,11 +91,11 @@ configuradas, la pestaña de espejado no aparece en absoluto, y el rechazo
 nombra la variable, para que un operador que *sí* quería espejar una
 carpeta aprenda exactamente qué configurar.
 
-Una vez espejada una carpeta, la pestaña **Optimizar** ofrece
-**Actualizar**: relee la carpeta que espejaste la última vez — mostrada
-junto al botón, para que siempre veas qué se va a releer — y actualiza
-solo lo que cambió, por diff de hash. Una actualización conserva los
-resúmenes que alguien ya aprobó: la curación nunca corre en un sync.
+Una vez espejada una carpeta, la pestaña **Optimizar** vuelve a ejecutar
+el espejo: su botón **Ingerir** relee la carpeta que espejaste la última
+vez — mostrada junto al botón, para que siempre veas qué se va a releer —
+y actualiza solo lo que cambió, por diff de hash. Un sync conserva los
+resúmenes que alguien ya aprobó: la curación nunca corre en uno.
 
 ### Los lotes son jobs
 
@@ -120,8 +120,8 @@ con un **job** (spec J.9), y el trabajo corre en la Station:
   invisible. Si *detienes* un lote, la cola se queda quieta y te espera.
 - **Cancelar es limpio.** Una cancelación surte efecto en la siguiente
   frontera de documento — un documento está entero o ausente, nunca a
-  medias. Lo plantado queda en pie (eso son commits), y **Actualizar**
-  completa el resto sin duplicar nada.
+  medias. Lo plantado queda en pie (eso son commits), y volver a espejar
+  la carpeta desde **Optimizar** completa el resto sin duplicar nada.
 
 > **Nota** — un reinicio de la Station olvida los *registros* de jobs,
 > nunca el *trabajo*: el trabajo son commits, y la cuenta propia del
@@ -176,8 +176,8 @@ cosas distintas según lo que le des (spec G.2.2):
 - **Un `.csv`, `.json`, `.xls` o `.xlsx` se convierte** en un dataset
   recién nacido con tipos de columna inferidos. Un workbook convierte
   **todas** las hojas, una tabla por hoja — tomar la hoja uno y descartar
-  el resto es como una hoja de cálculo llega sin los datos por los que
-  alguien la adoptó.
+  el resto es la manera en que una hoja de cálculo acaba llegando sin los
+  datos por los que alguien la adoptó.
 
 De cualquier forma, el pasaporte del dataset lleva el **mapa de muestra**
 (spec G.2.3): un `## Query manual` que nombra cada tabla y cada columna
@@ -313,5 +313,5 @@ escritas una vez, leídas en cada pregunta que toque el dataset.
 
 ---
 
-El bosque está alimentado. Ahora conecta las IA que van a leerlo — y a
-hacerlo crecer — desde fuera: [Conectar tus IA →](./connecting-ai.md)
+El bosque está alimentado. Ahora conecta las IAs que van a leerlo — y a
+hacerlo crecer — desde fuera: [Conectar tus IAs →](./connecting-ai.md)

@@ -1,4 +1,4 @@
-# Gestionar y gobernar
+# Administrar y gobernar
 
 [English](../en/managing.md) · [Português](../pt/managing.md) · Español
 
@@ -6,10 +6,14 @@
 
 El bosque es el producto; esta página trata de mantenerlo gobernado y sano.
 Cinco consolas cargan con ese trabajo — **Accesos**, **Modelos**, **Salud**,
-**Auditoría** y la pestaña **Optimizar** de Ingesta — y todas aparecen solo
-para una clave que tiene la capacidad `admin` sobre el bosque. Todo lo que
-hacen viaja por las mismas rutas `/v1` que cualquier cliente de la API
-podría llamar: no hay canal lateral privilegiado, y deliberadamente no hay
+**Auditoría** y la pestaña **Optimizar** de Ingesta. Las cuatro consolas
+aparecen solo para una clave que tiene la capacidad `admin` sobre el bosque;
+la pestaña Optimizar se muestra para cualquier clave que pueda hacer
+`ingest` (una simple relectura de la carpeta espejada no exige más), con sus
+tarjetas de Reconstruir y de Actualizar la capa vectorial reservadas para
+`admin`. Todo lo que hacen viaja por las mismas rutas `/v1` que cualquier
+cliente de la API podría llamar: no hay canal lateral privilegiado, y
+deliberadamente no hay
 un panel separado de superadministrador. Una consola, una API, con las
 capacidades decidiendo qué aparece.
 
@@ -24,7 +28,7 @@ tiene y cuándo se le vio por última vez.
 
 ![La consola de Accesos: todos los que pueden alcanzar tus bosques, una fila por persona](../assets/people.png)
 
-*(Las capturas de pantalla muestran la interfaz en inglés.)*
+*(Las capturas de pantalla muestran la consola en inglés.)*
 
 El acceso se concede como **primero un nivel, después las capacidades**. Un
 nivel es un punto de partida con nombre, y la consola documenta cada nivel
@@ -250,8 +254,9 @@ donde le corresponde a cada una:
   Los cuerpos y los fragmentos nunca se copian dentro — el log registra
   acceso, no contenido — y la consola lo dice en pantalla.
 - **Las escrituras** ya son commits en el historial git del propio bosque,
-  selladas con el principal que actúa (`station(<principal>): <action>`),
-  así que la historia de lo que cambió es la del propio bosque.
+  cada una con un trailer de commit `station-principal: <name>` que nombra
+  al principal que actúa, así que la historia de lo que cambió es la del
+  propio bosque.
 
 Juntas, las dos reconstruyen el rastro completo de cualquier respuesta
 después del hecho: qué principal, qué primitivos, qué nodos, en qué orden.
@@ -271,7 +276,7 @@ apretar es la mayor parte de la destreza:
 
 | Botón | Qué hace | Cuándo apretarlo |
 |---|---|---|
-| **Sincronizar** | Relee la carpeta que este bosque espejó por última vez y actualiza solo lo que cambió. | Los documentos de origen avanzaron y el bosque debería seguirlos. |
+| **Ingerir** (el botón de envío de la pestaña) | Relee la carpeta que este bosque espejó por última vez y actualiza solo lo que cambió. | Los documentos de origen avanzaron y el bosque debería seguirlos. |
 | **Reconstruir** | Reconstruye el índice de búsqueda a partir de los archivos — los archivos son la verdad, el índice es derivado. | Cualquier cosa parece desactualizada: una búsqueda que no encuentra un nodo que sí puedes leer, un bosque que llegó de un snapshot o de una versión anterior. |
 | **Actualizar** | Embebe solo los nodos escritos desde la última construcción de la capa vectorial. | La consola dice "*n* nodos se escribieron desde la última construcción, así que la búsqueda híbrida ordena sin ellos." |
 
@@ -304,9 +309,9 @@ respeta:
 | `look` | 500 |
 | `move` | 600 |
 | `locate`, `scan`, `sniff` | 800 |
-| `query` | 2,000 — filas enteras caen desde el final; la lista de columnas nunca cae |
-| `pick` | un cuerpo de más de 4,000 devuelve en su lugar su esquema, dirigiendo al agente a una sección |
-| `harvest` | 4,000 para todo el compuesto |
+| `query` | 2000 — filas enteras caen desde el final; la lista de columnas nunca cae |
+| `pick` | un cuerpo de más de 4000 devuelve en su lugar su esquema, dirigiendo al agente a una sección |
+| `harvest` | 4000 para todo el compuesto |
 
 La única llamada que cuesta dinero de verdad es `answer` — la llamada al
 modelo detrás de Preguntar. Por eso la Station mantiene un **banco de

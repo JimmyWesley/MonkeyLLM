@@ -112,13 +112,19 @@ cunha nada.
 
 ## Modelos locais
 
-Nenhum provedor externo é necessário: dois sidecars llama.cpp acompanham
-por trás de perfis do compose, então chat e embeddings podem rodar ao lado
-da Station.
+O arquivo compose traz um **embedder local** por trás de um perfil, e
+carrega um **sidecar de chat como template comentado** — llama.cpp nos
+dois casos, rodando ao lado da Station.
 
 ```bash
-docker compose --profile local-llm --profile local-embed up -d
+docker compose --profile local-embed up -d   # the embedder (bge-m3)
 ```
+
+Para chat local, abra o `docker-compose.yml` e **descomente o serviço
+`llm`** (perfil `local-llm`) — ele vem comentado porque pesos de chat são
+pesados e muitas implantações preferem apontar `MONKEYLLM_LLM_ENDPOINT`
+para um provedor externo compatível com OpenAI (para um setup llama.cpp
+na sua própria GPU, veja `docs/local-inference.md`).
 
 O primeiro início baixa os pesos do Hugging Face para o volume `models`
 (padrões: Qwen2.5-7B-Instruct Q4_K_M para chat, bge-m3 Q8_0 para
@@ -134,8 +140,8 @@ MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1
 A Station lê essas variáveis na inicialização, então o sidecar é só metade
 do trabalho — defina a variável **e** reinicie a Station. Em uma
 plataforma compose sem a flag `--profile` (Dokploy, Coolify), defina
-`COMPOSE_PROFILES=local-llm,local-embed` no ambiente em vez disso; o
-Compose a lê sozinho.
+`COMPOSE_PROFILES=local-embed` (mais `local-llm` se você descomentou o
+serviço de chat) no ambiente em vez disso; o Compose a lê sozinho.
 
 > **Nota** — os sidecars rodam em CPU por padrão, o que basta para o
 > modelo navegador 7B Q4. Deixe o embedder desligado para manter a busca

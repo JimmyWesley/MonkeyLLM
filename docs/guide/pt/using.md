@@ -25,7 +25,7 @@ e escreve a resposta.
 
 ![O console Perguntar: uma pergunta, sua resposta e a lista de evidências com os nós que foram de fato lidos](../assets/ask.png)
 
-(As capturas de tela mostram a interface em inglês.)
+*(As capturas de tela mostram o console em inglês.)*
 
 **A evidência não é decoração.** Cada id listado sob a resposta foi de
 fato lido para produzi-la. Clique em um e ele abre no Explorar, então uma
@@ -55,8 +55,9 @@ Alguns controles ficam ao lado da caixa de pergunta:
   hora, sem pagar o modelo de novo. Desligue para comprar uma execução
   nova e substituir a guardada.
 
-**Respostas do banco dizem que são.** Uma resposta servida carrega o selo
-**Do banco**, e o custo registrado nunca é cobrado de novo. Não é um
+**Respostas servidas do banco dizem que são.** Uma resposta servida
+carrega o selo **Do banco**, e o custo registrado nunca é cobrado de
+novo. Não é um
 cache burro: a busca ainda roda em toda pergunta, e a resposta guardada
 só é servida enquanto o que seria lido hoje coincide com o que foi lido
 então — uma floresta que mudou por baixo da pergunta recebe uma resposta
@@ -187,7 +188,7 @@ o agente igualmente.
 
 **Notas é onde uma pessoa ensina o agente** (spec C.2.1). Estrutura e
 amostra saem do arquivo; o *significado* não — qual coluna é USD e qual é
-BRL, o que um código de status quer dizer, qual join responde a pergunta
+BRL, o que um código de status quer dizer, qual join responde à pergunta
 que as pessoas fazem de verdade. O que você escrever na aba Notas volta
 em todo `look` deste dataset, e viaja com ele para dentro de toda
 resposta que o host monta — antes de qualquer SQL ser escrito. É salvo
@@ -252,4 +253,4 @@ Tudo acima é uma janela humana sobre uma superfície de máquina. Perguntar
 conectado via MCP segura as mesmas ferramentas sob o mesmo escopo e os
 mesmos orçamentos — o console é uma janela, e a floresta atrás dele é o
 produto. Para entregar estas chamadas à sua IA, veja
-[Conectando sua IA](./connecting-ai.md).
+[Conectando a sua IA](./connecting-ai.md).
