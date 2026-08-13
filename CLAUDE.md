@@ -250,8 +250,36 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   /v1/forests/{f}/payload/{node}` — read cap, byte-identical
   `E_NOT_FOUND` for out-of-scope/absent/no-payload, resolved path
   contained in the forest root, remote URIs refused `E_SCHEMA`. Bytes
-  never enter model material through it; the G.5.1 describer at ingest
-  is the one place a model sees an image.
+  never enter material the host assembles for a model; the G.5.1
+  describer reads the image at ingest, and C.6d `view` is the one
+  path a multimodal *client* fetches it deliberately.
+- **A model sees the image it chose (spec C.6d, v0.48)**: `view(id)` is
+  an **MCP-only** tool (REST refuses the name — J.14's GET is REST's
+  byte route, and a JSON twin would disclose server paths): image
+  payloads only, ≤6 MiB (the describer's own cap — one project-wide
+  answer to "too big for a model"), local-only, contained, and
+  byte-identical `E_NOT_FOUND` for absent/out-of-scope/payload-less.
+  Engine method `Vine.view` returns path+identity, never bytes; the MCP
+  layer reads the file into an image content block beside a JSON header
+  that MUST NOT carry the path. Traced and audited like a read.
+- **The reply has a stated size (spec J.10.8, v0.48)**: `answer` takes
+  `reply_tokens` per call — clamped [64, 4000], it replaces the
+  binding's `max_tokens` on the model call AND is stated in the prompt
+  (a hard cut alone truncates mid-sentence, invisibly). It enters the
+  J.10.7 key **only when set**; absent and `0` both mean "the binding
+  rules" and key exactly as before the upgrade. The console slider is
+  a per-person localStorage preference (`monkeyllm.ask.prefs`), never
+  in the address. The reasoning bump applies after the override.
+- **The answer shows what it read (spec J.10.9, v0.48)**: prompts teach
+  `![caption](media:<node id>)` whenever the material carries a `media`
+  node — ids from the material only. The host never fetches or
+  rewrites; Studio's `Markdown media={{forest}}` resolves the scheme
+  through J.14 with the *viewer's* credential, so an invented or
+  out-of-scope id renders as its caption, never an error. Evidence of
+  type `media` renders its image (PayloadImage, outside the row's own
+  `<a>`); the `.md` export rewrites `media:` to the absolute payload
+  route. And the reading fingerprint now hashes `notes` too — a
+  teaching edited is a reading changed.
 - **The Clipper is a client (spec J.15, v0.48)** — `apps/clipper/`, MV3:
   stores origin + paired key only (never the password); prose through
   `compose`, binaries through `upload`; `E_LOCKED` queues client-side;

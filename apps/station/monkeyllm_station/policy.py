@@ -131,7 +131,7 @@ class Policy:
 
 REQUIRED_CAP = {
     "locate": "read", "look": "read", "move": "read", "pick": "read",
-    "scan": "read", "sniff": "read", "harvest": "read",
+    "scan": "read", "sniff": "read", "harvest": "read", "view": "read",
     "query": "query", "tend": "tend", "plant": "write", "graft": "write",
 }
 
@@ -270,6 +270,12 @@ class ScopedVine:
     def pick(self, id: str, section: str | None = None) -> dict:
         self._gate(id)
         return self._vine.pick(id, section=section)
+
+    def view(self, id: str) -> dict:
+        # C.6d resolves like J.14: out-of-scope, absent and payload-less all
+        # answer the one `_gate`/engine envelope, byte-identical.
+        self._gate(id)
+        return self._vine.view(id)
 
     def harvest(self, query: str, terms: list[str] | None = None, k: int = 3) -> dict:
         from monkeyllm.harvest import harvest as _harvest

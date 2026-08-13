@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Jimmy Wesley
 
-"""Vine MCP server — the 9 primitives + harvest as MCP tools (spec Part C).
+"""Vine MCP server — the 9 primitives + harvest + view as MCP tools (spec Part C).
 
 Transport: stdio for dev, streamable-http for the network/Docker.
 Errors come back as the spec envelope: {"error": {code, message, hint}}.
@@ -227,6 +227,23 @@ def build_server(
     def pick(id: str, section: str | None = None, forest: str | None = None) -> dict:
         """Harvest the body (or one section) of a node."""
         return guarded("pick", forest, id, section=section)
+
+    @mcp.tool()
+    def view(id: str, forest: str | None = None):
+        """The image behind a media node, as MCP image content (spec C.6d).
+
+        A media node's body is a describer's prose about the image; view()
+        hands a multimodal client the pixels themselves — images only,
+        local payloads only, bounded at 6 MiB. Returns a JSON header
+        (id, media_type, size, payload_hash) beside the image block."""
+        meta = guarded("view", forest, id)
+        if not isinstance(meta, dict) or "error" in meta:
+            return meta
+        from mcp.server.mcpserver.utilities.types import Image
+
+        path = meta.pop("path")
+        fmt = meta["media_type"].split("/", 1)[1]
+        return [meta, Image(path=path, format=fmt)]
 
     @mcp.tool()
     def query(id: str, sql: str, forest: str | None = None) -> dict:

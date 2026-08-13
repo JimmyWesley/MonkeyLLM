@@ -21,6 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
+import { api } from '../api.js'
 import { useTheme } from '../theme.jsx'
 import { highlightHtml } from './highlight.jsx'
 
@@ -36,14 +37,21 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
-export function Markdown({ children, className = '' }) {
+/** `media={{ forest }}` opts a surface into J.10.9: a markdown image whose
+ *  address is `media:<node id>` is resolved after mount through the J.14
+ *  payload route, with the viewer's own credential — so scope is enforced
+ *  where it always is, and an id the model invented (or one this viewer may
+ *  not read) renders as its caption and nothing else. */
+export function Markdown({ children, className = '', media = null }) {
   const { resolved } = useTheme()
   const host = useRef(null)
   const sources = useRef([])
+  const mediaRefs = useRef([])
   const [failed, setFailed] = useState(false)
 
   const html = useMemo(() => {
     sources.current = []
+    mediaRefs.current = []
     const renderer = new marked.Renderer()
     // Fences are held back, not rendered: the diagram is drawn after mount,
     // from an array the sanitiser never touches. Nothing from the model is
@@ -58,11 +66,75 @@ export function Markdown({ children, className = '' }) {
       // so the fence gains spans without gaining a second trust boundary.
       return `<pre><code>${highlightHtml(text, lang)}</code></pre>`
     }
+    if (media?.forest) {
+      // Same discipline as the diagrams: the id and the caption are parked
+      // in a ref the sanitiser never sees, and only an index enters markup.
+      const baseImage = renderer.image.bind(renderer)
+      renderer.image = (token) => {
+        const href = String(token.href || '')
+        if (href.startsWith('media:')) {
+          const i = mediaRefs.current.push({
+            id: href.slice('media:'.length),
+            alt: String(token.text || ''),
+          }) - 1
+          return `<span class="md-media" data-media="${i}"></span>`
+        }
+        return baseImage(token)
+      }
+    }
     const parsed = marked.parse(String(children ?? ''), {
       renderer, gfm: true, breaks: true,
     })
     return DOMPurify.sanitize(parsed, { ADD_ATTR: ['target'] })
-  }, [children])
+  }, [children, media?.forest])
+
+  useEffect(() => {
+    const slots = host.current?.querySelectorAll('.md-media') || []
+    if (!media?.forest || !slots.length) return
+    let alive = true
+    const urls = []
+    ;(async () => {
+      for (const slot of slots) {
+        const ref = mediaRefs.current[Number(slot.dataset.media)]
+        if (!alive || !ref) continue
+        try {
+          const p = await api.payload(media.forest, ref.id)
+          if (!p.type.startsWith('image/')) {
+            p.cancel()
+            throw new Error('not an image')
+          }
+          const blob = await p.blob()
+          if (!alive) return
+          const url = URL.createObjectURL(blob)
+          urls.push(url)
+          const link = document.createElement('a')
+          link.href = url
+          link.target = '_blank'
+          link.rel = 'noreferrer'
+          const img = document.createElement('img')
+          img.src = url
+          img.alt = ref.alt
+          img.className = 'md-media-img max-h-[420px] max-w-full rounded-lg '
+            + 'border border-line bg-surface-2 object-contain'
+          link.replaceChildren(img)
+          slot.replaceChildren(link)
+        } catch {
+          // The caption, never an error card: a failed reference must not
+          // outrank the answer it decorates (J.10.9).
+          if (alive && ref.alt) {
+            const cap = document.createElement('em')
+            cap.className = 'text-text-3'
+            cap.textContent = ref.alt
+            slot.replaceChildren(cap)
+          }
+        }
+      }
+    })()
+    return () => {
+      alive = false
+      urls.forEach((u) => URL.revokeObjectURL(u))
+    }
+  }, [html, media?.forest])
 
   useEffect(() => {
     const slots = host.current?.querySelectorAll('.md-diagram') || []

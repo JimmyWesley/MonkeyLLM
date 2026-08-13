@@ -30,3 +30,4 @@ Conventions:
 | T11 | Answer store: serve the answer already bought (spec v0.33 → J.10.7 + F.37) | in-progress (2026-08-11: exact tier shipped end-to-end, F.37 green minus the near-tier clause; the near tier remains) |
 | T12 | Snapshot travel: download and import over the Station (spec v0.39 → J.13.1/J.13.2 + F.39) | done (2026-08-11: owner-only download + import routes, Studio controls, F.39 suite green) |
 | T13 | The Clipper: browser extension feeding the Gardener (spec v0.48 → J.2.6/G.5.1/J.14/J.15 + F.47–F.49) | in-progress (2026-08-13: spec written; Station pairing + payload bytes, engine stub converter, vision role, `apps/clipper/` MV3 underway) |
+| T14 | Media in answers: `view` over MCP, `media:` references, per-call reply size (spec v0.48 → C.6d/J.10.8/J.10.9 + F.50–F.51) | done (2026-08-13: engine+Station+Studio shipped, suites green; user's real-browser pass and commit remain) |

@@ -80,7 +80,8 @@ def normalize(question: str) -> str:
 
 
 def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
-              binding: dict, policy, head: str | None = None) -> str:
+              binding: dict, policy, head: str | None = None,
+              reply_tokens: int | None = None) -> str:
     """The closed list of J.10.7 — and nothing off it.
 
     Every component here can change the answer; nothing else may enter,
@@ -91,6 +92,9 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
     scope is identical and unreachable across scopes. `head` is the walk's
     pin (v0.35): a sweep passes None, because its freshness is decided by
     the reading fingerprint rather than by the forest's clock.
+    `reply_tokens` (J.10.8) enters only when the caller set one — the
+    material keeps its old shape otherwise, so an upgrade invalidates
+    nothing.
     """
     material = json.dumps({
         "question": normalize(question),
@@ -112,6 +116,7 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
             "tables": {d: sorted(t) for d, t in sorted((policy.tables or {}).items())},
         },
         "head": head,
+        **({"reply_tokens": int(reply_tokens)} if reply_tokens else {}),
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
@@ -127,10 +132,15 @@ def reading_fingerprint(bundle: dict) -> str:
     not the body's, and a store invalidated by its own hits would never
     hold an entry. A result that enters or leaves the set is a change of
     reading; a set that merely reshuffled is not.
+
+    `notes` is in the list (v0.48) because it is in the bundle (C.2.1 rule
+    6): the teaching is handed to the model, so a teaching edited is a
+    reading changed — without it, an operator writing notes could not
+    invalidate an answer built before them.
     """
     material = sorted(
         [[r.get("id"), r.get("type"), r.get("title"), r.get("summary"),
-          r.get("matches"), r.get("content")]
+          r.get("matches"), r.get("content"), r.get("notes")]
          for r in (bundle.get("results") or [])],
         key=lambda item: str(item[0]))
     payload = json.dumps(

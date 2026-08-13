@@ -40,19 +40,57 @@ DATASET_CAVEAT = (
     "dataset, and name it."
 )
 
+# J.10.9: the reader can be shown the image the describer wrote about. The
+# reference is resolved by the console through the payload route, with the
+# viewer's own credential — so an invented id renders as its caption and
+# nothing else, and the reply itself stays plain, storable markdown.
+MEDIA_CAVEAT = (
+    "\n\n=== ABOUT THE MEDIA ABOVE ===\n"
+    "These are type:media nodes: {ids}. Their text is a machine-written "
+    "description of an image (or audio) file the reader cannot see in your "
+    "words alone. When showing the image itself would help the reader, embed "
+    "it in your answer as a markdown image on its own line: "
+    "![<short caption>](media:<node id>). Use ONLY node ids listed above — "
+    "never invent one — and never embed audio."
+)
 
-def chat_from_binding(binding: dict, *, timeout: float = 180.0):
+# J.10.8: the hard cap alone cuts mid-sentence, and a provider's cut carries
+# no flag the caller could see. Said out loud, the model shapes the reply to
+# the room instead of overrunning it.
+REPLY_BUDGET_NOTE = (
+    "\n\nKeep {what} within about {tokens} tokens (roughly {words} "
+    "words): shape it to fit and finish cleanly rather than being cut off."
+)
+
+MIN_REPLY_TOKENS = 64
+MAX_REPLY_TOKENS = 4000
+
+
+def clamp_reply_tokens(value) -> int:
+    """The effective per-call reply budget (J.10.8) — what the model call
+    uses and what the J.10.7 key records. Garbage raises and surfaces as
+    E_SCHEMA through the composite's own guard."""
+    return max(MIN_REPLY_TOKENS, min(int(value), MAX_REPLY_TOKENS))
+
+
+def chat_from_binding(binding: dict, *, timeout: float = 180.0,
+                      reply_tokens: int | None = None):
     """An OpenAI-compatible client for one binding. Mirrors the engine's own
     client (`curator.make_chat`) so behaviour matches what the CLI produces —
     including the reasoning-off default, without which hybrid thinkers spend
-    the whole budget thinking and return empty content."""
+    the whole budget thinking and return empty content.
+
+    `reply_tokens` (J.10.8) overrides the binding's `max_tokens` for this
+    call, already clamped by the composite; the reasoning bump is applied
+    after it, for the reason the bump exists — thinking tokens must not eat
+    the reply."""
     import httpx
 
     endpoint = (binding.get("endpoint") or "").rstrip("/")
     if not endpoint:
         raise VineError(E_SCHEMA, "provider has no endpoint")
     model = binding.get("model") or "local"
-    max_tokens = int(binding.get("max_tokens") or 600)
+    max_tokens = int(reply_tokens or binding.get("max_tokens") or 600)
     reasoning_on = str(binding.get("reasoning", "off")).lower() == "on"
     if reasoning_on:
         max_tokens += 1000
@@ -155,7 +193,7 @@ def probe(endpoint: str, api_key: str | None) -> dict:
 
 
 def answer(scoped_vine, question: str, binding: dict, k: int = 3,
-           bundle: dict | None = None) -> dict:
+           bundle: dict | None = None, reply_tokens: int | None = None) -> dict:
     """Retrieve inside the principal's scope, then let the bound model read.
 
     The retrieval half is deterministic and scoped; the model only ever sees
@@ -179,15 +217,26 @@ def answer(scoped_vine, question: str, binding: dict, k: int = 3,
     datasets = [r.get("id") for r in bundle.get("results", [])
                 if r.get("type") == "dataset"]
     caveat = DATASET_CAVEAT.format(ids=", ".join(datasets)) if datasets else ""
+    # J.10.9: a media node's prose describes pixels the reader cannot see;
+    # the embed rule rides per call, so it reaches every binding.
+    media = [r.get("id") for r in bundle.get("results", [])
+             if r.get("type") == "media"]
+    if media:
+        caveat += MEDIA_CAVEAT.format(ids=", ".join(media))
 
-    chat, model = chat_from_binding(binding)
+    system = ANSWER_SYSTEM
+    if reply_tokens:
+        system += REPLY_BUDGET_NOTE.format(
+            what="the answer", tokens=reply_tokens,
+            words=int(reply_tokens * 0.75))
+    chat, model = chat_from_binding(binding, reply_tokens=reply_tokens)
     # Timed here rather than around the whole composite: the retrieval half
     # is measured per primitive by the engine's own tracer, and reporting one
     # number for both would hide the only split that matters — how much of a
     # slow answer was the forest and how much was the provider.
     t0 = time.perf_counter()
     reply = chat([
-        {"role": "system", "content": ANSWER_SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content":
             "=== HARVESTED MATERIAL ===\n"
             + json.dumps(bundle, ensure_ascii=False)
@@ -242,6 +291,10 @@ Rules:
   in the prose. A "notes" field on a dataset is what its operator wrote about how to read it —
   follow it. Never `SELECT *` on a wide table: results are token-budgeted, so name the columns
   you need or the rows come back truncated.
+- type:media nodes are images (or audio): their body is a machine-written description of the
+  file. If showing the reader the image itself would help, embed it in your FINAL answer text as
+  ![<short caption>](media:<node id>) on its own line — only ids you actually saw in tool
+  results, never invented, and never for audio.
 - answer_nodes are exact ids from tool results, and only nodes you actually opened.
 Entry points for this question are in the first message."""
 
@@ -438,7 +491,7 @@ def _teach_datasets(scoped_vine, entry: dict) -> None:
 
 
 def forage(scoped_vine, question: str, binding: dict, k: int = 3,
-           max_hops: int = 6) -> dict:
+           max_hops: int = 6, reply_tokens: int | None = None) -> dict:
     """Answer by navigating (J.10.5), instead of by one deterministic sweep.
 
     `answer`'s default is `harvest`: entry search, no hops, one model call —
@@ -452,12 +505,19 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
     the hunt — a deadline turn forces an answer from what was already read.
     """
     max_hops = max(1, min(int(max_hops or 1), MAX_HOPS))
-    chat, model = chat_from_binding(binding)
+    system = FORAGE_SYSTEM
+    if reply_tokens:
+        # J.10.8: the cap bounds every turn (a tool call sits far under the
+        # floor); the note aims it at the answer, the only turn a reader sees.
+        system += REPLY_BUDGET_NOTE.format(
+            what="the final answer's text", tokens=reply_tokens,
+            words=int(reply_tokens * 0.75))
+    chat, model = chat_from_binding(binding, reply_tokens=reply_tokens)
 
     entry = scoped_vine.call("locate", query=question, k=k)
     _teach_datasets(scoped_vine, entry)
     messages = [
-        {"role": "system", "content": FORAGE_SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content":
             f"QUESTION: {question}\n\nlocate({question!r}) returned:\n"
             + json.dumps(entry, ensure_ascii=False)},
@@ -497,9 +557,8 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
                 "answer": str(args.get("text") or "").strip(),
                 "model": model, "model_ms": round(model_ms, 1),
                 "turns": turns, "hops": hops, "read": list(read.values()),
-            "usage": _usage_of(chat),
-            "sources": _sources(known, [], opened, read),
                 "usage": _usage_of(chat),
+                "sources": _sources(known, [], opened, read),
                 # Only what was actually opened. A cited id the model never
                 # read is a claim about the forest, not evidence from it.
                 "evidence": [i for i in said if i in opened] or opened[:k],

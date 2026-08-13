@@ -1050,7 +1050,7 @@ def build_app(
             vine.trails.add_heat(ids)
 
     def consult_walk_store(sample, forest, vine, policy, binding, payload,
-                           question, k, budget):
+                           question, k, budget, reply_tokens=None):
         """The walk's J.10.7 lookup, unchanged from v0.33: HEAD in the key
         (a walk cannot be re-walked without paying the model per hop), the
         stored response served whole, and heat deposited through the trails
@@ -1072,7 +1072,8 @@ def build_app(
             question=question, terms=derive_terms(question),
             k=k, hops=budget,
             hybrid=bool(getattr(vine, "hybrid_locate", False)),
-            binding=binding, policy=policy, head=head)
+            binding=binding, policy=policy, head=head,
+            reply_tokens=reply_tokens)
         store = answer_store.AnswerStore(Path(vine.forest.root))
         sample["cache_store"] = {"store": store, "key": key,
                                  "question": question,
@@ -1106,7 +1107,7 @@ def build_app(
         return result
 
     def serve_from_reading(sample, forest, vine, policy, binding, payload,
-                           question, k, bundle):
+                           question, k, bundle, reply_tokens=None):
         """The sweep's J.10.7 check (v0.35): the key finds the entry, the
         reading decides the model. The sweep already ran — this function
         never touches a primitive, so a hit's trace and pheromone are the
@@ -1131,7 +1132,8 @@ def build_app(
             question=question, terms=derive_terms(question),
             k=clamp_k(k), hops=None,
             hybrid=bool(getattr(vine, "hybrid_locate", False)),
-            binding=binding, policy=policy, head=None)
+            binding=binding, policy=policy, head=None,
+            reply_tokens=reply_tokens)
         fingerprint = answer_store.reading_fingerprint(bundle)
         store = answer_store.AnswerStore(Path(vine.forest.root))
         sample["cache_store"] = {"store": store, "key": key,
@@ -1222,6 +1224,14 @@ def build_app(
             if name == "answer":
                 question = payload.get("question") or payload.get("query") or ""
                 k = int(payload.get("k", 3))
+                # J.10.8: per-call reply size, clamped once — the same value
+                # caps the model call, rides the prompt and names the key.
+                # Zero and absent both mean "the binding rules": a console's
+                # slider at "auto" and a call that never heard of the knob
+                # must be the same call, and the same key.
+                raw_reply = payload.get("reply_tokens") or None
+                reply = (inference.clamp_reply_tokens(raw_reply)
+                         if raw_reply is not None else None)
                 # J.10.5: hops are opt-in and cost one model call each, so the
                 # sweep stays the default. `hops: true` means "use the budget
                 # you would have picked"; a number sets it.
@@ -1230,10 +1240,11 @@ def build_app(
                 if budget:
                     served = consult_walk_store(
                         sample, forest, vine, policy, binding, payload,
-                        question, k, budget)
+                        question, k, budget, reply)
                     if served is None:
                         served = inference.forage(
-                            scoped, question, binding, k=k, max_hops=budget)
+                            scoped, question, binding, k=k, max_hops=budget,
+                            reply_tokens=reply)
                         whisper(vine, served.get("evidence")
                                 if isinstance(served, dict) else None)
                     return served
@@ -1244,10 +1255,11 @@ def build_app(
                     return bundle
                 served = serve_from_reading(
                     sample, forest, vine, policy, binding, payload,
-                    question, k, bundle)
+                    question, k, bundle, reply)
                 if served is None:
                     served = inference.answer(scoped, question, binding, k=k,
-                                              bundle=bundle)
+                                              bundle=bundle,
+                                              reply_tokens=reply)
                 # The whisper closes the hunt either way (v0.35): a hit and
                 # a miss heat identically, because the knowledge was used
                 # identically. (A walk hit deposits its stored trail in

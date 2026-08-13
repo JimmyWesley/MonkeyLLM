@@ -15,7 +15,31 @@ import { Markdown } from '../design/markdown.jsx'
 import {
   Ask as AskIcon, Clock, Collapse, Download, Expand, Printer, Sparkle, Trash,
 } from '../design/icons.jsx'
+import { PayloadImage } from './files.jsx'
 import { Metric, NeedsCapability, fmtMs, has, nodeLink, useAsync } from './shared.jsx'
+
+/* J.10.8: the reply size is the person's own preference — like language and
+ * theme (J.5.3), it lives in the browser and never in the address. 0 is
+ * "auto": the forest binding's own max_tokens rules, and nothing is sent. */
+const ASK_PREFS_KEY = 'monkeyllm.ask.prefs'
+const REPLY_STEPS = [0, 200, 400, 600, 900, 1200, 1800, 2600, 4000]
+
+function loadPrefs() {
+  try {
+    return { reply: 0, ...JSON.parse(localStorage.getItem(ASK_PREFS_KEY) || '{}') }
+  } catch {
+    return { reply: 0 }
+  }
+}
+
+function savePrefs(patch) {
+  try {
+    localStorage.setItem(ASK_PREFS_KEY, JSON.stringify({ ...loadPrefs(), ...patch }))
+  } catch { /* private mode: the preference just does not persist */ }
+}
+
+const replyStepIndex = (value) => REPLY_STEPS.reduce(
+  (best, v, i) => (Math.abs(v - value) < Math.abs(REPLY_STEPS[best] - value) ? i : best), 0)
 
 /** The console that needs no explanation, which is why it is the landing one.
  *
@@ -31,6 +55,9 @@ export default function Ask({ forest, grant, me, goto }) {
   const [question, setQuestion] = useState(
     () => new URLSearchParams(window.location.search).get('q') || '')
   const [k, setK] = useState(3)
+  // J.10.8: how long an answer this person likes. Restored from the saved
+  // preference at mount; dragging the slider is what writes it back.
+  const [reply, setReply] = useState(() => loadPrefs().reply || 0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
@@ -70,7 +97,8 @@ export default function Ask({ forest, grant, me, goto }) {
     // needs: the same question at `k=2` and at `k=6` are two runs, and a
     // record that dropped them would show two answers and no reason.
     const params = {
-      k, ...(hybrid ? { hybrid: true } : {}), ...(hops ? { hops: true } : {}),
+      k, ...(reply ? { reply_tokens: reply } : {}),
+      ...(hybrid ? { hybrid: true } : {}), ...(hops ? { hops: true } : {}),
       ...(cache ? {} : { cache: false }),
     }
     const t0 = performance.now()
@@ -96,6 +124,9 @@ export default function Ask({ forest, grant, me, goto }) {
     setHistory(false); setError(null); setBusy(false)
     setQuestion(run.question)
     setK(run.params?.k ?? 3)
+    // The run's own size, without touching the saved preference: restoring
+    // a record must not rewrite how this person likes fresh answers.
+    setReply(run.params?.reply_tokens ?? 0)
     setHybrid(!!run.params?.hybrid)
     setHops(!!run.params?.hops)
     setCache(run.params?.cache !== false)
@@ -114,6 +145,7 @@ export default function Ask({ forest, grant, me, goto }) {
   -H "Content-Type: application/json" \\
   -d '${JSON.stringify({
     question, k,
+    ...(reply ? { reply_tokens: reply } : {}),
     ...(hybrid ? { hybrid: true } : {}), ...(hops ? { hops: true } : {}),
     ...(cache ? {} : { cache: false }),
   })}'`
@@ -145,11 +177,33 @@ export default function Ask({ forest, grant, me, goto }) {
               console uses, so the button is always in the corner the eye
               already went to. */}
           <div className="flex flex-wrap items-center justify-end gap-3">
-            <div className="mr-auto flex items-center gap-2">
-              <span className="text-[11.5px] text-text-3">{t('ask.depth')}</span>
-              <Segmented value={k} onChange={setK} options={[
-                { value: 2, label: '2' }, { value: 3, label: '3' }, { value: 6, label: '6' },
-              ]} />
+            <div className="mr-auto flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11.5px] text-text-3">{t('ask.depth')}</span>
+                <Segmented value={k} onChange={setK} options={[
+                  { value: 2, label: '2' }, { value: 3, label: '3' }, { value: 6, label: '6' },
+                ]} />
+              </div>
+              {/* J.10.8: dragged per person, remembered per person. "Auto"
+                  sends nothing — the forest binding's own size rules. */}
+              <label className="flex items-center gap-2" title={t('ask.reply_hint')}>
+                <span className="text-[11.5px] text-text-3">{t('ask.reply_len')}</span>
+                <input type="range" className="graph-range w-24"
+                       min={0} max={REPLY_STEPS.length - 1} step={1}
+                       value={replyStepIndex(reply)}
+                       aria-label={t('ask.reply_len')}
+                       onChange={(e) => {
+                         const v = REPLY_STEPS[Number(e.target.value)] || 0
+                         setReply(v)
+                         savePrefs({ reply: v })
+                       }} />
+                <span className="whitespace-nowrap font-mono text-[11px] tabular-nums
+                                 text-text-3">
+                  {reply
+                    ? t('ask.reply_words', { n: Math.round(reply * 0.75) })
+                    : t('ask.reply_auto')}
+                </span>
+              </label>
             </div>
             {/* A keyboard shortcut is not advice on a phone. */}
             <span className="hidden text-[11.5px] text-text-3 sm:inline">
@@ -255,8 +309,10 @@ export default function Ask({ forest, grant, me, goto }) {
                 </>}>
             {/* An answer is markdown — tables, lists, and sometimes a mermaid
                 diagram. Rendering it as preformatted text showed the source
-                of a document instead of the document. */}
-            <Markdown>{result.answer}</Markdown>
+                of a document instead of the document. `media` opts in the
+                J.10.9 references: `![…](media:<id>)` becomes the image
+                itself, fetched through J.14 with this viewer's credential. */}
+            <Markdown media={{ forest }}>{result.answer}</Markdown>
 
             <div className="mt-6 border-t border-line pt-4">
               <div className="label">{t('common.evidence')}</div>
@@ -289,6 +345,16 @@ export default function Ask({ forest, grant, me, goto }) {
                               </span>
                             )}
                           </a>
+                          {/* J.10.9: evidence of type media shows its image
+                              beside its scent — the description exists
+                              because of the image (J.14). Outside the <a>:
+                              PayloadImage is a link of its own. */}
+                          {src?.type === 'media' && (
+                            <div className="mt-1.5 px-2.5">
+                              <PayloadImage forest={forest} id={id}
+                                            type="media" title={src?.title} />
+                            </div>
+                          )}
                         </li>
                       )
                     })}
@@ -343,11 +409,19 @@ export default function Ask({ forest, grant, me, goto }) {
 }
 
 /** The answer as a file. Markdown because that is what it already is —
- *  converting it to anything else here would be a lossy round trip. */
+ *  converting it to anything else here would be a lossy round trip.
+ *
+ *  `media:` references are rewritten to the absolute J.14 route (J.10.9):
+ *  the exported file names a fetchable address — credential still required —
+ *  rather than a scheme only this console understands. */
 function downloadMarkdown(result, question, forest) {
+  const answer = String(result.answer || '').replace(
+    /\]\(media:([^()\s]+)\)/g,
+    (_, id) => `](${window.location.origin}/v1/forests/${encodeURIComponent(forest)}`
+      + `/payload/${id.split('/').map(encodeURIComponent).join('/')})`)
   const lines = [
     `# ${question}`, '',
-    result.answer, '',
+    answer, '',
     '---', '',
     `- Forest: \`${forest}\``,
     `- Model: \`${result.model}\``,

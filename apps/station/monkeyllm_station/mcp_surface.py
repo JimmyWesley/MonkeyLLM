@@ -43,7 +43,8 @@ INSTRUCTIONS = (
     "has no access to the master _index. Then harvest(forest, query) for "
     "one-shot retrieval, or navigate: look(forest, id), locate(forest, query), "
     "move(forest, id), sniff(forest, terms) for exact terms in bodies, "
-    "pick(forest, id) to read, query(forest, id, sql) for datasets. "
+    "pick(forest, id) to read, query(forest, id, sql) for datasets, "
+    "view(forest, id) to see the image behind a type:media node. "
     "Anything outside your scope reports E_NOT_FOUND, exactly as a missing "
     "node does."
 )
@@ -154,6 +155,25 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         return await call(forest, "pick", id=id, section=section)
 
     @mcp.tool()
+    async def view(forest: str, id: str):
+        """The image behind an in-scope media node, as MCP image content
+        (spec C.6d). A media node's body is a machine-written description
+        of the image; view() hands your model the pixels themselves —
+        images only, local payloads only, bounded at 6 MiB. Returns a JSON
+        header (id, media_type, size, payload_hash) beside the image block.
+        Out-of-scope answers E_NOT_FOUND, exactly as a missing node does."""
+        meta = await call(forest, "view", id=id)
+        if not isinstance(meta, dict) or "error" in meta or "path" not in meta:
+            return meta
+        from mcp.server.mcpserver.utilities.types import Image
+
+        # The path is the lane's answer, never the caller's to see: the
+        # bytes ride in the image block, the header carries identity only.
+        path = meta.pop("path")
+        fmt = meta["media_type"].split("/", 1)[1]
+        return [meta, Image(path=path, format=fmt)]
+
+    @mcp.tool()
     async def scan(forest: str, parent_id: str, filter: dict | None = None,
                    recursive: bool = False, limit: int = 50) -> dict:
         """Filter a branch's nodes by metadata."""
@@ -174,14 +194,20 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
 
     @mcp.tool()
     async def answer(forest: str, question: str, k: int = 3,
-                     cache: bool = True) -> dict:
+                     cache: bool = True,
+                     reply_tokens: int | None = None) -> dict:
         """Ask the forest directly: scoped retrieval read by the model bound
         to this forest, returning a grounded answer with its evidence. The
         one call that replaces a knowledge-base lookup plus a summarisation
         round-trip. A repeat of a question may be served from the forest's
         answer store, labelled `cached: true`; pass `cache: false` to skip
-        the store and buy a fresh run (which replaces the stored one)."""
-        return await call(forest, "answer", question=question, k=k, cache=cache)
+        the store and buy a fresh run (which replaces the stored one).
+        `reply_tokens` bounds the reply's size per call (clamped to
+        [64, 4000]); absent, the forest's own binding decides."""
+        return await call(forest, "answer", question=question, k=k,
+                          cache=cache,
+                          **({"reply_tokens": reply_tokens}
+                             if reply_tokens is not None else {}))
 
     @mcp.tool()
     async def query(forest: str, id: str, sql: str) -> dict:

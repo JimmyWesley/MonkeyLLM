@@ -17,6 +17,7 @@ import datetime as dt
 import hashlib
 import inspect
 import json
+import mimetypes
 import re
 import sqlite3
 import threading
@@ -88,6 +89,9 @@ NEIGHBOR_SUMMARY_TOKENS = 25
 MAX_EDGES_SHOWN = 12
 QUERY_DEFAULT_LIMIT = 200
 QUERY_TIMEOUT_S = 2.0
+# C.6d: the byte ceiling of `view` — the G.5.1 describer's own number,
+# because "too big to hand a model?" is one question and gets one answer.
+VIEW_MAX_BYTES = 6 * 1024 * 1024
 # C.5.1 (v0.47): a row cap is not a token cap — width is unbounded. Below
 # PICK_MAX_BODY_TOKENS on purpose: a body is read once, a result enters a
 # loop that carries it forward turn after turn.
@@ -1072,6 +1076,76 @@ class Vine:
             "body": body,
             "body_tokens": body_tokens,
             "truncated": False,
+        }
+
+    # =======================================================================
+    # C.6d view — the image payload, resolved for a multimodal client
+    # =======================================================================
+
+    @_traced
+    def view(self, id: str) -> dict:
+        """Resolve a media node's image payload (spec C.6d).
+
+        Returns the file's location and identity, never the bytes: the
+        transport (an MCP image content block, J.14's model-facing twin)
+        reads the file itself. Resolution mirrors J.14 exactly — and the
+        refusals are deliberate: a node without a payload answers the SAME
+        envelope as a missing node, a remote URI is refused rather than
+        fetched inside a read, and anything that is not an image stays with
+        the surfaces that already serve it (`query` for datasets, the J.14
+        byte route for people).
+        """
+        self._row_or_raise(id)
+        node = self.forest.read(id)
+        not_found = VineError(
+            E_NOT_FOUND,
+            f"node not found: {id}",
+            hint="Use locate() to find entry points.",
+        )
+        payload = node.frontmatter.get("payload")
+        if not payload:
+            raise not_found
+        if is_remote(payload):
+            scheme = str(payload).split("://", 1)[0]
+            raise VineError(
+                E_SCHEMA,
+                f"remote payload scheme '{scheme}' is not served",
+                hint="view() serves local bytes only; warm the region with "
+                     "prefetch first (G.9).",
+            )
+        root_dir = Path(self.forest.root).resolve()
+        assert node.path is not None
+        target = (node.path.parent / str(payload)).resolve()
+        if not target.is_relative_to(root_dir):
+            raise VineError(E_SCHEMA, "payload escapes the forest")
+        if not target.is_file():
+            # The map said bytes exist and the disk disagrees: same absent
+            # payload as no field at all (J.14 / F.49 discipline).
+            raise not_found
+        media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        if not media_type.startswith("image/"):
+            raise VineError(
+                E_SCHEMA,
+                f"payload is not an image ({media_type})",
+                hint="view() serves image payloads; a dataset is read with "
+                     "query(), and raw bytes of any kind are the host's "
+                     "payload route (J.14).",
+            )
+        size = target.stat().st_size
+        if size > VIEW_MAX_BYTES:
+            raise VineError(
+                E_SCHEMA,
+                f"image payload is {size} bytes, over the "
+                f"{VIEW_MAX_BYTES}-byte view limit",
+                hint="The host's payload route (J.14) serves bytes of any "
+                     "size to people.",
+            )
+        return {
+            "id": id,
+            "path": str(target),
+            "media_type": media_type,
+            "size": size,
+            "payload_hash": str(node.frontmatter.get("payload_hash") or ""),
         }
 
     # =======================================================================
