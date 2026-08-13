@@ -121,7 +121,16 @@ export default function ForestFiles({ forest, grant, data, selected, onSelect,
 
   return (
     <div className="grid gap-4 xl:grid-cols-[248px_minmax(0,1fr)_280px]">
-      <Card title={t('files.tree')} icon={File} bodyClass="p-2">
+      {/* The rails pin to the viewport at xl, the way the nav rail does
+          (Shell): the tree takes every pixel of screen it can get and
+          scrolls inside itself, instead of stopping at a fixed cap with
+          dead page below — and it stays in hand while a long body scrolls.
+          `self-start` gives sticky its room; below xl the columns stack
+          and the caps return. */}
+      <Card title={t('files.tree')} icon={File}
+            className="xl:sticky xl:top-6 xl:flex xl:max-h-[calc(100vh-3rem)]
+                       xl:flex-col xl:self-start"
+            bodyClass="p-2 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
         <label className="relative mb-2 block">
           <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2
                                        -translate-y-1/2 text-text-3" />
@@ -129,7 +138,8 @@ export default function ForestFiles({ forest, grant, data, selected, onSelect,
                  placeholder={t('files.filter')}
                  onChange={(e) => setFilter(e.target.value)} />
         </label>
-        <div className="max-h-[26rem] overflow-y-auto pr-1">
+        <div className="max-h-[26rem] overflow-y-auto pr-1 xl:max-h-none
+                        xl:min-h-0 xl:flex-1">
           {filter.trim() ? (
             <ul className="space-y-0.5">
               {shown.map((f) => (
@@ -616,8 +626,11 @@ function Inspector({ forest, node, meta, onOpen }) {
   const d = digest.data
 
   return (
-    <Card bodyClass="p-0">
-      <div className="flex border-b border-line">
+    /* The same viewport pin as the tree: two rails, one rule. */
+    <Card className="xl:sticky xl:top-6 xl:flex xl:max-h-[calc(100vh-3rem)]
+                     xl:flex-col xl:self-start"
+          bodyClass="p-0 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+      <div className="flex shrink-0 border-b border-line">
         {[['passport', t('files.tab_passport')],
           ['index', t('files.tab_index')],
           ['trails', t('files.tab_trails')]].map(([key, label]) => (
@@ -631,7 +644,8 @@ function Inspector({ forest, node, meta, onOpen }) {
         ))}
       </div>
 
-      <div className="max-h-[30rem] overflow-y-auto p-3.5">
+      <div className="max-h-[30rem] overflow-y-auto p-3.5 xl:max-h-none
+                      xl:min-h-0 xl:flex-1">
         {digest.busy ? <Skeleton rows={5} />
           : digest.error ? <ErrorNote error={digest.error} onRetry={digest.reload} />
           : !d ? null
