@@ -1,0 +1,17 @@
+{
+  "extName": {
+    "message": "MonkeyLLM Clipper"
+  },
+  "extDescription": {
+    "message": "Recorte a página que você está lendo para uma floresta MonkeyLLM."
+  },
+  "cmdOpen": {
+    "message": "Abrir o popup do Clipper"
+  },
+  "cmdClipPage": {
+    "message": "Recortar a página atual"
+  },
+  "cmdRegion": {
+    "message": "Capturar uma região da página"
+  }
+}

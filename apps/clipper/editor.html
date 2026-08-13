@@ -1,0 +1,75 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright 2026 Jimmy Wesley -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MonkeyLLM — Write</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <div class="page">
+    <header>
+      <img src="icons/icon32.png" alt="" width="24" height="24">
+      <h1 data-i18n="appName">MonkeyLLM Clipper</h1>
+      <div class="pickers">
+        <label for="forest" data-i18n="forestLabel"></label>
+        <select id="forest"></select>
+        <label for="dest" data-i18n="destLabel"></label>
+        <input id="dest" type="text" list="dest-options" autocomplete="off"
+               spellcheck="false" data-i18n-ph="destPlaceholder">
+        <datalist id="dest-options"></datalist>
+        <select id="lang" class="lang" data-i18n-title="langLabel"></select>
+      </div>
+    </header>
+
+    <p id="page-warning" class="error" hidden></p>
+
+    <!-- WRITE: the whole point of this tab is room (J.15). -->
+    <main id="view-write">
+      <input id="title" type="text" autocomplete="off"
+             data-i18n-ph="noteTitlePlaceholder">
+
+      <div class="toolbar" role="toolbar">
+        <button id="tb-h2" data-i18n-aria="tbH2"><span aria-hidden="true">H2</span></button>
+        <button id="tb-bold" data-i18n-aria="tbBold"><span aria-hidden="true"><b>B</b></span></button>
+        <button id="tb-italic" data-i18n-aria="tbItalic"><span aria-hidden="true"><i>I</i></span></button>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <button id="tb-bullet" data-i18n-aria="tbBullet"><span aria-hidden="true">•—</span></button>
+        <button id="tb-ordered" data-i18n-aria="tbOrdered"><span aria-hidden="true">1.</span></button>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <button id="tb-code" data-i18n-aria="tbCode"><span aria-hidden="true">&lt;/&gt;</span></button>
+        <button id="tb-quote" data-i18n-aria="tbQuote"><span aria-hidden="true">&#8220;&#8221;</span></button>
+        <span class="tb-spacer"></span>
+        <button id="tb-mic" class="mic" hidden data-i18n-aria="dictate">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="6" y="1.5" width="4" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5M5.5 14.5h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <div id="editor" class="prose"></div>
+      <p id="ghost" class="ghost" hidden></p>
+
+      <div class="sendbar">
+        <span id="draft-note" class="draft" hidden data-i18n="draftSaved"></span>
+        <button id="btn-send" class="primary" data-i18n="send"></button>
+      </div>
+    </main>
+
+    <!-- SENT: the worker owns it from here; this tab is done. -->
+    <main id="view-sent" hidden>
+      <h2 data-i18n="sentTitle"></h2>
+      <p class="lead" data-i18n="sentBody"></p>
+      <div class="sent-actions">
+        <a id="open-studio" href="#" target="_blank" data-i18n="openStudio"></a>
+        <button id="btn-again" class="primary" data-i18n="writeAnother"></button>
+      </div>
+    </main>
+  </div>
+
+  <script src="vendor/tiptap.js"></script>
+  <script src="vendor/turndown.js"></script>
+  <script src="vendor/turndown-plugin-gfm.js"></script>
+  <script type="module" src="editor.js"></script>
+</body>
+</html>

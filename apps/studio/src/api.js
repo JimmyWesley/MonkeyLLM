@@ -106,6 +106,35 @@ export const api = {
     return request(`/v1/forests/${encodeURIComponent(forest)}/${kind}${tail}`)
   },
 
+  // Payload bytes (J.14): the raw file behind a media node's textual proxy.
+  // Steps around `request` because the body is the bytes, not JSON — and it
+  // exists at all because an <img src> cannot carry the Bearer header, so
+  // the caller fetches the blob and mints an object URL it must revoke.
+  // Segments are encoded one by one: a node id carries slashes the route's
+  // path matcher needs to see as slashes.
+  payload: async (forest, node) => {
+    const path = `/v1/forests/${encodeURIComponent(forest)}/payload/`
+      + String(node).split('/').map(encodeURIComponent).join('/')
+    const res = await fetch(path, {
+      headers: getKey() ? { Authorization: `Bearer ${getKey()}` } : {},
+    })
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}))
+      const err = payload?.error || {}
+      throw new ApiError(err.message || res.statusText || `HTTP ${res.status}`,
+                         { code: err.code, hint: err.hint, status: res.status })
+    }
+    // Two steps on purpose: the type is a header, the bytes are the body.
+    // A caller sniffing whether a media payload is an image must be able
+    // to decline BEFORE paying for it — a 40 MB audio payload is a header
+    // read, not a download (J.14).
+    return {
+      type: res.headers.get('Content-Type') || '',
+      blob: () => res.blob(),
+      cancel: () => { res.body?.cancel()?.catch(() => {}) },
+    }
+  },
+
   // credentials (J.2.1 / J.2.2)
   login: (username, password) =>
     request('/v1/auth/login', { method: 'POST', body: { username, password } }),

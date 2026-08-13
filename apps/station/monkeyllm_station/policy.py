@@ -25,7 +25,7 @@ Two invariants shape every method here (J.3):
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from monkeyllm.errors import E_NOT_FOUND, E_SCHEMA, VineError
 
@@ -94,6 +94,22 @@ class Policy:
 
     def grants(self, cap: str) -> bool:
         return "admin" in self.caps or cap in self.caps
+
+    def masked(self, mask: frozenset[str] | None) -> "Policy":
+        """This policy as one credential may exercise it (J.2.6).
+
+        Effective authority is grants ∩ mask, computed at the moment of
+        use: the mask is a filter over live authority, never a copy of it,
+        so a grant revoked after pairing is gone from the intersection
+        immediately. None means unmasked — today's behaviour, byte-for-byte
+        — and an empty intersection is a working key that can do nothing:
+        the refusals come from the existing capability checks, not from a
+        new error path here. Scope (`allow`/`deny`/`tables`) is untouched —
+        a mask narrows capabilities, never widens or reshapes a subtree.
+        """
+        if mask is None:
+            return self
+        return replace(self, caps=self.caps & frozenset(mask))
 
     def roots(self) -> list[str]:
         """Where a scoped principal starts. There is no implicit grant on the

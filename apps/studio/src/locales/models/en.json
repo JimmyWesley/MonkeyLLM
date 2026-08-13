@@ -44,6 +44,8 @@
   "models.role_answer_sub": "Reads retrieved material and writes the reply. Worth a fast one it runs on every question.",
   "models.role_ingest": "Summarising what comes in",
   "models.role_ingest_sub": "Writes the summary every later search navigates by. Worth a careful model it runs once per document.",
+  "models.role_vision": "Describing images",
+  "models.role_vision_sub": "Reads slides, diagrams and screenshots at ingest and writes the text sniff will find them by. Worth a faithful model it runs once per image, and its description is all an image ever says.",
   "models.scope_note": "Binding a model does not widen access. Retrieval runs inside the asker’s scope first, so the model only ever reads what that person could already read.",
   "models.test": "Test",
   "models.testing": "Testing…",

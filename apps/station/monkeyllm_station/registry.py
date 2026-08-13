@@ -52,7 +52,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
     kind         TEXT NOT NULL DEFAULT 'api',   -- 'api' | 'session'
     expires_at   TEXT,
     revoked_at   TEXT,
-    last_used_at TEXT
+    last_used_at TEXT,
+    -- J.2.6: the capability mask a paired key carries. JSON list, or NULL
+    -- for an unmasked key. A mask is a filter over live authority, never a
+    -- copy of it: the grants are read at the moment of use and intersected,
+    -- so revoking a grant narrows every masked key immediately.
+    caps         TEXT
 );
 CREATE TABLE IF NOT EXISTS grants (
     principal TEXT NOT NULL REFERENCES principals(id),
@@ -122,9 +127,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_single_owner
     ON principals(owner) WHERE owner = 1;
 """
 
+# `vision` is the G.5.1 describer: it reads images at adopt/sync so `sniff`
+# can find them; absent, the engine's stub still plants `media` nodes.
 # `embed` is not a chat model: it builds the Canopy and points the
 # Gauntlet (Part K). Absent, navigation is unchanged.
-ROLES = ("ingest", "answer", "embed")
+ROLES = ("ingest", "answer", "vision", "embed")
 
 # Columns added after the Phase A schema shipped; a Station upgraded in place
 # must not lose its principals over a migration.
@@ -142,6 +149,7 @@ MIGRATIONS = {
         "expires_at": "TEXT",
         "revoked_at": "TEXT",
         "last_used_at": "TEXT",
+        "caps": "TEXT",
     },
     "providers": {"origin": "TEXT NOT NULL DEFAULT 'console'"},
 }
@@ -264,32 +272,46 @@ class Registry:
 
     def issue_key(self, principal_id: str, label: str | None = None, *,
                   expires_in_days: float | None = None,
-                  kind: str = "api") -> str:
-        """Mint an API key. The plaintext is returned ONCE and never stored."""
+                  kind: str = "api",
+                  caps: set[str] | frozenset[str] | None = None) -> str:
+        """Mint an API key. The plaintext is returned ONCE and never stored.
+
+        `caps` is the J.2.6 capability mask: stored sorted so two masks that
+        mean the same thing read the same in the table. None means unmasked
+        — today's keys, byte-for-byte.
+        """
         self.add_principal(principal_id)
         key = f"mk_{secrets.token_urlsafe(32)}"
         expires = (_in_hours(expires_in_days * 24)
                    if expires_in_days else None)
         self.conn.execute(
             "INSERT INTO api_keys (key_hash, principal, label, created, prefix, "
-            "kind, expires_at) VALUES (?,?,?,?,?,?,?)",
-            (hash_key(key), principal_id, label, _now(), key[:9], kind, expires),
+            "kind, expires_at, caps) VALUES (?,?,?,?,?,?,?,?)",
+            (hash_key(key), principal_id, label, _now(), key[:9], kind, expires,
+             json.dumps(sorted(caps)) if caps is not None else None),
         )
         self.conn.commit()
         return key
 
-    def authenticate(self, key: str | None) -> str | None:
-        """API key -> principal id, or None.
+    def resolve_key(self, key: str | None) -> dict | None:
+        """API key -> {"principal": id, "caps": frozenset | None}, or None.
 
         Lookup is by digest, so a stolen registry file yields no usable keys.
         Revoked and expired keys fail here rather than at some later gate:
         this is the single place every surface passes through, and a
-        lifecycle enforced anywhere else is a lifecycle with a bypass.
+        lifecycle enforced anywhere else is a lifecycle with a bypass —
+        which is also why `authenticate` is a wrapper over this rather than
+        a second copy of the checks.
+
+        `caps` is the J.2.6 mask exactly as stored: None for an unmasked
+        key, a frozenset for a paired one. The intersection with the live
+        grants happens at the moment of use, never here — this method knows
+        the credential, not the authority.
         """
         if not key:
             return None
         row = self.conn.execute(
-            "SELECT principal, revoked_at, expires_at FROM api_keys "
+            "SELECT principal, revoked_at, expires_at, caps FROM api_keys "
             "WHERE key_hash = ?", (hash_key(key),)
         ).fetchone()
         if row is None or row["revoked_at"]:
@@ -303,7 +325,15 @@ class Registry:
             "UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?",
             (_now(), hash_key(key)))
         self.conn.commit()
-        return row["principal"]
+        return {"principal": row["principal"],
+                "caps": frozenset(json.loads(row["caps"])) if row["caps"]
+                else None}
+
+    def authenticate(self, key: str | None) -> str | None:
+        """API key -> principal id, or None. A thin wrapper over
+        `resolve_key`, so the lifecycle stays enforced in one place."""
+        resolved = self.resolve_key(key)
+        return resolved["principal"] if resolved else None
 
     def keys_of(self, principals: list[str] | None = None) -> list[dict]:
         """Token metadata — never the secret, which exists only in the reply

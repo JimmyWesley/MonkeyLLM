@@ -1,0 +1,185 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright 2026 Jimmy Wesley -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MonkeyLLM Clipper</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <a href="https://monkeyllm.com" target="_blank" rel="noreferrer"
+       class="mark" data-i18n-title="linkSiteTitle">
+      <img src="icons/icon32.png" alt="" width="24" height="24">
+    </a>
+    <h1 data-i18n="appName">MonkeyLLM Clipper</h1>
+    <span id="version" class="version"></span>
+    <a href="https://monkeyllm.com" target="_blank" rel="noreferrer"
+       class="gh push" data-i18n-title="linkSiteTitle" aria-label="monkeyllm.com">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+           aria-hidden="true">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M3 12h18M12 3c2.7 2.6 4 5.6 4 9s-1.3 6.4-4 9c-2.7-2.6-4-5.6-4-9s1.3-6.4 4-9z"/>
+      </svg>
+    </a>
+    <a href="https://github.com/JimmyWesley/MonkeyLLM" target="_blank"
+       rel="noreferrer" class="gh" data-i18n-title="linkGithubTitle"
+       aria-label="GitHub">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"
+           aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29
+        6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53
+        -.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
+        1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2
+        -3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0
+        .67-.21 2.2.82a7.5 7.5 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16
+        1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25
+        .54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0
+        0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+    </a>
+  </header>
+
+  <!-- LOGIN: pair with a Station (J.2.6) or paste a key you already hold. -->
+  <main id="view-login" hidden>
+    <p class="lead" data-i18n="loginLead"></p>
+    <label for="origin" data-i18n="originLabel"></label>
+    <input id="origin" type="text" autocomplete="off" spellcheck="false"
+           data-i18n-ph="originPlaceholder">
+
+    <div class="tabs" role="tablist">
+      <button id="tab-password" class="tab active" role="tab"
+              aria-selected="true" data-i18n="tabPassword"></button>
+      <button id="tab-token" class="tab" role="tab"
+              aria-selected="false" data-i18n="tabToken"></button>
+    </div>
+
+    <section id="pane-password">
+      <label for="username" data-i18n="usernameLabel"></label>
+      <input id="username" type="text" autocomplete="username">
+      <label for="password" data-i18n="passwordLabel"></label>
+      <input id="password" type="password" autocomplete="current-password">
+      <p class="hint" data-i18n="pairHint"></p>
+      <button id="btn-pair" class="primary" data-i18n="signIn"></button>
+    </section>
+
+    <section id="pane-token" hidden>
+      <label for="token" data-i18n="tokenLabel"></label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false"
+             data-i18n-ph="tokenPlaceholder">
+      <p class="hint" data-i18n="tokenHint"></p>
+      <button id="btn-token" class="primary" data-i18n="saveToken"></button>
+    </section>
+
+    <p id="login-error" class="error" hidden></p>
+  </main>
+
+  <!-- MAIN: pick a forest and a branch, then clip. -->
+  <main id="view-main" hidden>
+    <div class="row">
+      <label for="forest" data-i18n="forestLabel"></label>
+      <select id="forest"></select>
+    </div>
+    <div class="row">
+      <label for="dest" data-i18n="destLabel"></label>
+      <input id="dest" type="text" list="dest-options" autocomplete="off"
+             spellcheck="false" data-i18n-ph="destPlaceholder">
+      <datalist id="dest-options"></datalist>
+    </div>
+
+    <p id="main-warning" class="error" hidden></p>
+
+    <div id="actions" class="grid">
+      <button id="act-page">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1h6l3 3v11H4z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6 8h5M6 10.5h5M6 5.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        <span data-i18n="btnClipPage"></span>
+      </button>
+      <button id="act-selection">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5.5h12M2 8h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M2 10.5h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".35"/><rect x="1" y="4" width="10.5" height="5.4" rx="1" fill="currentColor" opacity=".15"/></svg>
+        <span data-i18n="btnClipSelection"></span>
+      </button>
+      <button id="act-shot">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4" width="13" height="9.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 4l1-1.7h3l1 1.7" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8.7" r="2.4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+        <span data-i18n="btnScreenshot"></span>
+      </button>
+      <button id="act-region">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 4.5v-3h3M11.5 1.5h3v3M14.5 11.5v3h-3M4.5 14.5h-3v-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="0.8" fill="currentColor" opacity=".2"/><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.2 1.6"/></svg>
+        <span data-i18n="btnRegion"></span>
+      </button>
+      <button id="act-both">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 1.5h6l2 2v8h-8z" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="6.5" y="7" width="8" height="6.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="9" cy="9.5" r="1" fill="currentColor"/><path d="M7 12.5l2-1.8 2 1.3 2.5-2.2" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>
+        <span data-i18n="btnClipBoth"></span>
+      </button>
+      <button id="act-write">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2" width="13" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 5.5h7M4.5 8h7M4.5 10.5h4.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        <span data-i18n="btnWrite"></span>
+      </button>
+      <button id="act-note">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.3 1.9l2.8 2.8L5.6 13.2l-3.4.6.6-3.4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span data-i18n="btnNote"></span>
+      </button>
+      <button id="act-upload">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11V3.5M5 6l3-2.8L11 6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 11v2.5h11V11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span data-i18n="btnUpload"></span>
+      </button>
+    </div>
+    <input id="file-input" type="file" hidden>
+
+    <!-- Quick note: one-liners in place. The full editor (a whole tab,
+         rich text, dictation) is behind the Write button. -->
+    <section id="note-view" hidden>
+      <input id="note-title" type="text" data-i18n-ph="noteTitlePlaceholder">
+      <textarea id="note-text" rows="6" data-i18n-ph="noteTextPlaceholder"></textarea>
+      <div class="row buttons">
+        <button id="note-send" class="primary" data-i18n="send"></button>
+        <button id="note-cancel" data-i18n="cancel"></button>
+      </div>
+    </section>
+
+    <p id="status" class="status" data-i18n="statusIdle"></p>
+    <p id="queue-note" class="queue" hidden></p>
+
+    <!-- The question box: the fastest path from "reading" to "asking".
+         Typed or dictated, it opens Studio's Ask console with the question
+         prefilled — never asked for you: a reload must not spend a model
+         call (J.5.8), and neither should a popup. The quick note borrows
+         this slot while it is open. -->
+    <section id="ask-block">
+      <div class="askbox">
+        <textarea id="ask-q" rows="2" autocomplete="off" spellcheck="false"
+                  data-i18n-ph="askPlaceholder"></textarea>
+        <!-- Stands in for the textarea while dictating: preparing, then
+             recording with a seconds timer, then processing — the box only
+             returns when the recognizer has said everything it heard. -->
+        <button id="ask-live" type="button" hidden>
+          <span class="dot" aria-hidden="true"></span>
+          <span id="ask-live-text"></span>
+        </button>
+        <div class="askbar">
+          <button id="ask-mic" class="icon-btn" data-i18n-title="dictate">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                 stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3"/>
+              <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/>
+            </svg>
+          </button>
+          <button id="btn-ask" class="primary slim" data-i18n="askGo"></button>
+        </div>
+      </div>
+    </section>
+
+    <div id="toast" role="status"></div>
+
+    <footer>
+      <a id="open-studio" href="#" data-i18n="openStudio"></a>
+      <span id="principal" class="who"></span>
+      <select id="lang" class="lang" data-i18n-title="langLabel"></select>
+      <button id="btn-logout" class="linkish" data-i18n="logout"
+              data-i18n-title="logoutTip"></button>
+    </footer>
+  </main>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

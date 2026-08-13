@@ -14,8 +14,12 @@ the Station is a privileged client, not a fork of the server.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import io
 import json
 import logging
+import math
+import mimetypes
 import os
 import re
 import secrets
@@ -28,7 +32,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -36,7 +40,7 @@ from starlette.applications import Starlette
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -52,7 +56,7 @@ from monkeyllm.errors import (
     VineError,
 )
 from monkeyllm.server import ForestPool
-from monkeyllm_station import answer_store
+from monkeyllm_station import answer_store, vision
 from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
 from monkeyllm_station.registry import Registry
@@ -100,6 +104,97 @@ MIN_OWNER_PASSWORD = 12
 # One stable directory per forest, so a later `sync` still has its source.
 UPLOAD_DIR = ("_derived", "uploads")
 
+# J.2.6: what a pair key may ask for — clip and look. `write`, `tend`,
+# `query` and `admin` stay what People and `station key` mint, deliberately.
+PAIR_CAPS = frozenset({"read", "ingest"})
+# A pair key MUST expire: absent or zero means the default, never
+# "unlimited", and the ceiling is stated to the caller, never silently
+# clamped.
+PAIR_DEFAULT_DAYS = 90.0
+PAIR_MAX_DAYS = 365.0
+
+# J.2.6: `login` and `pair` both verify passwords and both are reachable
+# from every browser that holds the origin, not only from the console — so
+# both are rate limited. Fixed window per (username, client host).
+AUTH_ATTEMPT_LIMIT = 5
+AUTH_WINDOW_SECONDS = 60.0
+
+
+class AuthWindow:
+    """Fixed-window failure counter for the password doors (J.2.6).
+
+    In-process on purpose: the registry is not a place to write on every
+    wrong password, and a limiter forgotten by a restart limits again on
+    the very next failure. One lock, one dict — a success clears the
+    window, and the refusal never says whether the user exists, so the
+    limiter cannot become the directory the login refusal already refuses
+    to be (J.2.1).
+    """
+
+    def __init__(self, limit: int = AUTH_ATTEMPT_LIMIT,
+                 seconds: float = AUTH_WINDOW_SECONDS,
+                 max_tracked: int = 4096):
+        self.limit = limit
+        self.seconds = seconds
+        # The username is caller-controlled on an unauthenticated route, so
+        # without a ceiling a stream of distinct usernames grows this dict
+        # forever — an unauthenticated memory-exhaustion vector. Expired
+        # windows are only otherwise pruned when their exact key is asked
+        # about again, which a one-shot username never is.
+        self.max_tracked = max_tracked
+        self._lock = threading.Lock()
+        self._failures: dict[tuple[str, str], tuple[float, int]] = {}
+
+    def over_limit(self, username: str, host: str) -> bool:
+        """Checked BEFORE the password is verified: past the limit, the
+        answer is 429 without spending a hash comparison."""
+        now = time.monotonic()
+        with self._lock:
+            entry = self._failures.get((username, host))
+            if entry is None:
+                return False
+            start, count = entry
+            if now - start >= self.seconds:
+                # The window closed on its own; forget it rather than let a
+                # dead entry keep the dict growing.
+                del self._failures[(username, host)]
+                return False
+            return count >= self.limit
+
+    def failed(self, username: str, host: str) -> None:
+        now = time.monotonic()
+        with self._lock:
+            start, count = self._failures.get((username, host), (now, 0))
+            if now - start >= self.seconds:
+                start, count = now, 0
+            self._failures[(username, host)] = (start, count + 1)
+            if len(self._failures) > self.max_tracked:
+                self._sweep(now)
+
+    def _sweep(self, now: float) -> None:
+        """Callers hold the lock. Expired windows go first; if a flood of
+        distinct usernames keeps the dict over the ceiling anyway, the
+        oldest live windows go too — forgetting a window early merely
+        restarts its count, it never locks anyone out."""
+        for key in [k for k, (start, _) in self._failures.items()
+                    if now - start >= self.seconds]:
+            del self._failures[key]
+        excess = len(self._failures) - self.max_tracked
+        if excess > 0:
+            for key in sorted(self._failures,
+                              key=lambda k: self._failures[k][0])[:excess]:
+                del self._failures[key]
+
+    def clear(self, username: str, host: str) -> None:
+        with self._lock:
+            self._failures.pop((username, host), None)
+
+
+def _too_many_attempts() -> JSONResponse:
+    """One message whether the user exists or not (J.2.6)."""
+    return _envelope(
+        VineError(E_FORBIDDEN, "too many attempts; try again shortly"), 429)
+
 
 @dataclass
 class PreparedIngest:
@@ -123,6 +218,14 @@ class PreparedIngest:
 # The Studio is a React/Vite build: static files only, no server rendering,
 # so it stays a plain REST client with no privileged side-channel (J.5).
 STUDIO_DIST = Path(__file__).resolve().parents[2] / "studio" / "dist"
+
+# The Clipper the Station hands out (J.15): one shared build, resolved like
+# the Studio's — the sibling app in the repo or image, overridable for a
+# deployment that stages it elsewhere. The server never ships a per-user
+# binary; pairing supplies the origin and the credential, so the artifact
+# itself carries no secrets and no configuration.
+CLIPPER_DIR = Path(__file__).resolve().parents[2] / "clipper"
+CLIPPER_DIR_ENV = "MONKEYLLM_STATION_CLIPPER_DIR"
 
 
 class StudioFiles(StaticFiles):
@@ -633,7 +736,15 @@ def build_app(
     def principal_of(request: Request) -> str | None:
         header = request.headers.get("authorization", "")
         key = header[7:].strip() if header.lower().startswith("bearer ") else None
-        return registry.authenticate(key or request.headers.get("x-api-key"))
+        resolved = registry.resolve_key(key or request.headers.get("x-api-key"))
+        # J.2.6: the mask rides with the request from the one place the key
+        # is resolved, so every later authority read can intersect without
+        # a second registry lookup. None = unmasked, today's behaviour.
+        request.state.caps_mask = resolved["caps"] if resolved else None
+        return resolved["principal"] if resolved else None
+
+    def mask_of(request: Request):
+        return getattr(request.state, "caps_mask", None)
 
     def require_principal(request: Request):
         principal = principal_of(request)
@@ -641,7 +752,14 @@ def build_app(
             return None, _envelope(VineError(E_FORBIDDEN, "missing or invalid API key"), 401)
         return principal, None
 
-    def is_admin(principal: str, forest: str | None = None) -> bool:
+    def is_admin(principal: str, forest: str | None = None,
+                 mask: frozenset[str] | None = None) -> bool:
+        # J.2.6: the mask filters live authority at the moment of use, so a
+        # masked key without 'admin' answers False before any grant — or
+        # the owner bit — is read. A pair key held by the owner opens no
+        # admin console, exactly as if the bit were absent.
+        if mask is not None and "admin" not in mask:
+            return False
         # The owner bit (J.2.4) is authority over every forest present and
         # future, so it answers before the grants are even read — including
         # when there are no forests, which is the state it exists for.
@@ -689,8 +807,13 @@ def build_app(
         vine.embedder = _embedders[key]
 
     def run_primitive(principal: str, forest: str, name: str, payload: dict,
-                      clocks: dict | None = None):
+                      clocks: dict | None = None,
+                      caps_mask: frozenset[str] | None = None):
         """Executed on the forest thread: resolve, scope, call, attribute.
+
+        `caps_mask` is J.2.6's narrowing, resolved by the surface BEFORE the
+        thread hop — a contextvar does not cross the lane, and the mask
+        belongs to the credential, which only the surface saw.
 
         `clocks`, when a caller supplies one, is filled with the three
         durations of J.10.6: the engine, the provider round trip when there
@@ -706,7 +829,8 @@ def build_app(
         span = time.perf_counter()
         sample: dict = {}
         try:
-            return dispatch(principal, forest, name, payload, sample)
+            return dispatch(principal, forest, name, payload, sample,
+                            caps_mask=caps_mask)
         finally:
             if clocks is not None:
                 tracer, mark = sample.get("tracer"), sample.get("mark", 0)
@@ -727,12 +851,16 @@ def build_app(
                                            - (store_ms or 0.0)), 3)
 
     def dispatch(principal: str, forest: str, name: str, payload: dict,
-                 sample: dict):
+                 sample: dict, caps_mask: frozenset[str] | None = None):
         """The call itself. `sample` is where it leaves what it alone knows:
         the tracer to read the engine's clock off, and the provider's."""
         policy = registry.policy_for(principal, forest)
         if policy is None:
             return None
+        # J.2.6: grants ∩ mask, at the moment of use — this is the ONE seam
+        # where the registry's policy feeds the primitive dispatch, so every
+        # primitive, composite and ingest below inherits the narrowing.
+        policy = policy.masked(caps_mask)
         try:
             vine = pool.get(forest)
         except VineError as e:
@@ -1133,7 +1261,43 @@ def build_app(
         except Exception as e:  # provider outages must not 500 the Station
             return VineError(E_SCHEMA, f"{name} failed: {e}"[:300]).to_dict()
 
-    def stage_upload(root: Path, files: list) -> tuple[Path, list[str]]:
+    def upload_source_url(entry: dict) -> str | None:
+        """J.8 (v0.48): an upload entry MAY say where its bytes came from.
+
+        `http`/`https` only and bounded at 2048 characters — anything else
+        is `E_SCHEMA` naming the entry, because a provenance line that is
+        a `javascript:` URL or an unbounded string is not an address, and
+        the Gardener will append it to a body verbatim.
+        """
+        url = entry.get("source_url")
+        if url is None:
+            return None
+        name = str(entry.get("name") or "").strip() or "<unnamed>"
+        if not isinstance(url, str):
+            raise VineError(E_SCHEMA,
+                            f"'{name}': source_url must be a string")
+        if not url.startswith(("http://", "https://")):
+            raise VineError(
+                E_SCHEMA, f"'{name}': source_url must be http:// or https://",
+                hint="Provenance names an address a person can follow.")
+        if len(url) > 2048:
+            raise VineError(
+                E_SCHEMA,
+                f"'{name}': source_url is over 2048 characters")
+        if any(ord(c) < 0x21 or ord(c) == 0x7F for c in url):
+            # A raw space or control character is not legal in a URL — and
+            # a newline here would let the client author arbitrary prose
+            # (a fake heading, a second Source line) into a body the
+            # server writes. The address is one token or it is refused.
+            raise VineError(
+                E_SCHEMA,
+                f"'{name}': source_url must not contain spaces or "
+                "control characters",
+                hint="Percent-encode them (%20) if the address needs one.")
+        return url
+
+    def stage_upload(root: Path,
+                     files: list) -> tuple[Path, list[str], dict[str, str]]:
         """Write uploaded documents into the forest's staging directory.
 
         Each name is resolved and then checked to still be *under* the
@@ -1145,10 +1309,22 @@ def build_app(
         text-only upload path left them reachable from a shell and from
         nowhere else — the operator with only a browser is exactly who this
         surface exists for (J.8).
+
+        Returns the provenance map alongside: staged rel name -> the
+        entry's validated `source_url`, keyed exactly as the Gardener
+        records `source_path`, so the map matches on adopt AND on the
+        upload->sync flip. Validated for EVERY entry before the first byte
+        lands — a bad third entry must not leave two staged files behind
+        for the next batch's hash-diff to mistake for changed documents.
         """
         staging = root.joinpath(*UPLOAD_DIR)
         staging.mkdir(parents=True, exist_ok=True)
+        staging_root = staging.resolve()
+        for entry in files:
+            if isinstance(entry, dict):
+                upload_source_url(entry)  # E_SCHEMA before anything stages
         written = []
+        provenance: dict[str, str] = {}
         for entry in files:
             if not isinstance(entry, dict):
                 raise VineError(E_SCHEMA, "each file must be an object "
@@ -1180,7 +1356,14 @@ def build_app(
             else:
                 target.write_text(str(entry.get("text") or ""), encoding="utf-8")
             written.append(name)
-        return staging, written
+            url = entry.get("source_url")
+            if url:
+                # Keyed by the path relative to the staging root the walk
+                # will use — the exact string the Gardener writes into
+                # `source_path` — not by the raw entry name, whose
+                # separators the resolve may have normalised.
+                provenance[target.relative_to(staging_root).as_posix()] = url
+        return staging, written, provenance
 
     def run_ingest(principal, forest, vine, policy, _name, payload) -> dict:
         """The Gardener over REST (J.8), with the host's three additions:
@@ -1334,12 +1517,21 @@ def build_app(
                     + (f": {running.id}" if running else ""),
                     hint="Watch it under GET /v1/forests/{forest}/jobs, "
                          "cancel it, or wait for it to finish.").to_dict()
+        provenance: dict[str, str] = {}
         try:
             if mode == "upload":
-                source, staged = stage_upload(root, payload["files"])
+                source, staged, provenance = stage_upload(root, payload["files"])
 
             curator = inference.curator_from_binding(
                 vine, policy, registry.binding(forest, "ingest"))
+            # G.5.1: the describer is the host's half of the media story —
+            # a forest with a `vision` binding reads its images at ingest,
+            # once; without one the engine's stub still plants `media`,
+            # never `unsupported`. The Gardener ranks `extra_converters`
+            # after the operator's command hooks, so a configured `.png`
+            # hook keeps winning, and a describer that raises falls back
+            # down the chain to the stub (G.4.3 reaching conversion).
+            describer = vision.image_converter(registry.binding(forest, "vision"))
             # Accepting a reviewed draft replaces the model's curation with
             # the reviewer's, as an ordinary `on_curate` hook (J.8.1). The
             # Curator object is still built — `rollup` below is a different
@@ -1357,8 +1549,15 @@ def build_app(
             # is what lets a batch of ONE large file show movement instead
             # of standing at 0/1 for a minute, which reads as a hang.
             watched = job
+            # The provenance map rides the ONE Gardener construction, so it
+            # reaches the adopt path and the upload->sync flip below alike —
+            # that flip is why this is a map and not a curation hook: a
+            # refresh re-converts the body, and curation never runs on
+            # refreshes (J.8 v0.48).
             gardener = Gardener(
                 vine, hooks=hooks, dry_run=stage,
+                extra_converters=([describer] if describer else None),
+                provenance=(provenance or None),
                 on_stage=(None if watched is None
                           else lambda f, st: board.note_stage(watched, f, st)))
 
@@ -1459,7 +1658,8 @@ def build_app(
             "curated": written, "bound": curator is not None, "curation": stats,
         }
 
-    def run_ingest_status(principal: str, forest: str):
+    def run_ingest_status(principal: str, forest: str,
+                          caps_mask: frozenset[str] | None = None):
         """What a refresh would re-read, before anyone asks for one (J.8).
 
         `sync` is the one ingest call whose reach comes from configuration
@@ -1473,6 +1673,7 @@ def build_app(
         policy = registry.policy_for(principal, forest)
         if policy is None:
             return None
+        policy = policy.masked(caps_mask)
         if not policy.grants("ingest"):
             return VineError(E_FORBIDDEN, "ingest requires the 'ingest' capability",
                              hint=f"This principal holds: {sorted(policy.caps)}."
@@ -1497,7 +1698,8 @@ def build_app(
 
     # -- map projections (J.11) ---------------------------------------------
 
-    def run_map(principal: str, forest: str, kind: str, params: dict):
+    def run_map(principal: str, forest: str, kind: str, params: dict,
+                caps_mask: frozenset[str] | None = None):
         """A whole region in one payload, under the caller's own policy.
 
         Executed on the forest thread like every other forest touch. This is
@@ -1510,6 +1712,7 @@ def build_app(
         policy = registry.policy_for(principal, forest)
         if policy is None:
             return None
+        policy = policy.masked(caps_mask)
         if not policy.grants("read"):
             return VineError(
                 E_FORBIDDEN, f"'{kind}' requires the 'read' capability",
@@ -1681,7 +1884,8 @@ def build_app(
             "password_login": super_admin is not None or registry.has_any_password(),
         })
 
-    def effective_grants(principal: str) -> list[dict]:
+    def effective_grants(principal: str,
+                         mask: frozenset[str] | None = None) -> list[dict]:
         """The principal's grants as policy resolves them.
 
         For everyone this is the grant table. For the owner (J.2.4) there is
@@ -1690,30 +1894,46 @@ def build_app(
         `/v1/me` and `/v1/forests` read from here, because a console that saw
         an owner with zero forests would render an empty product for the one
         principal who may do everything.
+
+        A masked key is reported the MASKED caps (J.2.6): what a console
+        renders from here is what the key can actually do, or every
+        disabled button becomes a support ticket.
         """
         if not registry.is_owner(principal):
-            return registry.grants_of(principal)
-        return [{"forest": f["id"], "caps": sorted(CAPS), "allow": [""],
-                 "deny": [], "tables": {}}
-                for f in pool.list()["forests"]]
+            grants = registry.grants_of(principal)
+        else:
+            grants = [{"forest": f["id"], "caps": sorted(CAPS), "allow": [""],
+                       "deny": [], "tables": {}}
+                      for f in pool.list()["forests"]]
+        if mask is not None:
+            grants = [{**g, "caps": sorted(set(g["caps"]) & mask)}
+                      for g in grants]
+        return grants
 
     async def me(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
         if err:
             return err
-        grants = effective_grants(principal)
+        mask = mask_of(request)
+        grants = effective_grants(principal, mask)
         for g in grants:
             policy = registry.policy_for(principal, g["forest"])
             g["roots"] = policy.roots() if policy else []
         return JSONResponse({"principal": principal, "grants": grants,
-                             "admin": is_admin(principal),
-                             "owner": registry.is_owner(principal)})
+                             "admin": is_admin(principal, mask=mask),
+                             # The owner bit is masked with `admin` (J.2.6):
+                             # a pair key held by the owner is refused every
+                             # owner door, so reporting the bit would render
+                             # buttons the key cannot press.
+                             "owner": registry.is_owner(principal)
+                             and (mask is None or "admin" in mask)})
 
     async def forests(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
         if err:
             return err
-        granted = {g["forest"]: g for g in effective_grants(principal)}
+        granted = {g["forest"]: g
+                   for g in effective_grants(principal, mask_of(request))}
         listed = []
         for f in pool.list()["forests"]:
             if f["id"] not in granted:
@@ -1787,6 +2007,22 @@ def build_app(
                              "expires_at": session["expires_at"],
                              "admin": True, "owner": True})
 
+    # One limiter for both password doors (J.2.6): the window is keyed by
+    # (username, client host), so hammering `pair` spends the same budget as
+    # hammering `login` — they verify the same password.
+    auth_window = AuthWindow()
+
+    def verify_login(username: str, password: str) -> bool:
+        """The ONE password check both doors run (J.2.1 / J.2.6): the
+        environment super-admin compare included, and False alike for a
+        wrong password, an unknown user and a user with no password."""
+        if not username or not password:
+            return False
+        if super_admin and secrets.compare_digest(username, super_admin[0]):
+            # Break-glass: compared against the environment, never stored.
+            return secrets.compare_digest(password, super_admin[1])
+        return registry.verify_password(username, password)
+
     async def auth_login(request: Request) -> JSONResponse:
         """Password in, session token out (J.2.1).
 
@@ -1801,19 +2037,19 @@ def build_app(
             return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
+        host = request.client.host if request.client else ""
+        # Before the password is verified (J.2.6): past the limit, the
+        # answer costs nothing and says nothing about who exists.
+        if auth_window.over_limit(username, host):
+            return _too_many_attempts()
 
-        ok = False
-        if username and password:
-            if super_admin and secrets.compare_digest(username, super_admin[0]):
-                # Break-glass: compared against the environment, never stored.
-                ok = secrets.compare_digest(password, super_admin[1])
-            else:
-                ok = registry.verify_password(username, password)
-        if not ok:
+        if not verify_login(username, password):
+            auth_window.failed(username, host)
             # One message for a wrong password, an unknown user and a user
             # with no password at all: distinguishing them would turn the
             # login form into a directory of who exists.
             return _envelope(VineError(E_FORBIDDEN, "invalid username or password"), 401)
+        auth_window.clear(username, host)
 
         session = registry.open_session(username)
         return JSONResponse({"key": session["key"], "principal": username,
@@ -1821,11 +2057,88 @@ def build_app(
                              "admin": is_admin(username),
                              "owner": registry.is_owner(username)})
 
+    async def auth_pair(request: Request) -> JSONResponse:
+        """The third door (J.2.6): a key that narrows.
+
+        Unauthenticated like `login`, self-service by construction: pairing
+        reaches nothing the password could not already reach — refusing it
+        would only route the same authority through a wider credential. The
+        minted key is an ordinary J.2.2 key whose row carries a capability
+        mask; the mask is intersected with the live grants at the moment of
+        use, so it never adds a capability and never outlives a revocation.
+        """
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        host = request.client.host if request.client else ""
+        if auth_window.over_limit(username, host):
+            return _too_many_attempts()
+
+        if not verify_login(username, password):
+            auth_window.failed(username, host)
+            # Same single message as `login`, verbatim (J.2.6).
+            return _envelope(VineError(E_FORBIDDEN, "invalid username or password"), 401)
+        auth_window.clear(username, host)
+
+        raw_caps = body.get("caps")
+        if raw_caps in (None, []):
+            caps = set(PAIR_CAPS)
+        elif not isinstance(raw_caps, list):
+            return _envelope(VineError(E_SCHEMA, "caps must be a list"))
+        else:
+            caps = {str(c) for c in raw_caps}
+            if not caps <= PAIR_CAPS:
+                return _envelope(VineError(
+                    E_SCHEMA,
+                    f"pair caps must be within {sorted(PAIR_CAPS)}",
+                    hint="write, tend, query and admin stay what People "
+                         "and `station key` mint, deliberately."))
+
+        raw_days = body.get("expires_in_days")
+        if raw_days in (None, "", 0):
+            # Absent or zero means the default, never "unlimited" (J.2.6).
+            days = PAIR_DEFAULT_DAYS
+        else:
+            try:
+                days = float(raw_days)
+            except (TypeError, ValueError):
+                return _envelope(VineError(
+                    E_SCHEMA, "expires_in_days must be a number"))
+            if not math.isfinite(days):
+                # NaN compares False against both bounds below, so without
+                # this it would sail through validation and blow up inside
+                # timedelta — a 500 where the caller earned a 400.
+                return _envelope(VineError(
+                    E_SCHEMA, "expires_in_days must be a number"))
+            if days <= 0:
+                return _envelope(VineError(
+                    E_SCHEMA, "expires_in_days must be positive"))
+            if days > PAIR_MAX_DAYS:
+                # Stated, not silently clamped: a caller who asked for two
+                # years should learn the ceiling, not discover it in 365
+                # days.
+                return _envelope(VineError(
+                    E_SCHEMA,
+                    f"expires_in_days must be at most {PAIR_MAX_DAYS:g}"))
+
+        key = registry.issue_key(
+            username, label=str(body.get("label") or "").strip() or "clipper",
+            expires_in_days=days, kind="api", caps=caps)
+        # Second-resolution, like `open_session`'s reply: the row's own
+        # timestamp may differ by the second the mint took.
+        expires_at = (datetime.now(timezone.utc)
+                      + timedelta(days=days)).isoformat(timespec="seconds")
+        return JSONResponse({"api_key": key, "principal": username,
+                             "caps": sorted(caps), "expires_at": expires_at})
+
     async def admin_keys(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
         if err:
             return err
-        if not is_admin(principal):
+        if not is_admin(principal, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
 
         if request.method == "GET":
@@ -1873,6 +2186,12 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
+        # J.2.6: this route's gate is `administers_fully` below, which reads
+        # the requester's grants unmasked (it also serves questions about
+        # OTHER principals) — so the mask is honoured here, at the door.
+        mask = mask_of(request)
+        if mask is not None and "admin" not in mask:
+            return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
         body = await request.json()
         target = str(body.get("principal") or "").strip()
         if not target or not administers_fully(principal, target):
@@ -1901,7 +2220,7 @@ def build_app(
         body = await request.json() if request.method == "POST" else {}
         if not forest:
             forest = body.get("forest")
-        if not is_admin(principal, forest):
+        if not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
 
         def work():
@@ -1957,7 +2276,7 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
-        if not is_admin(principal):
+        if not is_admin(principal, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
         mine = administered(principal)
 
@@ -2019,7 +2338,7 @@ def build_app(
             else:
                 landed = False
                 for forest in targets:
-                    if not is_admin(principal, forest):
+                    if not is_admin(principal, forest, mask=mask_of(request)):
                         deny("grant", f"you do not administer '{forest}'", forest=forest)
                         continue
                     try:
@@ -2038,7 +2357,7 @@ def build_app(
         if drop:
             dropped = False
             for forest in drop:
-                if not is_admin(principal, forest):
+                if not is_admin(principal, forest, mask=mask_of(request)):
                     deny("revoke_access", f"you do not administer '{forest}'", forest=forest)
                     continue
                 registry.revoke(target, forest)
@@ -2120,7 +2439,7 @@ def build_app(
         # J.7 as amended in v0.25: `admin` on an existing forest, or the owner
         # bit — the authority that precedes every forest, and the only one an
         # empty registry can offer.
-        if not is_admin(principal):
+        if not is_admin(principal, mask=mask_of(request)):
             return _envelope(
                 VineError(E_FORBIDDEN, "creating a forest requires the 'admin' "
                                        "capability on an existing forest"), 403)
@@ -2204,8 +2523,12 @@ def build_app(
         # the forest behind it, and a route that timed only its successes
         # would say which forests exist by staying silent.
         clocks: dict = {}
+        # Read off the request BEFORE the lane, like the MCP surface does:
+        # the mask belongs to the credential and the lane never saw one.
+        mask = mask_of(request)
         result = await in_forest_thread(
-            forest, lambda: run_primitive(principal, forest, name, payload, clocks)
+            forest, lambda: run_primitive(principal, forest, name, payload,
+                                          clocks, mask)
         )
         timing = _server_timing(clocks)
         if result is None:
@@ -2235,7 +2558,7 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
-        if not is_admin(principal):
+        if not is_admin(principal, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
         # J.3.2: a branch prefix describes somebody's world. It does not
         # become readable because the reader administers a different forest.
@@ -2254,7 +2577,7 @@ def build_app(
             return err
         body = await request.json()
         forest = body.get("forest")
-        if not forest or not is_admin(principal, forest):
+        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(
                 VineError(E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403
             )
@@ -2279,7 +2602,7 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
-        if not is_admin(principal):
+        if not is_admin(principal, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
         limit = min(int(request.query_params.get("limit", 100)), 500)
         # An audit entry records what somebody read. Same rule as J.3.2:
@@ -2295,7 +2618,7 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
-        if not is_admin(principal):
+        if not is_admin(principal, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
         if request.method == "GET":
             return JSONResponse({"providers": registry.providers()})
@@ -2314,7 +2637,7 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
-        if not is_admin(principal):
+        if not is_admin(principal, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
         from monkeyllm_station import inference
 
@@ -2333,12 +2656,12 @@ def build_app(
             return err
         if request.method == "GET":
             forest = request.query_params.get("forest")
-            if not is_admin(principal, forest):
+            if not is_admin(principal, forest, mask=mask_of(request)):
                 return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
             return JSONResponse({"bindings": registry.bindings(forest)})
         body = await request.json()
         forest = body.get("forest")
-        if not is_admin(principal, forest):
+        if not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
         try:
             if body.get("remove"):
@@ -2359,10 +2682,11 @@ def build_app(
             return err
         forest = request.path_params["forest"]
         kind = request.path_params["kind"]
+        mask = mask_of(request)
         if kind == "ingest":
             # The GET beside the POST: what a refresh would re-read (J.8).
             result = await in_forest_thread(
-                forest, lambda: run_ingest_status(principal, forest))
+                forest, lambda: run_ingest_status(principal, forest, mask))
             if result is None:
                 return _unknown_forest(forest)
             if isinstance(result.get("error"), dict):
@@ -2376,7 +2700,7 @@ def build_app(
                      "Primitives are POSTed to this path."))
         params = dict(request.query_params)
         result = await in_forest_thread(
-            forest, lambda: run_map(principal, forest, kind, params))
+            forest, lambda: run_map(principal, forest, kind, params, mask))
         if result is None:
             return _unknown_forest(forest)
         if isinstance(result.get("error"), dict):
@@ -2386,13 +2710,16 @@ def build_app(
 
     # -- ingest jobs, read side (J.9) ---------------------------------------
 
-    def _job_watch_refusal(principal: str, forest: str) -> JSONResponse | None:
+    def _job_watch_refusal(principal: str, forest: str,
+                           mask: frozenset[str] | None = None
+                           ) -> JSONResponse | None:
         """Who may watch: whoever could have asked (J.9). Touches only the
         host registry — never the forest, never a lane — which is what
         keeps polling free while the batch runs."""
         policy = registry.policy_for(principal, forest)
         if policy is None:
             return _unknown_forest(forest)
+        policy = policy.masked(mask)
         if not policy.grants("ingest"):
             return _envelope(VineError(
                 E_FORBIDDEN, "watching ingest jobs requires the 'ingest' capability",
@@ -2404,7 +2731,7 @@ def build_app(
         if err:
             return err
         forest = request.path_params["forest"]
-        refused = _job_watch_refusal(principal, forest)
+        refused = _job_watch_refusal(principal, forest, mask_of(request))
         if refused is not None:
             return refused
         listed, truncated = board.list(forest)
@@ -2418,7 +2745,7 @@ def build_app(
         if err:
             return err
         forest = request.path_params["forest"]
-        refused = _job_watch_refusal(principal, forest)
+        refused = _job_watch_refusal(principal, forest, mask_of(request))
         if refused is not None:
             return refused
         job = board.get(forest, request.path_params["job"])
@@ -2436,7 +2763,7 @@ def build_app(
         if err:
             return err
         forest = request.path_params["forest"]
-        refused = _job_watch_refusal(principal, forest)
+        refused = _job_watch_refusal(principal, forest, mask_of(request))
         if refused is not None:
             return refused
         job = board.get(forest, request.path_params["job"])
@@ -2449,6 +2776,108 @@ def build_app(
         # true.
         board.cancel(job)
         return JSONResponse({"job": job.snapshot()})
+
+    # -- payload bytes (J.14) -------------------------------------------------
+
+    async def forest_payload(request: Request):
+        """`GET /v1/forests/{forest}/payload/{node}`: the raw bytes behind a
+        node's textual proxy (J.14).
+
+        A human surface: the console shows the screenshot, the browser saves
+        the `.db`. Payload bytes MUST NOT enter model material through it —
+        G.5's line stands, and the describer (G.5.1) is the one place a
+        model sees the image, at ingest, once. Served by a read-only Station
+        too: it writes nothing.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        node_id = request.path_params["node"]
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            # No grant and no such forest answer identically, exactly as the
+            # primitive dispatch does — the registry is not enumerable.
+            return _unknown_forest(forest)
+        policy = policy.masked(mask_of(request))
+        if not policy.grants("read"):
+            return _envelope(VineError(
+                E_FORBIDDEN, "'payload' requires the 'read' capability",
+                hint=f"This principal holds: {sorted(policy.caps)}."), 403)
+
+        def work():
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            # ONE envelope for out-of-scope, absent and payload-less (J.14 /
+            # F.49): byte-identical, mirroring `ScopedVine._gate`, so this
+            # surface is no more an existence oracle than the primitives.
+            not_found = VineError(
+                E_NOT_FOUND, f"node not found: {node_id}",
+                hint="Use locate() to find entry points.").to_dict()
+            if not policy.in_scope(node_id) or not vine.forest.exists(node_id):
+                return not_found
+            try:
+                node = vine.forest.read(node_id)
+            except VineError:
+                # Unparseable frontmatter behind a URL-guessed id reads as
+                # absent, not as a distinguishable third state.
+                return not_found
+            payload = str(node.frontmatter.get("payload") or "")
+            if not payload:
+                # Absence is explicit — the map keeps working (G.7).
+                return not_found
+            if "://" in payload:
+                scheme = payload.split("://", 1)[0]
+                # Fetching on a GET would hide a network dependency inside a
+                # read (G.9); a remote region is warmed by `vine prefetch`.
+                return VineError(
+                    E_SCHEMA,
+                    f"remote payload scheme '{scheme}' is not served",
+                    hint="This surface serves local bytes only.").to_dict()
+            # Relative to the node's own directory, exactly as the Gardener
+            # writes it (`_assets/<name>` or a sibling `.db`) — and contained
+            # after resolution, J.8.2's posture: this surface hands out file
+            # contents, so a payload field pointing outside the forest is
+            # refused, never followed.
+            root_dir = Path(vine.forest.root).resolve()
+            assert node.path is not None
+            target = (node.path.parent / payload).resolve()
+            if not target.is_relative_to(root_dir):
+                return VineError(
+                    E_SCHEMA, "payload escapes the forest").to_dict()
+            if not target.is_file():
+                # The map said bytes exist and the disk disagrees: to the
+                # reader that is the same absent payload as no field at all.
+                return not_found
+            return {"path": str(target),
+                    "etag": str(node.frontmatter.get("payload_hash") or ""),
+                    "size": target.stat().st_size}
+
+        result = await in_forest_thread(forest, work)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        # Audited like a read (J.4): who fetched which node's bytes, and how
+        # many — never the bytes.
+        registry.record(principal=principal, forest=forest, primitive="payload",
+                        args={"node": node_id}, result="ok",
+                        size=result["size"])
+        headers = {"Cache-Control": "private"}
+        if result["etag"]:
+            # The passport's own hash: a client that cached the bytes can
+            # revalidate against the map instead of re-downloading — and the
+            # revalidation is honoured HERE, because FileResponse never
+            # reads If-None-Match, so without this a console revisiting a
+            # media node re-downloads the whole payload every time.
+            headers["ETag"] = result["etag"]
+            if request.headers.get("if-none-match") == result["etag"]:
+                return Response(status_code=304, headers=headers)
+        media_type = (mimetypes.guess_type(result["path"])[0]
+                      or "application/octet-stream")
+        return FileResponse(result["path"], media_type=media_type,
+                            headers=headers)
 
     # -- maintenance (J.13) -------------------------------------------------
 
@@ -2466,7 +2895,7 @@ def build_app(
         if err:
             return err
         forest = request.query_params.get("forest") or ""
-        if not forest or not is_admin(principal, forest):
+        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(VineError(
                 E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
         policy = registry.policy_for(principal, forest)
@@ -2519,7 +2948,7 @@ def build_app(
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
-        if not forest or not is_admin(principal, forest):
+        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(VineError(
                 E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
         policy = registry.policy_for(principal, forest)
@@ -2575,7 +3004,7 @@ def build_app(
             except json.JSONDecodeError as e:
                 return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
             forest = str(body.get("forest") or "")
-        if not forest or not is_admin(principal, forest):
+        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(VineError(
                 E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
 
@@ -2655,7 +3084,7 @@ def build_app(
             except json.JSONDecodeError as e:
                 return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
             forest = str(body.get("forest") or "")
-        if not forest or not is_admin(principal, forest):
+        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(VineError(
                 E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
 
@@ -2719,7 +3148,12 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
-        if not registry.is_owner(principal):
+        # J.2.6: a masked key held by the owner is refused the owner doors
+        # exactly as if the bit were absent — same envelope, so the mask
+        # discloses nothing about who holds the key.
+        mask = mask_of(request)
+        if (mask is not None and "admin" not in mask) \
+                or not registry.is_owner(principal):
             return _envelope(VineError(
                 E_FORBIDDEN, "downloading a snapshot requires the owner",
                 hint="A bundle carries the whole forest with its full "
@@ -2766,7 +3200,10 @@ def build_app(
             return _envelope(VineError(
                 E_READONLY, "this Station serves read-only forests",
                 hint="Start it with --writable to import forests."), 403)
-        if not registry.is_owner(principal):
+        # J.2.6: the owner bit is masked with 'admin', same as the download.
+        mask = mask_of(request)
+        if (mask is not None and "admin" not in mask) \
+                or not registry.is_owner(principal):
             return _envelope(VineError(
                 E_FORBIDDEN, "importing a snapshot requires the owner",
                 hint="A bundle enters as-is — no converter, curation or "
@@ -2875,11 +3312,80 @@ def build_app(
             status_code=404,
         )
 
+    # -- the Clipper build (J.15) --------------------------------------------
+
+    clipper_dir = Path(os.environ.get(CLIPPER_DIR_ENV) or CLIPPER_DIR)
+    # (signature, bytes, etag): rebuilt when any file moves under it, so a
+    # developer editing the extension is never handed yesterday's zip. The
+    # signature is a stat scan — ~30 small files — not a re-read.
+    clipper_cache: dict[str, object] = {}
+
+    def _clipper_signature(src: Path) -> str:
+        h = hashlib.sha256()
+        for p in sorted(src.rglob("*")):
+            if p.is_dir() or p.name == ".DS_Store":
+                continue
+            st = p.stat()
+            h.update(f"{p.relative_to(src).as_posix()}\0{st.st_size}"
+                     f"\0{st.st_mtime_ns}\n".encode())
+        return h.hexdigest()
+
+    def _build_clipper_zip(src: Path) -> bytes:
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for p in sorted(src.rglob("*")):
+                if p.is_dir() or p.name == ".DS_Store":
+                    continue
+                # A fixed date keeps the zip reproducible: the same build
+                # yields the same bytes, so the ETag means what it says.
+                info = zipfile.ZipInfo(p.relative_to(src).as_posix(),
+                                       date_time=(2026, 1, 1, 0, 0, 0))
+                info.external_attr = 0o644 << 16
+                z.writestr(info, p.read_bytes())
+        return buf.getvalue()
+
+    async def clipper_zip(request: Request) -> Response:
+        """One shared build, downloadable by anybody who can see the console
+        (J.15). Unauthenticated like the Studio shell it sits beside: the
+        extension is public software carrying no secrets and no origin —
+        pairing supplies both — and pairing is self-service (J.2.6), so
+        distribution must be too, or the administrator becomes the
+        gatekeeper the pair route exists to remove."""
+        if not (clipper_dir / "manifest.json").is_file():
+            return JSONResponse(
+                {"error": {"code": E_NOT_FOUND,
+                           "message": "this deployment ships no Clipper build",
+                           "hint": f"Stage apps/clipper beside the Station or "
+                                   f"point {CLIPPER_DIR_ENV} at a build."}},
+                status_code=404)
+        # Stat scan + zip both walk the filesystem: host lane, not the loop.
+        def fresh():
+            signature = _clipper_signature(clipper_dir)
+            if clipper_cache.get("signature") != signature:
+                data = _build_clipper_zip(clipper_dir)
+                clipper_cache.update(
+                    signature=signature, data=data,
+                    etag=f'"{hashlib.sha256(data).hexdigest()[:16]}"')
+            return clipper_cache["data"], clipper_cache["etag"]
+
+        data, etag = await in_forest_thread(None, fresh)
+        headers = {"ETag": etag, "Cache-Control": "no-cache",
+                   "Content-Disposition":
+                       'attachment; filename="monkeyllm-clipper.zip"'}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        return Response(data, media_type="application/zip", headers=headers)
+
     routes = [
         Route("/v1/health", health),
         Route("/v1/me", me),
         Route("/v1/forests", forests),
         Route("/v1/auth/login", auth_login, methods=["POST"]),
+        # The third door (J.2.6): unauthenticated like login, rate-limited
+        # like login, and what it mints is narrower than what login opens.
+        Route("/v1/auth/pair", auth_pair, methods=["POST"]),
         # Registered unconditionally and gated inside, so it can close without
         # the route table being rebuilt — and so a closed setup answers with
         # the same body an unrouted path would (J.2.4).
@@ -2910,6 +3416,12 @@ def build_app(
         Route("/v1/forests/{forest}/jobs/{job}", job_get, methods=["GET"]),
         Route("/v1/forests/{forest}/jobs/{job}/cancel", job_cancel,
               methods=["POST"]),
+        # Payload bytes (J.14) before the `{kind}` GET below: Starlette
+        # matches in order, and `payload/...` would otherwise be read as a
+        # map projection named "payload". `:path` because node ids carry
+        # slashes.
+        Route("/v1/forests/{forest}/payload/{node:path}", forest_payload,
+              methods=["GET"]),
         Route("/v1/forests/{forest}/{kind:str}", forest_map, methods=["GET"]),
         Route("/v1/forests/{forest}/{primitive}", primitive, methods=["POST"]),
     ]
@@ -2931,6 +3443,11 @@ def build_app(
 
     routes.append(Route("/v1/{rest:path}", api_not_found,
                         methods=["GET", "POST", "PUT", "PATCH", "DELETE"]))
+
+    # Before the SPA mount, or the catch-all would answer the download with
+    # the console shell. A fixed path, not /v1: it is a static artifact like
+    # the shell itself, not an API surface (J.15).
+    routes.append(Route("/clipper.zip", clipper_zip, methods=["GET"]))
 
     # Last: the SPA catch-all must not shadow the API routes above it.
     if (STUDIO_DIST / "index.html").is_file():

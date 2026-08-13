@@ -1,0 +1,388 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Jimmy Wesley */
+
+/* Clean and compact: one green accent for the forest, the system font
+   stack for everything, both themes via prefers-color-scheme. */
+
+:root {
+  --bg: #fbfbf9;
+  --panel: #ffffff;
+  --ink: #1f2a24;
+  --muted: #68766d;
+  --line: #dde3dd;
+  --accent: #2e7d4f;
+  --accent-ink: #ffffff;
+  --error: #b3382c;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171d19;
+    --panel: #1f2620;
+    --ink: #e6ece7;
+    --muted: #9aa89e;
+    --line: #313b33;
+    --accent: #58b788;
+    --accent-ink: #10241a;
+    --error: #e0796d;
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* The hidden attribute MUST win: any author `display` on an element (the
+   listening bar's flex, say) silently overrides the UA's [hidden] rule,
+   and the element becomes un-hideable — a red dot pulsing forever over a
+   microphone that stopped long ago. */
+[hidden] { display: none !important; }
+
+body {
+  width: 440px;
+  margin: 0;
+  padding: 0 16px 12px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        Helvetica, Arial, sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+header h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.1px;
+}
+
+header .mark { display: inline-flex; }
+
+header .version {
+  color: var(--text-3, #8a938c);
+  font-size: 11.5px;
+  align-self: flex-end;
+  padding-bottom: 1px;
+}
+
+header .gh {
+  color: var(--text-3, #8a938c);
+  display: inline-flex;
+  transition: color 0.15s;
+}
+header .gh:hover { color: var(--text, inherit); }
+header .push { margin-left: auto; }
+
+/* The question box: one bordered surface, the textarea breathing inside
+   it, mic and send on the bar beneath — the shape every chat box taught. */
+.askbox {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px;
+  margin: 8px 0 2px;
+}
+.askbox:focus-within { border-color: var(--accent); }
+.askbox textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  background: transparent;
+  resize: none;
+  outline: none;
+  font: inherit;
+  color: inherit;
+  min-height: 40px;
+}
+.askbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+/* The generic primary is full-width by design; inside the bar it is a
+   button beside a mic, not a banner. */
+.askbar .primary {
+  width: auto;
+  margin-top: 0;
+  margin-left: auto;
+  padding: 6px 18px;
+}
+button.slim { white-space: nowrap; }
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-3, #8a938c);
+  cursor: pointer;
+  padding: 0;
+}
+.icon-btn:hover { color: inherit; border-color: var(--accent); }
+
+/* The textarea's stand-in while dictating. */
+#ask-live {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--text-3, #8a938c);
+  cursor: pointer;
+  text-align: left;
+  padding: 6px 2px;
+}
+#ask-live .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--error);
+  flex: none;
+  animation: mkcPulse 1.1s ease-in-out infinite;
+}
+.icon-btn.recording {
+  color: var(--error);
+  border-color: var(--error);
+  animation: mkcPulse 1.1s ease-in-out infinite;
+}
+@keyframes mkcPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* One small voice for "it worked": slides up, says the outcome, leaves. */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%) translateY(6px);
+  max-width: 90%;
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: var(--bg-elev, #1c231d);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s, transform 0.18s;
+  z-index: 20;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+#toast.ok { border-color: var(--accent); color: var(--accent); }
+#toast.bad { border-color: var(--error); color: var(--error); }
+
+main { padding-top: 10px; }
+
+.lead { margin: 0 0 10px; color: var(--muted); }
+
+label {
+  display: block;
+  margin: 8px 0 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+input[type="text"], input[type="password"], select, textarea {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+textarea { resize: vertical; }
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.tab.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.hint { margin: 8px 0; color: var(--muted); font-size: 12px; }
+
+button.primary {
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+button.primary:hover { filter: brightness(1.06); }
+button:disabled { opacity: 0.55; cursor: default; }
+
+.error {
+  margin: 10px 0 2px;
+  color: var(--error);
+  font-size: 12px;
+}
+
+.row { margin-bottom: 2px; }
+.row.buttons { display: flex; gap: 8px; margin-top: 8px; }
+.row.buttons button { flex: 1; }
+.row.buttons button:not(.primary) {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  padding: 8px 10px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin: 12px 0 4px;
+}
+
+.grid button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.grid button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.grid button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+#note-view { margin-top: 12px; }
+#note-view textarea {
+  margin-top: 8px;
+  min-height: 96px;
+  line-height: 1.55;
+}
+#note-title { margin-top: 2px; }
+
+.status {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.status.ok { color: var(--accent); border-color: var(--accent); }
+.status.bad { color: var(--error); border-color: var(--error); }
+
+.queue {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+footer a { color: var(--accent); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+.who {
+  flex: 1;
+  text-align: center;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linkish {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.linkish:hover { color: var(--error); }
+
+/* The language selector: quiet, footer-sized, no chrome of its own. */
+.lang {
+  width: auto;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lang:hover, .lang:focus { border-color: var(--line); color: var(--ink); }

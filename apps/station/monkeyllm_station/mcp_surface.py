@@ -24,6 +24,13 @@ import os
 PRINCIPAL: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "station_principal", default=None
 )
+# J.2.6: the capability mask riding on the key that authenticated this
+# request. Published beside PRINCIPAL by the same middleware, for the same
+# reason — and, like PRINCIPAL, it must be read on the request's own task:
+# a contextvar does not cross `in_forest_thread`.
+CAPS_MASK: contextvars.ContextVar[frozenset | None] = contextvars.ContextVar(
+    "station_caps_mask", default=None
+)
 
 UNAUTHENTICATED = {
     "error": {"code": "E_FORBIDDEN", "message": "missing or invalid API key",
@@ -82,8 +89,12 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         principal = PRINCIPAL.get()
         if principal is None:
             return UNAUTHENTICATED
+        # Read HERE, before the lane: the lambda below runs on the forest
+        # thread, where this request's contextvars do not exist (J.2.6).
+        mask = CAPS_MASK.get()
         result = await in_forest_thread(
-            forest, lambda: run_primitive(principal, forest, name, kwargs)
+            forest, lambda: run_primitive(principal, forest, name, kwargs,
+                                          caps_mask=mask)
         )
         if result is None:
             return {"error": {"code": "E_NOT_FOUND", "message": f"unknown forest: {forest}",
@@ -103,13 +114,19 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         principal = PRINCIPAL.get()
         if principal is None:
             return UNAUTHENTICATED
+        mask = CAPS_MASK.get()
         granted = {g["forest"]: g for g in registry.grants_of(principal)}
         out = []
         for f in pool.list()["forests"]:
             if f["id"] not in granted:
                 continue
             policy = registry.policy_for(principal, f["id"])
-            out.append({"id": f["id"], "caps": granted[f["id"]]["caps"],
+            caps = granted[f["id"]]["caps"]
+            if mask is not None:
+                # J.2.6: what an agent is told it may do is what the key
+                # can actually do — same rule as /v1/me for a console.
+                caps = sorted(set(caps) & mask)
+            out.append({"id": f["id"], "caps": caps,
                         "roots": policy.roots() if policy else []})
         return {"forests": out}
 
@@ -212,7 +229,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
     )
 
     class Authenticated:
-        """Resolves the key once per request and publishes the principal."""
+        """Resolves the key once per request and publishes the principal
+        and its J.2.6 capability mask side by side."""
 
         def __init__(self, app):
             self.app = app
@@ -224,10 +242,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
             auth = headers.get(b"authorization", b"").decode(errors="ignore")
             key = (auth[7:].strip() if auth.lower().startswith("bearer ")
                    else headers.get(b"x-api-key", b"").decode(errors="ignore"))
-            token = PRINCIPAL.set(registry.authenticate(key))
+            resolved = registry.resolve_key(key)
+            token = PRINCIPAL.set(resolved["principal"] if resolved else None)
+            mask_token = CAPS_MASK.set(resolved["caps"] if resolved else None)
             try:
                 await self.app(scope, receive, send)
             finally:
+                CAPS_MASK.reset(mask_token)
                 PRINCIPAL.reset(token)
 
     return Authenticated(inner), mcp.session_manager.run

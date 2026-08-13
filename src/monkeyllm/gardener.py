@@ -71,6 +71,12 @@ PAYLOAD_TYPE_BY_EXT = {
     ".flac": "audio",
 }
 
+# G.5.1: the extensions the media stub claims — exactly the image and audio
+# halves of PAYLOAD_TYPE_BY_EXT, kept as named sets because the typing rule
+# and the staging-archive rule test the same membership.
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac"}
+
 
 # ===========================================================================
 # G.2 — the converter contract (public plugin API v1)
@@ -527,6 +533,32 @@ class CommandConverter:
         return Conversion(kind="markdown", title=title, markdown=text)
 
 
+class MediaStubConverter:
+    """Built-in (G.5.1): the model-free floor for image and audio files.
+
+    Before this existed an image was `unsupported` — no converter claimed
+    it, so a screenshot fell out of the report entirely. The stub returns
+    the only markdown that needs no model: what the file is called, what
+    format it is, how big it is, and the plain admission that nothing has
+    described it yet. A richer converter injected ahead of this one (the
+    `extra_converters` seam) replaces the body; the stub is what guarantees
+    the node exists either way.
+    """
+
+    extensions = IMAGE_EXTENSIONS | AUDIO_EXTENSIONS
+
+    def convert(self, path: Path) -> Conversion:
+        title = path.stem.replace("_", " ").replace("-", " ")
+        size = path.stat().st_size
+        fmt = path.suffix.lstrip(".").upper()
+        body = (
+            f"# {title}\n\n"
+            f"Media file `{path.name}` ({fmt} format, {size} bytes).\n\n"
+            "No description has been generated for this media yet.\n"
+        )
+        return Conversion(kind="markdown", title=title, markdown=body)
+
+
 def builtin_converters() -> list:
     # SQLite needs no optional dependency: it is the standard library and it
     # is already this project's payload format (G.2.2).
@@ -550,15 +582,26 @@ def builtin_converters() -> list:
         convs.append(DocxConverter())
     except ImportError:
         pass
+    # G.5.1: last on purpose — the stub is the floor every richer media
+    # converter (a command hook, an injected describer) stands above.
+    convs.append(MediaStubConverter())
     return convs
 
 
-def discover_converters(config: dict) -> list:
-    """G.2 order: config command hooks > entry points > built-ins."""
+def discover_converters(config: dict, extra: list | None = None) -> list:
+    """G.2 order: config command hooks > injected extras (G.5.1) > entry
+    points > built-ins.
+
+    `extra` is the seam a host uses to inject converters it holds (the
+    vision describer): AFTER the operator's command hooks — an operator who
+    configured their own `.png` hook keeps it — and BEFORE entry points and
+    built-ins, so everyone else gets the injected converter over the stub.
+    """
     convs: list = [
         CommandConverter(ext, tpl)
         for ext, tpl in (config.get("converters") or {}).items()
     ]
+    convs.extend(extra or [])
     for ep in entry_points(group="monkeyllm.converters"):
         try:
             loaded = ep.load()
@@ -730,12 +773,29 @@ class Gardener:
 
     def __init__(self, vine: Vine, converters: list | None = None,
                  hooks: list[Callable] | None = None, *, dry_run: bool = False,
-                 on_stage: Callable[[str, str], None] | None = None):
+                 on_stage: Callable[[str, str], None] | None = None,
+                 extra_converters: list | None = None,
+                 provenance: dict[str, str] | None = None):
         self.vine = vine
         self.forest = vine.forest
         self.config = self._load_config()
+        # J.8 (v0.48): source path -> URL, for sources whose origin is an
+        # address rather than a directory (a clipped page, a saved image).
+        # A MAP handed at construction, deliberately not an `on_curate`
+        # hook: curation never runs on refreshes (G.3), so provenance
+        # recorded there would vanish with the first `sync` — the map is
+        # consulted on adopt and on every body refresh alike. Keys are the
+        # relative posix paths `source_path` records; the URL is data, not
+        # vocabulary, so nothing here reads it.
+        self.provenance = dict(provenance or {})
+        # G.5.1 seam: `extra_converters` joins discovery between the
+        # operator's command hooks and everything else. An explicit
+        # `converters` list bypasses discovery entirely (tests do this),
+        # so the extras are ignored there — the caller already said
+        # exactly what runs.
         self.converters = (converters if converters is not None
-                           else discover_converters(self.config))
+                           else discover_converters(self.config,
+                                                    extra=extra_converters))
         self.hooks = hooks if hooks is not None else discover_hooks()
         self.dry_run = bool(dry_run)
         self.on_stage = on_stage
@@ -852,6 +912,28 @@ class Gardener:
             if ext in conv.extensions:
                 return conv
         return None
+
+    def _with_provenance(self, markdown: str, rel: str) -> str:
+        """J.8 (v0.48): a converted body whose source has an address ends
+        with the same `Source:` line a composed clip carries.
+
+        Applied to markdown conversions only — a dataset's map is not
+        prose, and a payload's body is the G.2.3 sample map — and BEFORE
+        curation and the content policy, so the Curator reads what a
+        reader will and a cached body carries its address too. Idempotent
+        by the STAMPED LINE, not by substring: a body citing a deeper
+        link on the same site (`…/blog/post-123` under source
+        `…/blog`) contains the URL as a prefix, and a substring test
+        would silently drop the provenance for exactly the common case.
+        Only a body already carrying the exact `Source:` line is left
+        alone.
+        """
+        url = self.provenance.get(rel)
+        if not url:
+            return markdown
+        if re.search(rf"(?m)^Source: {re.escape(url)}[ \t]*$", markdown):
+            return markdown
+        return markdown.rstrip("\n") + f"\n\n---\n\nSource: {url}\n"
 
     # -- ids and branches ----------------------------------------------------
 
@@ -1005,19 +1087,39 @@ class Gardener:
     def _ingest_file(self, src: Path, f: Path, dest: str | None,
                      report: IngestReport) -> None:
         rel = f.relative_to(src)
-        conv_obj = self._converter_for(f)
-        if conv_obj is None:
+        ext = f.suffix.lower()
+        claimants = [c for c in self.converters if ext in c.extensions]
+        if not claimants:
             report.unsupported.append(rel.as_posix())
             return
         self._stage(rel.as_posix(), STAGE_CONVERT)
-        try:
-            conversion = conv_obj.convert(f)
-        except VineError as e:
-            report.errors.append(f"{rel.as_posix()}: {e.message}")
-            return
-        except Exception as e:  # G.2: a broken converter never crashes adopt
-            report.errors.append(f"{rel.as_posix()}: converter error: {e}")
-            return
+        # G.5.1: a converter that fails falls THROUGH, not out — the next
+        # claimant in discovery order gets the file (a describer whose
+        # endpoint is down falls back to the stub), and every failure lands
+        # in the report's errors, naming who failed on what. Only when the
+        # LAST claimant fails does the file take the terminal error path,
+        # with the message shape it always had (G.2: a broken converter
+        # never crashes adopt).
+        conversion = None
+        for conv_obj in claimants:
+            terminal = conv_obj is claimants[-1]
+            try:
+                conversion = conv_obj.convert(f)
+                break
+            except VineError as e:
+                if terminal:
+                    report.errors.append(f"{rel.as_posix()}: {e.message}")
+                    return
+                report.errors.append(
+                    f"{rel.as_posix()}: {type(conv_obj).__name__} failed, "
+                    f"falling back: {e.message}")
+            except Exception as e:
+                if terminal:
+                    report.errors.append(f"{rel.as_posix()}: converter error: {e}")
+                    return
+                report.errors.append(
+                    f"{rel.as_posix()}: {type(conv_obj).__name__} failed, "
+                    f"falling back: {e}")
 
         branch_id = self._ensure_branch(rel.parent, dest, report)
         node_id = self._node_id(rel, dest)
@@ -1031,7 +1133,11 @@ class Gardener:
 
         st = f.stat()
         source_hash = hashlib.sha256(f.read_bytes()).hexdigest()
-        is_text_source = f.suffix.lower() in MarkdownConverter.extensions
+        is_text_source = ext in MarkdownConverter.extensions
+        # G.5.1: media is typed off the SOURCE, not off what the converter
+        # returned — a describer and the stub both hand back markdown, and
+        # the passport has to say `media` either way.
+        is_media_source = PAYLOAD_TYPE_BY_EXT.get(ext) in ("image", "audio")
         draft: dict = {
             "id": node_id,
             "parent": branch_id,
@@ -1073,22 +1179,41 @@ class Gardener:
                 "summary": self._dataset_summary(conversion),
             })
         else:
+            # G.5.1 typing rule: text source -> note; an image/audio source
+            # -> media; every other converted format -> document.
             draft.update({
-                "type": "note" if is_text_source else "document",
+                "type": ("note" if is_text_source
+                         else "media" if is_media_source else "document"),
                 "body": conversion.markdown,
                 "summary": derive_summary(conversion.markdown, conversion.title),
             })
         # G.7 archive policy: durable sources are referenced, not copied.
         # A payload conversion's original IS its payload (G.2.2 rule 6) —
         # archiving it would store the same bytes twice under two hashes.
+        # G.5.1 amendment: media STAGED under this forest's `_derived/` (an
+        # upload) is archived regardless of the policy — `_derived/` is
+        # disposable by contract, so the `_assets/` copy is the only one
+        # that will exist. Resolved paths on both sides: the forest root
+        # may sit behind a symlink (same comparison `_resolve_source` makes).
+        staged_media = is_media_source and src.resolve().is_relative_to(
+            self.forest.root.resolve() / "_derived")
         if (not is_text_source and conversion.kind != "payload"
-                and self.config.get("archive", "never") == "always"):
+                and (staged_media
+                     or self.config.get("archive", "never") == "always")):
             payload, ptype, phash = self._archive(f, branch_id)
             # dataset payload is its own .db; unknown payload types are
             # archived but not referenced (the A.3 enum stays honest)
             if conversion.kind != "dataset" and ptype:
                 draft.update({"payload": payload, "payload_type": ptype,
                               "payload_hash": phash})
+
+        # J.8 (v0.48): the address is stamped after the summary derived —
+        # a URL is not scent, and locate's 60 tokens are too few to spend
+        # on one — but before curation and the content policy, so the
+        # Curator reads what a reader will and a cached body carries its
+        # address too.
+        if conversion.kind == "markdown":
+            draft["body"] = self._with_provenance(draft["body"], rel.as_posix())
 
         # curation sees the FULL converted text (G.7.4)…
         self._stage(rel.as_posix(), STAGE_CURATE)
@@ -1327,19 +1452,44 @@ class Gardener:
         No `curate` stage here, and that is the contract rather than an
         omission: a refresh keeps the scent somebody already approved.
         """
-        conv_obj = self._converter_for(f)
-        if conv_obj is None:
+        ext = f.suffix.lower()
+        claimants = [c for c in self.converters if ext in c.extensions]
+        if not claimants:
             report.unsupported.append(node_id)
             return
         self._stage(rel or node_id, STAGE_CONVERT)
-        try:
-            conversion = conv_obj.convert(f)
-        except VineError as e:
-            report.errors.append(f"{node_id}: {e.message}")
-            return
-        except Exception as e:
-            report.errors.append(f"{node_id}: converter error: {e}")
-            return
+        # G.5.1: the fallback chain covers refreshes too — a describer whose
+        # endpoint is down during a sync falls back to the stub exactly as it
+        # does during adopt. A refresh that errored where an adopt would have
+        # planted would make the same file's fate depend on which verb found
+        # it.
+        conversion = None
+        for conv_obj in claimants:
+            terminal = conv_obj is claimants[-1]
+            try:
+                conversion = conv_obj.convert(f)
+                break
+            except VineError as e:
+                if terminal:
+                    report.errors.append(f"{node_id}: {e.message}")
+                    return
+                report.errors.append(
+                    f"{node_id}: {type(conv_obj).__name__} failed, "
+                    f"falling back: {e.message}")
+            except Exception as e:
+                if terminal:
+                    report.errors.append(f"{node_id}: converter error: {e}")
+                    return
+                report.errors.append(
+                    f"{node_id}: {type(conv_obj).__name__} failed, "
+                    f"falling back: {e}")
+
+        # J.8 (v0.48): a refresh rebuilds the body from the converter, so
+        # the address is stamped again here — the same line the adopt path
+        # appended, through the same helper, or a re-uploaded screenshot
+        # would lose where it came from on its first refresh.
+        if conversion.kind == "markdown" and rel is not None:
+            conversion.markdown = self._with_provenance(conversion.markdown, rel)
 
         if self.dry_run:
             # An update refreshes the body and keeps the curated scent (G.3),
@@ -1398,6 +1548,33 @@ class Gardener:
             pass  # the body IS the source; hash bookkeeping above is enough
         else:
             body = conversion.markdown
+
+        # G.5.1: a refreshed media file re-archives under the same condition
+        # the adopt path used, or the map and the served bytes disagree — a
+        # re-uploaded screenshot would keep serving the OLD image from
+        # `_assets/` under a payload_hash that still validates, while the
+        # new bytes sit only in disposable staging. The digest names the
+        # archived copy, so a changed original lands under a new name and
+        # the stale one is removed rather than left to accumulate.
+        ext = f.suffix.lower()
+        is_text_source = ext in MarkdownConverter.extensions
+        staged_media = (PAYLOAD_TYPE_BY_EXT.get(ext) in ("image", "audio")
+                        and f.resolve().is_relative_to(
+                            self.forest.root.resolve() / "_derived"))
+        if (not is_text_source and conversion.kind not in ("payload", "dataset")
+                and (staged_media
+                     or self.config.get("archive", "never") == "always")):
+            old = fm.get("payload")
+            payload, ptype, phash = self._archive(f, node_id)
+            if ptype:
+                fm.update({"payload": payload, "payload_type": ptype,
+                           "payload_hash": phash})
+                if old and old != payload and old.startswith(f"{ASSETS_DIR}/"):
+                    stale = self.forest.path_for(node_id).parent / old
+                    try:
+                        stale.unlink(missing_ok=True)
+                    except OSError:
+                        pass  # a lingering copy is untidy, not incorrect
 
         assert node.path is not None
         node.path.write_text(serialize_node(fm, body), encoding="utf-8", newline="\n")

@@ -44,6 +44,8 @@
   "models.role_answer_sub": "Lê o material recuperado e escreve a resposta. Vale um modelo rápido roda a cada pergunta.",
   "models.role_ingest": "Resumir o que entra",
   "models.role_ingest_sub": "Escreve o resumo pelo qual toda busca futura navega. Vale um modelo caprichado roda uma vez por documento.",
+  "models.role_vision": "Descrever imagens",
+  "models.role_vision_sub": "Lê slides, diagramas e capturas de tela na ingestão e escreve o texto pelo qual o sniff as encontra. Vale um modelo fiel roda uma vez por imagem, e a descrição é tudo que uma imagem vai dizer.",
   "models.scope_note": "Ligar um modelo não amplia acesso. A busca roda primeiro dentro do escopo de quem pergunta, então o modelo só lê o que aquela pessoa já podia ler.",
   "models.test": "Testar",
   "models.testing": "Testando…",

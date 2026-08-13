@@ -29,3 +29,4 @@ Conventions:
 | T10.1 | Compose with review: the passport before the plant | done (2026-08-09: spec v0.24 → J.8.1 two-phase compose + F.27; `Gardener(dry_run=True)`, approval-as-`on_curate`, review card in the Write tab) |
 | T11 | Answer store: serve the answer already bought (spec v0.33 → J.10.7 + F.37) | in-progress (2026-08-11: exact tier shipped end-to-end, F.37 green minus the near-tier clause; the near tier remains) |
 | T12 | Snapshot travel: download and import over the Station (spec v0.39 → J.13.1/J.13.2 + F.39) | done (2026-08-11: owner-only download + import routes, Studio controls, F.39 suite green) |
+| T13 | The Clipper: browser extension feeding the Gardener (spec v0.48 → J.2.6/G.5.1/J.14/J.15 + F.47–F.49) | in-progress (2026-08-13: spec written; Station pairing + payload bytes, engine stub converter, vision role, `apps/clipper/` MV3 underway) |

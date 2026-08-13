@@ -44,6 +44,8 @@
   "models.role_answer_sub": "Lee el material recuperado y escribe la respuesta. Merece uno rápido corre en cada pregunta.",
   "models.role_ingest": "Resumir lo que entra",
   "models.role_ingest_sub": "Escribe el resumen por el que navega toda búsqueda posterior. Merece un modelo cuidadoso corre una vez por documento.",
+  "models.role_vision": "Describir imágenes",
+  "models.role_vision_sub": "Lee diapositivas, diagramas y capturas de pantalla al ingerir y escribe el texto por el que sniff las encuentra. Merece un modelo fiel corre una vez por imagen, y su descripción es todo lo que una imagen dirá.",
   "models.scope_note": "Enlazar un modelo no amplía el acceso. La búsqueda corre primero dentro del alcance de quien pregunta, así que el modelo solo lee lo que esa persona ya podía leer.",
   "models.test": "Probar",
   "models.testing": "Probando…",

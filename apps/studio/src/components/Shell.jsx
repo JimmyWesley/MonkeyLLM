@@ -15,8 +15,8 @@ import { useI18n, LANGUAGES } from '../i18n.jsx'
 import { useTheme } from '../theme.jsx'
 import { ErrorNote, Field, Modal } from '../design/ui.jsx'
 import {
-  CONSOLE_ICON, ChevronDown, Forest, Globe, LogOut, Moon, More, PanelLeft,
-  Plus, Star, Sun, Upload, X,
+  CONSOLE_ICON, ChevronDown, Download, Forest, Globe, LogOut, Moon, More,
+  PanelLeft, Plus, Star, Sun, Upload, X,
 } from '../design/icons.jsx'
 import JobPill from './JobPill.jsx'
 
@@ -202,6 +202,20 @@ export function Shell({ session, forest, view, node, onForestCreated,
             </div>
           ))}
         </nav>
+
+        {/* The Clipper download lives on the rail, not behind the admin-
+            gated manual: pairing is self-service (J.2.6), so getting the
+            extension must be too. A real anchor — the browser saves the one
+            shared build the Station serves at /clipper.zip (J.15); the
+            walkthrough stays in Integrations for whoever administers. */}
+        <div className="shrink-0 border-t border-line px-2.5 py-1.5">
+          <a href="/clipper.zip" download
+             className={`nav-item ${collapsed ? 'lg:justify-center lg:px-0' : ''}`}
+             title={t('nav.clipper.blurb')}>
+            <Download size={16} />
+            {!collapsed && <span className="truncate">{t('nav.clipper')}</span>}
+          </a>
+        </div>
 
         <Footer session={session} collapsed={collapsed}
                 onExpand={() => collapse(false)} />

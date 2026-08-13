@@ -24,7 +24,12 @@ import { Metric, NeedsCapability, fmtMs, has, nodeLink, useAsync } from './share
  * decoration — it is the set of nodes that were actually read. */
 export default function Ask({ forest, grant, me, goto }) {
   const { t, lang } = useI18n()
-  const [question, setQuestion] = useState('')
+  // ?q= PREFILLS the question — it never asks it. The address restores a
+  // page, not a call (J.5.8): a shared link or the Clipper's ask box
+  // lands here with the words ready, and the person presses ask. Read
+  // once at mount; typing never writes it back.
+  const [question, setQuestion] = useState(
+    () => new URLSearchParams(window.location.search).get('q') || '')
   const [k, setK] = useState(3)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)

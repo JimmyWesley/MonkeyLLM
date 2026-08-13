@@ -8,7 +8,7 @@ import {
   Badge, Card, Combobox, Empty, ErrorNote, Field, Note, Select, Skeleton,
   Spinner, Table, Td, Toggle,
 } from '../design/ui.jsx'
-import { Ask, Check, Ingest, Models as Chip, Trash } from '../design/icons.jsx'
+import { Ask, Check, Eye, Ingest, Models as Chip, Trash } from '../design/icons.jsx'
 import { Metric, NeedsCapability, has, useAsync } from './shared.jsx'
 
 /** Saving a binding, with the three states a save actually has.
@@ -70,6 +70,12 @@ const ROLES = [
   // model said nothing useful" rather than "it was cut off".
   { key: 'ingest', icon: Ingest, defaultTokens: 600 },
   { key: 'answer', icon: Ask, defaultTokens: 600 },
+  // The G.5.1 describer. It runs where ingest runs — once per image, at
+  // adopt/sync — and what it writes is the only text `sniff` will ever see
+  // of a slide or a screenshot, so fidelity is the thing to pay for. Unbound,
+  // images still plant as media with the stub body; nothing here is required
+  // for ingest to keep working (J.10).
+  { key: 'vision', icon: Eye, defaultTokens: 600 },
 ]
 
 const PRESETS = [

@@ -16,7 +16,7 @@ import {
   useCrumbs, useForestTree,
 } from './shared.jsx'
 import ForestGraph from './graph.jsx'
-import ForestFiles from './files.jsx'
+import ForestFiles, { PayloadImage } from './files.jsx'
 import NodeEditor from './editor.jsx'
 
 /** One console, three ways of looking at the same forest (spec J.5.4).
@@ -273,6 +273,15 @@ function NodeDetail({ forest, grant, id, digest, setNode }) {
               <button className="btn btn-sm" onClick={read}>{t('explore.read')}</button>
             </>}>
         <p className="text-[14px] leading-relaxed text-text">{d.summary}</p>
+
+        {/* The image the prose was written about, beside it (J.14). `look`
+            carries no payload fields, so the component itself lets the
+            served Content-Type decide — and declines an audio payload. */}
+        {d.type === 'media' && (
+          <div className="mt-4">
+            <PayloadImage forest={forest} id={d.id} title={d.title} type={d.type} />
+          </div>
+        )}
 
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Metric label={t('explore.degree')} value={d.stats?.degree ?? 0} />

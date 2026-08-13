@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.47.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.48.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -24,7 +24,7 @@ Forests are never edited in place — change the generator and rebuild.
 
 Two licenses (see `LICENSING.md`): **Apache-2.0** for the engine and
 everything around it, **AGPL-3.0-only** for the host (`apps/station/`,
-`apps/studio/`). Every new source file carries an SPDX header naming the
+`apps/studio/`, `apps/clipper/`). Every new source file carries an SPDX header naming the
 license of the tree it lives in. Apache-2.0 is one-way compatible with
 AGPL, so the direction is load-bearing: the host may import the engine, and
 `src/monkeyllm/` **must never import from `apps/`** — that is now a legal
@@ -228,6 +228,38 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   auto-generates `## Query manual`, and commits only the `.md`. No `ALTER`
   for agents; `tend` stays DML-only forever. Initial `rows` at birth are
   loaded parameterized (v0.9 rule 7) — never as SQL text.
+- **A pair key narrows, never adds (spec J.2.6, v0.48)**: `POST
+  /v1/auth/pair` turns a password into a key carrying a capability mask
+  (`{read, ingest}` default, that set is also the ceiling — anything else
+  is `E_SCHEMA`); effective authority is grants **∩ mask at the moment of
+  use**, wherever the requesting principal's authority is read — policy
+  build, grants listing, admin/owner bits, REST **and** MCP. Self-service
+  by construction (it reaches nothing the password could not); MUST
+  expire (90 d default, 365 ceiling); `login`+`pair` are rate-limited
+  with one 429 message that never reveals whether the user exists.
+- **An image is never `unsupported` (spec G.5.1, v0.48)**: image/audio
+  plant as `media` via the engine's built-in stub converter (typing rule:
+  text → `note`, image/audio payload type → `media`, else `document`); a
+  bound `vision` role (J.10) injects a describer through the Gardener's
+  `extra_converters` seam (after operator command hooks, before entry
+  points/built-ins); a describer that raises falls back to the stub.
+  Media staged under `_derived/` (uploads) is archived into `_assets/`
+  regardless of `archive:` — staging is disposable, so there the payload
+  is the only copy.
+- **Payload bytes are a human surface (spec J.14, v0.48)**: `GET
+  /v1/forests/{f}/payload/{node}` — read cap, byte-identical
+  `E_NOT_FOUND` for out-of-scope/absent/no-payload, resolved path
+  contained in the forest root, remote URIs refused `E_SCHEMA`. Bytes
+  never enter model material through it; the G.5.1 describer at ingest
+  is the one place a model sees an image.
+- **The Clipper is a client (spec J.15, v0.48)** — `apps/clipper/`, MV3:
+  stores origin + paired key only (never the password); prose through
+  `compose`, binaries through `upload`; `E_LOCKED` queues client-side;
+  injects on user action only (`activeTab`). Distributed by the Station
+  at `GET /clipper.zip` — ONE shared build, unauthenticated like the
+  shell, offered on the Studio rail to every signed-in person (never
+  admin-gated: pairing is self-service, so distribution is too);
+  `MONKEYLLM_STATION_CLIPPER_DIR` overrides the staged build.
 - **Starting a Station mints nothing (spec J.2.5, v0.28)**: the registry is
   as authoritative after boot as before it, so J.2.4's setup window survives
   to be used. The first-run banner names the open door (setup URL / env

@@ -10,10 +10,11 @@
  *
  * Three rules from J.5.4 are load-bearing here:
  *
- * - **Nothing is read outside the primitives.** The tree comes from the map
- *   projection, a body from `pick`, a table from `query`. There is no file
- *   endpoint, because a console that could read bytes directly would be the
- *   privileged side-channel J.5 forbids.
+ * - **Nothing is read outside the primitives and the J.14 byte route.** The
+ *   tree comes from the map projection, a body from `pick`, a table from
+ *   `query`, an image from `GET .../payload/{node}` — a governed surface any
+ *   client with the same key could fetch, never the privileged side-channel
+ *   J.5 forbids.
  * - **A reconstructed passport is never shown as the file's bytes.** The
  *   source view names its two halves: the passport as the Catalog holds it,
  *   and the body as stored.
@@ -55,6 +56,7 @@ export function filesOf(nodes) {
       const dir = n.id.includes('/') ? n.id.slice(0, n.id.lastIndexOf('/') + 1) : ''
       out.push({
         path: dir + n.payload, id: n.id, type: n.type,
+        payload_type: n.payload_type,
         kind: n.payload.toLowerCase().endsWith('.db') ? 'db' : 'payload',
       })
     }
@@ -218,6 +220,66 @@ function FileRow({ file, depth, open, onOpen, label }) {
   )
 }
 
+/* -- payload bytes (J.14) ------------------------------------------------- */
+
+/** The image behind a media node, beside its prose (spec J.14).
+ *
+ *  The description exists because of the image, so a reader shown one
+ *  without the other is left trusting text about pixels nobody can see.
+ *  The bytes come through the J.14 route — a fetch, because an <img src>
+ *  cannot carry the Bearer header — and live as an object URL, revoked
+ *  when the node changes or the view unmounts. A payload that is gone or
+ *  out of scope is a quiet one-line note, never an error wall: the map
+ *  keeps working when the flesh is out of reach (G.7).
+ */
+export function PayloadImage({ forest, id, title, type, payloadType }) {
+  const { t } = useI18n()
+  // Media only, and only an image when the map named the payload's type.
+  // `look` carries no payload fields, so callers coming from a digest pass
+  // no payloadType and the served Content-Type decides instead — an audio
+  // payload simply declines to render.
+  const wanted = type === 'media' && (!payloadType || payloadType === 'image')
+  const [shown, setShown] = useState(null)   // {url} | {missing: true} | null
+
+  useEffect(() => {
+    if (!wanted) return undefined
+    let url = null
+    let alive = true
+    setShown(null)
+    api.payload(forest, id)
+      .then(async (p) => {
+        // When the map declared `payload_type: image`, the map is trusted;
+        // otherwise only bytes the host itself calls an image are shown —
+        // and the decision is made on the HEADER, before the body is paid
+        // for: an audio payload declines at one header read, not after a
+        // full download it was going to discard.
+        if (!alive || (!payloadType && !p.type.startsWith('image/'))) {
+          p.cancel()
+          return
+        }
+        const blob = await p.blob()
+        if (!alive) return
+        url = URL.createObjectURL(blob)
+        setShown({ url })
+      })
+      .catch(() => { if (alive) setShown({ missing: true }) })
+    return () => { alive = false; if (url) URL.revokeObjectURL(url) }
+  }, [forest, id, wanted, payloadType])
+
+  if (!wanted || !shown) return null
+  if (shown.missing) {
+    return <p className="text-[12px] text-text-3">{t('files.payload_missing')}</p>
+  }
+  return (
+    <a href={shown.url} target="_blank" rel="noreferrer"
+       title={t('files.payload_open')} className="inline-block">
+      <img src={shown.url} alt={title || t('files.payload_alt')}
+           className="max-h-[420px] max-w-full rounded-lg border border-line
+                      bg-surface-2 object-contain" />
+    </a>
+  )
+}
+
 /* -- the viewer ---------------------------------------------------------- */
 
 function Viewer({ forest, grant, file, onEdit, onNavigate }) {
@@ -233,9 +295,16 @@ function Viewer({ forest, grant, file, onEdit, onNavigate }) {
     return <DatasetViewer forest={forest} grant={grant} file={file} digest={digest} />
   }
   if (file.kind === 'payload') {
+    // The file IS the image here, so it opens as one (J.14); every other
+    // payload kind still has no viewer and says so.
     return (
       <Card title={file.path} subtitle={t('files.payload_sub')} icon={File}>
-        <Empty icon={File} title={t('files.payload')}>{t('files.payload_hint')}</Empty>
+        {file.type === 'media' && file.payload_type === 'image' ? (
+          <PayloadImage forest={forest} id={file.id} title={digest.data?.title}
+                        type="media" payloadType="image" />
+        ) : (
+          <Empty icon={File} title={t('files.payload')}>{t('files.payload_hint')}</Empty>
+        )}
       </Card>
     )
   }
@@ -320,11 +389,17 @@ function NodeBody({ forest, id, mode, digest, onNavigate }) {
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-    <div onClick={follow}
-         className={asPage ? 'rounded-lg border border-line bg-surface-2 p-4' : ''}>
-      {asPage && <div className="label">{t('files.as_page')}</div>}
-      <Markdown>{asPage ? text : linkify(text)}</Markdown>
+    <div className="space-y-4">
+      {/* Above the body, because the body exists because of it (J.14). */}
+      {d.type === 'media' && (
+        <PayloadImage forest={forest} id={id} title={d.title} type={d.type} />
+      )}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      <div onClick={follow}
+           className={asPage ? 'rounded-lg border border-line bg-surface-2 p-4' : ''}>
+        {asPage && <div className="label">{t('files.as_page')}</div>}
+        <Markdown>{asPage ? text : linkify(text)}</Markdown>
+      </div>
     </div>
   )
 }

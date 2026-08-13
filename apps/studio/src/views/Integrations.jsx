@@ -16,15 +16,15 @@ import { useI18n } from '../i18n.jsx'
 import { Badge, Card, CopyButton, Note, Table, Td } from '../design/ui.jsx'
 import { Highlighted } from '../design/highlight.jsx'
 import {
-  Download, File, Key, Link, Monitor, Playground, Plug,
+  Copy, Download, File, Key, Link, Monitor, Playground, Plug,
 } from '../design/icons.jsx'
 import { ALL_CAPS, NeedsCapability, has } from './shared.jsx'
 
-const SECTIONS = ['overview', 'install', 'deploy', 'mcp', 'api', 'access', 'env']
+const SECTIONS = ['overview', 'install', 'deploy', 'mcp', 'api', 'clipper', 'access', 'env']
 
 const SECTION_ICON = {
   overview: Link, install: Download, deploy: Monitor, mcp: Plug,
-  api: Playground, access: Key, env: File,
+  api: Playground, clipper: Copy, access: Key, env: File,
 }
 
 /** Tool name → the capability it needs (null = any valid key). */
@@ -39,9 +39,11 @@ const MCP_TOOLS = [
 const ROUTES = [
   ['GET /v1/health', 'none', 'health'],
   ['POST /v1/auth/login', 'none', 'login'],
+  ['POST /v1/auth/pair', 'none', 'pair'],
   ['GET /v1/me', 'key', 'me'],
   ['GET /v1/forests', 'key', 'forests'],
   ['POST /v1/forests/{forest}/{name}', 'cap', 'call'],
+  ['GET /v1/forests/{forest}/payload/{node}', 'read', 'payload'],
   ['POST /v1/admin/forests', 'admin', 'admin_forests'],
   ['GET, POST /v1/admin/people', 'admin', 'people'],
   ['GET, POST /v1/admin/keys', 'admin', 'keys'],
@@ -53,7 +55,7 @@ const ROUTES = [
   ['GET, POST /v1/admin/canopy', 'admin', 'canopy'],
 ]
 
-const NEED_TONE = { cap: 'accent', admin: 'warn' }
+const NEED_TONE = { read: 'accent', cap: 'accent', admin: 'warn' }
 
 const ENV_VARS = [
   [['MONKEYLLM_STATION_ADMIN', 'MONKEYLLM_STATION_PASSWORD'], 'admin'],
@@ -346,6 +348,33 @@ Authorization: Bearer mk_…`} />
               </tr>
             ))}
           </Table>
+        </Section>
+
+        {/* The Clipper (J.15) is a client like the two sections above it —
+            MCP for agents, REST for scripts, this for the browser — and its
+            credential story is the bridge into the access section below:
+            pairing (J.2.6) mints a key that can only narrow, never add. The
+            origin rendered here is this Station's own, like every snippet on
+            this page: the extension asks for exactly that string. */}
+        <Section id="clipper" title={t('integrations.clipper.title')}
+                 sub={t('integrations.clipper.sub')}>
+          <P>{t('integrations.clipper.p1')}</P>
+          <H>{t('integrations.clipper.install')}</H>
+          <ol className="max-w-[72ch] list-decimal space-y-1.5 pl-5 text-[13px]
+                         leading-relaxed text-text-2">
+            {[1, 2, 3].map((n) => (
+              <li key={n}>{t(`integrations.clipper.in${n}`, { origin })}</li>
+            ))}
+          </ol>
+          <H>{t('integrations.clipper.pair')}</H>
+          <P>{t('integrations.clipper.pair_p1')}</P>
+          <CodeBlock title={t('integrations.clipper.origin')} lang="bash" code={origin} />
+          <P>{t('integrations.clipper.pair_p2')}</P>
+          <CodeBlock title={t('integrations.clipper.ex_pair')} lang="bash"
+                     code={`curl -sX POST ${origin}/v1/auth/pair \\
+  -H 'content-type: application/json' \\
+  -d '{"username": "you", "password": "…", "label": "clipper-laptop"}'`} />
+          <Note>{t('integrations.clipper.revoke')}</Note>
         </Section>
 
         <Section id="access" title={t('integrations.access.title')}
