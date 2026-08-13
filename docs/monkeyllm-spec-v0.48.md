@@ -53,7 +53,45 @@ guard moves.
   out-of-scope and absent alike, resolved path contained in the forest
   root, local payloads only. Until now a screenshot the Clipper
   ingested was a node whose image no console could show.
-- Acceptance: **F.47, F.48, F.49**.
+- **A multimodal client may view what it found (new C.6d; amended
+  G.5, J.14).** G.5 named serving payload bytes over MCP as a possible
+  future; it is now the `view` tool: the image payload of an in-scope
+  `media` node, returned as MCP image content beside a small JSON
+  header — same resolution rules as J.14 (byte-identical `E_NOT_FOUND`,
+  local-only, contained), images only, bounded at the describer's own
+  6 MiB. The line J.14 drew is *sharpened*, not crossed: material the
+  host assembles for a model still never carries bytes — `view` is the
+  caller's model fetching the image deliberately, into its own context,
+  under its own budget, exactly as G.5 always intended a "multimodal
+  client that wants full fidelity" to do.
+- **The answer can show what it read (new J.10.9).** A media node's
+  body is a describer's prose about pixels the reader cannot see. The
+  answering model may now embed the image itself: a markdown image whose
+  address is `media:<node id>`, allowed only for ids present in its
+  material. The host neither fetches nor rewrites anything — the console
+  resolves the reference through J.14, where scope is enforced, so an
+  invented id renders as its caption and nothing else. Evidence of type
+  `media` is rendered with its image beside the prose, and exports carry
+  what the reader saw.
+- **The reply has a stated size (new J.10.8; amended J.10.7).**
+  The only reply-length control was the binding's `max_tokens` — per
+  forest, operator-set, and silent: a model that overran it was cut
+  mid-sentence. `answer` now accepts `reply_tokens` per call, clamped
+  to [64, 4000]; the effective value caps the model call AND is stated
+  in the prompt, so the model shapes the reply instead of being
+  truncated by it. It joins the J.10.7 key — a short answer and a long
+  answer to one question are two entries — and the console offers it as
+  a slider kept as the person's own preference, client-side, never in
+  the address.
+- **The fingerprint reads everything the model reads (amended
+  J.10.7).** v0.47 made a dataset's `notes` ride in every bundle;
+  the reading fingerprint was still hashing the six original fields, so
+  an operator editing the teaching did not invalidate the stored answer
+  built without it — a stale hit, exactly what the fingerprint exists to
+  make impossible. The rule was always "the sweep fingerprints what it
+  would hand the model"; the `notes` now enter the hash like any other
+  handed field.
+- Acceptance: **F.47, F.48, F.49, F.50, F.51**.
 
 **Changelog v0.46 → v0.47 — a wrong name is not a locked door, and a result is material like any other.**
 
@@ -2282,6 +2320,62 @@ results first (never silently slicing a body).
 }
 ```
 
+### C.6d `view(id: string) → media content` (v0.48)
+
+**MCP tool, not a REST primitive**: the image payload behind a `media`
+node, handed to the *caller's* model as MCP image content. G.5 stated
+the split — text to find, binary to consume — and named this tool as a
+possible future; this section makes it normative. `harvest` finds the
+screenshot by its describer prose; `view` is how a multimodal client
+then reads the pixels themselves: a tutorial screenshot before acting
+on it, a UI mock a person clipped as feedback, a whiteboard photo whose
+arrows the describer could only gesture at.
+
+Semantics (normative):
+
+1. Resolution follows J.14 exactly: the node, its `payload` field
+   resolved relative to the node's directory, contained in the forest
+   root after resolution. Absent node, node without a `payload`, and a
+   `payload` whose file is missing all answer the **same** `E_NOT_FOUND`
+   envelope as a missing node — and on a host, an out-of-scope node is
+   byte-identical to all of them (J.3's no-existence-oracle invariant).
+2. A remote payload URI (G.9) is refused `E_SCHEMA` naming the scheme,
+   as on J.14: fetching inside a read hides a network dependency;
+   `vine prefetch` is how a remote region is warmed.
+3. **Images only.** A payload whose type is not `image/*` is refused
+   `E_SCHEMA` naming the type: a dataset is read with `query`, audio
+   waits for a transcriber role (G.5.1), and raw bytes of arbitrary
+   kind remain the human surface's affair (J.14).
+4. **Bounded at 6 MiB** — the same number as the G.5.1 describer's own
+   refusal, because it is the same question ("too big to hand a
+   model?") and one project answers it once. Over the bound is
+   `E_SCHEMA` naming the size; the J.14 route serves bytes of any size
+   to people.
+5. The result is two content blocks: a JSON header — `id`,
+   `media_type`, `size`, `payload_hash` — and the image content itself.
+   The token budgets of Part C do not apply to the image block: the
+   bytes land in the caller's context by the caller's explicit choice,
+   and the byte bound above is their ceiling.
+6. Traced like any read (Part D) and it deposits pheromone: a model
+   that chose to open an image is the strongest evidence of usefulness
+   this node will ever receive.
+7. On a host: requires the `read` capability, audited like a read with
+   the byte size (never the bytes), and **not** offered to the J.10.5
+   walk — its whitelist is unchanged, because the forest's own `answer`
+   binding is not presumed multimodal. A vision-capable walk is a
+   possible future, not this section.
+8. On the REST surface this tool does not exist: `GET .../payload/{node}`
+   (J.14) is REST's byte route, and a JSON twin of it would only
+   disclose server paths.
+
+**F.50 (acceptance).** `view` on a media node returns image content
+whose bytes equal the payload file and a header whose `payload_hash`
+matches the passport. On a dataset it answers `E_SCHEMA` naming the
+type; over 6 MiB, `E_SCHEMA` naming the size; on a remote URI,
+`E_SCHEMA` naming the scheme. A scoped principal viewing an
+out-of-scope media node receives the same envelope as for a missing
+one, and a node without a payload the same. All covered by tests.
+
 ### C.7 `plant(node: NodeSpec) → PlantResult`
 
 `NodeSpec` = full frontmatter + `body` + `parent` (destination branch id).
@@ -3130,8 +3224,8 @@ never core dependencies) returns markdown that becomes the `media`
 passport's body. The forest's job is **finding** media fast: `locate`/
 `sniff` search the textual proxy; a multimodal client that wants full
 fidelity follows `payload` to the raw file. Text to find, binary to
-consume. (Serving payload bytes over MCP to multimodal clients is a
-possible future extension — not normative here.)
+consume. Serving payload bytes over MCP to multimodal clients is the
+`view` tool (C.6d, v0.48): found by its prose, read in its pixels.
 
 ### G.5.1 The stub and the describer (v0.48)
 
@@ -5486,7 +5580,10 @@ it.** An entry is named by the digest of, exactly:
    differently, so it answers differently;
 4. the **binding as resolved** — provider, model, `max_tokens`,
    `reasoning`. A rebound model is a different answerer, so it is a
-   different key;
+   different key. And the caller's **`reply_tokens`, when one was set**
+   (J.10.8, v0.48), as clamped: a short answer and a long answer to one
+   question are two different answers, and a call that set none keys
+   exactly as before, so an upgrade invalidates nothing;
 5. the caller's **scope** — allow, deny and table grants as enforced
    (J.3). Two principals under one scope are asking one forest; under
    different scopes they are asking different forests that happen to share
@@ -5506,8 +5603,10 @@ hit rate halved for no correctness bought.
 jobs. The key above finds the entry; a second digest — the **reading
 fingerprint**, stored with it — decides whether the model owes a fresh
 pass. The sweep fingerprints what it would hand the model: the set of
-results keyed by id, each contributing its type, title, summary, matches
-and body content, plus the bundle's truncation flag — and nothing
+results keyed by id, each contributing its type, title, summary, matches,
+body content and `notes` when it carries them (v0.48 — the teaching is
+handed to the model, so a teaching edited is a reading changed), plus the
+bundle's truncation flag — and nothing
 volatile: not score, not heat, not the serving order. Pheromone drifts on
 every use and reorders near-ties (Part D); the order is the ranking's
 affair, not the body's, and a store invalidated by its own hits would
@@ -5633,6 +5732,87 @@ host, two sweeps asking `k: 10` and `k: 50` under a cap of 5 form one
 store key and the second is served from the store; the same two calls
 with the walk on (J.10.5) form two keys, because the walk's `k` is not
 capped. Covered by tests.
+
+### J.10.8 The reply has a stated size (v0.48)
+
+The one control over how much an answer says was the binding's
+`max_tokens` (J.10): per forest, set by the operator, and enforced only
+as a hard cut — a model that overran it stopped mid-sentence. The person
+asking has the opposite need per question: a one-line confirmation now,
+a thorough reading across documents later. That is a per-call choice,
+not a per-forest configuration.
+
+`answer` therefore accepts **`reply_tokens`**, walk and sweep alike:
+
+- **Clamped to [64, 4000]**, the upper bound being the project's
+  familiar "one reading" budget (`pick`, `harvest`). Absent means the
+  binding's `max_tokens` rules exactly as before — the parameter is an
+  override, never a new default.
+- **The cap is also said.** When set, the effective value replaces
+  `max_tokens` on the model call AND is stated in the prompt, so the
+  model shapes the reply to fit rather than being truncated by it —
+  a truncation the caller cannot even see, since a provider's cut
+  carries no flag. On a walk it bounds every turn (a tool call is far
+  under the floor) and the prompt names it for the final answer.
+- **It joins the key when set** (J.10.7): the effective, clamped value —
+  two calls that differ only in reply size are asking for two different
+  answers. A call that set none contributes nothing to the key, so
+  existing stores survive the upgrade untouched.
+- The binding's `reasoning` bump is applied after the override, for the
+  same reason it exists at all: thinking tokens must not eat the reply.
+
+**The console offers it as a control, and keeps it as a preference.**
+A slider beside the ask box, defaulting to the binding's own size
+("auto"), persisted client-side per person — J.5.3's class of choice
+(like language and theme), never in the address: the address restores
+a page (J.5.8), and how long someone likes their answers is theirs, not
+the page's.
+
+**F.51 (acceptance).** An `answer` carrying `reply_tokens` makes the
+provider call with that value as `max_tokens` (clamped to [64, 4000])
+and the prompt states it; absent, the binding's value rules byte-for-
+byte as before. Two sweeps differing only in `reply_tokens` are two
+store entries; a call without it forms the same key as before the
+upgrade. The MCP `answer` tool accepts it. Covered by tests.
+
+### J.10.9 The answer that shows what it read (v0.48)
+
+A media node's body is a describer's prose about pixels (G.5.1). The
+J.14 route lets a console show the image beside the node — but the
+*answer* is where a person actually meets the forest, and an answer
+built on a screenshot was text about an image nobody was shown: the
+model had read the description, used it, and had no way to hand the
+reader the thing itself.
+
+The model may now **embed a media node's image in its reply**, by
+reference:
+
+- The syntax is a markdown image whose address is the `media:` scheme
+  followed by the node id — `![<caption>](media:<node id>)` — stated to
+  the model in the answer prompts whenever its material contains a
+  `media` node, with the rule that only ids present in the material may
+  be named. It is a *reference*: the host neither fetches, inlines nor
+  rewrites anything, and the reply stays plain markdown — storable in
+  the answer store (J.10.7) unchanged, because a node id is stable
+  where a URL is not.
+- **The console resolves it through J.14**, the route where scope is
+  already enforced: a `media:` reference is fetched with the viewer's
+  own credential, so an id the model invented — or one the *viewer*
+  may not read — resolves `E_NOT_FOUND` and MUST render as its caption
+  and nothing else, never as an error that outranks the answer. Bytes
+  still never ride in the response body; G.5's line is untouched.
+- **Evidence shows its image.** An evidence item of type `media` MUST
+  be rendered with its image beside its scent (J.14's console rule,
+  made specific): whether or not the model chose to embed it, "what was
+  this answer built from" includes the pixels.
+- **Exports carry what the reader saw.** A PDF export includes the
+  rendered images; a markdown export rewrites `media:` references to
+  the absolute J.14 route, so the file names a fetchable address
+  rather than a scheme only this console understands.
+
+*(Informative.)* The embed rule rides in the prompt per call, so it
+reaches every binding without retraining; a model that never embeds
+loses nothing — evidence rendering does not depend on it.
 
 ### J.11 Map projections
 
@@ -5905,9 +6085,14 @@ ingested was a node whose image no console could show.
 - The response is the raw bytes: `Content-Type` guessed from the file
   name (`application/octet-stream` when unknown), `ETag` from
   `payload_hash` when the node carries one, `Cache-Control: private`.
-- It is a **human surface**. Payload bytes MUST NOT enter model
-  material through it; G.5's line stands — the describer (G.5.1) is
-  the one place a model sees the image, at ingest, once.
+- It is a **human surface**. Payload bytes MUST NOT enter material the
+  host assembles for a model — not through this route, not through any
+  other: the describer (G.5.1) reads the image at ingest, and a
+  multimodal *client* that wants the pixels fetches them deliberately
+  through `view` (C.6d), into its own context, under its own budget.
+  What G.5's line forbids is bytes arriving unasked in a token-budgeted
+  bundle; what it always intended is a client choosing to consume the
+  binary it found.
 - Audited like a read; served by a read-only Station (it writes
   nothing).
 - A console SHOULD render an in-scope media node's image payload
