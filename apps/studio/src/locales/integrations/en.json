@@ -135,5 +135,6 @@
   "integrations.tool.query": "Read-only SQL against a dataset node.",
   "integrations.tool.scan": "Filters a branch’s nodes by metadata.",
   "integrations.tool.sniff": "Literal search inside bodies the facts summaries do not carry.",
-  "integrations.tool.tend": "Single-statement dataset write."
+  "integrations.tool.tend": "Single-statement dataset write.",
+  "integrations.tool.view": "The image payload of a media node, as image content a multimodal client reads into its own context."
 }

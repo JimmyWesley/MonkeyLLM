@@ -31,7 +31,7 @@ const SECTION_ICON = {
 const MCP_TOOLS = [
   ['forests', null], ['locate', 'read'], ['look', 'read'], ['move', 'read'],
   ['pick', 'read'], ['scan', 'read'], ['sniff', 'read'], ['harvest', 'read'],
-  ['answer', 'read'], ['query', 'query'], ['plant', 'write'],
+  ['answer', 'read'], ['view', 'read'], ['query', 'query'], ['plant', 'write'],
   ['graft', 'write'], ['tend', 'tend'], ['ingest', 'ingest'],
 ]
 

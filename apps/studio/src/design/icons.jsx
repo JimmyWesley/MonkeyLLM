@@ -200,6 +200,6 @@ export const Plug = (p) => (
 
 export const CONSOLE_ICON = {
   overview: Overview, ask: Ask, explore: Explore, playground: Playground,
-  data: Data, ingest: Ingest, models: Models, people: Users, audit: Audit,
-  integrations: Plug, health: Health,
+  data: Data, skills: Sparkle, ingest: Ingest, models: Models, people: Users,
+  audit: Audit, integrations: Plug, health: Health,
 }

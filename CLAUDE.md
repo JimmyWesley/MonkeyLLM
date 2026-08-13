@@ -1,7 +1,7 @@
 # MonkeyLLM — agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.48.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.49.md` is normative
 (earlier versions are archived) — **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -288,6 +288,19 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   shell, offered on the Studio rail to every signed-in person (never
   admin-gated: pairing is self-service, so distribution is too);
   `MONKEYLLM_STATION_CLIPPER_DIR` overrides the staged build.
+- **The door names its surfaces, and the first minute is chrome (spec
+  J.5.1 + J.5.11 + J.5.12, v0.49)**: the integration manual's menu entry
+  reads **MCP / API / Integrations** (`MCP`/`API` travel untranslated);
+  the first-access presentation shows at most once per browser (flag in
+  browser storage only — spends no model call, writes nothing
+  server-side, never precedes identity); the **Skills** console is
+  self-service (`read`-gated, NEVER admin-gated) and generates the
+  Claude Code skill client-side with the Station origin + open forest id
+  baked in — the Station gains no endpoint, the skill teaches only the
+  published MCP surface under a paired key, and its body stays English
+  (it addresses a model; the walkthrough around it is translated).
+  Companion handbook: `docs/guide/{en,pt,es}` — screenshots shared in
+  `docs/guide/assets/`.
 - **Starting a Station mints nothing (spec J.2.5, v0.28)**: the registry is
   as authoritative after boot as before it, so J.2.4's setup window survives
   to be used. The first-run banner names the open door (setup URL / env

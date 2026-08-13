@@ -135,5 +135,6 @@
   "integrations.tool.query": "SQL somente leitura contra um nó dataset.",
   "integrations.tool.scan": "Filtra os nós de um galho por metadados.",
   "integrations.tool.sniff": "Busca literal dentro dos corpos os fatos que os sumários não carregam.",
-  "integrations.tool.tend": "Escrita de dataset em uma única instrução."
+  "integrations.tool.tend": "Escrita de dataset em uma única instrução.",
+  "integrations.tool.view": "O payload de imagem de um nó media, como conteúdo de imagem que um cliente multimodal lê para o próprio contexto."
 }

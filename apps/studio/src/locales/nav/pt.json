@@ -17,7 +17,7 @@
   "nav.health.blurb": "O que o Ranger enxerga, e tire um snapshot",
   "nav.ingest": "Ingestão",
   "nav.ingest.blurb": "Coloque seus documentos dentro da floresta",
-  "nav.integrations": "Integrações",
+  "nav.integrations": "MCP / API / Integrações",
   "nav.integrations.blurb": "Conecte agentes, apps e implantações a esta Station",
   "nav.menu": "Menu",
   "nav.models": "Modelos",
@@ -32,6 +32,8 @@
   "nav.pin_hint": "A estrela fixa o atalho na barra de baixo.",
   "nav.playground": "Playground",
   "nav.playground.blurb": "Veja exatamente o que um agente vê, chamada a chamada",
+  "nav.skills": "Skills",
+  "nav.skills.blurb": "Ensine a sua IA a usar esta floresta como memória",
   "nav.tokens": "Tokens",
   "nav.tokens.blurb": "Quais credenciais existem, e até quando",
   "nav.unpin": "Tirar da barra"

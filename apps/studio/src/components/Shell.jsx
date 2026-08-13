@@ -19,6 +19,7 @@ import {
   PanelLeft, Plus, Star, Sun, Upload, X,
 } from '../design/icons.jsx'
 import JobPill from './JobPill.jsx'
+import Welcome from './Welcome.jsx'
 
 /** `cap` is what the console's own endpoints require. Absent means every
  *  principal has something to see there: Overview describes the key itself,
@@ -29,6 +30,9 @@ export const CONSOLES = [
   { key: 'explore', group: 'use', cap: 'read' },
   { key: 'playground', group: 'use', cap: 'read' },
   { key: 'data', group: 'use', cap: 'query' },
+  // Self-service by contract (J.5.12): `read`, never admin — the person
+  // who may read the forest is the person whose AI may learn to.
+  { key: 'skills', group: 'use', cap: 'read' },
   { key: 'ingest', group: 'build', cap: 'ingest' },
   { key: 'models', group: 'build', cap: 'admin' },
   { key: 'people', group: 'govern', cap: 'admin' },
@@ -268,6 +272,10 @@ export function Shell({ session, forest, view, node, onForestCreated,
             on the ingest console — the full card is already there — and
             nothing when the board is idle. */}
         <JobPill forest={forest} view={view} grant={grant} />
+
+        {/* First access (J.5.11): inside the Shell so it can never precede
+            identity, above whichever console the person landed on. */}
+        <Welcome forest={forest} grant={grant} />
       </div>
     </div>
   )

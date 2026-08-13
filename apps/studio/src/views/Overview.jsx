@@ -5,7 +5,7 @@ import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { Card, Note, Skeleton, Stat } from '../design/ui.jsx'
 import {
-  Ask, Data, Explore, Forest, Ingest, Models, Overview as Grid,
+  Ask, Data, Explore, Forest, Ingest, Models, Overview as Grid, Plug, Sparkle,
 } from '../design/icons.jsx'
 import {
   ALL_CAPS, capsOf, has, nodeLink, rootsOf, useAsync, useForestTree,
@@ -117,6 +117,29 @@ export default function Overview({ forest, grant, me, goto }) {
           </p>
         </Card>
       </div>
+
+      {/* The standing restatement of the first-access presentation (J.5.11):
+          the person who dismissed it on day one is the person who needs the
+          door on day thirty. Links only — this card does no work. */}
+      <Card title={t('overview.connect')} icon={Sparkle}>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <p className="min-w-[24ch] max-w-[72ch] flex-1 text-[13px] leading-relaxed text-text-2">
+            {t('overview.connect_p')}
+          </p>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {has(grant, 'read') && (
+              <button className="btn" onClick={() => goto('skills')}>
+                <Sparkle size={14} /> {t('overview.connect_go')}
+              </button>
+            )}
+            {has(grant, 'admin') && (
+              <button className="btn" onClick={() => goto('integrations')}>
+                <Plug size={14} /> {t('overview.connect_manual')}
+              </button>
+            )}
+          </div>
+        </div>
+      </Card>
     </div>
   )
 }

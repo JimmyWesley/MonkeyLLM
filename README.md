@@ -37,6 +37,16 @@ python forests/scripts/build_fixture.py
 python -m monkeyllm.cli validate --forest forests/forest-fixture
 ```
 
+## Documentation
+
+**[The MonkeyLLM Handbook](docs/guide/README.md)** — install it, sign in
+for the first time, use and feed the forest, connect your own AI over MCP
+(including the Claude Code skill the Studio generates), and govern the
+deployment. English, Português and Español, with screenshots.
+
+The technical specification stays the truth: the latest
+`docs/monkeyllm-spec-v*.md` is normative.
+
 ## Run the whole environment (Docker)
 
 One container serves frontend and backend; data persists in named volumes:

@@ -1,0 +1,13 @@
+{
+  "welcome.ask.p": "As respostas são fundamentadas na floresta e chegam com as fontes — nós que você pode abrir, ler e corrigir.",
+  "welcome.ask.title": "Pergunte a ela",
+  "welcome.connect.p": "O Claude Code ou qualquer agente MCP se pluga nesta Station e ganha as tools da floresta: recuperação, navegação, SQL, plantio.",
+  "welcome.connect.title": "Conecte uma IA",
+  "welcome.feed.p": "Envie documentos, espelhe pastas inteiras, recorte páginas do navegador. O Gardener os transforma em conhecimento curado e encontrável.",
+  "welcome.feed.title": "Alimente-a",
+  "welcome.p1": "O MonkeyLLM mantém uma floresta de conhecimento: nós de markdown curados que uma IA pode navegar, questionar e estender. Este Studio é como pessoas a observam, governam e ensinam — mas a floresta foi feita para ser lida e alimentada pelos seus próprios agentes, via MCP, enquanto você a mantiver crescendo.",
+  "welcome.skills_cta": "Ensinar a minha IA",
+  "welcome.start": "Dar uma olhada",
+  "welcome.sub": "O console é uma janela. A floresta atrás dele é o produto.",
+  "welcome.title": "Um cérebro que as suas IAs podem cultivar"
+}

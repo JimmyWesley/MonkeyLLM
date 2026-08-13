@@ -135,5 +135,6 @@
   "integrations.tool.query": "SQL de solo lectura contra un nodo dataset.",
   "integrations.tool.scan": "Filtra los nodos de una rama por metadatos.",
   "integrations.tool.sniff": "Búsqueda literal dentro de los cuerpos los hechos que los sumarios no llevan.",
-  "integrations.tool.tend": "Escritura de dataset en una sola sentencia."
+  "integrations.tool.tend": "Escritura de dataset en una sola sentencia.",
+  "integrations.tool.view": "El payload de imagen de un nodo media, como contenido de imagen que un cliente multimodal lee dentro de su propio contexto."
 }

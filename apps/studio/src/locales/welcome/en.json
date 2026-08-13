@@ -1,0 +1,13 @@
+{
+  "welcome.ask.p": "Answers are grounded in the forest and arrive with their sources — nodes you can open, read and correct.",
+  "welcome.ask.title": "Ask it",
+  "welcome.connect.p": "Claude Code or any MCP agent plugs into this Station and gains the forest's tools: recall, navigation, SQL, planting.",
+  "welcome.connect.title": "Connect an AI",
+  "welcome.feed.p": "Upload documents, adopt whole folders, clip pages from your browser. The Gardener turns them into curated, findable knowledge.",
+  "welcome.feed.title": "Feed it",
+  "welcome.p1": "MonkeyLLM keeps a knowledge forest: curated markdown nodes an AI can navigate, question and extend. This Studio is how people watch, govern and teach it — but the forest is built to be read and fed by your own agents, over MCP, for as long as you keep it growing.",
+  "welcome.skills_cta": "Teach my AI",
+  "welcome.start": "Look around",
+  "welcome.sub": "The console is a window. The forest behind it is the product.",
+  "welcome.title": "A brain your AIs can grow"
+}

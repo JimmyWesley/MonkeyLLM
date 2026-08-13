@@ -17,7 +17,7 @@
   "nav.health.blurb": "What the Ranger sees, and take a snapshot",
   "nav.ingest": "Ingest",
   "nav.ingest.blurb": "Put your documents into the forest",
-  "nav.integrations": "Integrations",
+  "nav.integrations": "MCP / API / Integrations",
   "nav.integrations.blurb": "Plug agents, apps and deployments into this Station",
   "nav.menu": "Menu",
   "nav.models": "Models",
@@ -32,6 +32,8 @@
   "nav.pin_hint": "The star pins a shortcut to the bar below.",
   "nav.playground": "Playground",
   "nav.playground.blurb": "See exactly what an agent sees, call by call",
+  "nav.skills": "Skills",
+  "nav.skills.blurb": "Teach your AI to use this forest as its memory",
   "nav.tokens": "Tokens",
   "nav.tokens.blurb": "Which credentials exist, and until when",
   "nav.unpin": "Remove from the bar"
