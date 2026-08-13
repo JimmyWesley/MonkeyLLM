@@ -136,6 +136,21 @@
       </div>
     </section>
 
+    <!-- File upload, second breath: the file is picked, and BEFORE it goes
+         the person may write guidance for the Gardener — optional on
+         purpose. Empty, the file speaks for itself (a bound vision model
+         reads an image and indexes what it finds); written, the words
+         travel as a paired note naming the file (J.15's two-nodes rule). -->
+    <section id="file-view" hidden>
+      <p id="file-name" class="hint" style="margin:8px 0 4px"></p>
+      <textarea id="file-note" rows="3" data-i18n-ph="regionComment"></textarea>
+      <p class="hint" data-i18n="uploadNoteHint"></p>
+      <div class="row buttons">
+        <button id="file-send" class="primary" data-i18n="send"></button>
+        <button id="file-cancel" data-i18n="cancel"></button>
+      </div>
+    </section>
+
     <p id="status" class="status" data-i18n="statusIdle"></p>
     <p id="queue-note" class="queue" hidden></p>
 

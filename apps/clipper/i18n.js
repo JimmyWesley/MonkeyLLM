@@ -73,6 +73,7 @@ export const MESSAGES = {
     sttProcessing: 'Processing…',
     askListening: 'Recording $1 — click to stop',
     regionUndo: 'Undo',
+    regionColor: 'Color',
     regionMic: 'Dictate the note',
     regionMicStop: 'Stop dictating',
     regionMicDenied: 'Allow the microphone once in the tab that just opened, then try again.',
@@ -84,6 +85,7 @@ export const MESSAGES = {
     permOk: 'Done — you can dictate now. This tab closes itself.',
     permDenied: 'The microphone was refused. Allow it for this extension in the browser settings and try again.',
     errFileTooBig: 'That file is over 24 MB — too large to send from the extension.',
+    uploadNoteHint: 'Optional. Sent empty, the file speaks for itself — with a vision model bound, the AI reads an image and indexes everything it finds.',
     errNeedTitleText: 'A note needs a title and some text.',
 
     forestLabel: 'Forest',
@@ -191,6 +193,7 @@ export const MESSAGES = {
     sttProcessing: 'Processando…',
     askListening: 'Gravando $1 — clique para parar',
     regionUndo: 'Desfazer',
+    regionColor: 'Cor',
     regionMic: 'Ditar a nota',
     regionMicStop: 'Parar de ditar',
     regionMicDenied: 'Permita o microfone uma vez na aba que acabou de abrir e tente de novo.',
@@ -202,6 +205,7 @@ export const MESSAGES = {
     permOk: 'Pronto — já dá para ditar. Esta aba se fecha sozinha.',
     permDenied: 'O microfone foi recusado. Permita-o para esta extensão nas configurações do navegador e tente de novo.',
     errFileTooBig: 'Esse arquivo passa de 24 MB — grande demais para enviar pela extensão.',
+    uploadNoteHint: 'Opcional. Enviado em branco, o arquivo fala por si — com um modelo de visão vinculado, a IA lê a imagem e indexa tudo o que encontrar.',
     errNeedTitleText: 'Uma nota precisa de um título e de algum texto.',
 
     forestLabel: 'Floresta',
@@ -309,6 +313,7 @@ export const MESSAGES = {
     sttProcessing: 'Procesando…',
     askListening: 'Grabando $1 — haz clic para parar',
     regionUndo: 'Deshacer',
+    regionColor: 'Color',
     regionMic: 'Dictar la nota',
     regionMicStop: 'Dejar de dictar',
     regionMicDenied: 'Permite el micrófono una vez en la pestaña que se acaba de abrir e inténtalo de nuevo.',
@@ -320,6 +325,7 @@ export const MESSAGES = {
     permOk: 'Listo — ya puedes dictar. Esta pestaña se cierra sola.',
     permDenied: 'El micrófono fue rechazado. Permítelo para esta extensión en la configuración del navegador e inténtalo de nuevo.',
     errFileTooBig: 'Ese archivo supera los 24 MB — demasiado grande para enviarlo desde la extensión.',
+    uploadNoteHint: 'Opcional. Enviado en blanco, el archivo habla por sí mismo — con un modelo de visión vinculado, la IA lee la imagen e indexa todo lo que encuentre.',
     errNeedTitleText: 'Una nota necesita un título y algo de texto.',
 
     forestLabel: 'Bosque',

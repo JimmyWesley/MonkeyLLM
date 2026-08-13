@@ -494,7 +494,10 @@ async function clip(kind) {
   if (!tab) return;
   // Choosing another action folds the quick note away (its draft is
   // already saved — typing is saving); the question box takes the slot
-  // back, which is where the outcome will be watched from.
+  // back, which is where the outcome will be watched from. A picked file
+  // waiting for its note is dropped too — the person chose otherwise.
+  closeFileNote();
+  pendingUpload = null;
   await closeQuickNote();
   setStatusLine('', t('statusWorking'));
   await dispatch({ type: 'clip', kind, tabId: tab.id });
@@ -526,6 +529,8 @@ $('act-write').addEventListener('click', () => {
 const QUICKNOTE_KEY = 'mkc:quicknote';
 
 async function openQuickNote() {
+  closeFileNote(); // the two borrow the same slot and never stack
+  pendingUpload = null;
   $('ask-block').hidden = true;
   $('note-view').hidden = false;
   const stored = (await chrome.storage.session.get(QUICKNOTE_KEY))[QUICKNOTE_KEY];
@@ -573,7 +578,15 @@ $('note-send').addEventListener('click', async () => {
 });
 
 // Upload a file: binary in, base64 out, mode "upload" (J.15 — binaries
-// never travel as prose). The file keeps its own name.
+// never travel as prose). The file keeps its own name. Between the pick
+// and the send there is one breath: an OPTIONAL guidance box — empty, the
+// file speaks for itself (a bound vision model reads an image on its own);
+// written, the words go as a paired note naming the file, the region
+// note's exact shape. The bytes live only in this popup: no session copy
+// (they can be 24 MB), so a popup that dies forgets the pick, never the
+// forest.
+let pendingUpload = null;
+
 $('act-upload').addEventListener('click', () => {
   closeQuickNote();
   $('file-input').click();
@@ -590,19 +603,53 @@ $('file-input').addEventListener('change', async () => {
     mainWarning(t('errFileTooBig'));
     return;
   }
-  setStatusLine('', t('statusWorking'));
   const bytes = new Uint8Array(await file.arrayBuffer());
   let s = '';
   const CHUNK = 0x8000;
   for (let i = 0; i < bytes.length; i += CHUNK) {
     s += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
   }
+  pendingUpload = { name: file.name, b64: btoa(s) };
+  openFileNote(file.name);
+});
+
+function openFileNote(name) {
+  closeQuickNote();
+  $('ask-block').hidden = true;
+  $('file-view').hidden = false;
+  $('file-name').textContent = name;
+  $('file-note').value = '';
+  autoGrow($('file-note'), 180);
+  $('file-note').focus();
+}
+
+function closeFileNote() {
+  if ($('file-view').hidden) return;
+  $('file-view').hidden = true;
+  $('ask-block').hidden = false;
+}
+
+$('file-send').addEventListener('click', async () => {
+  if (!pendingUpload) { closeFileNote(); return; }
+  const upload = pendingUpload;
+  pendingUpload = null;
+  const note = $('file-note').value.trim();
+  setStatusLine('', t('statusWorking'));
+  closeFileNote();
   await dispatch({
     type: 'upload',
-    files: [{ name: file.name, b64: btoa(s) }],
-    label: file.name,
+    files: [upload],
+    label: upload.name,
+    ...(note ? { note } : {}),
   });
 });
+
+$('file-cancel').addEventListener('click', () => {
+  pendingUpload = null;
+  closeFileNote();
+});
+
+$('file-note').addEventListener('input', () => autoGrow($('file-note'), 180));
 
 // -- status strip ------------------------------------------------------------
 

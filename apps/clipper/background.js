@@ -257,10 +257,24 @@ async function handleWork(msg) {
     case 'compose':
       return submitAndTell(msg.forest,
         composeBody(msg.dest || '', msg.title, msg.text), msg.title);
-    case 'upload':
+    case 'upload': {
+      const label = msg.label || (msg.files[0] && msg.files[0].name) || 'upload';
+      // Guidance typed at upload time travels as a PAIRED compose naming
+      // the file — the region note's shape exactly (J.15, the two-nodes
+      // rule): the uploaded node's body stays the server's to write, so a
+      // bound vision model still reads an image for itself, and the
+      // person's words become their own findable node beside it.
+      const note = String(msg.note || '').trim();
+      if (note) {
+        await setLast({ state: 'working' });
+        const title = note.split('\n')[0].slice(0, 80) || `Note on ${label}`;
+        const text = note
+          + `\n\nWritten for the uploaded file \`${label}\`.`;
+        await submitCompose(msg.forest, msg.dest || '', title, text);
+      }
       return submitAndTell(msg.forest,
-        uploadBody(msg.dest || '', msg.files, msg.sourceUrl),
-        msg.label || (msg.files[0] && msg.files[0].name) || 'upload');
+        uploadBody(msg.dest || '', msg.files, msg.sourceUrl), label);
+    }
     default:
       throw new Error(`unknown message: ${msg.type}`);
   }
@@ -499,6 +513,9 @@ async function pickRegion(tab) {
     pendingRegions.set(tab.id, (rect) => {
       clearTimeout(timer);
       pendingRegions.delete(tab.id);
+      if (rect && typeof rect.color === 'string' && rect.color) {
+        chrome.storage.local.set({ annotColor: rect.color }).catch(() => {});
+      }
       resolve(rect);
     });
   });
@@ -516,6 +533,7 @@ async function pickRegion(tab) {
       pen: await tt('regionPen'),
       text: await tt('regionText'),
       undo: await tt('regionUndo'),
+      color: await tt('regionColor'),
       mic: await tt('regionMic'),
       micStop: await tt('regionMicStop'),
       micDenied: await tt('regionMicDenied'),
@@ -523,10 +541,16 @@ async function pickRegion(tab) {
       preparing: await tt('sttPreparing'),
       processing: await tt('sttProcessing'),
     };
+    // The last annotation colour rides in beside the strings: the picker
+    // opens with the pen the person put down last time.
+    const { annotColor } = await chrome.storage.local.get('annotColor');
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      args: [text],
-      func: (t) => { window.__mkcRegionText = t; },
+      args: [text, annotColor || null],
+      func: (t, c) => {
+        window.__mkcRegionText = t;
+        if (c) window.__mkcRegionColor = c;
+      },
     });
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -575,18 +599,21 @@ async function cropShot(tab, rect, dpr, annotations = []) {
   return b64Of(new Uint8Array(await jpeg.arrayBuffer()));
 }
 
-const ANNOTATION_COLOR = '#e5484d'; // the red every screenshot tool taught
+const ANNOTATION_COLOR = '#e5484d'; // the default red, mirrored by the picker
 
 function drawAnnotations(ctx, annotations, sx, sy, dpr, scale) {
   const fx = (v) => (v * dpr - sx) * scale;
   const fy = (v) => (v * dpr - sy) * scale;
   const lw = Math.max(2.5, 3 * dpr * scale);
-  ctx.strokeStyle = ANNOTATION_COLOR;
-  ctx.fillStyle = ANNOTATION_COLOR;
   ctx.lineWidth = lw;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   for (const a of annotations) {
+    // Each vector ships in the colour it was drawn with (the picker's
+    // well): a blue arrow and a yellow one live in the same shot.
+    const color = (typeof a.color === 'string' && a.color) || ANNOTATION_COLOR;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
     if (a.kind === 'rect') {
       ctx.strokeRect(fx(a.x), fy(a.y),
                      Math.max(1, a.w * dpr * scale),

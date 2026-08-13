@@ -47,11 +47,19 @@ body {
         Helvetica, Arial, sans-serif;
 }
 
+/* The header and the footer never leave; only the middle scrolls. Sticky
+   inside the popup's own scroller, full-bleed across the body's gutters
+   (negative margins) so nothing scrolls visibly beneath them. */
 header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 0 10px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin: 0 -16px;
+  padding: 12px 16px 10px;
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 
@@ -342,8 +350,12 @@ footer {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
-  padding-top: 10px;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  margin: 12px -16px -12px;
+  padding: 10px 16px 12px;
+  background: var(--bg);
   border-top: 1px solid var(--line);
   font-size: 12px;
 }

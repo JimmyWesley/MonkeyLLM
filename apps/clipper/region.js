@@ -35,6 +35,7 @@
     pen: 'Pen',
     text: 'Text',
     undo: 'Undo',
+    color: 'Color',
     mic: 'Dictate the note',
     micStop: 'Stop dictating',
     micDenied: 'Allow the microphone once in the tab that just opened, then try again.',
@@ -57,6 +58,17 @@
   const RED = '#e5484d';     // annotation red, mirrored by the worker
   const GREEN = '#58b788';
   const INK = '#c9d6cd';
+
+  // The annotation colour: LightShot's grammar again — one well on the
+  // rail, press it and DRAG along a gradient strip, release and go. Each
+  // vector keeps the colour it was drawn with (a blue arrow and a yellow
+  // one live in the same shot), and the worker composites per vector.
+  // The last pick rides in from storage, planted like the strings.
+  const PALETTE = ['#ffffff', '#ffd60a', '#ff9f0a', '#e5484d', '#bf5af2',
+                   '#0a84ff', '#64d2ff', '#30d158', '#111111'];
+  let annotColor = (typeof window.__mkcRegionColor === 'string'
+    && window.__mkcRegionColor) || RED;
+  delete window.__mkcRegionColor;
 
   // -- icons: one visual language, stroke-only, currentColor ---------------
 
@@ -146,6 +158,98 @@
     toolButtons[kind] = b;
     return b;
   };
+
+  // -- the colour well and its strip ----------------------------------------
+
+  const colorWell = document.createElement('button');
+  colorWell.type = 'button';
+  colorWell.title = TEXT.color;
+  colorWell.setAttribute('style', toolBtnStyle(false));
+  const wellDot = document.createElement('span');
+  wellDot.setAttribute('style', [
+    'width:16px', 'height:16px', 'border-radius:50%',
+    `background:${annotColor}`, 'border:2px solid #2c4a3a',
+    'box-sizing:border-box', 'pointer-events:none',
+  ].join(';'));
+  colorWell.appendChild(wellDot);
+  rail.appendChild(colorWell);
+
+  const STRIP_W = 16;
+  const STRIP_H = 148;
+  const strip = document.createElement('div');
+  strip.setAttribute('style', [
+    'position:fixed', 'display:none', `width:${STRIP_W}px`,
+    `height:${STRIP_H}px`, 'border-radius:8px', 'pointer-events:auto',
+    'z-index:2147483647', 'cursor:crosshair', 'box-sizing:border-box',
+    'border:1px solid rgba(0,0,0,0.45)',
+    `background:linear-gradient(${PALETTE.join(',')})`,
+    'box-shadow:0 6px 24px rgba(0,0,0,0.4)',
+  ].join(';'));
+
+  // The strip is sampled, never guessed: the same gradient painted onto a
+  // 1px-wide canvas gives the exact colour under the finger at any point,
+  // including the white and black caps a hue formula cannot reach.
+  let stripCtx = null;
+  function sampleStrip(clientY) {
+    if (!stripCtx) {
+      const c = document.createElement('canvas');
+      c.width = 1;
+      c.height = STRIP_H;
+      stripCtx = c.getContext('2d', { willReadFrequently: true });
+      const g = stripCtx.createLinearGradient(0, 0, 0, STRIP_H);
+      PALETTE.forEach((col, i) => g.addColorStop(i / (PALETTE.length - 1), col));
+      stripCtx.fillStyle = g;
+      stripCtx.fillRect(0, 0, 1, STRIP_H);
+    }
+    const top = strip.getBoundingClientRect().top;
+    const y = clamp(Math.round(clientY - top), 0, STRIP_H - 1);
+    const [r, g, b] = stripCtx.getImageData(0, y, 1, 1).data;
+    return `rgb(${r},${g},${b})`;
+  }
+
+  let colorPick = null; // {from: 'well'|'strip', moved: bool} while pressed
+  const stripOpen = () => strip.style.display === 'block';
+
+  function applyColor(c) {
+    annotColor = c;
+    wellDot.style.background = c;
+  }
+
+  function openStrip() {
+    const wr = colorWell.getBoundingClientRect();
+    const rr = rail.getBoundingClientRect();
+    // Beside the rail, away from the selection; flipped when the rail
+    // already hugs that edge — same never-off-screen rule as the rail.
+    let left = rr.right + 8;
+    if (left + STRIP_W > window.innerWidth - 6) left = rr.left - STRIP_W - 8;
+    if (left < 6) left = clamp(rr.left, 6, window.innerWidth - STRIP_W - 6);
+    strip.style.left = left + 'px';
+    strip.style.top = clamp(wr.top - 4, 8,
+                            window.innerHeight - STRIP_H - 8) + 'px';
+    strip.style.display = 'block';
+  }
+  function closeStrip() {
+    strip.style.display = 'none';
+  }
+
+  colorWell.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (stripOpen()) { closeStrip(); return; }
+    openStrip();
+    // The press that opened it may keep going: drag onto the strip, pick,
+    // release — one gesture, no second click owed.
+    colorPick = { from: 'well', moved: false };
+  });
+  strip.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    applyColor(sampleStrip(ev.clientY));
+    colorPick = { from: 'strip', moved: false };
+  });
+
   rail.appendChild(mkTool('arrow'));
   rail.appendChild(mkTool('rect'));
   rail.appendChild(mkTool('pen'));
@@ -161,6 +265,7 @@
 
   function setTool(kind) {
     if (textInput) commitTextInput();
+    closeStrip();
     activeTool = kind;
     for (const [k, b] of Object.entries(toolButtons)) {
       b.setAttribute('style', toolBtnStyle(k === kind));
@@ -320,6 +425,7 @@
   root.appendChild(svg);
   root.appendChild(label);
   root.appendChild(rail);
+  root.appendChild(strip);
   root.appendChild(panel);
   (document.body || document.documentElement).appendChild(root);
 
@@ -356,6 +462,9 @@
   // -- annotation rendering (preview only) ---------------------------------
 
   function shapeEl(a) {
+    // Each vector keeps the colour it was drawn with; the worker mirrors
+    // this exactly when it composites onto the crop.
+    const col = a.color || RED;
     let el;
     if (a.kind === 'rect') {
       el = document.createElementNS(SVG_NS, 'rect');
@@ -378,7 +487,7 @@
         [a.x2 - head * Math.cos(angle - 0.42), a.y2 - head * Math.sin(angle - 0.42)],
         [a.x2 - head * Math.cos(angle + 0.42), a.y2 - head * Math.sin(angle + 0.42)],
       ].map((p) => p.join(',')).join(' '));
-      tip.setAttribute('fill', RED);
+      tip.setAttribute('fill', col);
       tip.setAttribute('stroke', 'none');
       el.appendChild(line);
       el.appendChild(tip);
@@ -387,7 +496,7 @@
       el.setAttribute('x', a.x);
       el.setAttribute('y', a.y);
       el.setAttribute('dominant-baseline', 'text-before-edge');
-      el.setAttribute('fill', RED);
+      el.setAttribute('fill', col);
       el.setAttribute('stroke', 'none');
       el.setAttribute('style',
         'font:600 16px system-ui,sans-serif;user-select:none;');
@@ -397,7 +506,7 @@
       el = document.createElementNS(SVG_NS, 'polyline');
       el.setAttribute('points', a.points.map((p) => p.join(',')).join(' '));
     }
-    el.setAttribute('stroke', RED);
+    el.setAttribute('stroke', col);
     el.setAttribute('stroke-width', 3);
     el.setAttribute('fill', a.kind === 'arrow' ? 'none' : 'none');
     el.setAttribute('stroke-linecap', 'round');
@@ -426,12 +535,15 @@
     input.type = 'text';
     input.setAttribute('style', [
       'position:fixed', `left:${x}px`, `top:${y - 2}px`,
-      'background:transparent', `color:${RED}`,
-      `border:1px dashed ${RED}`, 'border-radius:3px',
+      'background:transparent', `color:${annotColor}`,
+      `border:1px dashed ${annotColor}`, 'border-radius:3px',
       'font:600 16px system-ui,sans-serif', 'padding:1px 3px',
       'outline:none', 'min-width:40px', 'width:6ch',
       'pointer-events:auto', 'z-index:2147483647',
     ].join(';'));
+    // The label ships in the colour it was opened with, even if the well
+    // changes before it is committed — what you see is what lands.
+    input.dataset.color = annotColor;
     input.addEventListener('input', () => {
       input.style.width = Math.max(6, input.value.length + 2) + 'ch';
     });
@@ -453,10 +565,12 @@
     if (!textInput) return;
     const value = textInput.value.trim();
     const { x, y } = { x: Number(textInput.dataset.x), y: Number(textInput.dataset.y) };
+    const color = textInput.dataset.color;
     textInput.remove();
     textInput = null;
     if (value) {
-      annotations.push({ kind: 'text', x, y, text: value });
+      annotations.push({ kind: 'text', x, y, text: value,
+                         color: color || annotColor });
       renderAnnotations();
     }
   }
@@ -592,6 +706,8 @@
         devicePixelRatio: window.devicePixelRatio || 1,
         comment: note.value.trim(),
         annotations,
+        // The last pick becomes the next session's first colour.
+        color: annotColor,
       });
     } else {
       finish(null);
@@ -638,6 +754,9 @@
 
   root.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0) return;
+    // A press anywhere else puts the palette away; the well and the strip
+    // stop their own events before reaching here.
+    if (stripOpen()) closeStrip();
     if (mode === 'draw') {
       ev.preventDefault();
       dragging = true;
@@ -655,9 +774,11 @@
         openTextInput(x, y);
         return;
       }
-      drawing = activeTool === 'rect' ? { kind: 'rect', x, y, w: 0, h: 0 }
-        : activeTool === 'arrow' ? { kind: 'arrow', x1: x, y1: y, x2: x, y2: y }
-        : { kind: 'pen', points: [[x, y]] };
+      drawing = activeTool === 'rect'
+        ? { kind: 'rect', x, y, w: 0, h: 0, color: annotColor }
+        : activeTool === 'arrow'
+          ? { kind: 'arrow', x1: x, y1: y, x2: x, y2: y, color: annotColor }
+          : { kind: 'pen', points: [[x, y]], color: annotColor };
       renderAnnotations();
     }
   });
@@ -683,6 +804,14 @@
   }
 
   function onWinMove(ev) {
+    if (colorPick) {
+      // The pick is live: the well previews every colour the drag crosses,
+      // and releasing keeps the one under the finger.
+      ev.preventDefault();
+      colorPick.moved = true;
+      applyColor(sampleStrip(ev.clientY));
+      return;
+    }
     if (mode === 'draw') {
       if (!dragging) return;
       ev.preventDefault();
@@ -732,6 +861,13 @@
   }
 
   function onWinUp(ev) {
+    if (colorPick) {
+      // A press-drag-release picked and is done; a bare click on the well
+      // leaves the strip up for an unhurried second click.
+      if (colorPick.from === 'strip' || colorPick.moved) closeStrip();
+      colorPick = null;
+      return;
+    }
     if (mode === 'draw' && dragging) {
       ev.preventDefault();
       dragging = false;
@@ -750,8 +886,11 @@
           ? Math.hypot(drawing.x2 - drawing.x1, drawing.y2 - drawing.y1) >= 6
           : Math.abs(drawing.w) >= 4 && Math.abs(drawing.h) >= 4;
       if (keep) {
+        // normalized() rebuilds the rect from coordinates alone — the
+        // colour must ride along or the release repaints it in default red.
         annotations.push(drawing.kind === 'rect'
-          ? { kind: 'rect', ...normalized(drawing) } : drawing);
+          ? { kind: 'rect', ...normalized(drawing), color: drawing.color }
+          : drawing);
       }
       drawing = null;
       renderAnnotations();
@@ -774,9 +913,10 @@
     if (ev.key === 'Escape') {
       ev.preventDefault();
       ev.stopPropagation();
-      // The nearest undoable thing goes first: an open label, then an
-      // armed tool, then the picker itself.
+      // The nearest undoable thing goes first: an open label, then the
+      // palette, then an armed tool, then the picker itself.
       if (textInput) { discardTextInput(); return; }
+      if (stripOpen()) { closeStrip(); return; }
       if (activeTool) { setTool(null); paint(); return; }
       finish(null);
     } else if (ev.key === 'Enter') {
