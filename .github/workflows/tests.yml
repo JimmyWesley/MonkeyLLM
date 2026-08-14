@@ -34,6 +34,22 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      # The Station serves the Studio's Vite build as static files (spec J.5)
+      # and `apps/studio/dist` is gitignored, so without a build `GET /` is a
+      # 404 and the test asserting the console is served fails on a missing
+      # artifact rather than on anything the change did.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+
+      - name: Build the Studio
+        working-directory: apps/studio
+        run: |
+          npm ci
+          npm run build
+
       # plant/graft commit inside the forest (spec C.7/C.8) and the fixture
       # builds its own embedded git, so the runner needs an identity or every
       # commit dies on "Please tell me who you are".
@@ -43,12 +59,41 @@ jobs:
           git config --global user.email "ci@monkeyllm.invalid"
           git config --global init.defaultBranch main
 
-      # `ingest` carries the G.2 built-in readers (openpyxl, python-docx,
-      # xlrd) that three test modules import.
+      # Two packages, two licences (LICENSING.md): the engine from the root,
+      # the host from apps/station. `ingest` carries the G.2 built-in readers
+      # (openpyxl, python-docx, xlrd) that three test modules import, and the
+      # suite drives the host, whose `httpx` is declared only in its own
+      # pyproject — mcp 2.x ships `httpx2`, a different distribution under a
+      # different import name — so installing the root alone leaves every
+      # provider probe raising ModuleNotFoundError.
       - name: Install
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,ingest]"
+          python -m pip install -e apps/station
 
       - name: pytest
         run: python -m pytest -q
+
+  # The `main` ruleset requires ONE context from this workflow, and it is this
+  # job. A matrix job's check name carries its parameters ("tests (3.11)"), so
+  # requiring the matrix directly couples the branch rules to the Python
+  # versions: changing `python-version` renames the required checks, the
+  # renamed ones never report, and every merge blocks with nothing on screen
+  # to explain why. This name never changes, so the matrix stays free to.
+  gate:
+    needs: tests
+    runs-on: ubuntu-latest
+    # Without `always()` a failed matrix would *skip* this job, and a skipped
+    # required check does not fail a pull request — the gate would wave
+    # through exactly what it exists to stop.
+    if: always()
+    steps:
+      - name: The matrix must have succeeded
+        run: |
+          # A matrix job's aggregate result is success only when every leg is.
+          if [ "${{ needs.tests.result }}" != "success" ]; then
+            echo "::error::tests: ${{ needs.tests.result }}"
+            exit 1
+          fi
+          echo "tests: success"
