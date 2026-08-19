@@ -1,14 +1,27 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "monkeyllm"
-version = "0.1.0"
-description = "MonkeyLLM - agent-navigable knowledge forest. Vine MCP server (Phase 0)."
+version = "0.49.0"
+description = "An agent-navigable knowledge forest: markdown and indexes an LLM traverses through MCP, instead of flat vector search."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+keywords = ["llm", "rag", "mcp", "agents", "retrieval", "knowledge-base", "markdown", "knowledge-graph"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Indexing",
+]
 dependencies = [
     # mcp 2.0 renamed FastMCP to mcp.server.mcpserver.MCPServer; the engine
     # targets the 2.x line (1.x lacks the import path).
@@ -22,6 +35,13 @@ dev = ["pytest>=8.0", "pytest-timeout>=2.3"]
 demo = ["huggingface_hub>=0.30"]
 # G.2 built-in converters that need a (MIT/BSD-clean) third-party reader
 ingest = ["openpyxl>=3.1", "python-docx>=1.1", "xlrd>=2.0"]
+
+[project.urls]
+Homepage      = "https://monkeyllm.com"
+Repository    = "https://github.com/JimmyWesley/MonkeyLLM"
+Documentation = "https://github.com/JimmyWesley/MonkeyLLM/blob/main/docs/guide/README.md"
+Paper         = "https://github.com/JimmyWesley/MonkeyLLM/blob/main/paper/monkeyllm-paper.md"
+Issues        = "https://github.com/JimmyWesley/MonkeyLLM/issues"
 
 [project.scripts]
 vine = "monkeyllm.cli:main"

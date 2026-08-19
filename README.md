@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/logo.png" alt="MonkeyLLM Logo" width="120"/>
+  <img src="https://raw.githubusercontent.com/JimmyWesley/MonkeyLLM/main/docs/logo.png" alt="MonkeyLLM Logo" width="120"/>
 </div>
 
 # MonkeyLLM
@@ -15,7 +15,7 @@ Successful hunts deposit pheromone and mint shortcut links, so the corpus
 itself learns from use.
 
 <div align="center">
-  <img src="docs/guide/assets/graph-sample.png" alt="A real knowledge forest: 1,877 nodes across 49 branches, seen in the Explore console" width="900"/>
+  <img src="https://raw.githubusercontent.com/JimmyWesley/MonkeyLLM/main/docs/guide/assets/graph-sample.png" alt="A real knowledge forest: 1,877 nodes across 49 branches, seen in the Explore console" width="900"/>
   <br/>
   <sub>A real forest: 1,877 nodes across 49 branches. Every cluster is a
   branch, every dot a node; solid lines are curated trails, dashed ones are
@@ -29,7 +29,7 @@ navigator**, at **0.58×** the token cost per correct answer of an
 iterative-RAG baseline, on a single consumer GPU. If your first reaction
 is *"I need to test whether this actually serves my case"*, good. Every
 number is reproducible from committed scripts, and the whole design is
-written down in [the paper](paper/monkeyllm-paper.md).
+written down in [the paper](https://github.com/JimmyWesley/MonkeyLLM/blob/main/paper/monkeyllm-paper.md).
 
 Everything else in this repository exists *around* that engine. The
 **Studio** console you see in the screenshots is not the product. It is
@@ -46,9 +46,15 @@ server and no UI attached. Point it at a folder and you have a forest;
 operate it from your own Python:
 
 ```bash
-pip install -e .                                # the monkeyllm package + vine CLI
+pip install monkeyllm                           # the monkeyllm package + vine CLI
 vine init --forest ./brain --title "My brain"   # an empty forest, git and all
 ```
+
+Straight from source, without waiting for a release:
+`pip install "git+https://github.com/JimmyWesley/MonkeyLLM.git"`. Python
+3.11+; the file converters of Part G are an extra
+(`pip install "monkeyllm[ingest]"`), and contributors want the editable
+install further down.
 
 ```python
 from monkeyllm import Vine
@@ -92,7 +98,7 @@ console, or from your browser:
 |---|---|
 | `.md`, `.markdown`, `.txt` | a `note`; the text is already the body |
 | `.docx` | a `document`: headings and paragraphs as markdown |
-| `.pdf` | a `document`, through a one-line converter hook, using any CLI extractor you trust ([how](docs/ingest-tools.md)) |
+| `.pdf` | a `document`, through a one-line converter hook, using any CLI extractor you trust ([how](https://github.com/JimmyWesley/MonkeyLLM/blob/main/docs/ingest-tools.md)) |
 | `.csv` | a **dataset**: a real SQLite table, queried with read-only SQL |
 | `.json` | a dataset when it is a flat table, otherwise a `document` holding the JSON |
 | `.xlsx`, `.xls` | a dataset **per sheet**, with types inferred |
@@ -114,7 +120,7 @@ extractor is a heavyweight (often copyleft) dependency this project will
 not force on you: name the tool in `_meta/gardener.yaml` and it joins the
 pipeline. Everything else in the table works out of the box.
 
-![Sending files into a forest from the Ingest console](docs/guide/assets/ingest.png)
+![Sending files into a forest from the Ingest console](https://raw.githubusercontent.com/JimmyWesley/MonkeyLLM/main/docs/guide/assets/ingest.png)
 
 Drop files, mirror a whole folder the host can read, or write a document
 in place: each one arrives with a curated passport, and a batch is a job
@@ -135,10 +141,10 @@ back.
   <table>
     <tr>
       <td align="center" width="30%">
-        <img src="docs/guide/assets/clipper.png" width="250" alt="The Clipper popup: clip, capture, write or ask"/>
+        <img src="https://raw.githubusercontent.com/JimmyWesley/MonkeyLLM/main/docs/guide/assets/clipper.png" width="250" alt="The Clipper popup: clip, capture, write or ask"/>
       </td>
       <td align="center" width="70%">
-        <img src="docs/guide/assets/sample-clipper.png" width="620" alt="Capturing and annotating a region of a page, with a note for the Gardener"/>
+        <img src="https://raw.githubusercontent.com/JimmyWesley/MonkeyLLM/main/docs/guide/assets/sample-clipper.png" width="620" alt="Capturing and annotating a region of a page, with a note for the Gardener"/>
       </td>
     </tr>
     <tr>
@@ -170,7 +176,7 @@ identity, per-forest policy, audit and model bindings, serving REST under
 `/v1` and MCP under `/mcp`. It also serves the **Studio**, the web console:
 
 <div align="center">
-  <img src="docs/guide/assets/overview.png" alt="The Studio console, the management layer over the engine" width="720"/>
+  <img src="https://raw.githubusercontent.com/JimmyWesley/MonkeyLLM/main/docs/guide/assets/overview.png" alt="The Studio console, the management layer over the engine" width="720"/>
 </div>
 
 Ask questions that arrive with their sources, walk the tree as a living
@@ -182,14 +188,14 @@ the same key could fetch: there is no privileged path.
 
 ## Documentation
 
-**[The MonkeyLLM Handbook](docs/guide/README.md)**: install it, sign in
+**[The MonkeyLLM Handbook](https://github.com/JimmyWesley/MonkeyLLM/blob/main/docs/guide/README.md)**: install it, sign in
 for the first time, use and feed the forest, connect your own AI over MCP
 (including the Claude Code skill the Studio generates), and govern the
 deployment. English, Português and Español, with screenshots.
 
 ## The paper
 
-**[MonkeyLLM: Stigmergic Navigation of Knowledge Forests](paper/monkeyllm-paper.md)**,
+**[MonkeyLLM: Stigmergic Navigation of Knowledge Forests](https://github.com/JimmyWesley/MonkeyLLM/blob/main/paper/monkeyllm-paper.md)**,
 replacing retrieval-augmented generation with agentic foraging by small
 language models. The forest, the scent contract, the ten budgeted
 primitives, the pheromone economy, and the **Forest Principle** (*spend
@@ -200,8 +206,8 @@ every benchmark number reproducible from this repository.
 
 The engine, the Station, the Studio and the Clipper are built and
 measured; the phases below are what comes next. The full plan, with exit
-criteria per phase, is [`docs/monkeyllm-roadmap.md`](docs/monkeyllm-roadmap.md);
-the working backlog is [`tasks/`](tasks/README.md).
+criteria per phase, is [`docs/monkeyllm-roadmap.md`](https://github.com/JimmyWesley/MonkeyLLM/blob/main/docs/monkeyllm-roadmap.md);
+the working backlog is [`tasks/`](https://github.com/JimmyWesley/MonkeyLLM/blob/main/tasks/README.md).
 
 | Next | What it means | Where it stands |
 |---|---|---|
@@ -243,7 +249,7 @@ cp .env.example .env   # fill in what you use
 docker compose up --build -d
 ```
 
-See [deploy/README.md](deploy/README.md) for the full walkthrough,
+See [deploy/README.md](https://github.com/JimmyWesley/MonkeyLLM/blob/main/deploy/README.md) for the full walkthrough,
 including Dokploy and optional local llama.cpp inference.
 
 ## License
@@ -251,10 +257,10 @@ including Dokploy and optional local llama.cpp inference.
 Two licenses, split along the line the architecture already draws:
 
 - **Engine** (`src/monkeyllm/`, the spec, the benchmark, the tooling):
-  [Apache-2.0](LICENSE). The MCP contract is meant to spread.
+  [Apache-2.0](https://github.com/JimmyWesley/MonkeyLLM/blob/main/LICENSE). The MCP contract is meant to spread.
 - **Host** (`apps/station/`, `apps/studio/`, `apps/clipper/`):
-  [AGPL-3.0-only](apps/station/LICENSE). Self-hosting is free and
+  [AGPL-3.0-only](https://github.com/JimmyWesley/MonkeyLLM/blob/main/apps/station/LICENSE). Self-hosting is free and
   unrestricted; offering it as a managed service means opening your stack.
 
-See [LICENSING.md](LICENSING.md) for the full map, the commercial option and
+See [LICENSING.md](https://github.com/JimmyWesley/MonkeyLLM/blob/main/LICENSING.md) for the full map, the commercial option and
 the DCO requirement for contributions.
