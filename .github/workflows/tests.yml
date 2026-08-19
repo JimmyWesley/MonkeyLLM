@@ -11,6 +11,11 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # `release.yml` calls this same file instead of restating the suite. A
+  # release that ran a *copy* of the checks would drift from the copy the
+  # branches enforce, and the drift would surface as a published version
+  # nobody can reproduce. One suite, two callers.
+  workflow_call:
 
 # Read-only by default. A public repo's workflow that needs no write should
 # never be handed one.

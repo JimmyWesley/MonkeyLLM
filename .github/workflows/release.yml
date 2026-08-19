@@ -1,0 +1,100 @@
+# A published version is permanent: PyPI never lets `0.49.0` mean anything
+# else, and never lets it be replaced. So everything that could go wrong has
+# to go wrong BEFORE the upload — which is the whole shape of this file.
+#
+# No API token exists here. Publishing authenticates through Trusted
+# Publishing (OIDC): PyPI is configured to trust *this repository, this
+# workflow, this environment*, and mints a credential valid for minutes.
+# A token on a laptop is a secret that leaks, rotates by hand, and pastes
+# wrong; this one cannot be stolen from a disk because it is never on one.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Read-only at the top. `id-token: write` is granted to the publish job
+# alone (below): the job that runs the suite has no business minting a
+# credential that can speak to PyPI as this project.
+permissions:
+  contents: read
+
+jobs:
+  # The tag is the only thing a human types, and `version` in pyproject.toml
+  # is what actually gets published. When they disagree, PyPI rejects the
+  # upload as a duplicate — AFTER the full suite has run. Ten seconds here
+  # instead of ten minutes there, and the error names the real mismatch.
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: The tag must be the version
+        run: |
+          declared=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$declared" != "$tagged" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} would publish ${declared}. Set version in pyproject.toml to ${tagged}, or tag v${declared}."
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} == pyproject ${declared}"
+
+  # The same suite the branches require, called rather than copied.
+  tests:
+    needs: guard
+    uses: ./.github/workflows/tests.yml
+
+  build:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the sdist and the wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+
+      # `twine check` renders the long description exactly as PyPI will. The
+      # README carries absolute raw.githubusercontent URLs on purpose (a
+      # relative path resolves against pypi.org and 404s), and this is what
+      # notices if somebody makes one relative again.
+      - name: The page must render
+        run: twine check dist/*
+
+      # What gets published is this artifact — not a second build. Rebuilding
+      # in the publish job would ship bytes no test ever saw.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    # Name this environment in PyPI's trusted publisher, and add a required
+    # reviewer to it if a pushed tag alone should not be able to publish.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/monkeyllm
+
+    # The OIDC token PyPI trades for an upload credential. This is the only
+    # job that gets it, and it is the only permission it has.
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
