@@ -2376,11 +2376,19 @@ def build_app(
         # Station nobody can sign in to.
         from monkeyllm_station.mcp_surface import package_version
 
+        # J.1.3 (v0.55): the door tells the truth about the rooms. Counts,
+        # never ids — health is unauthenticated and forest ids are J.3's to
+        # disclose. `locked` counts live foreign writers only: an orphan
+        # lock heals at the next open (C.9) and is not an outage.
+        listing = pool.list()["forests"]
+        locked = sum(1 for f in listing if f.get("locked"))
         return JSONResponse({
-            "status": "ok", "mode": pool.mode, "writable": writable,
+            "status": "degraded" if locked else "ok",
+            "mode": pool.mode, "writable": writable,
             # J.1.2 rule 3 (v0.54): which build answered — the same number
             # the MCP handshake states, in the place an operator curls.
             "version": package_version(),
+            "forests": {"served": len(listing) - locked, "locked": locked},
             "setup_required": setup_open(),
             "password_login": super_admin is not None or registry.has_any_password(),
             "mcp": mcp_status(request),
@@ -3945,6 +3953,86 @@ def build_app(
                    {"nodes": result["nodes"], "ms": result["ms"]})
         return JSONResponse(result)
 
+    def _lock_root(forest: str):
+        """The forest's directory for a lock probe — containment without
+        opening anything (J.13.5: a diagnostic must not need the patient
+        healthy)."""
+        if pool.root is not None:
+            return (pool.root / forest) if _servable(forest) else None
+        if pool.default is not None and forest == pool.default:
+            return pool.get(None).forest.root
+        return None
+
+    def _lock_active(forest: str) -> bool:
+        return any(f["id"] == forest and f.get("active")
+                   for f in pool.list()["forests"])
+
+    async def admin_locks(request: Request) -> JSONResponse:
+        """The C.9 lock's state: free, orphan, or held (J.13.5).
+
+        A probe, never an open — it asks the kernel and reads the card,
+        touching no catalog and no lane. `self: true` marks the one holder
+        that is not a problem: this Station's own open vine.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.query_params.get("forest") or ""
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+        from monkeyllm.forest import WriterLock
+
+        root = _lock_root(forest)
+        if root is None:
+            return _unknown_forest(forest)
+        state = WriterLock.probe(root)
+        if state["state"] == "held" and _lock_active(forest):
+            state["self"] = True
+        return JSONResponse({"forest": forest, **state})
+
+    async def admin_unlock(request: Request) -> JSONResponse:
+        """Remove an orphan `.vine.lock`; refuse a held one (J.13.5).
+
+        The API cannot break a live writer's lock — two writers is the
+        corruption C.9 exists to prevent, and there is no override flag.
+        What it CAN do is what the old hint demanded a shell for: clear a
+        file whose writer is gone, from the console, audited.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        try:
+            body = await request.json() if await request.body() else {}
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        forest = str(body.get("forest") or request.query_params.get("forest") or "")
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+        from monkeyllm.forest import WriterLock
+
+        root = _lock_root(forest)
+        if root is None:
+            return _unknown_forest(forest)
+        if _lock_active(forest):
+            return _envelope(VineError(
+                E_LOCKED, "this Station itself holds the lock",
+                hint="The forest is open and serving; there is nothing to "
+                     "release."), 409)
+        try:
+            result = WriterLock.break_orphan(root)
+        except VineError as e:
+            record_governance(principal, "admin.unlock",
+                              {"refused": "held"}, "refused", forest=forest)
+            return _envelope(e, STATUS_BY_CODE.get(e.code, 400))
+        record_governance(principal, "admin.unlock",
+                          {"state": result["state"],
+                           "holder": result.get("holder") or {}},
+                          "removed" if result.get("removed") else "kept",
+                          forest=forest)
+        return JSONResponse({"forest": forest, **result})
+
     async def admin_cache(request: Request) -> JSONResponse:
         """The answer store's switches and its economy (J.10.7).
 
@@ -4374,6 +4462,8 @@ def build_app(
         Route("/v1/admin/health", admin_health),
         Route("/v1/admin/cache", admin_cache, methods=["GET", "POST"]),
         Route("/v1/admin/reindex", admin_reindex, methods=["POST"]),
+        Route("/v1/admin/locks", admin_locks),
+        Route("/v1/admin/unlock", admin_unlock, methods=["POST"]),
         Route("/v1/admin/snapshots", admin_snapshots, methods=["GET", "POST"]),
         Route("/v1/admin/snapshots/import", admin_snapshot_import,
               methods=["POST"]),

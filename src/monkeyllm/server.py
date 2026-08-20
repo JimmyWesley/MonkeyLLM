@@ -50,11 +50,23 @@ class ForestPool:
 
     def list(self) -> dict:
         if self.root:
-            forests = [
-                {"id": child.name, "active": child.name in self._vines}
-                for child in sorted(self.root.iterdir())
-                if child.is_dir() and (child / "_index.md").is_file()
-            ]
+            forests = []
+            for child in sorted(self.root.iterdir()):
+                if not (child.is_dir() and (child / "_index.md").is_file()):
+                    continue
+                entry = {"id": child.name, "active": child.name in self._vines}
+                # J.1.3 (v0.55): a forest a live foreign writer holds cannot
+                # serve, and the listing says so instead of letting the
+                # caller learn it one failed call later. An open vine holds
+                # its own lock and serves; an orphan file heals at the next
+                # open (C.9) and marks nothing. The probe reads the lock
+                # file and asks the kernel — it never opens the forest.
+                if not entry["active"] and self.writable:
+                    from monkeyllm.forest import WriterLock
+
+                    if WriterLock.probe(child).get("state") == "held":
+                        entry["locked"] = True
+                forests.append(entry)
         else:
             forests = [{"id": fid, "active": True} for fid in self._vines]
         return {"forests": forests, "mode": self.mode}

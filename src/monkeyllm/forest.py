@@ -11,7 +11,10 @@ extension (spec Part B). Files are the database.
 from __future__ import annotations
 
 import datetime as _dt
+import errno
+import json as _json
 import os
+import socket as _socket
 from pathlib import Path
 from typing import Iterator
 
@@ -247,32 +250,237 @@ class Forest:
         return self._gardener_root
 
 
+def _try_kernel_lock(fd: int):
+    """Take the OS's advisory lock, non-blocking (C.9 v0.55).
+
+    True = acquired; False = a live holder exists; None = this filesystem
+    cannot hold the lock, and guessing liveness without the kernel is how
+    two writers happen — the caller falls back to existence semantics.
+    """
+    try:
+        if os.name == "nt":  # pragma: no cover - exercised on Windows dev
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError as e:
+        unsupported = {errno.ENOLCK, errno.ENOTSUP,
+                       getattr(errno, "EOPNOTSUPP", errno.ENOTSUP)}
+        if e.errno in unsupported:
+            return None
+        return False
+
+
+def _kernel_unlock(fd: int) -> None:
+    try:
+        if os.name == "nt":  # pragma: no cover - exercised on Windows dev
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+def _read_card(path: Path) -> dict:
+    """The holder's card — {pid, host, since} — or whatever a pre-v0.55
+    lock left (a bare pid). Diagnostics, never the control."""
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return {}
+    if not raw:
+        return {}
+    try:
+        card = _json.loads(raw)
+    except ValueError:
+        return {}
+    if isinstance(card, dict):
+        return card
+    # A pre-v0.55 lock held a bare pid, which JSON reads as an integer.
+    return {"pid": card} if isinstance(card, int) else {}
+
+
 class WriterLock:
-    """One writer per forest (spec C.9). `.vine.lock` at the root."""
+    """One writer per forest (spec C.9). `.vine.lock` at the root.
+
+    Possession is the kernel's advisory lock on the open file (v0.55),
+    released by the OS when the holder exits, however it exits. The file's
+    content is the holder's card — pid, host, since — quoted by the
+    refusal and read by J.13.5, never the control. An orphan file (card
+    present, lock unheld) is reclaimed silently at the next acquire:
+    crashing is how server processes actually end, and a crash must not
+    cost the forest its availability. Where the kernel cannot hold the
+    lock, acquisition keeps the pre-v0.55 existence semantics.
+    """
 
     def __init__(self, root: Path):
         self.path = Path(root) / LOCK_FILE
         self._fd: int | None = None
 
+    def _refusal(self, card: dict) -> VineError:
+        who = ""
+        if card.get("pid"):
+            who = f" (pid {card['pid']}"
+            if card.get("host"):
+                who += f" on {card['host']}"
+            if card.get("since"):
+                who += f" since {card['since']}"
+            who += ")"
+        return VineError(
+            E_LOCKED,
+            f"forest already has a writer{who} (lock: {self.path})",
+            hint="Only one writing Vine per forest. The lock releases "
+                 "itself when its holder exits; an orphan left by a dead "
+                 "process is reclaimed automatically.",
+        )
+
+    def _card(self) -> bytes:
+        return _json.dumps({
+            "pid": os.getpid(),
+            "host": _socket.gethostname(),
+            "since": _dt.datetime.now(_dt.timezone.utc)
+                     .isoformat(timespec="seconds"),
+        }).encode("utf-8")
+
     def acquire(self) -> None:
+        for _ in range(4):
+            fd = os.open(self.path, os.O_CREAT | os.O_RDWR)
+            got = _try_kernel_lock(fd)
+            if got is None:
+                os.close(fd)
+                return self._acquire_by_existence()
+            if got is False:
+                card = _read_card(self.path)
+                os.close(fd)
+                raise self._refusal(card)
+            # Identity check (C.9): release unlinks while holding, so a
+            # lock taken on a just-unlinked inode must retry against the
+            # fresh file — two writers agreeing they both won is the
+            # corruption this class exists to prevent.
+            try:
+                if os.name != "nt" and (
+                        os.fstat(fd).st_ino != os.stat(self.path).st_ino):
+                    os.close(fd)
+                    continue
+            except OSError:
+                os.close(fd)
+                continue
+            os.ftruncate(fd, 0)
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.write(fd, self._card())
+            self._fd = fd
+            return
+        raise VineError(
+            E_LOCKED,
+            f"forest lock is contended (lock: {self.path})",
+            hint="Another writer is acquiring or releasing right now; retry.",
+        )
+
+    def _acquire_by_existence(self) -> None:
+        """C.9 rule 4: the pre-v0.55 semantics, kept where the kernel
+        cannot vouch for liveness."""
         try:
-            self._fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(self._fd, str(os.getpid()).encode())
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            raise VineError(
-                E_LOCKED,
-                f"forest already has a writer (lock: {self.path})",
-                hint="Only one writing Vine per forest. Remove a stale .vine.lock manually.",
-            ) from None
+            raise self._refusal(_read_card(self.path)) from None
+        os.write(fd, self._card())
+        self._fd = fd
 
     def release(self) -> None:
-        if self._fd is not None:
-            os.close(self._fd)
-            self._fd = None
+        if self._fd is None:
+            return
         try:
+            # Unlink while still holding: a waiter that acquired on this
+            # inode fails its identity check and retries on the fresh file.
             self.path.unlink(missing_ok=True)
         except OSError:
             pass
+        try:
+            os.close(self._fd)
+        finally:
+            self._fd = None
+
+    # -- J.13.5: the lock, inspected and released over HTTP -----------------
+
+    @classmethod
+    def probe(cls, root: Path) -> dict:
+        """free / orphan / held, without opening the forest.
+
+        Asks the kernel and reads the card; touches no catalog, no lane.
+        The shared-nothing window in which the probe itself holds the lock
+        is microseconds and released before returning.
+        """
+        path = Path(root) / LOCK_FILE
+        if not path.exists():
+            return {"state": "free"}
+        try:
+            fd = os.open(path, os.O_RDWR)
+        except FileNotFoundError:
+            return {"state": "free"}
+        except OSError:
+            return {"state": "held", "holder": _read_card(path)}
+        try:
+            got = _try_kernel_lock(fd)
+            if got is None:
+                # The file is all this filesystem lets us know (C.9 rule 4).
+                return {"state": "held", "holder": _read_card(path),
+                        "verified": False}
+            if got:
+                _kernel_unlock(fd)
+                return {"state": "orphan", "holder": _read_card(path)}
+            return {"state": "held", "holder": _read_card(path)}
+        finally:
+            os.close(fd)
+
+    @classmethod
+    def break_orphan(cls, root: Path) -> dict:
+        """Remove an orphan lock file; REFUSE a held one (J.13.5).
+
+        An endpoint able to break a live writer's lock is an endpoint able
+        to produce two writers. An unverifiable lock (C.9 rule 4
+        filesystems) is removable — that endpoint is the operator's path
+        exactly there.
+        """
+        path = Path(root) / LOCK_FILE
+        if not path.exists():
+            return {"state": "free", "removed": False}
+        try:
+            fd = os.open(path, os.O_RDWR)
+        except FileNotFoundError:
+            return {"state": "free", "removed": False}
+        except OSError:
+            return {"state": "held", "removed": False,
+                    "holder": _read_card(path)}
+        card = _read_card(path)
+        try:
+            got = _try_kernel_lock(fd)
+            if got is False:
+                raise VineError(
+                    E_LOCKED,
+                    "the lock is held by a live writer and cannot be broken",
+                    hint="It releases itself when its holder exits. "
+                         "Two writers is the corruption C.9 exists to "
+                         "prevent; there is no override.",
+                )
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                return {"state": "orphan" if got else "unverified",
+                        "removed": False, "holder": card}
+            return {"state": "orphan" if got else "unverified",
+                    "removed": True, "holder": card}
+        finally:
+            os.close(fd)
 
     def __enter__(self) -> "WriterLock":
         self.acquire()

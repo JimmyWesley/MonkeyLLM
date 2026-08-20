@@ -119,14 +119,17 @@ def test_warming_deposits_no_pheromone_and_writes_no_audit(warm_root, tmp_path):
 def test_a_forest_that_will_not_open_does_not_stop_the_station(
         warm_root, tmp_path):
     """Refusing to serve the others because one was busy is not a
-    performance feature."""
+    performance feature. C.9 (v0.55): "busy" now means a LIVE writer — an
+    orphan file heals during warm-up and skips nothing."""
+    from monkeyllm.forest import WriterLock
+
     second = warm_root.parent / "locked-root"
     if not second.exists():
         second.mkdir()
         build_forest(second / FOREST)
         build_forest(second / "other-forest")
-    lock = second / FOREST / ".vine.lock"
-    lock.write_text("999999", encoding="utf-8")
+    holder = WriterLock(second / FOREST)
+    holder.acquire()
     try:
         app = _app(second, tmp_path / "locked.db")
         # Shutdown closes the pool in its own forest thread, so leaving the
@@ -136,7 +139,20 @@ def test_a_forest_that_will_not_open_does_not_stop_the_station(
             assert FOREST in app.state.warmed["skipped"]
             assert client.get("/v1/health").status_code == 200
     finally:
-        lock.unlink(missing_ok=True)
+        holder.release()
+
+
+def test_an_orphan_lock_does_not_skip_warming(warm_root, tmp_path):
+    """The other half of C.9 v0.55: the file alone decides nothing."""
+    second = warm_root.parent / "orphan-root"
+    if not second.exists():
+        second.mkdir()
+        build_forest(second / FOREST)
+    (second / FOREST / ".vine.lock").write_text("999999", encoding="utf-8")
+    app = _app(second, tmp_path / "orphan.db")
+    with _serve(app):
+        assert FOREST in app.state.warmed["warmed"]
+        assert not app.state.warmed["skipped"]
 
 
 # -- derived storage (C.6.1) ------------------------------------------------

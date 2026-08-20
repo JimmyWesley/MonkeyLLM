@@ -213,6 +213,12 @@ export const api = {
   // endpoint instead, and stopped offering the password form entirely.
   forestHealth: (forest) =>
     request(`/v1/admin/health?forest=${encodeURIComponent(forest)}`),
+  // J.13.5: the C.9 lock, inspected and (when orphan) released. The
+  // console gains no path the API refuses — a held lock stays held.
+  locks: (forest) =>
+    request(`/v1/admin/locks?forest=${encodeURIComponent(forest)}`),
+  unlock: (forest) =>
+    request('/v1/admin/unlock', { method: 'POST', body: { forest } }),
   snapshots: (forest) =>
     request(`/v1/admin/snapshots?forest=${encodeURIComponent(forest)}`),
   takeSnapshot: (forest, withPayloads = false) =>
