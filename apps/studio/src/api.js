@@ -169,6 +169,23 @@ export const api = {
     request(`/v1/forests/${encodeURIComponent(forest)}/jobs/${encodeURIComponent(id)}/cancel`,
             { method: 'POST' }),
 
+  // Webhooks (J.16): the outbound half. Scoped exactly like everything else
+  // — the GET carries the catalogue a console must never hard-code, and the
+  // secret appears in exactly one response, the one that created it.
+  webhooks: (forest) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/webhooks`),
+  saveWebhook: (forest, body) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/webhooks`,
+            { method: 'POST', body }),
+  webhook: (forest, id) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/webhooks/${encodeURIComponent(id)}`),
+  webhookAction: (forest, id, body) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/webhooks/${encodeURIComponent(id)}`,
+            { method: 'POST', body }),
+  deleteWebhook: (forest, id) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/webhooks/${encodeURIComponent(id)}`,
+            { method: 'DELETE' }),
+
   // governance
   principals: () => request('/v1/admin/principals'),
   grant: (body) => request('/v1/admin/grant', { method: 'POST', body }),

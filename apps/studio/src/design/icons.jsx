@@ -198,8 +198,15 @@ export const Plug = (p) => (
   <S {...p}><path d="M9 2.5V7M15 2.5V7" /><path d="M6.5 7h11v3a5.5 5.5 0 01-11 0z" /><path d="M12 15.5V18a3 3 0 01-3 3H6.5" /></S>
 )
 
+/* One event, fanning out to the places that asked for it (J.16). Drawn as
+   a source above two destinations rather than as a plug: the console
+   already has a plug, and it means the opposite direction. */
+export const Webhook = (p) => (
+  <S {...p}><circle cx="12" cy="6" r="2.6" /><circle cx="5.5" cy="17.5" r="2.6" /><circle cx="18.5" cy="17.5" r="2.6" /><path d="M10.1 7.9l-2.7 7.2M13.9 7.9l2.7 7.2" /></S>
+)
+
 export const CONSOLE_ICON = {
   overview: Overview, ask: Ask, explore: Explore, playground: Playground,
   data: Data, skills: Sparkle, ingest: Ingest, models: Models, people: Users,
-  audit: Audit, integrations: Plug, health: Health,
+  audit: Audit, integrations: Plug, health: Health, webhooks: Webhook,
 }
