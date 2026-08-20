@@ -1691,6 +1691,10 @@ def build_app(
                             reply_tokens=reply, window=window)
                         whisper(vine, served.get("evidence")
                                 if isinstance(served, dict) else None)
+                    # J.10.8 (v0.54): the clamp is reported — a caller who
+                    # asked for 40 learns it was served by the floor, 64.
+                    if reply and isinstance(served, dict) and "error" not in served:
+                        served.setdefault("reply_tokens", reply)
                     return served
                 # The sweep's retrieval always runs — it is the cheap half,
                 # and its reading is what decides the hit (J.10.7 v0.35).
@@ -1720,6 +1724,9 @@ def build_app(
                 # consult_walk_store instead.)
                 whisper(vine, served.get("evidence")
                         if isinstance(served, dict) else None)
+                # J.10.8 (v0.54): the clamp is reported.
+                if reply and isinstance(served, dict) and "error" not in served:
+                    served.setdefault("reply_tokens", reply)
                 return served
             return inference.recurate(scoped, payload.get("id"), binding)
         except VineError as e:
@@ -2367,8 +2374,13 @@ def build_app(
         # pre-identity screens the console must render (J.5.6). Deciding that
         # locally is how a console ends up offering a sign-in form on a
         # Station nobody can sign in to.
+        from monkeyllm_station.mcp_surface import package_version
+
         return JSONResponse({
             "status": "ok", "mode": pool.mode, "writable": writable,
+            # J.1.2 rule 3 (v0.54): which build answered — the same number
+            # the MCP handshake states, in the place an operator curls.
+            "version": package_version(),
             "setup_required": setup_open(),
             "password_login": super_admin is not None or registry.has_any_password(),
             "mcp": mcp_status(request),

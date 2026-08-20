@@ -159,11 +159,13 @@ class Ranger:
     # -- H.3 health report (read-only) ----------------------------------------
 
     def health(self) -> dict:
+        from monkeyllm.gardener import MEDIA_STUB_SENTINEL
         from monkeyllm.lint import lint_forest
 
         needs_split: list[str] = []
         fat_nodes: list[str] = []
         stale_passports: list[str] = []
+        needs_description: list[str] = []
         buckets: dict[str, int] = {}
 
         source_root = self._gardener_source_root()
@@ -186,6 +188,14 @@ class Ranger:
             sp = node.frontmatter.get("source_path")
             if sp and source_root and not (source_root / str(sp)).exists():
                 stale_passports.append(node_id)
+            # H.3 (v0.54): media still wearing the G.5.1 stub — findable by
+            # filename and nothing else, and every one of them a BM25
+            # near-duplicate of the others. The repair is a vision binding
+            # plus a re-describe, and a repair nobody is told about is not
+            # one.
+            if (node.frontmatter.get("type") == "media"
+                    and MEDIA_STUB_SENTINEL in node.body):
+                needs_description.append(node_id)
 
         issues = lint_forest(self.forest)
         return {
@@ -196,6 +206,7 @@ class Ranger:
                 "warnings": sum(1 for i in issues if i.level == "warning"),
             },
             "stale_passports": stale_passports,
+            "needs_description": needs_description,
             "uncertain_links": buckets,
             "heat": self.vine.trails.stats(),
         }

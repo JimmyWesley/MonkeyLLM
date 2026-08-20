@@ -289,25 +289,29 @@ class ScopedVine:
 
     def scan(self, parent_id: str, filter: dict | None = None,
              fields: list[str] | None = None, recursive: bool = False,
-             limit: int = 50, gauntlet: bool | None = None,
+             limit: int = 50, after: str | None = None,
+             gauntlet: bool | None = None,
              toward: str | None = None, since: str | None = None,
              until: str | None = None, date_field: str | None = None) -> dict:
         self._gate(parent_id)
         # Part K is ordering, not access: it changes which in-scope nodes come
-        # first, never which nodes are in scope. So it is forwarded as-is and
-        # the filtering below is unchanged.
+        # first, never which nodes are in scope.
         win = {"since": since, "until": until, "date_field": date_field}
         if self.policy.unrestricted:
             return self._vine.scan(parent_id, filter=filter, fields=fields,
                                    recursive=recursive, limit=limit,
-                                   gauntlet=gauntlet, toward=toward, **win)
+                                   after=after, gauntlet=gauntlet,
+                                   toward=toward, **win)
+        # C.6.2 (v0.54): the policy rides INTO the engine, where candidates
+        # are chosen — so `total` counts what this principal may see (never
+        # the forest, which is a size oracle), and the cursor walks their
+        # nodes without skipping what a post-hoc trim would have dropped.
         raw = self._vine.scan(parent_id, filter=filter, fields=fields,
-                              recursive=recursive, limit=self._fetch(limit),
-                              gauntlet=gauntlet, toward=toward, **win)
-        out = self._trim(raw, "nodes", limit)
-        if "window" in raw:
-            out["window"] = raw["window"]
-        return out
+                              recursive=recursive, limit=limit, after=after,
+                              gauntlet=gauntlet, toward=toward,
+                              visible=self.policy.in_scope, **win)
+        raw["nodes"] = [self._scrub(it) for it in raw["nodes"]]
+        return raw
 
     def look(self, id, fields: list[str] | None = None,
              gauntlet: bool | None = None, toward: str | None = None) -> dict:
@@ -334,7 +338,9 @@ class ScopedVine:
             branches = sum(1 for c in digest["children"] if c["id"].endswith("/_index"))
             bananas = len(digest["children"]) - branches
             if "coverage" in digest:
-                digest["coverage"] = f"{bananas} bananas, {branches} sub-branches."
+                # C.2 (v0.54): counts, not prose — recomputed from what
+                # survived the scope, same as every derived number (J.11).
+                digest["coverage"] = {"notes": bananas, "branches": branches}
         if "cross_trails" in digest:
             digest["cross_trails"] = [
                 t for t in digest["cross_trails"] if self._trail_visible(t)
