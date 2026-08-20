@@ -11,8 +11,22 @@ What it clips:
   (Turndown + GFM tables/strikethrough), sent as one `compose`.
 - **Selection** exactly what you highlighted, HTML-serialized and
   converted, so a copied table is still a table.
-- **Screenshot** the visible tab, downscaled to a describer-sized JPEG and
-  sent through `upload` as a media file (a J.9 job).
+- **Page as image** the whole scrollable document, not the window: the
+  extension scrolls to the end, shoots each viewport and composes them into
+  one JPEG, downscaled to a describer-sized width and sent through `upload`
+  as a media file (a J.9 job). The page is re-measured at every step, so a
+  page that loads as it scrolls keeps growing into the capture; elements
+  fixed to the viewport are hidden after the first slice, so a navigation
+  bar appears once rather than down the length of the image; and your
+  scroll position is put back when it finishes.
+
+  Two bounds, both deliberate. The walk stops after 20 viewports — an
+  endless feed has no end to reach, and the captures are spaced because
+  `captureVisibleTab` is quota-limited to about two a second, so 20 is
+  already ~12 seconds of your time. And a page that stops advancing ends
+  the walk instead of shooting the same screen twenty times. A page the
+  extension may not script (the web store, a PDF viewer) still gives you
+  the one viewport the browser will hand over.
 - **Region** drag a rectangle over the page (crosshair overlay, live
   dimensions), then adjust it: move the box, resize it by its eight
   handles, **annotate it** from the icon rail riding the selection's

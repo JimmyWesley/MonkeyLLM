@@ -29,6 +29,18 @@ const JOB_POLL_MS = 2000;
 const JOB_POLL_MAX = 150; // five minutes of curation is a long batch already
 const SHOT_MAX_WIDTH = 1568; // a full-res PNG is pointlessly heavy for a describer
 const REGION_WAIT_MS = 180000; // a careful drag deserves patience
+// A full-page screenshot walks the page one viewport at a time. The cap is
+// on slices rather than on pixels because it bounds the thing a person
+// actually waits through: at the interval below, twenty of them is about
+// twelve seconds, and a feed that never ends would otherwise never stop.
+const FULL_SHOT_MAX_SLICES = 20;
+// `captureVisibleTab` is quota-limited to roughly two calls a second, and
+// exceeding it fails the call instead of slowing it down.
+const CAPTURE_INTERVAL_MS = 550;
+// Canvas has its own ceilings, and a describer reads a page — not a mural.
+const FULL_SHOT_MAX_HEIGHT = 30000;
+// Under the G.5.1 describer ceiling with room for base64's third.
+const SHOT_MAX_BYTES = 4 * 1024 * 1024;
 
 /** Translate in the stored UI language — read from storage on every use,
  *  because a notification formatted before the person changed languages
@@ -790,20 +802,178 @@ function imageName(srcUrl, pageTitle, mime) {
 // Screenshot capture — visible tab, downscaled to a describer-sized JPEG.
 // ---------------------------------------------------------------------------
 
-async function captureShot(tab) {
+/** One viewport, as the browser hands it over. */
+async function captureViewport(tab) {
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
     format: 'png',
   });
-  const blob = await (await fetch(dataUrl)).blob();
-  const bmp = await createImageBitmap(blob);
-  const scale = Math.min(1, SHOT_MAX_WIDTH / bmp.width);
-  const w = Math.max(1, Math.round(bmp.width * scale));
-  const h = Math.max(1, Math.round(bmp.height * scale));
-  const canvas = new OffscreenCanvas(w, h);
-  canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
-  bmp.close();
-  const jpeg = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
-  return b64Of(new Uint8Array(await jpeg.arrayBuffer()));
+  return createImageBitmap(await (await fetch(dataUrl)).blob());
+}
+
+/** The whole page, scrolled to its end and stitched into one image.
+ *
+ *  `captureVisibleTab` shoots the viewport and only the viewport, so a
+ *  screenshot of an article used to be the part of it the person happened
+ *  to be looking at. The rest of the page is reachable the only way the
+ *  browser offers: scroll, shoot, repeat.
+ *
+ *  Three things make that more than a loop.
+ *
+ *  The page is measured again at every step, because scrolling is what
+ *  makes a lazily-loaded page grow it does not stop at whatever
+ *  `scrollHeight` said before the first move, which on a feed is a small
+ *  fraction of what is there.
+ *
+ *  Fixed and sticky elements are hidden after the first slice. They travel
+ *  with the viewport, so leaving them visible stamps the same navigation
+ *  bar down the whole stitched image, over the content it covers.
+ *
+ *  And the captures are spaced: `captureVisibleTab` is quota-limited to a
+ *  couple of calls a second, and going over returns an error rather than a
+ *  slower answer.
+ */
+async function captureShot(tab) {
+  let started = false;
+  try {
+    const page = await runOnTab(tab, fullShotBegin);
+    started = true;
+    const slices = [];
+    let total = page.height;
+    let target = 0;
+    let lastCapture = 0;
+
+    for (let i = 0; i < FULL_SHOT_MAX_SLICES; i += 1) {
+      const at = await runOnTab(tab, fullShotStep, [target, i > 0]);
+      const gap = CAPTURE_INTERVAL_MS - (Date.now() - lastCapture);
+      if (gap > 0) await sleep(gap);
+      slices.push({ y: at.scrollY, bmp: await captureViewport(tab) });
+      lastCapture = Date.now();
+      total = Math.max(total, at.height);
+
+      const covered = at.scrollY + page.viewport;
+      if (covered >= total - 2) break;
+      // A page that refuses to move (an overlay holding the scroll, a
+      // container that scrolls instead of the document) would otherwise
+      // shoot the same viewport until the cap.
+      if (i > 0 && at.scrollY <= slices[i - 1].y) break;
+      target = covered;
+    }
+    return await stitch(slices, total, page.dpr);
+  } catch (e) {
+    // A page the extension may not script — the web store, a PDF viewer —
+    // still deserves the screenshot the browser CAN give. Measured in the
+    // bitmap's own pixels, so the scale below is the only one applied.
+    const bmp = await captureViewport(tab);
+    return stitch([{ y: 0, bmp }], bmp.height, 1);
+  } finally {
+    if (started) await runOnTab(tab, fullShotEnd).catch(() => { /* tab gone */ });
+  }
+}
+
+/** Draw the slices into one image, at the width a describer is given.
+ *  Scaled on the way in rather than after: a tall page stitched at device
+ *  resolution first is a canvas nobody needs and a peak nobody budgeted. */
+async function stitch(slices, totalCss, dpr) {
+  const src = slices[0].bmp;
+  const scale = Math.min(1, SHOT_MAX_WIDTH / src.width);
+  const width = Math.max(1, Math.round(src.width * scale));
+  // Height comes from what was actually shot, not from what the page
+  // measured: a page that kept growing past the slice cap would otherwise
+  // get a canvas sized to content nobody captured, ending in a blank band.
+  // The page's own height still bounds it, for the short page whose last
+  // viewport reaches past the document.
+  const shot = Math.max(...slices.map((s) => s.y * dpr + s.bmp.height));
+  const height = Math.max(1, Math.min(
+    Math.round(Math.min(shot, totalCss * dpr) * scale), FULL_SHOT_MAX_HEIGHT));
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  // JPEG has no transparency, so anything left undrawn would encode black.
+  // Paper is the honest colour for "nothing was here".
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  for (const slice of slices) {
+    // Slices overlap where the last scroll could not advance a full
+    // viewport; drawing in order lets the later one win, which is what
+    // makes the bottom of the page land whole.
+    ctx.drawImage(slice.bmp, 0, Math.round(slice.y * dpr * scale),
+                  Math.round(slice.bmp.width * scale),
+                  Math.round(slice.bmp.height * scale));
+    slice.bmp.close();
+  }
+  // The describer refuses anything over its own ceiling (G.5.1), and a long
+  // page is exactly what approaches it. Quality first, size second: a
+  // readable page at 0.6 is worth more than a sharp half of one.
+  for (const quality of [0.85, 0.7, 0.55]) {
+    const jpeg = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+    if (jpeg.size <= SHOT_MAX_BYTES || quality === 0.55) {
+      return b64Of(new Uint8Array(await jpeg.arrayBuffer()));
+    }
+  }
+}
+
+/** Run a plain function in the tab and hand back what it returns. */
+async function runOnTab(tab, func, args = []) {
+  const [out] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id }, func, args,
+  });
+  return out?.result;
+}
+
+// The three below are injected, so they close over nothing and speak only
+// DOM. State lives on `window` between calls because each injection is its
+// own execution.
+
+function fullShotBegin() {
+  const doc = document.documentElement;
+  window.__mkcShot = {
+    x: window.scrollX,
+    y: window.scrollY,
+    behavior: doc.style.scrollBehavior,
+    hidden: [],
+  };
+  // Smooth scrolling and a capture loop disagree: the shot lands mid-glide.
+  doc.style.scrollBehavior = 'auto';
+  return {
+    height: Math.max(doc.scrollHeight, document.body ? document.body.scrollHeight : 0),
+    viewport: window.innerHeight,
+    dpr: window.devicePixelRatio || 1,
+  };
+}
+
+function fullShotStep(y, hideFixed) {
+  const state = window.__mkcShot;
+  if (hideFixed && state && !state.hidden.length) {
+    for (const el of document.querySelectorAll('body *')) {
+      const position = getComputedStyle(el).position;
+      if (position === 'fixed' || position === 'sticky') {
+        state.hidden.push([el, el.style.visibility]);
+        el.style.visibility = 'hidden';
+      }
+    }
+  }
+  window.scrollTo(0, y);
+  const doc = document.documentElement;
+  // Two frames: one for the scroll to land, one for what it revealed to
+  // paint. A single frame catches the page mid-repaint often enough to
+  // show as a torn band in the stitched image.
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+      scrollY: window.scrollY,
+      height: Math.max(doc.scrollHeight, document.body ? document.body.scrollHeight : 0),
+    })));
+  });
+}
+
+function fullShotEnd() {
+  const state = window.__mkcShot;
+  if (!state) return;
+  for (const [el, visibility] of state.hidden) el.style.visibility = visibility;
+  document.documentElement.style.scrollBehavior = state.behavior;
+  // The person gets their page back where they left it. A clip that
+  // silently scrolls somebody to the bottom of an article has taken
+  // something from them to give the forest a picture.
+  window.scrollTo(state.x, state.y);
+  delete window.__mkcShot;
 }
 
 function b64Of(bytes) {
