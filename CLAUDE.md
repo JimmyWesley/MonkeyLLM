@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.49.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.50.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -155,6 +155,21 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   SQLite decides; `E_QUERY_FORBIDDEN` (**403**) stays what the guard
   decides. Both `query` and `tend`: one kept honest would make the code
   mean different things per primitive.
+- **SQLite decides what a statement touches (spec C.5.3, v0.50)**: a
+  grant's table allow-list is enforced by the **authorizer**, asked once
+  per table and column the statement actually touches — so subquery, CTE,
+  view and table-valued function are the same question. Reading table
+  names out of SQL text is a second parser and two parsers agree only
+  where somebody compared them; a text pre-read MAY stay for a friendlier
+  message, NEVER as the control. It applies to `query` **and `tend`, with
+  `SQLITE_READ` denied too**: writing is a way of reading, so a scope on
+  the destination alone is not a scope. The refusal is
+  `E_QUERY_FORBIDDEN`/403 (the grant decided it; SQLite only noticed) and
+  never names the table it stopped at. Under a scope the schema is not
+  readable either — the C.5 name hint is filtered by the allow-list, and
+  `pragma_*` functions are refused beside the `PRAGMA` keyword they share
+  no spelling with. The list travels keyword-only from `ScopedVine`,
+  unreachable from the wire (same construction as G.2.5).
 - `tend` (spec C.10) is the ONLY dataset write path: single INSERT/UPDATE/
   DELETE, WHERE mandatory on UPDATE/DELETE, no DDL; refreshes `payload_hash`
   and commits only the `.md` (it has its own injection suite too).
@@ -301,6 +316,56 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   (it addresses a model; the walkthrough around it is translated).
   Companion handbook: `docs/guide/{en,pt,es}` screenshots shared in
   `docs/guide/assets/`.
+- **A provider serves every forest, so it answers to every forest (spec
+  J.3.2 + J.10.2, v0.50)**: the providers table has no forest column —
+  the endpoint decides where every forest's material goes and the key pays
+  for every forest's calls. **Listing** stays open to any admin (a
+  per-forest binding points at those names; `has_key` is a bool, never the
+  key); **editing or testing** requires administering *every* forest.
+  Stated as reach, not as the owner bit, so J.2.1 break-glass keeps
+  provider repair and a single-forest deployment is unaffected — and a
+  second forest narrows that authority the moment it exists, with nobody
+  revoking anything. Custody: a stored key does NOT follow a changed
+  endpoint (blank-key re-save still works while the address is unchanged)
+  and is never sent to a caller-supplied destination. A connection test
+  resolves the host and judges **every** address it maps to — text
+  inspection decides on what a URL says, not where it goes — refusing
+  non-public ones unless `MONKEYLLM_STATION_PROVIDER_ALLOW_PRIVATE=1`,
+  which local llama.cpp/Ollama deployments need (`docs/local-inference.md`).
+- **Governance leaves a trail (spec J.4.1, v0.50)**: Part D audited reads
+  and writes; the mutations deciding *who may do either* are audited too —
+  grant/revoke, key issue/revoke, password, provider, model binding,
+  forest creation, login (**both outcomes** — the J.2.6 limiter counts in
+  memory and forgets on restart), pair, setup. Never the secret: a key by
+  its non-secret prefix, a password only by the fact one was set. A
+  governance row carries the no-forest placeholder `"-"` and **only the
+  owner reads those** (J.3.2's rule, applied to governance); a row that IS
+  about one forest carries its id so that forest's admin reads it back. An
+  audit write must never fail the act it describes.
+- **The page declares what it may load (spec J.5.13, v0.50)**: the console
+  renders model output and ingested bodies as markdown, both untrusted by
+  the product's premise — and whatever such text talks the page into
+  fetching is fetched by the *reader's* browser, which the Station never
+  sees, so no host-side check can be the control. Every response carries
+  CSP (`img-src` same-origin + `data:` + `blob:`, `connect-src 'self'`,
+  `frame-ancestors 'none'`, `object-src`/`base-uri 'none'`), `nosniff`,
+  `no-referrer`, `X-Frame-Options: DENY`. Nothing legitimate is lost:
+  J.14 images arrive by credentialed fetch and render as `blob:`. Inline
+  script is allowed **by hash computed from the built shell** — a digest
+  written by hand goes stale on the next edit and fails silently (the page
+  loads, the theme script just stops). `style-src` keeps `'unsafe-inline'`
+  (style attributes + mermaid); script never does, and never
+  `'unsafe-eval'`. The renderer dropping unresolved image sources is the
+  second layer, not the control.
+- **A sidecar carries payloads, decided when unpacking (spec J.13.2,
+  v0.50)**: `restore` validates every member **before** extracting and
+  refuses the archive rather than skipping a member; members are named
+  positively (the payload files) instead of filtered against known-bad
+  shapes, because the destination is a working git repo whose contents git
+  itself later reads, and discarding relative segments is not sufficient
+  there. Explicit uncompressed ceiling, and
+  `MONKEYLLM_STATION_IMPORT_MAX_MB` now **defaults to 1024** (`0` still
+  means unlimited, decided rather than inherited).
 - **Starting a Station mints nothing (spec J.2.5, v0.28)**: the registry is
   as authoritative after boot as before it, so J.2.4's setup window survives
   to be used. The first-run banner names the open door (setup URL / env
