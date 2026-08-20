@@ -63,7 +63,7 @@ from monkeyllm.errors import (
 from monkeyllm.server import ForestPool
 from monkeyllm.signatures import validate_args
 from monkeyllm.windows import normalize_window
-from monkeyllm_station import answer_store, vision
+from monkeyllm_station import answer_store, vision, webhooks
 from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
 from monkeyllm_station.registry import Registry
@@ -830,6 +830,10 @@ def build_app(
                     final = await in_forest_thread(
                         prep.forest, lambda: _finish_ingest(prep, cancelled=True))
                     board.finish(job, "cancelled", report=final)
+                    hooks.emit(prep.forest, "ingest.cancelled", prep.principal,
+                               {"job": job.id, "mode": prep.mode,
+                                "done": job.done, "total": job.total,
+                                **ingest_counts(final)})
                     return
                 step = await in_forest_thread(
                     prep.forest, lambda: _advance(steps))
@@ -837,14 +841,38 @@ def build_app(
                     final = await in_forest_thread(
                         prep.forest, lambda: _finish_ingest(prep, cancelled=False))
                     board.finish(job, "done", report=final)
+                    # `ingest_counts` carries the report's own `errors`,
+                    # which is the same fact as `job.errors` and is spread
+                    # in last — one of them would silently win, so only one
+                    # is stated.
+                    hooks.emit(prep.forest, "ingest.finished", prep.principal,
+                               {"job": job.id, "mode": prep.mode,
+                                "total": job.total,
+                                "commit": (final or {}).get("commit"),
+                                "curated": bool((final or {}).get("curated")),
+                                **ingest_counts(final)})
                     return
                 board.note_step(job, step)
+                if step.get("action") == "error":
+                    # The one signal in a batch that wants a human: routed
+                    # per document, so a 900-file adopt with two failures
+                    # does not have to be read to find them.
+                    hooks.emit(prep.forest, "ingest.document.failed",
+                               prep.principal,
+                               {"job": job.id, "document": step.get("file"),
+                                "index": step.get("index"),
+                                "total": job.total})
         except Exception as e:  # noqa: BLE001 — a job must land somewhere
             err = (e.to_dict() if isinstance(e, VineError)
                    else VineError(E_SCHEMA, f"ingest failed: {e}"[:300]).to_dict())
             partial = {**prep.steps.report.as_dict(), "mode": prep.mode,
                        "staged": prep.staged}
             board.finish(job, "error", report=partial, error=err.get("error", err))
+            hooks.emit(prep.forest, "ingest.failed", prep.principal,
+                       {"job": job.id, "mode": prep.mode, "done": job.done,
+                        "total": job.total,
+                        "code": (err.get("error") or {}).get("code")
+                        if isinstance(err.get("error"), dict) else None})
             registry.record(
                 principal=prep.principal, forest=prep.forest, primitive="ingest",
                 args={**prep.payload, "job": job.id}, result="error",
@@ -853,6 +881,9 @@ def build_app(
     def _launch_ingest(prep: PreparedIngest):
         prep.job.task = asyncio.get_running_loop().create_task(
             _drive_ingest(prep))
+        hooks.emit(prep.forest, "ingest.started", prep.principal,
+                   {"job": prep.job.id, "mode": prep.mode,
+                    "total": prep.job.total})
         return prep.job
 
     mcp_lifespan = None  # set below when the MCP surface is mounted
@@ -884,6 +915,10 @@ def build_app(
             # arrives first to the boot nobody is watching.
             if warm_forests:
                 _app.state.warmed = await _warm_boot()
+            # J.16: one worker thread owning every outbound request. Started
+            # here rather than at construction so a built-but-never-served
+            # app (the test suite builds many) leaves no thread behind.
+            hooks.start()
             try:
                 yield
             finally:
@@ -894,6 +929,7 @@ def build_app(
                         await in_forest_thread(
                             fid, lambda fid=fid: pool.close_one(fid))
                 lanes.shutdown()
+                hooks.stop()
                 registry.close()
 
     # -- auth ---------------------------------------------------------------
@@ -1015,6 +1051,118 @@ def build_app(
             return {f["id"] for f in pool.list()["forests"]}
         return {g["forest"] for g in registry.grants_of(principal)
                 if "admin" in g["caps"]}
+
+    # -- webhooks (J.16) ----------------------------------------------------
+
+    def webhook_authority(owner: str, scope: str) -> bool:
+        """Whether the principal a webhook is owned by still has the reach
+        to hold it.
+
+        Asked at every DELIVERY, not only at creation (J.16.2). A webhook is
+        a standing instruction to send data outward, and v0.50's rule — a
+        second forest narrows deployment authority the moment it exists,
+        with nobody revoking anything — would otherwise stop at the door:
+        the webhook was created while the authority held and would keep
+        firing after it lapsed.
+
+        The two reach tests are the host's own, passed in rather than
+        reimplemented. A second copy of either would agree with the original
+        only where somebody thought to compare them (v0.50, C.5.3).
+        """
+        if scope == webhooks.DEPLOYMENT:
+            return governs_deployment(owner)
+        return is_admin(owner, scope)
+
+    def audit_webhook(principal: str, hook: dict, action: str,
+                      extra: dict | None = None) -> None:
+        """The lifecycle is a governance change, so J.4.1 records it.
+
+        By id and destination **host**: never the path, which routinely
+        carries a token (a Slack or n8n URL is a secret in its tail); never
+        the secret; never a header value.
+        """
+        record_governance(
+            principal, f"admin.webhook.{action}",
+            {"webhook": hook.get("id"),
+             "host": urlsplit(hook.get("url") or "").hostname or "-",
+             **(extra or {})},
+            "ok", forest=hook.get("scope") or NO_FOREST)
+
+    hooks = webhooks.Dispatcher(
+        registry, webhook_authority,
+        audit=lambda hook, action, extra: audit_webhook(
+            hook.get("owner") or NO_FOREST, hook, action, extra))
+
+    def emit_write(principal: str, forest: str, name: str, payload: dict,
+                   result: dict, commit_sha: str | None) -> None:
+        """What a successful write announces (J.16.3).
+
+        Identity only, and only what this call ALREADY held: the id, the
+        type, the parent, the commit. `title` and `summary` travel
+        separately as J.16.1's opt-in material — the dispatcher merges them
+        per webhook, so a webhook without the opt-in never sees them and no
+        webhook ever causes a read to fetch them.
+
+        A branch and a dataset also announce themselves as one: `plant`
+        fires `node.planted` for every node, and the narrower name beside
+        it for the two types an automation usually cares about separately.
+        """
+        spec = payload.get("node") if isinstance(payload.get("node"), dict) else {}
+        node_id = result.get("id") or spec.get("id") or payload.get("id")
+        if name == "plant":
+            kind = spec.get("type") or "note"
+            data = {"node": node_id, "type": kind, "parent": spec.get("parent"),
+                    "source": spec.get("source"), "commit": commit_sha}
+            meta = {"title": spec.get("title"), "summary": spec.get("summary")}
+            hooks.emit(forest, "node.planted", principal, data, meta)
+            if kind == "branch":
+                hooks.emit(forest, "branch.created", principal, data, meta)
+            elif kind == "dataset":
+                hooks.emit(forest, "dataset.created", principal, data, meta)
+        elif name == "graft":
+            patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else {}
+            # The operation NAMES, never the text they carried.
+            hooks.emit(forest, "node.grafted", principal,
+                       {"node": node_id, "operations": sorted(patch),
+                        "commit": commit_sha})
+        elif name == "tend":
+            hooks.emit(forest, "dataset.changed", principal,
+                       {"node": node_id,
+                        "rows_affected": result.get("rows_affected"),
+                        "commit": commit_sha})
+
+    def emit_answer(principal: str, forest: str, result: dict) -> None:
+        """J.10 answered. The question and the reply stay behind (J.16.1):
+        what goes out is that it happened, what it cost and how much
+        material it stood on."""
+        error = result.get("error") if isinstance(result, dict) else None
+        if isinstance(error, dict):
+            hooks.emit(forest, "answer.failed", principal,
+                       {"code": error.get("code")})
+            return
+        hooks.emit(forest, "answer.served", principal, {
+            "mode": result.get("mode"),
+            "cached": bool(result.get("cached")),
+            "evidence": len(result.get("evidence") or []),
+            "cost": result.get("cost"),
+        })
+
+    def emit_refusal(principal: str, forest: str, name: str, result) -> None:
+        """A scoped call was refused. The security signal an automation
+        actually wants, and it costs nothing to say: the refusal already
+        happened and is already audited."""
+        error = result.get("error") if isinstance(result, dict) else None
+        code = (error or {}).get("code")
+        if code in (E_FORBIDDEN, E_QUERY_FORBIDDEN):
+            hooks.emit(forest, "access.denied", principal,
+                       {"primitive": name, "code": code})
+
+    def ingest_counts(report: dict | None) -> dict:
+        """A G.10 report as COUNTS. The report itself is lists of file names
+        and a batch can be thousands of them — a webhook body is a
+        notification, not an export (J.16.1)."""
+        return {k: len(v) for k, v in (report or {}).items()
+                if isinstance(v, list)}
 
     # -- forest calls -------------------------------------------------------
 
@@ -1174,6 +1322,13 @@ def build_app(
                 size=len(json.dumps(result, default=str)),
                 commit_sha=result.get("commit"),
             )
+            # J.16: after the record, before the return. The act is complete
+            # and audited; the announcement is O(1) when nobody subscribes
+            # and a queue push when somebody does, so the caller waits for
+            # neither DNS nor a socket.
+            if name in COMPOSITES:
+                emit_answer(principal, forest, result)
+            emit_refusal(principal, forest, name, result)
             return result
 
         root_path = Path(vine.forest.root)
@@ -1195,6 +1350,10 @@ def build_app(
             result="error" if (isinstance(result, dict) and "error" in result) else "ok",
             size=len(json.dumps(result, default=str)), commit_sha=commit_sha,
         )
+        if (name in WRITE_PRIMITIVES and isinstance(result, dict)
+                and "error" not in result):
+            emit_write(principal, forest, name, payload, result, commit_sha)
+        emit_refusal(principal, forest, name, result)
         return result
 
     # Per-token prices, as the provider itself states them (J.10). Fetched
@@ -1532,6 +1691,10 @@ def build_app(
                             reply_tokens=reply, window=window)
                         whisper(vine, served.get("evidence")
                                 if isinstance(served, dict) else None)
+                    # J.10.8 (v0.54): the clamp is reported — a caller who
+                    # asked for 40 learns it was served by the floor, 64.
+                    if reply and isinstance(served, dict) and "error" not in served:
+                        served.setdefault("reply_tokens", reply)
                     return served
                 # The sweep's retrieval always runs — it is the cheap half,
                 # and its reading is what decides the hit (J.10.7 v0.35).
@@ -1561,6 +1724,9 @@ def build_app(
                 # consult_walk_store instead.)
                 whisper(vine, served.get("evidence")
                         if isinstance(served, dict) else None)
+                # J.10.8 (v0.54): the clamp is reported.
+                if reply and isinstance(served, dict) and "error" not in served:
+                    served.setdefault("reply_tokens", reply)
                 return served
             return inference.recurate(scoped, payload.get("id"), binding)
         except VineError as e:
@@ -2208,8 +2374,13 @@ def build_app(
         # pre-identity screens the console must render (J.5.6). Deciding that
         # locally is how a console ends up offering a sign-in form on a
         # Station nobody can sign in to.
+        from monkeyllm_station.mcp_surface import package_version
+
         return JSONResponse({
             "status": "ok", "mode": pool.mode, "writable": writable,
+            # J.1.2 rule 3 (v0.54): which build answered — the same number
+            # the MCP handshake states, in the place an operator curls.
+            "version": package_version(),
             "setup_required": setup_open(),
             "password_login": super_admin is not None or registry.has_any_password(),
             "mcp": mcp_status(request),
@@ -2396,6 +2567,8 @@ def build_app(
             # tried, which is the fact worth keeping.
             record_governance(username or "-", "auth.login",
                               {"username": username, "host": host}, "refused")
+            hooks.emit(webhooks.DEPLOYMENT, "auth.login.failed",
+                       username or "-", {"username": username, "host": host})
             # One message for a wrong password, an unknown user and a user
             # with no password at all: distinguishing them would turn the
             # login form into a directory of who exists.
@@ -2405,6 +2578,8 @@ def build_app(
         session = registry.open_session(username)
         record_governance(username, "auth.login",
                           {"username": username, "host": host}, "ok")
+        hooks.emit(webhooks.DEPLOYMENT, "auth.login.succeeded", username,
+                   {"username": username, "host": host})
         return JSONResponse({"key": session["key"], "principal": username,
                              "expires_at": session["expires_at"],
                              "admin": is_admin(username),
@@ -2487,6 +2662,11 @@ def build_app(
         record_governance(username, "auth.pair",
                           {"username": username, "caps": ",".join(sorted(caps)),
                            "prefix": key[:9], "expires_in_days": days}, "ok")
+        # The prefix, never the key (J.4.1 rule 1). A webhook body is read
+        # by whoever holds its URL, so the rule is stricter here, not looser.
+        hooks.emit(webhooks.DEPLOYMENT, "pair.issued", username,
+                   {"principal": username, "caps": sorted(caps),
+                    "prefix": key[:9], "expires_in_days": days})
         # Second-resolution, like `open_session`'s reply: the row's own
         # timestamp may differ by the second the mint took.
         expires_at = (datetime.now(timezone.utc)
@@ -2523,6 +2703,8 @@ def build_app(
             registry.revoke_key(str(body["revoke"]))
             record_governance(principal, "admin.key.revoke",
                               {"target": owner, "key": str(body["revoke"])}, "ok")
+            hooks.emit(webhooks.DEPLOYMENT, "key.revoked", principal,
+                       {"principal": owner, "key": str(body["revoke"])})
             return JSONResponse({"revoked": body["revoke"], "principal": owner})
 
         target = str(body.get("principal") or "").strip()
@@ -2546,6 +2728,9 @@ def build_app(
         record_governance(principal, "admin.key.issue",
                           {"target": target, "label": body.get("label") or "",
                            "prefix": key[:9], "expires_in_days": days}, "ok")
+        hooks.emit(webhooks.DEPLOYMENT, "key.issued", principal,
+                   {"principal": target, "label": body.get("label") or "",
+                    "prefix": key[:9], "expires_in_days": days})
         return JSONResponse({"api_key": key, "principal": target,
                              "keys": registry.keys_of([target])})
 
@@ -2629,6 +2814,13 @@ def build_app(
             return _unknown_forest(forest)
         if "error" in status:
             return JSONResponse(status, status_code=400)
+        if request.method == "POST":
+            hooks.emit(forest, "canopy.built", principal,
+                       {"embedded": status.get("embedded"),
+                        "nodes": status.get("nodes"),
+                        "stale": status.get("stale"),
+                        "model": status.get("model"),
+                        "refresh": bool(body.get("refresh"))})
         return JSONResponse(status)
 
     async def admin_people(request: Request) -> JSONResponse:
@@ -2879,6 +3071,9 @@ def build_app(
         record_governance(principal, "admin.forest.create",
                           {"title": title, "seed": seed or "-"}, "ok",
                           forest=forest_id)
+        hooks.emit(webhooks.DEPLOYMENT, "forest.created", principal,
+                   {"forest": forest_id, "title": title, "seed": seed or None,
+                    "commit": info.get("commit")})
         return JSONResponse({"forest": {"id": forest_id, "title": title,
                                         "commit": info.get("commit")},
                              "grants": registry.grants_of(principal)})
@@ -2982,12 +3177,18 @@ def build_app(
         record_governance(principal, "admin.grant",
                           {"target": target, "caps": ",".join(sorted(caps))},
                           "ok", forest=forest)
+        hooks.emit(forest, "grant.changed", principal,
+                   {"principal": target, "caps": sorted(caps),
+                    "branches": len(body.get("allow") or [])})
         out = {"principal": target, "grants": registry.grants_of(target)}
         if body.get("issue_key"):
             out["api_key"] = registry.issue_key(target, label=forest)
             record_governance(principal, "admin.key.issue",
                               {"target": target, "label": forest,
                                "prefix": out["api_key"][:9]}, "ok")
+            hooks.emit(webhooks.DEPLOYMENT, "key.issued", principal,
+                       {"principal": target, "label": forest,
+                        "prefix": out["api_key"][:9]})
         return JSONResponse(out)
 
     async def admin_audit(request: Request) -> JSONResponse:
@@ -3050,6 +3251,12 @@ def build_app(
              "endpoint": "" if body.get("remove") else str(body.get("endpoint") or ""),
              "removed": bool(body.get("remove")),
              "key_supplied": bool(body.get("api_key"))}, "ok")
+        hooks.emit(webhooks.DEPLOYMENT, "provider.changed", principal,
+                   {"name": str(body.get("name") or ""),
+                    "endpoint": "" if body.get("remove")
+                    else str(body.get("endpoint") or ""),
+                    "removed": bool(body.get("remove")),
+                    "key_supplied": bool(body.get("api_key"))})
         return JSONResponse({"providers": registry.providers()})
 
     async def admin_provider_test(request: Request) -> JSONResponse:
@@ -3126,6 +3333,11 @@ def build_app(
                            "model": str(body.get("model") or ""),
                            "removed": bool(body.get("remove"))},
                           "ok", forest=forest)
+        hooks.emit(forest, "model.bound", principal,
+                   {"role": str(body.get("role") or ""),
+                    "provider": str(body.get("provider") or ""),
+                    "model": str(body.get("model") or ""),
+                    "removed": bool(body.get("remove"))})
         return JSONResponse({"bindings": registry.bindings(forest)})
 
     async def forest_map(request: Request) -> JSONResponse:
@@ -3162,6 +3374,300 @@ def build_app(
         return JSONResponse(result)
 
     # -- ingest jobs, read side (J.9) ---------------------------------------
+
+    # -- webhooks over REST (J.16) ------------------------------------------
+
+    # A header name, and the ceiling on what one may carry. Bounded because
+    # every one of them rides on every delivery, and unbounded configuration
+    # is how a notification becomes a payload.
+    HEADER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    HEADER_VALUE_MAX = 1024
+    LABEL_MAX = 80
+    BRANCHES_MAX = 20
+
+    def webhook_public(hook: dict) -> dict:
+        """One webhook as the wire may see it.
+
+        The secret never appears — it was shown once, at creation (J.16.4).
+        Headers appear as NAMES: a value that can be read back is a value
+        that leaks through anyone who can read the configuration, which is
+        the custody rule a provider's key already gets.
+        """
+        return {
+            "id": hook["id"], "scope": hook["scope"], "owner": hook["owner"],
+            "label": hook["label"] or "", "url": hook["url"],
+            "events": hook["events"], "branches": hook["branches"],
+            "headers": sorted(hook["headers"] or {}),
+            "include_metadata": hook["include_metadata"],
+            "enabled": hook["enabled"], "suspended": hook["suspended"],
+            "fail_streak": hook["fail_streak"], "created": hook["created"],
+            "last_status": hook["last_status"], "last_at": hook["last_at"],
+        }
+
+    def webhook_scopes(principal: str, forest: str,
+                       mask: frozenset[str] | None) -> list[str]:
+        """Which scopes this caller may hold a webhook in, on this console.
+
+        Deployment scope is J.10.2's reach rule unchanged: the owner, or an
+        administrator of every forest there is. A forest admin who is not
+        that never sees a deployment webhook and cannot make one — the
+        scope is a ceiling, not a filter (J.16.2).
+        """
+        scopes = []
+        if is_admin(principal, forest, mask=mask):
+            scopes.append(forest)
+        if governs_deployment(principal, mask):
+            scopes.append(webhooks.DEPLOYMENT)
+        return scopes
+
+    def webhook_or_refusal(principal: str, forest: str, webhook_id: str,
+                           mask: frozenset[str] | None):
+        """The row, or the one answer that covers absent and out-of-scope.
+
+        Byte-identical for both, on J.14's terms: which webhooks exist on a
+        forest this caller does not administer is itself something they do
+        not administer.
+        """
+        allowed = webhook_scopes(principal, forest, mask)
+        hook = registry.webhook(webhook_id)
+        if hook is None or hook["scope"] not in allowed:
+            return None, _envelope(VineError(E_NOT_FOUND, "no such webhook"))
+        return hook, None
+
+    def read_webhook_body(body: dict, scope: str,
+                          existing: dict | None) -> tuple[dict, JSONResponse | None]:
+        """Validate a submitted webhook. Refuses; never repairs."""
+        url = str(body.get("url") or "").strip()
+        if not url:
+            return {}, _envelope(VineError(E_SCHEMA, "url is required"))
+        # A webhook URL is a caller-supplied address the Station will
+        # connect to repeatedly and unattended — J.10.2's problem, so
+        # J.10.2's answer, resolved rather than read (v0.50).
+        refusal = _reject_internal_endpoint(url)
+        if refusal is not None:
+            return {}, refusal
+
+        events = body.get("events")
+        if not isinstance(events, list) or not events:
+            return {}, _envelope(VineError(
+                E_SCHEMA, "events must be a non-empty list",
+                hint="GET this endpoint for the catalogue this scope may use."))
+        allowed = webhooks.allowed_events(scope)
+        outside = [e for e in events if e not in allowed]
+        if outside:
+            # Named, and refused rather than dropped: a subscription
+            # silently narrowed reads as coverage the operator does not have.
+            unknown = [e for e in outside if e not in webhooks.EVENTS]
+            return {}, _envelope(VineError(
+                E_SCHEMA,
+                f"events outside this webhook's scope: {sorted(outside)}",
+                hint="Unknown event name." if unknown else
+                     "Deployment events need a webhook in the deployment "
+                     "scope, held by a principal who administers every "
+                     "forest (J.16.2)."))
+
+        branches = body.get("branches") or []
+        if not isinstance(branches, list) or len(branches) > BRANCHES_MAX:
+            return {}, _envelope(VineError(
+                E_SCHEMA, f"branches must be a list of at most {BRANCHES_MAX} prefixes"))
+        branches = [str(b) for b in branches if str(b).strip()]
+
+        headers, refusal = read_webhook_headers(body, existing)
+        if refusal is not None:
+            return {}, refusal
+
+        label = str(body.get("label") or "").strip()[:LABEL_MAX]
+        return {
+            "url": url, "events": [str(e) for e in events],
+            "branches": branches, "headers": headers, "label": label,
+            "include_metadata": bool(body.get("include_metadata")),
+            "enabled": bool(body.get("enabled", True)),
+        }, None
+
+    def read_webhook_headers(body: dict,
+                             existing: dict | None) -> tuple[dict, JSONResponse | None]:
+        """The operator's own headers, with the custody rule spelled out.
+
+        Absent from the body: keep what is stored. Present: it replaces the
+        map, and a value of `null` means "keep this one" — which is the
+        only way an editor that can never READ a value can leave it alone.
+        """
+        stored = (existing or {}).get("headers") or {}
+        if "headers" not in body:
+            return dict(stored), None
+        submitted = body.get("headers")
+        if submitted in (None, ""):
+            return {}, None
+        if not isinstance(submitted, dict):
+            return {}, _envelope(VineError(E_SCHEMA, "headers must be an object"))
+        if len(submitted) > webhooks.MAX_HEADERS:
+            return {}, _envelope(VineError(
+                E_SCHEMA, f"at most {webhooks.MAX_HEADERS} headers"))
+        out = {}
+        for name, value in submitted.items():
+            if not HEADER_NAME.match(str(name)):
+                return {}, _envelope(VineError(
+                    E_SCHEMA, f"not a header name: {name!r}"))
+            lower = str(name).lower()
+            if lower in webhooks.RESERVED_HEADERS or lower.startswith(
+                    webhooks.HEADER_PREFIX):
+                return {}, _envelope(VineError(
+                    E_SCHEMA, f"'{name}' is set by the Station",
+                    hint="The framing and the signed X-MonkeyLLM-* set "
+                         "belong to the delivery, not to its configuration."))
+            if value is None:
+                if name in stored:
+                    out[name] = stored[name]
+                continue
+            if not isinstance(value, str) or len(value) > HEADER_VALUE_MAX:
+                return {}, _envelope(VineError(
+                    E_SCHEMA,
+                    f"header '{name}' must be a string of at most "
+                    f"{HEADER_VALUE_MAX} characters"))
+            out[name] = value
+        return out, None
+
+    async def forest_webhooks(request: Request) -> JSONResponse:
+        """List and create (J.16). The catalogue rides on the GET, so no
+        console hard-codes it and an integration can enumerate it."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        mask = mask_of(request)
+        scopes = webhook_scopes(principal, forest, mask)
+        if not scopes:
+            return _envelope(VineError(
+                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+
+        if request.method == "GET":
+            return JSONResponse({
+                "webhooks": [webhook_public(h) for h in registry.webhooks(scopes)],
+                "events": webhooks.catalogue(
+                    webhooks.DEPLOYMENT if webhooks.DEPLOYMENT in scopes else forest),
+                "groups": list(webhooks.GROUPS),
+                "scopes": ["forest"] + (["deployment"]
+                                        if webhooks.DEPLOYMENT in scopes else []),
+                "limits": {"attempts": webhooks.MAX_ATTEMPTS,
+                           "suspend_after": webhooks.SUSPEND_AFTER,
+                           "timeout_seconds": webhooks.TIMEOUT_SECONDS,
+                           "max_headers": webhooks.MAX_HEADERS,
+                           "keep_deliveries": webhooks.KEEP_DELIVERIES},
+                "queue": {"pending": hooks.pending(), "dropped": hooks.dropped},
+            })
+
+        try:
+            body = await request.json()
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        if not isinstance(body, dict):
+            return _envelope(VineError(E_SCHEMA, "body must be a JSON object"))
+
+        webhook_id = str(body.get("id") or "").strip() or None
+        existing = None
+        if webhook_id:
+            existing, refusal = webhook_or_refusal(principal, forest,
+                                                   webhook_id, mask)
+            if refusal is not None:
+                return refusal
+            scope = existing["scope"]
+        else:
+            wanted = str(body.get("scope") or "forest")
+            scope = webhooks.DEPLOYMENT if wanted == "deployment" else forest
+            if scope not in scopes:
+                return _envelope(VineError(
+                    E_FORBIDDEN,
+                    "a deployment webhook requires authority over every forest",
+                    hint="It hears events that belong to no forest, so "
+                         "administering one of several does not cover it."), 403)
+
+        fields, refusal = read_webhook_body(body, scope, existing)
+        if refusal is not None:
+            return refusal
+
+        secret = None if existing else webhooks.new_secret()
+        try:
+            hook = registry.put_webhook(webhook_id=webhook_id, scope=scope,
+                                        owner=principal, secret=secret, **fields)
+        except ValueError as e:
+            return _envelope(VineError(E_SCHEMA, str(e)))
+        hooks.refresh()
+        audit_webhook(principal, hook, "update" if existing else "create",
+                      {"events": len(fields["events"])})
+        out = {"webhook": webhook_public(hook)}
+        if secret:
+            # Once. The console says so at the moment it shows it (J.5.4).
+            out["secret"] = secret
+        return JSONResponse(out, status_code=200 if existing else 201)
+
+    async def forest_webhook(request: Request) -> JSONResponse:
+        """One webhook: its deliveries, its three actions, its removal."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        mask = mask_of(request)
+        hook, refusal = webhook_or_refusal(principal, forest,
+                                           request.path_params["hook"], mask)
+        if refusal is not None:
+            return refusal
+
+        if request.method == "GET":
+            limit = min(int(request.query_params.get("limit", 50)),
+                        webhooks.KEEP_DELIVERIES)
+            return JSONResponse({
+                "webhook": webhook_public(hook),
+                # The stored body travels back: it is what the console shows
+                # as "this is what your endpoint received", and it is already
+                # the J.16.1 payload — there is nothing in it to withhold.
+                "deliveries": registry.deliveries(hook["id"], limit),
+            })
+
+        if request.method == "DELETE":
+            registry.delete_webhook(hook["id"])
+            hooks.refresh()
+            audit_webhook(principal, hook, "delete")
+            return JSONResponse({"deleted": hook["id"]})
+
+        try:
+            body = await request.json() if await request.body() else {}
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        action = str(body.get("action") or "").strip()
+
+        if action == "rotate":
+            secret = webhooks.new_secret()
+            registry.put_webhook(
+                webhook_id=hook["id"], scope=hook["scope"], owner=hook["owner"],
+                url=hook["url"], events=hook["events"], label=hook["label"],
+                branches=hook["branches"], headers=hook["headers"],
+                include_metadata=hook["include_metadata"],
+                enabled=hook["enabled"], secret=secret)
+            hooks.refresh()
+            audit_webhook(principal, hook, "rotate")
+            return JSONResponse({"webhook": webhook_public(registry.webhook(hook["id"])),
+                                 "secret": secret})
+
+        if action == "test":
+            # Off the event loop: this opens a socket and waits up to the
+            # delivery timeout. Synchronous for the caller on purpose — the
+            # operator is asking about the address, not about the queue.
+            record = await in_forest_thread(None, lambda: hooks.test(hook))
+            audit_webhook(principal, hook, "test",
+                          {"status": record.get("status") or 0})
+            return JSONResponse({"delivery": record})
+
+        if action == "redeliver":
+            stored = registry.delivery(hook["id"], str(body.get("delivery") or ""))
+            if stored is None:
+                return _envelope(VineError(E_NOT_FOUND, "no such delivery"))
+            record = await in_forest_thread(
+                None, lambda: hooks.redeliver(hook, stored))
+            return JSONResponse({"delivery": record})
+
+        return _envelope(VineError(
+            E_SCHEMA, f"unknown action: {action or '(none)'}",
+            hint="One of: test, rotate, redeliver."))
 
     def _job_watch_refusal(principal: str, forest: str,
                            mask: frozenset[str] | None = None
@@ -3435,6 +3941,8 @@ def build_app(
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
         registry.record(principal=principal, forest=forest, primitive="reindex",
                         args={}, result="ok", size=result["nodes"])
+        hooks.emit(forest, "reindex.finished", principal,
+                   {"nodes": result["nodes"], "ms": result["ms"]})
         return JSONResponse(result)
 
     async def admin_cache(request: Request) -> JSONResponse:
@@ -3583,6 +4091,10 @@ def build_app(
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
         registry.record(principal=principal, forest=forest, primitive="snapshot",
                         args={}, result="ok", size=result.get("bytes", 0))
+        hooks.emit(forest, "snapshot.created", principal,
+                   {"name": Path(result["bundle"]).name,
+                    "bytes": result["bytes"],
+                    "payloads": result.get("payloads")})
         # The absolute path is host detail; the caller gets the name it will
         # see in the listing.
         return JSONResponse({"name": Path(result["bundle"]).name,
@@ -3871,6 +4383,10 @@ def build_app(
         # Jobs before the generic pair: `/jobs` is a literal, and the
         # `{kind}` GET below would otherwise swallow it (J.9).
         Route("/v1/forests/{forest}/jobs", jobs_list, methods=["GET"]),
+        Route("/v1/forests/{forest}/webhooks", forest_webhooks,
+              methods=["GET", "POST"]),
+        Route("/v1/forests/{forest}/webhooks/{hook}", forest_webhook,
+              methods=["GET", "POST", "DELETE"]),
         Route("/v1/forests/{forest}/jobs/{job}", job_get, methods=["GET"]),
         Route("/v1/forests/{forest}/jobs/{job}/cancel", job_cancel,
               methods=["POST"]),
@@ -3952,4 +4468,6 @@ def build_app(
     app.state.forest_lane = lambda forest=None: lanes.lane(
         forest if forest and _servable(forest) else None)
     app.state.jobs = board
+    # J.16: the one worker that owns every outbound request.
+    app.state.webhooks = hooks
     return app

@@ -36,5 +36,7 @@
   "nav.skills.blurb": "Teach your AI to use this forest as its memory",
   "nav.tokens": "Tokens",
   "nav.tokens.blurb": "Which credentials exist, and until when",
-  "nav.unpin": "Remove from the bar"
+  "nav.unpin": "Remove from the bar",
+  "nav.webhooks": "Webhooks",
+  "nav.webhooks.blurb": "Tell your other tools when something happens here"
 }

@@ -147,7 +147,9 @@ def test_branch_look_recomputes_coverage_and_degree(scoped, vine_ro):
     if "coverage" in scoped_digest:
         branches = sum(1 for c in scoped_digest["children"] if c["id"].endswith("/_index"))
         bananas = len(scoped_digest["children"]) - branches
-        assert scoped_digest["coverage"] == f"{bananas} bananas, {branches} sub-branches."
+        # C.2 (v0.54): counts, not prose — recomputed from what survived.
+        assert scoped_digest["coverage"] == {"notes": bananas,
+                                             "branches": branches}
 
 
 def test_sniff_scanned_nodes_is_not_a_size_oracle(scoped, vine_ro):

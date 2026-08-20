@@ -62,7 +62,10 @@ documents, data), recall first and reason after:
 - \`sniff(terms)\` — literal text search inside bodies (substring, not regex).
 - \`scan(parent_id)\`, \`move(id)\` — list a branch's nodes by metadata; follow
   a node's typed edges. \`scan("_index", recursive: true)\` is the cheapest
-  map of the whole forest when you need to see its shape first.
+  map of the whole forest when you need to see its shape first. Every scan
+  says \`total\` and \`returned\`; to walk everything, start it with
+  \`after: ""\` and keep passing the response's \`next\` back as \`after\` —
+  id order, complete, no duplicates.
 - \`calendar()\` — where the material sits in time: how many nodes each
   period holds, most recent first.
 - \`view(id)\` — the image behind a \`type: media\` node, if you can see images.
@@ -123,7 +126,10 @@ use the write it actually allows:
   nothing fits, ask the user), or graft to extend a node you can name.
   If a \`plant\` fails and you cannot tell whether it landed, repeat it with
   \`if_absent: true\`: an id already taken answers \`created: false\` and
-  writes nothing.
+  writes nothing. A \`graft\` that changes a body without its summary
+  answers \`summary_stale: true\` — rewrite the summary in the same turn
+  (\`set_frontmatter: {summary}\`), or the note keeps being found by what
+  it used to say.
 
 Write in English, keep the summary honest (it is how the note will be
 found, and \`locate\` sees nothing else), and never invent structure the

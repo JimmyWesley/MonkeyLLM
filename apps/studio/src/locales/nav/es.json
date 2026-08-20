@@ -36,5 +36,7 @@
   "nav.skills.blurb": "Enseña a tu IA a usar este bosque como su memoria",
   "nav.tokens": "Tokens",
   "nav.tokens.blurb": "Qué credenciales existen, y hasta cuándo",
-  "nav.unpin": "Quitar de la barra"
+  "nav.unpin": "Quitar de la barra",
+  "nav.webhooks": "Webhooks",
+  "nav.webhooks.blurb": "Avisa a tus otras herramientas cuando algo pasa aquí"
 }

@@ -71,6 +71,20 @@ def count_coverage(body: str) -> str:
     return f"{bananas} bananas, {subs} sub-branches"
 
 
+_COVERAGE_RE = re.compile(r"^(\d+) bananas?, (\d+) sub-branch(?:es)?\.?$")
+
+
+def parse_coverage(text: str | None) -> dict | None:
+    """C.1/C.2 (v0.54): machine fields carry numbers. The prose stays in
+    the index bodies; API payloads report `{notes, branches}`. None for
+    anything the render above did not produce — the caller then omits the
+    field rather than serving a sentence as data."""
+    m = _COVERAGE_RE.match((text or "").strip())
+    if not m:
+        return None
+    return {"notes": int(m.group(1)), "branches": int(m.group(2))}
+
+
 def render_index(index_node: ParsedNode, new_body: str, today: dt.date | None = None) -> str:
     fm = dict(index_node.frontmatter)
     fm["coverage"] = count_coverage(new_body)

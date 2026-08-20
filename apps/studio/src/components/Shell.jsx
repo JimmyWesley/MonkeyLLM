@@ -35,6 +35,9 @@ export const CONSOLES = [
   { key: 'skills', group: 'use', cap: 'read' },
   { key: 'ingest', group: 'build', cap: 'ingest' },
   { key: 'models', group: 'build', cap: 'admin' },
+  // J.16. The build group is the three directions a forest moves in:
+  // what comes in, who reads it, what goes out.
+  { key: 'webhooks', group: 'build', cap: 'admin' },
   { key: 'people', group: 'govern', cap: 'admin' },
   { key: 'audit', group: 'govern', cap: 'admin' },
   { key: 'health', group: 'govern', cap: 'admin' },

@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.52.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.54.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -392,6 +392,33 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   the scroll position**. `captureVisibleTab` is quota-limited to ~2/s, so
   the slices are spaced. The region picker stays a crop of the visible
   view — it is a rectangle somebody drew on what they were looking at.
+- **A webhook body is an audit row with a destination (spec J.16,
+  v0.53)**: Part J was pull-only, so nothing could tell an operator's other
+  tools that anything happened. The outbound half is shaped by one fact — a
+  delivery **leaves the Station's authority behind**: whoever holds the URL
+  reads it, under no scope, and a grant revoked later reaches none of it. So
+  the payload carries identity (ids, types, counts, states, job ids,
+  commits, error codes) and **never** a body, a snippet, a question, a
+  reply, SQL, a dataset row or `## Notes`. The one opt-in
+  (`include_metadata`) adds `title` + `summary` only, defaults off, and
+  **adds only what the act already knew** — `plant` was handed a title,
+  `graft` was not, and no event may cause a read. A **scope is a ceiling**:
+  forest webhooks (that forest's `admin`) can never subscribe to a
+  deployment event, and deployment webhooks need J.10.2's reach (owner, or
+  admin of every forest). Authority is re-read at **delivery**, so a lapsed
+  grant **suspends** rather than keeps firing — deleting would be the same
+  fact delivered as silence. Emission is O(1) when nobody subscribes (the
+  subscription index is in memory; a registry read per primitive would tax
+  the hot path to answer "no") and never runs on a forest lane: the
+  primitive returns before a socket opens. One body across every attempt so
+  a receiver dedupes by `id`; HMAC-SHA256 over `<timestamp>.<body>` (the
+  timestamp is INSIDE, or a captured body replays forever); destination
+  validated exactly as a provider's (J.10.2, resolved not read); headers
+  write-only (`null` = keep, which is the only way an editor that cannot
+  READ a value can leave it alone); audited by id and destination **host**,
+  never the path — a Slack or n8n URL is a secret in its tail. Console in
+  **Build**, so the group reads as what comes in / who reads it / what goes
+  out; it previews the exact JSON before the event is subscribed to.
 - **The Clipper is a client (spec J.15, v0.48)** `apps/clipper/`, MV3:
   stores origin + paired key only (never the password); prose through
   `compose`, binaries through `upload`; `E_LOCKED` queues client-side;

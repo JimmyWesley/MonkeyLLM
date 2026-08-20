@@ -95,6 +95,9 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "fields": _param("string[]"),
         "recursive": _param("boolean"),
         "limit": _param("integer"),
+        # C.6.2 (v0.54): the enumeration cursor. "" starts at the
+        # beginning; the response's `next` is what the next call takes.
+        "after": _param("string"),
         "gauntlet": _param("boolean"),
         "toward": _param("string"),
         "since": _param("string"),

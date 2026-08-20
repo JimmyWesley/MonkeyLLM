@@ -17,7 +17,12 @@ from monkeyllm.errors import E_FRONTMATTER, E_SCHEMA, VineError
 from monkeyllm.tokens import estimate_tokens
 
 IMMUTABLE_FIELDS = {"id", "type", "created"}
-MUTABLE_FRONTMATTER_FIELDS = {"title", "summary", "tags", "confidence"}
+MUTABLE_FRONTMATTER_FIELDS = {"title", "summary", "tags", "confidence",
+                              "aliases"}
+# C.8 (v0.54): aliases are graft-mutable so a curated name can be taught
+# after ingest, bounded like everything else that enters the FTS row.
+MAX_ALIASES = 16
+ALIAS_MAX_CHARS = 80
 
 # C.7.1 dataset planting (spec v0.8): the model never writes DDL — the schema
 # is data, validated whole, and the Vine generates the CREATE TABLEs itself.

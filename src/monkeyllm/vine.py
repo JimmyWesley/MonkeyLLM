@@ -43,6 +43,8 @@ from monkeyllm.fetch import PayloadCache, is_remote
 from monkeyllm.forest import Forest, WriterLock
 from monkeyllm.gitops import GitRepo
 from monkeyllm.models import (
+    ALIAS_MAX_CHARS,
+    MAX_ALIASES,
     MUTABLE_FRONTMATTER_FIELDS,
     NOTES_SECTION,
     GraftPatch,
@@ -111,6 +113,20 @@ SNIFF_DENSITY_BETA = 0.15
 # C.1.1 (v0.52): what `include` may ask for — a closed set, so a
 # misspelling is refused rather than silently ignored.
 LOCATE_INCLUDE = {"outline"}
+# C.12 rule 7 (v0.54): an enum refuses what it does not accept. A value
+# outside these sets used to fall back silently — `direction="all"` read
+# as an isolated node, `scope="typo"` as an unfiltered search.
+LOCATE_SCOPES = ("all", "branches", "bananas")
+MOVE_DIRECTIONS = ("out", "in", "both")
+# C.6 (v0.54): what `scan`'s `fields` may name — the catalog's
+# caller-facing columns plus computed heat. `payload`, `payload_hash` and
+# the internal columns are absent on purpose: a payload location is
+# J.14's business, not a listing's.
+SCAN_FIELDS = frozenset({
+    "id", "kind", "type", "title", "summary", "tags", "aliases", "created",
+    "updated", "confidence", "source", "entity_kind", "payload_type",
+    "parent", "trail", "coverage", "body_tokens", "outline", "heat",
+})
 NEIGHBOR_SUMMARY_TOKENS = 25
 MAX_EDGES_SHOWN = 12
 QUERY_DEFAULT_LIMIT = 200
@@ -409,6 +425,13 @@ def _sniff_body(body: str, folded_terms: list[str]) -> tuple[list[dict], set[int
 def _is_index(node_id: str) -> bool:
     """A branch's auto-generated index (C.6b, C.6c.2)."""
     return node_id == "_index" or node_id.endswith("/_index")
+
+
+def _is_system(node_id: str) -> bool:
+    """The dialect's own files (`_meta/`) — served, but not content (C.6
+    v0.54): a listing marks them `system: true` instead of leaving two
+    tools to disagree about a branch's child count."""
+    return node_id == "_meta" or node_id.startswith("_meta/")
 
 
 def batch_ids(ids, cap: int, primitive: str) -> list[str]:
@@ -772,6 +795,15 @@ class Vine:
                     f"include accepts {sorted(LOCATE_INCLUDE)}; got {unknown or include!r}",
                     hint="include=['outline'] adds each result's section headers.",
                 )
+        if scope not in LOCATE_SCOPES:
+            # C.12 rule 7 (v0.54): treated as "all", a typo returns a result
+            # the caller believes was filtered.
+            raise VineError(
+                E_SCHEMA,
+                f"scope expects one of {sorted(LOCATE_SCOPES)}, got {scope!r}",
+                hint="'branches' lands in regions, 'bananas' on leaves, "
+                     "'all' searches both.",
+            )
         # C.13.1: the window is decided here, where the candidates are
         # chosen — a filter applied to the ranked top-k returns fewer than
         # k while the forest still holds matches, and the caller reads a
@@ -846,7 +878,10 @@ class Vine:
                 "body_tokens": r["body_tokens"],
             }
             if r["kind"] == "branch" and r["coverage"]:
-                item["coverage"] = r["coverage"]
+                # C.1 (v0.54): machine fields carry numbers; the prose
+                # rendering stays in the index bodies.
+                item["coverage"] = (indexer.parse_coverage(r["coverage"])
+                                    or r["coverage"])
             if wants_outline:
                 # Same row again: the hop whose only purpose was learning
                 # which section to pick (C.1.1 rule 2).
@@ -1058,7 +1093,9 @@ class Vine:
                     ln.lstrip("- ").strip() for ln in cross.splitlines()[1:] if ln.strip().startswith("-")
                 ]
             if row["coverage"]:
-                digest["coverage"] = row["coverage"]
+                # C.2 (v0.54): same rule as locate — counts, not prose.
+                digest["coverage"] = (indexer.parse_coverage(row["coverage"])
+                                      or row["coverage"])
         else:
             digest["outline"] = json.loads(row["outline"])
 
@@ -1245,6 +1282,17 @@ class Vine:
     @_traced
     def move(self, id: str, rel: str | None = None, direction: str = "out",
              gauntlet: bool | None = None, toward: str | None = None) -> dict:
+        if direction not in MOVE_DIRECTIONS:
+            # C.3 (v0.54): matched against nothing, an unknown direction
+            # returned an empty neighbour list — byte-identical to an
+            # isolated node, on nodes with degree > 0.
+            raise VineError(
+                E_SCHEMA,
+                f"direction expects one of {sorted(MOVE_DIRECTIONS)}, "
+                f"got {direction!r}",
+                hint="Every direction at once is 'both' here; 'all' is "
+                     "locate's scope word, not a direction.",
+            )
         self._row_or_raise(id)
         neighbors: list[dict] = []
 
@@ -1573,21 +1621,50 @@ class Vine:
         fields: list[str] | None = None,
         recursive: bool = False,
         limit: int = 50,
+        after: str | None = None,
         gauntlet: bool | None = None,
         toward: str | None = None,
         since: str | None = None,
         until: str | None = None,
         date_field: str | None = None,
+        *,
+        visible=None,
     ) -> dict:
+        # `visible` is the host policy's predicate (J.3), applied where the
+        # candidates are chosen so `total`, the cursor and the page are all
+        # the principal's own — a count over nodes they may not see is a
+        # size oracle, and a cursor over them skips what a post-hoc trim
+        # drops. Keyword-only and absent from the signature table: it is
+        # the host's to pass, unreachable from the wire (same construction
+        # as G.2.5's `adopted`).
         self._row_or_raise(parent_id)
         window = normalize_window(since, until, date_field)
         filter = filter or {}
-        fields = fields or ["id", "type", "summary"]
+        # C.6 (v0.54): the cost of opening a node is known wherever a node
+        # is offered — body_tokens joins the default projection.
+        fields = fields or ["id", "type", "summary", "body_tokens"]
+        unknown = [f for f in fields if f not in SCAN_FIELDS]
+        if unknown:
+            # C.12 rule 7: silently omitted from every item, an unknown
+            # field reads exactly like "empty on every node".
+            raise VineError(
+                E_SCHEMA,
+                f"fields accepts {sorted(SCAN_FIELDS)}; got {unknown[0]!r}",
+            )
+        if after is not None and (toward or gauntlet):
+            raise VineError(
+                E_SCHEMA,
+                "after cannot be combined with gauntlet/toward",
+                hint="An enumeration has one order (id); a ranked page "
+                     "cannot be resumed. Drop the cursor to rank.",
+            )
         limit = min(max(1, limit), 50)
 
         rows = self.catalog.children(parent_id, recursive=recursive)
         out = []
         for r in rows:
+            if visible is not None and not visible(r["id"]):
+                continue
             if not self._match_filter(r, filter):
                 continue
             if window and not in_window(r[window["date_field"]], window):
@@ -1600,17 +1677,38 @@ class Vine:
                     item[f] = json.loads(r[f])
                 elif f == "heat":
                     item[f] = self._heat(r["id"])
+                elif f == "coverage":
+                    cov = indexer.parse_coverage(r["coverage"])
+                    if cov or r["coverage"]:
+                        item[f] = cov or r["coverage"]
                 elif f in r.keys():
                     item[f] = r[f]
+            if _is_system(r["id"]):
+                # C.6 (v0.54): `_meta/schema` is a child of no branch, so
+                # it shows up here and in no `look` — the marker is the
+                # explanation for the differing counts.
+                item["system"] = True
             item["_heat"] = self._heat(r["id"])
             out.append(item)
-        out.sort(key=lambda x: x["_heat"], reverse=True)
-        # Part K: 60 children cut to 14 by the budget, ordered by heat, is the
-        # forager seeing a quarter of the frontier chosen by something that
-        # has nothing to do with the question. Rank first, then cut.
-        goal = self._goal_for(toward, gauntlet)
-        if goal is not None:
-            self._rank_frontier(out, goal[0], signal_of=lambda x: x["_heat"])
+        # C.6.2 (v0.54): `total` is what the requested scope holds, counted
+        # before any cut — the size of what was NOT received.
+        total = len(out)
+        goal = None
+        if after is not None:
+            # The cursor selects id order: stable, resumable, and complete
+            # over a stable forest. `after: ""` starts at the beginning.
+            out.sort(key=lambda x: x["id"])
+            out = [x for x in out if x["id"] > after]
+        else:
+            out.sort(key=lambda x: x["_heat"], reverse=True)
+            # Part K: 60 children cut to 14 by the budget, ordered by heat,
+            # is the forager seeing a quarter of the frontier chosen by
+            # something that has nothing to do with the question. Rank
+            # first, then cut.
+            goal = self._goal_for(toward, gauntlet)
+            if goal is not None:
+                self._rank_frontier(out, goal[0],
+                                    signal_of=lambda x: x["_heat"])
         for item in out:
             item.pop("_heat", None)
         payload = {"nodes": out[:limit], "truncated": len(out) > limit}
@@ -1618,7 +1716,23 @@ class Vine:
             payload["frontier"] = {"ranked": True, "toward": goal[1]}
         if window:
             payload["window"] = window
-        return shrink_list_to_budget(payload, "nodes", BUDGET_SCAN)
+        # C.6.2: the meta fields sit inside the budget, so they are present
+        # (at their largest possible size) while the list is cut, and only
+        # their values are fixed up afterwards — the 800 stays a ceiling.
+        payload["total"] = total
+        payload["returned"] = len(payload["nodes"])
+        if after is not None and out:
+            payload["next"] = max((x["id"] for x in out), key=len)
+        payload = shrink_list_to_budget(payload, "nodes", BUDGET_SCAN)
+        payload["returned"] = len(payload["nodes"])
+        if (after is not None and payload["nodes"]
+                and payload["returned"] < len(out)):
+            # The last id returned is exactly what the next call's `after`
+            # takes; the final page carries no `next`.
+            payload["next"] = payload["nodes"][-1]["id"]
+        else:
+            payload.pop("next", None)
+        return payload
 
     @staticmethod
     def _match_filter(row: sqlite3.Row, flt: dict) -> bool:
@@ -1757,19 +1871,27 @@ class Vine:
             # the traversal that came before — as the only thing separating
             # a note holding ten occurrences from an index holding one.
             density = 1 + SNIFF_DENSITY_BETA * math.log2(len(matches))
-            hits.append(
-                {
-                    "id": nid,
-                    "type": r["type"],
-                    "title": r["title"],
-                    "trail": json.loads(r["trail"]),
-                    "score": round(strength * density * (1 + self.alpha * heat), 4),
-                    "heat": heat,
-                    "match_count": len(matches),
-                    "truncated_matches": len(matches) > SNIFF_MATCHES_PER_NODE,
-                    "matches": matches[:SNIFF_MATCHES_PER_NODE],
-                }
-            )
+            hit = {
+                "id": nid,
+                "type": r["type"],
+                "title": r["title"],
+                "trail": json.loads(r["trail"]),
+                "score": round(strength * density * (1 + self.alpha * heat), 4),
+                "heat": heat,
+                # C.6b (v0.54): the row is already in hand, and the caller
+                # is choosing what to open (C.1.1's rule).
+                "body_tokens": r["body_tokens"],
+                "match_count": len(matches),
+                "truncated_matches": len(matches) > SNIFF_MATCHES_PER_NODE,
+                "matches": matches[:SNIFF_MATCHES_PER_NODE],
+            }
+            if _is_index(nid):
+                # C.6b (v0.54): the sort below is deliberate and invisible
+                # on the wire — a client re-sorting by score would silently
+                # undo it. The marker says so; the score keeps telling the
+                # truth.
+                hit["demoted"] = True
+            hits.append(hit)
         # After the answer is decided, never before it: what the scan learned
         # is latency for the next caller, and it must not be able to change
         # this one's result.
@@ -2157,6 +2279,18 @@ class Vine:
                 )
         if "summary" in patch.set_frontmatter:
             validate_summary(str(patch.set_frontmatter["summary"]))
+        if "aliases" in patch.set_frontmatter:
+            aliases = patch.set_frontmatter["aliases"]
+            if (not isinstance(aliases, list) or len(aliases) > MAX_ALIASES
+                    or any(not isinstance(a, str) or not a.strip()
+                           or len(a) > ALIAS_MAX_CHARS for a in aliases)):
+                raise VineError(
+                    E_SCHEMA,
+                    f"aliases must be a list of at most {MAX_ALIASES} "
+                    f"non-empty strings of at most {ALIAS_MAX_CHARS} chars",
+                    hint="Aliases are curated names locate indexes beside "
+                         "the title (C.8, G.2.6).",
+                )
 
         fm = dict(node.frontmatter)
         body = node.body
@@ -2217,6 +2351,12 @@ class Vine:
             body = append_section(body, patch.append_section.header, patch.append_section.body)
             file_changed = True
 
+        # C.8 (v0.54): a body edit that leaves the summary behind ages the
+        # exact layer navigation trusts. Compared text-to-text, so a
+        # replace_body that wrote the same words signals nothing.
+        summary_stale = (body != node.body
+                         and "summary" not in patch.set_frontmatter)
+
         if not file_changed:
             return {"id": id, "commit": None, "fortified": fortified, "trail": self.forest.trail(id)}
 
@@ -2248,7 +2388,13 @@ class Vine:
         for path in paths[1:]:
             idx_id = self.forest.id_for(path)
             self.catalog.upsert_node(self.forest.read(idx_id))
-        return {"id": id, "commit": commit, "fortified": fortified, "trail": self.forest.trail(id)}
+        result = {"id": id, "commit": commit, "fortified": fortified,
+                  "trail": self.forest.trail(id)}
+        if summary_stale:
+            # Absent, never false: a signal, not a judgement of whether the
+            # summary still fits — only a reader of both can make that one.
+            result["summary_stale"] = True
+        return result
 
     def _propagate_summary(
         self, child_id: str, new_summary: str, touched: list[tuple[Path, str]]

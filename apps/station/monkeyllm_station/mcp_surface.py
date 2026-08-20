@@ -22,8 +22,27 @@ import contextvars
 import json
 import logging
 import os
+from typing import Literal
 
 log = logging.getLogger("monkeyllm_station")
+
+
+def package_version() -> str:
+    """The installed build's number (J.1.2 rule 3), read from package
+    metadata so the answer is what pip installed, never a hand-kept copy —
+    a whole report cycle was once spent against a build nobody could
+    identify."""
+    try:
+        from importlib.metadata import version
+
+        return version("monkeyllm")
+    except Exception:
+        try:
+            from monkeyllm import __version__
+
+            return __version__
+        except Exception:  # pragma: no cover - no package, no number
+            return ""
 
 ALLOWED_HOSTS_ENV = "MONKEYLLM_STATION_ALLOWED_HOSTS"
 DEFAULT_ALLOWED_HOSTS = "localhost,localhost:8800,127.0.0.1,127.0.0.1:8800,testserver"
@@ -172,9 +191,39 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
             "Studio and /v1/health all stay green. Name your domain there.",
             ALLOWED_HOSTS_ENV, ", ".join(hosts))
 
-    mcp = MCPServer("monkeyllm-station", instructions=INSTRUCTIONS)
+    mcp = MCPServer("monkeyllm-station", instructions=INSTRUCTIONS,
+                    version=package_version())
+    # J.1.2 rule 4: no empty promises. The SDK registers resource/prompt
+    # handlers unconditionally and derives capabilities from their
+    # presence; this Station serves neither, so announcing them makes
+    # every connecting client spend two round trips to learn "empty".
+    try:
+        handlers = mcp._lowlevel_server._request_handlers
+        for method in ("prompts/list", "prompts/get", "resources/list",
+                       "resources/templates/list", "resources/read",
+                       "resources/subscribe", "resources/unsubscribe",
+                       "subscriptions/listen"):
+            handlers.pop(method, None)
+    except AttributeError:  # pragma: no cover - the SDK moved its registry
+        pass
 
-    async def call(forest: str, name: str, **kwargs) -> dict:
+    from mcp.types import CallToolResult, TextContent
+
+    def compact(result) -> str:
+        # J.1.2 rule 1: the block goes into a model's context, billed by
+        # the token. Pretty-printing measured at 15-30% of every read.
+        return json.dumps(result, ensure_ascii=False, separators=(",", ":"),
+                          default=str)
+
+    def done(result) -> CallToolResult:
+        # J.1.2 rule 2: the protocol's flag and the C.12 envelope are two
+        # spellings of one fact, and a harness reads exactly one of them.
+        return CallToolResult(
+            content=[TextContent(type="text", text=compact(result))],
+            is_error=isinstance(result, dict) and "error" in result,
+        )
+
+    async def run(forest: str, name: str, **kwargs) -> dict:
         principal = PRINCIPAL.get()
         if principal is None:
             return UNAUTHENTICATED
@@ -197,12 +246,17 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
             return {"job": job.snapshot()}
         return result
 
+    async def call(forest: str, name: str, **kwargs) -> CallToolResult:
+        # One seam for every tool (J.1.2): the dict becomes the compact
+        # block here, and the flag is set beside it.
+        return done(await run(forest, name, **kwargs))
+
     @mcp.tool()
-    async def forests() -> dict:
+    async def forests():
         """List the forests this key may use, with capabilities and roots."""
         principal = PRINCIPAL.get()
         if principal is None:
-            return UNAUTHENTICATED
+            return done(UNAUTHENTICATED)
         mask = CAPS_MASK.get()
         granted = {g["forest"]: g for g in registry.grants_of(principal)}
         out = []
@@ -217,14 +271,14 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                 caps = sorted(set(caps) & mask)
             out.append({"id": f["id"], "caps": caps,
                         "roots": policy.roots() if policy else []})
-        return {"forests": out}
+        return done({"forests": out})
 
     @mcp.tool()
     async def locate(forest: str, query: str, k: int = 5, scope: str = "all",
                      type_filter: str | None = None,
                      include: list[str] | None = None,
                      since: str | None = None, until: str | None = None,
-                     date_field: str | None = None) -> dict:
+                     date_field: str | None = None):
         """Drop near the answer: ranked entry points over curated metadata —
         titles, summaries and tags, never bodies. Each result carries
         `body_tokens`, so you can size what you are about to open;
@@ -244,7 +298,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
 
     @mcp.tool()
     async def look(forest: str, id: str | list[str],
-                   fields: list[str] | None = None) -> dict:
+                   fields: list[str] | None = None):
         """Cheap digest of one node: summary, edges, children, stats.
 
         `id` may be a list of up to 10 ids — one call, one budget: the
@@ -255,13 +309,15 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
 
     @mcp.tool()
     async def move(forest: str, id: str, rel: str | None = None,
-                   direction: str = "out") -> dict:
-        """Neighbours of a node along typed edges (rel='children' for a branch)."""
+                   direction: Literal["out", "in", "both"] = "out"):
+        """Neighbours of a node along typed edges (rel='children' for a
+        branch). `direction` is out | in | both — 'both' is this tool's
+        word for every direction at once."""
         return await call(forest, "move", id=id, rel=rel, direction=direction)
 
     @mcp.tool()
     async def pick(forest: str, id: str | list[str],
-                   section: str | None = None) -> dict:
+                   section: str | None = None):
         """Harvest the body, or one section of it.
 
         `id` may be a list of up to 5 ids, sharing ONE 4000-token budget:
@@ -277,34 +333,46 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         images only, local payloads only, bounded at 6 MiB. Returns a JSON
         header (id, media_type, size, payload_hash) beside the image block.
         Out-of-scope answers E_NOT_FOUND, exactly as a missing node does."""
-        meta = await call(forest, "view", id=id)
+        meta = await run(forest, "view", id=id)
         if not isinstance(meta, dict) or "error" in meta or "path" not in meta:
-            return meta
+            return done(meta)
         from mcp.server.mcpserver.utilities.types import Image
 
         # The path is the lane's answer, never the caller's to see: the
         # bytes ride in the image block, the header carries identity only.
         path = meta.pop("path")
         fmt = meta["media_type"].split("/", 1)[1]
-        return [meta, Image(path=path, format=fmt)]
+        return CallToolResult(content=[
+            TextContent(type="text", text=compact(meta)),
+            Image(path=path, format=fmt).to_image_content(),
+        ])
 
     @mcp.tool()
     async def scan(forest: str, parent_id: str, filter: dict | None = None,
+                   fields: list[str] | None = None,
                    recursive: bool = False, limit: int = 50,
+                   after: str | None = None,
                    since: str | None = None, until: str | None = None,
-                   date_field: str | None = None) -> dict:
-        """Filter a branch's nodes by metadata. `scan("_index",
-        recursive=true)` is the cheapest shape of the whole forest;
-        `since`/`until` bound it by date."""
+                   date_field: str | None = None):
+        """Filter a branch's nodes by metadata — and enumerate them.
+
+        Budget: <= 800 tokens and <= 50 items per page, whichever cuts
+        first; every response carries `total` (what the scope holds) and
+        `returned`. To walk a whole forest, start
+        `scan("_index", recursive=true, after="")` and keep passing the
+        response's `next` back as `after` until none comes: id order, no
+        loss, no duplicates. `fields` picks the columns (default
+        id/type/summary/body_tokens); `since`/`until` bound it by date."""
         return await call(forest, "scan", parent_id=parent_id, filter=filter,
-                          recursive=recursive, limit=limit, since=since,
+                          fields=fields, recursive=recursive, limit=limit,
+                          after=after, since=since,
                           until=until, date_field=date_field)
 
     @mcp.tool()
     async def sniff(forest: str, terms: list[str], scope: str | None = None,
                     k: int = 5, since: str | None = None,
                     until: str | None = None,
-                    date_field: str | None = None) -> dict:
+                    date_field: str | None = None):
         """Literal search inside bodies — the facts summaries do not carry.
 
         `since`/`until` bound it by date, and here that is also the cheapest
@@ -317,7 +385,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
     async def harvest(forest: str, query: str, terms: list[str] | None = None,
                       k: int = 3, since: str | None = None,
                       until: str | None = None,
-                      date_field: str | None = None) -> dict:
+                      date_field: str | None = None):
         """One-shot retrieval: ranked evidence with exact snippets, no hops.
         `since`/`until` bound both of its legs to a period."""
         return await call(forest, "harvest", query=query, terms=terms, k=k,
@@ -328,7 +396,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                        date_field: str = "created",
                        granularity: str = "month",
                        since: str | None = None, until: str | None = None,
-                       limit: int = 24) -> dict:
+                       limit: int = 24):
         """Where this forest's material sits in time: how many nodes each
         period holds, most recent first, read from curated metadata without
         opening anything.
@@ -351,7 +419,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                      min_evidence: int = 0,
                      since: str | None = None,
                      until: str | None = None,
-                     date_field: str | None = None) -> dict:
+                     date_field: str | None = None):
         """Ask the forest directly: scoped retrieval read by the model bound
         to this forest, returning a grounded answer with its evidence. The
         one call that replaces a knowledge-base lookup plus a summarisation
@@ -377,12 +445,12 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                              if min_evidence else {}))
 
     @mcp.tool()
-    async def query(forest: str, id: str, sql: str) -> dict:
+    async def query(forest: str, id: str, sql: str):
         """Read-only SQL against a dataset node."""
         return await call(forest, "query", id=id, sql=sql)
 
     @mcp.tool()
-    async def plant(forest: str, node: dict, if_absent: bool = False) -> dict:
+    async def plant(forest: str, node: dict, if_absent: bool = False):
         """Create a node (needs the 'write' capability).
 
         A duplicate id is refused, so a write that timed out cannot simply
@@ -392,19 +460,19 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         return await call(forest, "plant", node=node, if_absent=if_absent)
 
     @mcp.tool()
-    async def graft(forest: str, id: str, patch: dict) -> dict:
+    async def graft(forest: str, id: str, patch: dict):
         """Edit a node (needs the 'write' capability)."""
         return await call(forest, "graft", id=id, patch=patch)
 
     @mcp.tool()
-    async def tend(forest: str, id: str, sql: str) -> dict:
+    async def tend(forest: str, id: str, sql: str):
         """Single-statement dataset write (needs the 'tend' capability)."""
         return await call(forest, "tend", id=id, sql=sql)
 
     @mcp.tool()
     async def ingest(forest: str, mode: str = "upload",
                      files: list[dict] | None = None, path: str | None = None,
-                     dest: str | None = None, wait: bool = True) -> dict:
+                     dest: str | None = None, wait: bool = True):
         """Put documents into the forest (needs the 'ingest' capability).
 
         `upload` sends the documents themselves as [{name, text}]; `adopt`
