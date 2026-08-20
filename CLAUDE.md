@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.50.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.51.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -295,6 +295,21 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   `<a>`); the `.md` export rewrites `media:` to the absolute payload
   route. And the reading fingerprint now hashes `notes` too a
   teaching edited is a reading changed.
+- **A page capture is the page, not the window (spec J.15, v0.51)**:
+  the Clipper's page screenshot scrolls the document to its end and
+  composes the viewports into one image. It is read ONCE, at ingest, by
+  the G.5.1 describer, and that prose is all `locate`/`sniff` ever see of
+  it — so a viewport-bounded capture let a scroll bar decide how much of
+  the page is findable. Four rules, each a way the obvious loop is wrong:
+  **re-measure every step** (scrolling is what makes a lazy page grow, so
+  its height before the first move is not its height); **hide fixed/sticky
+  after the first slice** (they ride the scroll and get stamped down the
+  whole image); **bound it** by slice count, end the walk when scrolling
+  stops advancing, and take the composed height from what was CAPTURED
+  (a page that outgrew the cap must not end in a blank band); **restore
+  the scroll position**. `captureVisibleTab` is quota-limited to ~2/s, so
+  the slices are spaced. The region picker stays a crop of the visible
+  view — it is a rectangle somebody drew on what they were looking at.
 - **The Clipper is a client (spec J.15, v0.48)** `apps/clipper/`, MV3:
   stores origin + paired key only (never the password); prose through
   `compose`, binaries through `upload`; `E_LOCKED` queues client-side;
