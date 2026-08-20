@@ -203,6 +203,8 @@ catálogo completo comentado vive en `.env.example`.
 | `MONKEYLLM_LLM_MODEL`, `MONKEYLLM_LLM_MAX_TOKENS`, `MONKEYLLM_LLM_REASONING` | Id de modelo por defecto, presupuesto de respuesta y modo de razonamiento para ese proveedor. |
 | `MONKEYLLM_EMBED_ENDPOINT`, `MONKEYLLM_EMBED_MODEL`, `MONKEYLLM_EMBED_API_KEY` | Endpoint y modelo de embeddings para la capa vectorial opcional. Sin definir, la búsqueda de entrada se queda en su contrato solo-BM25. |
 | `MONKEYLLM_S3_ENDPOINT` | Endpoint compatible con S3 para payloads remotos MinIO, R2. |
+| `MONKEYLLM_STATION_PROVIDER_ALLOW_PRIVATE` | Ponga `1` para que *Probar conexión* alcance loopback y direcciones privadas. Necesario cuando el modelo corre en la misma máquina o red (llama.cpp, Ollama); apagado por defecto, para que una instalación solo-alojada no pueda ser inducida a abrir una conexión hacia su propia red. |
+| `MONKEYLLM_STATION_IMPORT_MAX_MB` | Snapshot más grande que acepta la ruta de importación, en MB. Por defecto `1024`; `0` significa sin límite. |
 
 ## Actualizaciones y solo lectura
 

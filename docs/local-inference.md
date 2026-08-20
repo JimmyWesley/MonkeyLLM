@@ -17,6 +17,27 @@ and `bin/` is git-ignored and rebuildable.
 Both are OpenAI-compatible. Phase 0 (the 10-question demo) needs only the
 chat one; the embedder is optional and activates hybrid `locate` (Phase 1).
 
+### Serving these through a Station
+
+The variables above are read by the client and by the Station alike, so a
+local `llama-server` becomes an environment-declared provider (J.10.1) with
+no console step.
+
+One extra variable is needed for the **Test connection** button under
+*Models*, and only for that button:
+
+```bash
+export MONKEYLLM_STATION_PROVIDER_ALLOW_PRIVATE=1
+```
+
+The Station validates where a connection test is about to connect and
+refuses loopback and private addresses by default it is a route where the
+caller names an address the server then opens a connection to, and the
+default posture for that is "public endpoints only". A model on your own
+machine is exactly the case that needs the exception, which is why it is one
+line rather than a code change. Answering and curating are unaffected: they
+call the endpoint the provider already holds.
+
 ## Step by step
 
 ```powershell

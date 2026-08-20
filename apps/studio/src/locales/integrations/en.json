@@ -63,6 +63,8 @@
   "integrations.env.llm_model": "Default model id, response budget and reasoning mode for that provider.",
   "integrations.env.port": "Published port of the compose service 8800 by default.",
   "integrations.env.s3": "S3-compatible endpoint for remote payloads MinIO, R2.",
+  "integrations.env.provider_private": "Set to 1 to let Test connection reach loopback and private addresses. Needed when your model runs on the same machine or network (llama.cpp, Ollama); off by default.",
+  "integrations.env.import_max_mb": "Largest snapshot the import route accepts, in MB. Defaults to 1024; 0 means no limit.",
   "integrations.env.sub": "Everything the container reads from its environment. The annotated catalogue lives in .env.example.",
   "integrations.env.title": "Environment reference",
   "integrations.env.var": "Variable",

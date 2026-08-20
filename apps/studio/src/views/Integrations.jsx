@@ -65,6 +65,8 @@ const ENV_VARS = [
   [['MONKEYLLM_LLM_MODEL', 'MONKEYLLM_LLM_MAX_TOKENS', 'MONKEYLLM_LLM_REASONING'], 'llm_model'],
   [['MONKEYLLM_EMBED_ENDPOINT', 'MONKEYLLM_EMBED_MODEL', 'MONKEYLLM_EMBED_API_KEY'], 'embed'],
   [['MONKEYLLM_S3_ENDPOINT'], 's3'],
+  [['MONKEYLLM_STATION_PROVIDER_ALLOW_PRIVATE'], 'provider_private'],
+  [['MONKEYLLM_STATION_IMPORT_MAX_MB'], 'import_max_mb'],
 ]
 
 /** Which section the reader is in, so the page nav can say so. The first

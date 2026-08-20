@@ -194,6 +194,8 @@ in `.env.example`.
 | `MONKEYLLM_LLM_MODEL`, `MONKEYLLM_LLM_MAX_TOKENS`, `MONKEYLLM_LLM_REASONING` | Default model id, response budget and reasoning mode for that provider. |
 | `MONKEYLLM_EMBED_ENDPOINT`, `MONKEYLLM_EMBED_MODEL`, `MONKEYLLM_EMBED_API_KEY` | Embedding endpoint and model for the optional vector layer. Unset keeps entry search on its BM25-only contract. |
 | `MONKEYLLM_S3_ENDPOINT` | S3-compatible endpoint for remote payloads MinIO, R2. |
+| `MONKEYLLM_STATION_PROVIDER_ALLOW_PRIVATE` | Set to `1` to let *Test connection* reach loopback and private addresses. Needed when your model runs on the same machine or network (llama.cpp, Ollama); off by default, so a hosted-only deployment cannot be asked to open a connection into its own network. |
+| `MONKEYLLM_STATION_IMPORT_MAX_MB` | Largest snapshot the import route accepts, in MB. Defaults to `1024`; `0` means no limit. |
 
 ## Updating & read-only
 

@@ -63,6 +63,8 @@
   "integrations.env.llm_model": "Modelo por defecto, presupuesto de respuesta y modo de razonamiento de ese proveedor.",
   "integrations.env.port": "Puerto publicado del servicio compose 8800 por defecto.",
   "integrations.env.s3": "Endpoint compatible con S3 para payloads remotos MinIO, R2.",
+  "integrations.env.provider_private": "Ponga 1 para que Probar conexión alcance loopback y direcciones privadas. Necesario cuando el modelo corre en la misma máquina o red (llama.cpp, Ollama); apagado por defecto.",
+  "integrations.env.import_max_mb": "Snapshot más grande que acepta la ruta de importación, en MB. Por defecto 1024; 0 significa sin límite.",
   "integrations.env.sub": "Todo lo que el contenedor lee de su entorno. El catálogo comentado vive en .env.example.",
   "integrations.env.title": "Referencia de entorno",
   "integrations.env.var": "Variable",
