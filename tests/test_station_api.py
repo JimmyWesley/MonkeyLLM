@@ -14,6 +14,7 @@ scoping) lands with T08, when prefix policies become enforceable.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -287,34 +288,45 @@ def test_unknown_capability_is_rejected(station):
         registry.grant("dave", FOREST, {"read", "superuser"})
 
 
-def test_a_stale_lock_is_not_reported_as_an_unknown_forest(station, station_root):
-    """A grant already tells the caller the forest exists (J.3).
+def test_an_orphan_lock_heals_and_a_live_one_is_named(station, station_root):
+    """C.9 (v0.55): the lock is possession, not existence.
 
-    `_unknown_forest` exists so an ungranted principal cannot enumerate the
-    registry. Past the policy check that reasoning no longer applies, and
-    returning it anyway sent operators hunting for a naming mistake that was
-    not there — the usual cause is a writer lock left behind by a Station
-    that did not shut down, which says `E_LOCKED` and means "try again", not
-    "you typed the wrong name".
+    A file left by a dead writer — which is how server processes end — used
+    to be a total outage repaired only by shell access. It now heals at the
+    next open. A LIVE writer still refuses, with `E_LOCKED` naming its card
+    rather than `_unknown_forest`: a grant already tells the caller the
+    forest exists (J.3), and "you typed the wrong name" sent operators
+    hunting for a mistake that was not there.
     """
+    from monkeyllm.forest import WriterLock
+
     client, registry = station
     headers = _key(registry, caps=("read",))
 
     # Boot warming (J.6.1) leaves this forest open and holding its own lock,
-    # and releasing that lock deletes the file — so the pool is emptied first
-    # and the leftover written after, which is the situation being described:
-    # a forest nobody has open, with a lock somebody left behind. Closing goes
-    # through the forest thread, where those SQLite connections live.
+    # so the pool is emptied first and the leftover written after: a forest
+    # nobody has open, with a lock somebody left behind.
     _close_pool(client)
     lock = station_root / FOREST / ".vine.lock"
     lock.write_text("999999", encoding="utf-8")
     try:
         r = client.post(f"/v1/forests/{FOREST}/look", json={"id": "_index"},
                         headers=headers)
-        assert r.status_code == 409, r.text
-        assert r.json()["error"]["code"] == E_LOCKED
+        assert r.status_code == 200, r.text  # the orphan healed, silently
     finally:
-        lock.unlink(missing_ok=True)
+        _close_pool(client)
+
+    holder = WriterLock(station_root / FOREST)
+    holder.acquire()
+    try:
+        r = client.post(f"/v1/forests/{FOREST}/look", json={"id": "_index"},
+                        headers=headers)
+        assert r.status_code == 409, r.text
+        err = r.json()["error"]
+        assert err["code"] == E_LOCKED
+        assert str(os.getpid()) in err["message"]  # the card, quoted
+    finally:
+        holder.release()
         _close_pool(client)
 
 

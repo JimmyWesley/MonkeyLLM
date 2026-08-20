@@ -44,16 +44,19 @@ function Report({ forest, goto }) {
 
   if (report.busy) return <Card><Skeleton rows={7} /></Card>
   if (report.error) {
-    // The one refusal worth explaining rather than showing raw: a scoped
-    // admin is not missing a capability, they are asking for a shape this
-    // report does not have.
+    // Two refusals worth explaining rather than showing raw: a scoped
+    // admin is asking for a shape this report does not have, and a locked
+    // forest is a state this console can actually repair (J.13.5).
     const scoped = report.error.status === 403
       && /whole forest/i.test(report.error.message || '')
+    const locked = report.error.code === 'E_LOCKED'
     return (
       <Card title={t('health.title')} icon={HealthIcon}>
-        {scoped
-          ? <Empty icon={Alert} title={t('health.scoped')}>{t('health.scoped_hint')}</Empty>
-          : <ErrorNote error={report.error} onRetry={report.reload} />}
+        {locked
+          ? <LockPanel forest={forest} onCleared={report.reload} />
+          : scoped
+            ? <Empty icon={Alert} title={t('health.scoped')}>{t('health.scoped_hint')}</Empty>
+            : <ErrorNote error={report.error} onRetry={report.reload} />}
       </Card>
     )
   }
@@ -64,6 +67,7 @@ function Report({ forest, goto }) {
     .sort((a, b) => Number(a[0]) - Number(b[0]))
   const clear = !lint.errors && !lint.warnings && !d.needs_split?.length
     && !d.fat_nodes?.length && !d.stale_passports?.length
+    && !d.needs_description?.length
 
   return (
     <div className="min-w-0 space-y-4">
@@ -91,6 +95,9 @@ function Report({ forest, goto }) {
       <NodeList title={t('health.stale_passports')}
                 hint={t('health.stale_passports_hint')}
                 ids={d.stale_passports} goto={goto} />
+      <NodeList title={t('health.needs_description')}
+                hint={t('health.needs_description_hint')}
+                ids={d.needs_description} goto={goto} />
 
       {proposals.length > 0 && (
         <Card title={t('health.uncertain')} subtitle={t('health.uncertain_hint')}
@@ -117,6 +124,55 @@ function Report({ forest, goto }) {
           {t('health.heat_stats', { max: d.heat?.max ?? 0, mean: d.heat?.mean ?? 0 })}
         </p>
       </Card>
+    </div>
+  )
+}
+
+/* J.13.5: the refusal explained where it appears. The card is C.9's
+ * holder card; the release is the API's own `unlock`, which refuses a
+ * live writer — this console gains no path the API refuses. */
+function LockPanel({ forest, onCleared }) {
+  const { t } = useI18n()
+  const lock = useAsync(() => api.locks(forest), [forest])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function release() {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.unlock(forest)
+      onCleared?.()
+    } catch (e) { setError(e) } finally { setBusy(false) }
+  }
+
+  if (lock.busy) return <Skeleton rows={3} />
+  if (lock.error) return <ErrorNote error={lock.error} onRetry={lock.reload} />
+  const d = lock.data || {}
+  const holder = d.holder || {}
+  const releasable = d.state === 'orphan'
+    || (d.state === 'held' && d.verified === false && !d.self)
+  return (
+    <div className="space-y-3">
+      <Empty icon={Alert} title={t('health.locked')}>
+        {releasable ? t('health.locked_orphan')
+          : d.self ? t('health.locked_self') : t('health.locked_held')}
+      </Empty>
+      {holder.pid && (
+        <p className="text-center font-mono text-[12px] text-text-3">
+          {t('health.lock_holder', {
+            pid: holder.pid, host: holder.host || '?', since: holder.since || '?',
+          })}
+        </p>
+      )}
+      {releasable && (
+        <div className="text-center">
+          <button className="btn btn-primary btn-sm" onClick={release} disabled={busy}>
+            {busy ? t('health.releasing') : t('health.release')}
+          </button>
+        </div>
+      )}
+      <ErrorNote error={error} />
     </div>
   )
 }

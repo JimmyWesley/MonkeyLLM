@@ -134,16 +134,32 @@ UNAUTHENTICATED = {
               "hint": "Send Authorization: Bearer <key>."}
 }
 
+# J.1.2 rule 5 (v0.55): these instructions are the one description of the
+# surface every client receives unasked, and an agent that trusts them uses
+# exactly what they name — so every registered tool is named here, and
+# tests/test_v055_lock.py compares the two lists mechanically.
 INSTRUCTIONS = (
-    "Governed MonkeyLLM forests. Call forests() first: it returns the forests "
-    "this key may use and, for each, the `roots` to start from — a scoped key "
-    "has no access to the master _index. Then harvest(forest, query) for "
-    "one-shot retrieval, or navigate: look(forest, id), locate(forest, query), "
-    "move(forest, id), sniff(forest, terms) for exact terms in bodies, "
-    "pick(forest, id) to read, query(forest, id, sql) for datasets, "
-    "view(forest, id) to see the image behind a type:media node. "
-    "Anything outside your scope reports E_NOT_FOUND, exactly as a missing "
-    "node does."
+    "Governed MonkeyLLM forests. Call forests() first: it returns the "
+    "forests this key may use, each with its capabilities, the `roots` to "
+    "start from (a scoped key has no access to the master _index), and "
+    "`locked: true` while a forest temporarily cannot serve. "
+    "Retrieval: harvest(forest, query) for one-shot ranked evidence; "
+    "answer(forest, question) for a grounded reply from the forest's own "
+    "model. Navigate: locate(forest, query) ranks entry points over "
+    "curated metadata (titles, summaries, tags — never bodies); "
+    "look(forest, id) is a cheap digest, up to 10 ids per call; "
+    "pick(forest, id) opens the body or one section, up to 5 ids; "
+    "move(forest, id) follows typed edges; scan(forest, parent_id) lists "
+    "a branch — pass after=\"\" and follow `next` to enumerate a whole "
+    "forest; sniff(forest, terms) greps exact terms inside bodies; "
+    "calendar(forest) maps where material sits in time; "
+    "view(forest, id) shows the image behind a type:media node; "
+    "query(forest, id, sql) runs read-only SQL on type:dataset nodes. "
+    "Write, per capability: plant(forest, node) creates, "
+    "graft(forest, id, patch) edits, tend(forest, id, sql) is single-"
+    "statement dataset DML, ingest(forest, ...) sends documents through "
+    "the Gardener. Anything outside your scope reports E_NOT_FOUND, "
+    "exactly as a missing node does."
 )
 
 
@@ -269,8 +285,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                 # J.2.6: what an agent is told it may do is what the key
                 # can actually do — same rule as /v1/me for a console.
                 caps = sorted(set(caps) & mask)
-            out.append({"id": f["id"], "caps": caps,
-                        "roots": policy.roots() if policy else []})
+            entry = {"id": f["id"], "caps": caps,
+                     "roots": policy.roots() if policy else []}
+            if f.get("locked"):
+                # J.1.3: the first call the instructions prescribe must
+                # not send the agent into a room that does not open.
+                entry["locked"] = True
+            out.append(entry)
         return done({"forests": out})
 
     @mcp.tool()

@@ -96,6 +96,9 @@ def test_the_route_table_is_what_we_think_it_is(station):
         ("/v1/admin/grant", "POST"),
         ("/v1/admin/health", "GET"),
         ("/v1/admin/keys", "GET"), ("/v1/admin/keys", "POST"),
+        # The C.9 lock, inspected (v0.55, J.13.5): admin_gate like health,
+        # so the sweeps below cover it as they do every gated route.
+        ("/v1/admin/locks", "GET"),
         ("/v1/admin/models", "GET"), ("/v1/admin/models", "POST"),
         ("/v1/admin/password", "POST"),
         ("/v1/admin/people", "GET"), ("/v1/admin/people", "POST"),
@@ -110,6 +113,9 @@ def test_the_route_table_is_what_we_think_it_is(station):
         # anonymous sweeps below cover them like every other admin route.
         ("/v1/admin/snapshots/import", "POST"),
         ("/v1/admin/snapshots/{forest}/{file}", "GET"),
+        # An orphan lock, released over HTTP (v0.55, J.13.5): admin_gate,
+        # audited, and constitutionally unable to break a live writer.
+        ("/v1/admin/unlock", "POST"),
     ]
 
 
