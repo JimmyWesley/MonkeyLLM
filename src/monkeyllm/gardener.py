@@ -533,6 +533,12 @@ class CommandConverter:
         return Conversion(kind="markdown", title=title, markdown=text)
 
 
+# G.5.1 / H.3 (v0.54): the stub's admission, shared with the Ranger's
+# `needs_description` check — two spellings of a sentinel agree only where
+# somebody compared them.
+MEDIA_STUB_SENTINEL = "No description has been generated for this media yet."
+
+
 class MediaStubConverter:
     """Built-in (G.5.1): the model-free floor for image and audio files.
 
@@ -554,7 +560,7 @@ class MediaStubConverter:
         body = (
             f"# {title}\n\n"
             f"Media file `{path.name}` ({fmt} format, {size} bytes).\n\n"
-            "No description has been generated for this media yet.\n"
+            f"{MEDIA_STUB_SENTINEL}\n"
         )
         return Conversion(kind="markdown", title=title, markdown=body)
 
@@ -631,6 +637,29 @@ def discover_hooks() -> list[Callable]:
 
 _MD_NOISE = re.compile(r"^#+\s+.*$|^[-*>|`].*$|!\[[^\]]*\]\([^)]*\)", re.MULTILINE)
 _MD_INLINE = re.compile(r"\[([^\]]*)\]\([^)]*\)|[*_`]{1,3}")
+
+
+def derive_aliases(rel: Path, alias_map: dict) -> list[str]:
+    """G.2.6 (v0.54): the team's own name for a document.
+
+    Mechanical and declared, never guessed: a source file whose stem starts
+    with digits, sitting in a folder the operator's `aliases:` map names,
+    gains the conversational form (`BE-291`) and the path form
+    (`back-end/291`) — the two spellings integrators were observed to try.
+    No map, no aliases: the convention is content vocabulary, and content
+    vocabulary lives in the forest's own config, never in the engine.
+    """
+    if not isinstance(alias_map, dict) or not alias_map:
+        return []
+    m = re.match(r"(\d+)", rel.stem)
+    if m is None:
+        return []
+    folder = rel.parent.name
+    prefix = alias_map.get(folder)
+    if not prefix or not isinstance(prefix, str):
+        return []
+    num = m.group(1)
+    return [f"{prefix}-{num}", f"{folder}/{num}"]
 
 
 def derive_summary(markdown: str, title: str) -> str:
@@ -1150,6 +1179,11 @@ class Gardener:
             "source_size": st.st_size,
             "source_mtime": round(st.st_mtime, 3),
         }
+        # G.2.6 (v0.54): part of the draft build, so adopt derives them and
+        # sync recomputes rather than erases. Curation never touches them.
+        aliases = derive_aliases(rel, self.config.get("aliases") or {})
+        if aliases:
+            draft["aliases"] = aliases
         if conversion.kind == "dataset":
             # The map goes in here rather than being left to C.7.1's auto
             # manual, because curation runs BEFORE the plant and G.4.6 reads

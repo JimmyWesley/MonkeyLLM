@@ -200,6 +200,10 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
             "summary": meta.get("summary") or vine.look(nid, fields=["summary"]).get("summary"),
             "score": round(fused[nid], 4),
             "found_by": [name for name, ids in (("locate", loc_ids), ("sniff", sniff_ids)) if nid in ids],
+            # C.6c rule 4 (v0.54): the whole body's size, so a caller
+            # deciding to pick past the excerpt knows the price. Both legs
+            # carry it since v0.54, so it is already in hand.
+            "body_tokens": meta.get("body_tokens"),
             "matches": matches,
             "content": _content_for(vine, nid, matches),
         }
