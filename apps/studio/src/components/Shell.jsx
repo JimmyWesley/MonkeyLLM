@@ -28,6 +28,9 @@ export const CONSOLES = [
   { key: 'overview', group: 'use' },
   { key: 'ask', group: 'use', cap: 'read' },
   { key: 'explore', group: 'use', cap: 'read' },
+  // J.5.14: the page a document is READ on — full body via export, never
+  // pick's model-facing ceiling.
+  { key: 'read', group: 'use', cap: 'read' },
   { key: 'playground', group: 'use', cap: 'read' },
   { key: 'data', group: 'use', cap: 'query' },
   // Self-service by contract (J.5.12): `read`, never admin — the person

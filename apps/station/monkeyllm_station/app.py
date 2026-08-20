@@ -49,6 +49,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from monkeyllm.errors import (
+    E_ANCHORED,
     E_FRONTMATTER,
     E_INTERNAL,
     E_LOCKED,
@@ -76,7 +77,7 @@ READ_PRIMITIVES = frozenset(
      # no body opened, and scoped by the same policy.
      "calendar"}
 )
-WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend"})
+WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend", "prune"})
 # Not engine primitives: retrieval composed with the forest's bound model
 # (J.10). `answer` reads, `curate` proposes a summary for a human to apply.
 COMPOSITES = {"answer": ("read", "answer"), "curate": ("write", "ingest")}
@@ -383,6 +384,9 @@ STATUS_BY_CODE = {
     # 400 with a corrected statement is doing exactly the right thing.
     E_QUERY_INVALID: 400,
     E_LOCKED: 409,
+    # C.14 (v0.56): the forest's current shape said no — same family as
+    # E_LOCKED: the request was fine, the state refuses it.
+    E_ANCHORED: 409,
     E_TIMEOUT: 504,
     # C.12 rule 5 (v0.52): a defect on this side, said in the shape every
     # other refusal uses — so a caller can classify it instead of guessing.
@@ -1124,6 +1128,13 @@ def build_app(
             # The operation NAMES, never the text they carried.
             hooks.emit(forest, "node.grafted", principal,
                        {"node": node_id, "operations": sorted(patch),
+                        "commit": commit_sha})
+        elif name == "prune":
+            # C.14 rule 7: identity only, like every event — the id, what
+            # it was, how many backlinks left with it, the commit.
+            hooks.emit(forest, "node.pruned", principal,
+                       {"node": node_id,
+                        "backlinks_removed": result.get("backlinks_removed"),
                         "commit": commit_sha})
         elif name == "tend":
             hooks.emit(forest, "dataset.changed", principal,
@@ -2439,6 +2450,8 @@ def build_app(
                              and (mask is None or "admin" in mask)})
 
     async def forests(request: Request) -> JSONResponse:
+        from monkeyllm_station.mcp_surface import package_version
+
         principal, err = require_principal(request)
         if err:
             return err
@@ -2451,7 +2464,10 @@ def build_app(
             policy = registry.policy_for(principal, f["id"])
             listed.append({**f, "caps": granted[f["id"]]["caps"],
                            "roots": policy.roots() if policy else []})
-        return JSONResponse({"forests": listed, "mode": pool.mode})
+        # J.1.2 rule 6 (v0.56): the first reply states the version — same
+        # string as MCP's forests() and serverInfo.version.
+        return JSONResponse({"forests": listed, "mode": pool.mode,
+                             "station": package_version()})
 
     # -- credentials (J.2.1 / J.2.2) ----------------------------------------
 
@@ -3846,6 +3862,232 @@ def build_app(
         return FileResponse(result["path"], media_type=media_type,
                             headers=headers)
 
+    async def forest_export(request: Request):
+        """`GET /v1/forests/{forest}/export/{node}`: the document as
+        text/markdown (J.14.1) — J.14's discipline for the map's own text.
+
+        No token budget: this is a download for people and pipelines;
+        budgets protect a model's context window and none is on this path.
+        `content: inline` is served verbatim (byte-identical to what was
+        planted, F.84); cached/reference bodies are resolved (G.7).
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        node_id = request.path_params["node"]
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            return _unknown_forest(forest)
+        policy = policy.masked(mask_of(request))
+        if not policy.grants("read"):
+            return _envelope(VineError(
+                E_FORBIDDEN, "'export' requires the 'read' capability",
+                hint=f"This principal holds: {sorted(policy.caps)}."), 403)
+
+        def work():
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            try:
+                # ScopedVine._gate answers out-of-scope and absent with one
+                # byte-identical envelope — this surface is no more an
+                # existence oracle than the primitives (J.14 / F.49).
+                return {"text": ScopedVine(vine, policy).export(node_id)}
+            except VineError as e:
+                return e.to_dict()
+
+        result = await in_forest_thread(forest, work)
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        text = result["text"]
+        registry.record(principal=principal, forest=forest, primitive="export",
+                        args={"node": node_id}, result="ok", size=len(text))
+        leaf = node_id.rsplit("/", 1)[-1] or "node"
+        return Response(
+            text, media_type="text/markdown; charset=utf-8",
+            headers={
+                "Cache-Control": "private",
+                "Content-Disposition": f'attachment; filename="{leaf}.md"',
+            })
+
+    # -- shares (J.17): a share is a key with one room -----------------------
+
+    # Failed token lookups share the login limiter's discipline (J.17 rule
+    # 6): the token space makes guessing hopeless, the limiter makes it loud.
+    share_window = AuthWindow()
+
+    _SHARE_NOT_FOUND = ("share not found",
+                        "The link may have expired or been revoked.")
+
+    def _share_not_found() -> JSONResponse:
+        """ONE envelope for absent, revoked, expired and suspended (J.17
+        rule 3): a share URL in the wild must not become an oracle for why
+        it stopped working."""
+        return _envelope(VineError(E_NOT_FOUND, *_SHARE_NOT_FOUND), 404)
+
+    async def forest_share(request: Request):
+        """`POST /v1/forests/{forest}/share {node, days?}` (J.17)."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            return _unknown_forest(forest)
+        policy = policy.masked(mask_of(request))
+        if not policy.grants("read"):
+            # Rule 2: a share is a delegation, and nobody delegates what
+            # they do not hold.
+            return _envelope(VineError(
+                E_FORBIDDEN, "'share' requires the 'read' capability",
+                hint=f"This principal holds: {sorted(policy.caps)}."), 403)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if not isinstance(body, dict) or not isinstance(body.get("node"), str) \
+                or not body["node"]:
+            return _envelope(VineError(
+                E_SCHEMA, "share requires a 'node' (string)"))
+        node_id = body["node"]
+        days = body.get("days")
+        if days is not None and (isinstance(days, bool)
+                                 or not isinstance(days, int)
+                                 or not 1 <= days <= Registry.SHARE_MAX_DAYS):
+            return _envelope(VineError(
+                E_SCHEMA,
+                f"days must be an integer 1..{Registry.SHARE_MAX_DAYS}",
+                hint="A share always expires (J.17 rule 4)."))
+
+        def work():
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            if not policy.in_scope(node_id) or not vine.forest.exists(node_id):
+                # Byte-identical to the gate: out of scope IS absent (J.3).
+                return VineError(
+                    E_NOT_FOUND, f"node not found: {node_id}",
+                    hint="Use locate() to find entry points.").to_dict()
+            return {}
+
+        gate = await in_forest_thread(forest, work)
+        if gate is None:
+            return _unknown_forest(forest)
+        if gate.get("error"):
+            code = gate["error"].get("code", E_SCHEMA)
+            return JSONResponse(gate, status_code=STATUS_BY_CODE.get(code, 400))
+        share = registry.create_share(forest=forest, node=node_id,
+                                      issuer=principal, days=days)
+        record_governance(principal, "share.created",
+                          {"share": share["id"], "node": node_id,
+                           "days": days or Registry.SHARE_DEFAULT_DAYS},
+                          "ok", forest=forest)
+        # The token rides ONCE, inside the URL it exists for; no endpoint
+        # returns it again (rule 5).
+        return JSONResponse({"id": share["id"], "url": f"/s/{share['token']}",
+                             "expires": share["expires"]})
+
+    def _forest_admin(policy) -> bool:
+        return policy is not None and policy.grants("admin") and policy.unrestricted
+
+    async def forest_shares(request: Request):
+        """`GET .../shares`: the issuer's own; all of them for the forest's
+        admin — a share is a grant, and grants are visible to who governs
+        the forest (J.17 rule 5). Never the token."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            return _unknown_forest(forest)
+        policy = policy.masked(mask_of(request))
+        if not policy.grants("read"):
+            return _envelope(VineError(
+                E_FORBIDDEN, "'shares' requires the 'read' capability",
+                hint=f"This principal holds: {sorted(policy.caps)}."), 403)
+        issuer = None if _forest_admin(policy) else principal
+        return JSONResponse({"shares": registry.shares_of(forest, issuer)})
+
+    async def forest_share_revoke(request: Request):
+        """`DELETE .../shares/{share}`: issuer or admin. A share somebody
+        else issued answers as absent — nothing is disclosed."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        share_id = request.path_params["share"]
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            return _unknown_forest(forest)
+        policy = policy.masked(mask_of(request))
+        rows = registry.shares_of(
+            forest, None if _forest_admin(policy) else principal)
+        if not any(r["id"] == share_id for r in rows):
+            return _share_not_found()
+        revoked = registry.revoke_share(share_id, forest)
+        if revoked is None:
+            return _share_not_found()
+        record_governance(principal, "share.revoked",
+                          {"share": share_id, "node": revoked["node"]},
+                          "ok", forest=forest)
+        return JSONResponse({"id": share_id, "revoked": True})
+
+    async def share_serve(request: Request):
+        """`GET /v1/share/{token}`: the shared document, no session (J.17).
+
+        Authority is re-read at every serve (rule 3): the share must be
+        live AND its issuer must still hold `read` with the node in scope —
+        a lapsed grant suspends every share it issued, the moment it
+        lapses. Every miss wears one byte-identical envelope.
+        """
+        token = request.path_params["token"]
+        host = request.client.host if request.client else ""
+        if share_window.over_limit("share", host):
+            return _too_many_attempts()
+        row = registry.resolve_share(token)
+        if row is None:
+            share_window.failed("share", host)
+            return _share_not_found()
+        policy = registry.policy_for(row["issuer"], row["forest"])
+        if policy is None or not policy.grants("read") \
+                or not policy.in_scope(row["node"]):
+            return _share_not_found()
+
+        def work():
+            try:
+                vine = pool.get(row["forest"])
+            except VineError as e:
+                return e.to_dict()
+            try:
+                node = vine.forest.read(row["node"])
+            except VineError as e:
+                return e.to_dict()
+            body = node.body
+            if node.frontmatter.get("content") in ("cached", "reference"):
+                body = vine._resolved_body(node)
+            return {"title": node.title, "markdown": body,
+                    "outline": node.outline}
+
+        result = await in_forest_thread(row["forest"], work)
+        if result is None or result.get("error"):
+            return _share_not_found()
+        # Audited by share id under the issuer's authority — the reader is
+        # anonymous, the authority is not (rule 6).
+        registry.record(principal=row["issuer"], forest=row["forest"],
+                        primitive="share", args={"share": row["id"]},
+                        result="ok", size=len(result["markdown"]))
+        return JSONResponse({"title": result["title"],
+                             "markdown": result["markdown"],
+                             "outline": result["outline"],
+                             "expires": row["expires"]})
+
     # -- maintenance (J.13) -------------------------------------------------
 
     def snapshot_dir(forest: str) -> Path:
@@ -4477,6 +4719,12 @@ def build_app(
               methods=["GET", "POST"]),
         Route("/v1/forests/{forest}/webhooks/{hook}", forest_webhook,
               methods=["GET", "POST", "DELETE"]),
+        # Shares (J.17): literals before the generic {kind}/{primitive} pair.
+        Route("/v1/forests/{forest}/share", forest_share, methods=["POST"]),
+        Route("/v1/forests/{forest}/shares", forest_shares, methods=["GET"]),
+        Route("/v1/forests/{forest}/shares/{share}", forest_share_revoke,
+              methods=["DELETE"]),
+        Route("/v1/share/{token}", share_serve, methods=["GET"]),
         Route("/v1/forests/{forest}/jobs/{job}", job_get, methods=["GET"]),
         Route("/v1/forests/{forest}/jobs/{job}/cancel", job_cancel,
               methods=["POST"]),
@@ -4485,6 +4733,10 @@ def build_app(
         # map projection named "payload". `:path` because node ids carry
         # slashes.
         Route("/v1/forests/{forest}/payload/{node:path}", forest_payload,
+              methods=["GET"]),
+        # The document as text/markdown (J.14.1): same ordering reason and
+        # the same `:path` — node ids carry slashes.
+        Route("/v1/forests/{forest}/export/{node:path}", forest_export,
               methods=["GET"]),
         Route("/v1/forests/{forest}/{kind:str}", forest_map, methods=["GET"]),
         Route("/v1/forests/{forest}/{primitive}", primitive, methods=["POST"]),

@@ -163,6 +163,20 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 -- were inserted in.
 CREATE INDEX IF NOT EXISTS idx_deliveries_hook
     ON webhook_deliveries(webhook);
+-- J.17 (v0.56): a share is a key with one room — one node, read-only,
+-- expiring, revocable. The token is stored HASHED exactly as API keys are;
+-- the URL is the secret, shown once at creation and returned by nothing.
+CREATE TABLE IF NOT EXISTS shares (
+    id         TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    forest     TEXT NOT NULL,
+    node       TEXT NOT NULL,
+    issuer     TEXT NOT NULL,
+    created    TEXT NOT NULL,
+    expires    TEXT NOT NULL,
+    revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_shares_forest ON shares(forest);
 """
 
 # Indexes over columns that MIGRATIONS may still be about to add. Running
@@ -955,6 +969,65 @@ class Registry:
             "SELECT * FROM webhook_deliveries WHERE webhook = ? AND delivery = ? "
             "ORDER BY rowid DESC LIMIT 1", (webhook, delivery)).fetchone()
         return dict(row) if row else None
+
+    # -- shares (J.17) ------------------------------------------------------
+
+    SHARE_DEFAULT_DAYS = 7
+    SHARE_MAX_DAYS = 90
+
+    def create_share(self, *, forest: str, node: str, issuer: str,
+                     days: int | None = None) -> dict:
+        """Mint a share: one node, read-only, expiring. The token is
+        returned ONCE and stored hashed, exactly as API keys are (J.17
+        rule 2); no later call can recover it."""
+        days = self.SHARE_DEFAULT_DAYS if days is None else int(days)
+        if not 1 <= days <= self.SHARE_MAX_DAYS:
+            raise ValueError(f"days must be 1..{self.SHARE_MAX_DAYS}")
+        token = secrets.token_hex(16)          # 128 bits — rule 2
+        share_id = f"sh_{secrets.token_hex(6)}"
+        expires = _in_hours(days * 24)
+        self.conn.execute(
+            "INSERT INTO shares (id, token_hash, forest, node, issuer, "
+            "created, expires) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (share_id, hash_key(token), forest, node, issuer, _now(), expires))
+        self.conn.commit()
+        return {"id": share_id, "token": token, "expires": expires}
+
+    def resolve_share(self, token: str | None) -> dict | None:
+        """The LIVE share behind a token, or None. Revoked, expired and
+        never-existed resolve identically (J.17 rule 3) — the caller adds
+        the issuer-authority re-check, which this table cannot know."""
+        if not token:
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM shares WHERE token_hash = ?",
+            (hash_key(token),)).fetchone()
+        if row is None or row["revoked_at"] or row["expires"] <= _now():
+            return None
+        return dict(row)
+
+    def shares_of(self, forest: str, issuer: str | None = None) -> list[dict]:
+        """Active shares of a forest — never the token, no endpoint returns
+        it after creation (J.17 rule 5)."""
+        sql = ("SELECT id, forest, node, issuer, created, expires FROM shares "
+               "WHERE forest = ? AND revoked_at IS NULL AND expires > ?")
+        params: list = [forest, _now()]
+        if issuer is not None:
+            sql += " AND issuer = ?"
+            params.append(issuer)
+        return [dict(r) for r in self.conn.execute(sql + " ORDER BY created DESC",
+                                                   params)]
+
+    def revoke_share(self, share_id: str, forest: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT id, node, issuer FROM shares WHERE id = ? AND forest = ? "
+            "AND revoked_at IS NULL", (share_id, forest)).fetchone()
+        if row is None:
+            return None
+        self.conn.execute("UPDATE shares SET revoked_at = ? WHERE id = ?",
+                          (_now(), share_id))
+        self.conn.commit()
+        return dict(row)
 
     # -- bootstrap ----------------------------------------------------------
 

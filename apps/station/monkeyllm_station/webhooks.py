@@ -53,6 +53,8 @@ CATALOGUE: tuple[dict, ...] = (
     # -- content: the forest changed -------------------------------------
     {"event": "node.planted", "scope": "forest", "group": "content"},
     {"event": "node.grafted", "scope": "forest", "group": "content"},
+    # C.14 (v0.56): a removal is a content change like any other write.
+    {"event": "node.pruned", "scope": "forest", "group": "content"},
     {"event": "branch.created", "scope": "forest", "group": "content"},
     {"event": "dataset.created", "scope": "forest", "group": "content"},
     {"event": "dataset.changed", "scope": "forest", "group": "content"},

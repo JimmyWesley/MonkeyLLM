@@ -25,9 +25,13 @@ class TestLocate:
         assert all(x["kind"] == "branch" for x in r["results"])
         assert any("coverage" in x for x in r["results"])
 
-    def test_scope_bananas(self, vine_ro):
-        r = vine_ro.locate("stigmergy ants", scope="bananas")
-        assert all(x["kind"] == "banana" for x in r["results"])
+    def test_scope_notes(self, vine_ro):
+        # C.1 (v0.56): the wire's leaf token is "notes"/"note"; the old
+        # scope word still filters identically as a deprecated alias.
+        r = vine_ro.locate("stigmergy ants", scope="notes")
+        assert r["results"] and all(x["kind"] == "note" for x in r["results"])
+        legacy = vine_ro.locate("stigmergy ants", scope="bananas")
+        assert legacy["results"] == r["results"]
 
     def test_type_filter(self, vine_ro):
         r = vine_ro.locate("sales", type_filter="dataset")
@@ -126,12 +130,16 @@ class TestPick:
         assert "delega" in p["body"]
         assert p["body_tokens"] < 200
 
-    def test_giant_body_forces_section_navigation(self, vine_ro):
+    def test_giant_body_pages_instead_of_refusing(self, vine_ro):
+        # C.4.1 (v0.56): the over-budget read answers the FIRST page —
+        # non-empty, within budget, cursor attached — where it used to
+        # answer an empty body and a hint.
         p = vine_ro.pick("projects/mixerllm/experiment-log")
         assert p["truncated"] is True
-        assert "body" not in p
+        assert p["body"]
         assert p["outline"]
-        assert "section" in p["hint"]
+        assert "after" in p["hint"] and "section" in p["hint"]
+        assert p["next"] and p["total"] > p["returned"] > 0
         sec = vine_ro.pick("projects/mixerllm/experiment-log", section="Experiment 07")
         assert sec["truncated"] is False
 

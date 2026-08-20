@@ -141,14 +141,17 @@ UNAUTHENTICATED = {
 INSTRUCTIONS = (
     "Governed MonkeyLLM forests. Call forests() first: it returns the "
     "forests this key may use, each with its capabilities, the `roots` to "
-    "start from (a scoped key has no access to the master _index), and "
-    "`locked: true` while a forest temporarily cannot serve. "
+    "start from (a scoped key has no access to the master _index), "
+    "`locked: true` while a forest temporarily cannot serve, and "
+    "`station`, this server's version — if it is newer than the skill "
+    "you navigate by, tell your operator to re-download the skill. "
     "Retrieval: harvest(forest, query) for one-shot ranked evidence; "
     "answer(forest, question) for a grounded reply from the forest's own "
     "model. Navigate: locate(forest, query) ranks entry points over "
     "curated metadata (titles, summaries, tags — never bodies); "
     "look(forest, id) is a cheap digest, up to 10 ids per call; "
-    "pick(forest, id) opens the body or one section, up to 5 ids; "
+    "pick(forest, id) opens the body — up to 5 ids, a list of sections, "
+    "or page a large body with after=<next>; "
     "move(forest, id) follows typed edges; scan(forest, parent_id) lists "
     "a branch — pass after=\"\" and follow `next` to enumerate a whole "
     "forest; sniff(forest, terms) greps exact terms inside bodies; "
@@ -156,10 +159,11 @@ INSTRUCTIONS = (
     "view(forest, id) shows the image behind a type:media node; "
     "query(forest, id, sql) runs read-only SQL on type:dataset nodes. "
     "Write, per capability: plant(forest, node) creates, "
-    "graft(forest, id, patch) edits, tend(forest, id, sql) is single-"
-    "statement dataset DML, ingest(forest, ...) sends documents through "
-    "the Gardener. Anything outside your scope reports E_NOT_FOUND, "
-    "exactly as a missing node does."
+    "graft(forest, id, patch) edits, prune(forest, id) removes one node "
+    "(force=true also strips its backlinks), tend(forest, id, sql) is "
+    "single-statement dataset DML, ingest(forest, ...) sends documents "
+    "through the Gardener. Anything outside your scope reports "
+    "E_NOT_FOUND, exactly as a missing node does."
 )
 
 
@@ -292,7 +296,10 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                 # not send the agent into a room that does not open.
                 entry["locked"] = True
             out.append(entry)
-        return done({"forests": out})
+        # J.1.2 rule 6 (v0.56): the first reply states the version, where
+        # the MODEL reads — a downloaded skill is a snapshot of this
+        # surface, and this is what ages it visibly.
+        return done({"forests": out, "station": package_version()})
 
     @mcp.tool()
     async def locate(forest: str, query: str, k: int = 5, scope: str = "all",
@@ -338,13 +345,20 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
 
     @mcp.tool()
     async def pick(forest: str, id: str | list[str],
-                   section: str | None = None):
-        """Harvest the body, or one section of it.
+                   section: str | list[str] | None = None,
+                   after: str | None = None):
+        """Harvest the body, or sections of it.
 
         `id` may be a list of up to 5 ids, sharing ONE 4000-token budget:
         whole bodies drop from the tail and are named in `dropped`, never
-        sliced. `section` applies to every id in the batch."""
-        return await call(forest, "pick", id=id, section=section)
+        sliced. `section` may be a list of up to 10 headers of one
+        document — every name comes back in `sections`, `missing` or
+        `dropped`. A body over the budget arrives in PAGES: the response
+        carries `next`, `returned` and `total`; pass `next` back as
+        `after` until none comes, and the concatenated pages reproduce
+        the body byte-identically. `section` applies to every id in a
+        batch; `after` pages a single id."""
+        return await call(forest, "pick", id=id, section=section, after=after)
 
     @mcp.tool()
     async def view(forest: str, id: str):
@@ -484,6 +498,18 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
     async def graft(forest: str, id: str, patch: dict):
         """Edit a node (needs the 'write' capability)."""
         return await call(forest, "graft", id=id, patch=patch)
+
+    @mcp.tool()
+    async def prune(forest: str, id: str, force: bool = False):
+        """Remove one node (needs the 'write' capability, spec C.14).
+
+        The passport leaves through git — history keeps it — the parent
+        index is refreshed and a local payload moves to the graveyard.
+        A node other nodes point at refuses with E_ANCHORED listing the
+        anchors; `force=true` removes it and strips those backlinks in
+        the same commit. A branch with children never prunes — remove
+        the children first. A pruned id is free to plant again."""
+        return await call(forest, "prune", id=id, force=force)
 
     @mcp.tool()
     async def tend(forest: str, id: str, sql: str):

@@ -135,6 +135,47 @@ export const api = {
     }
   },
 
+  // The document as text/markdown (J.14.1): no token budget — a download
+  // for people, never model material. Segments encoded one by one, exactly
+  // as `payload` does and for the same reason.
+  exportNode: async (forest, node) => {
+    const path = `/v1/forests/${encodeURIComponent(forest)}/export/`
+      + String(node).split('/').map(encodeURIComponent).join('/')
+    const res = await fetch(path, {
+      headers: getKey() ? { Authorization: `Bearer ${getKey()}` } : {},
+    })
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}))
+      const err = payload?.error || {}
+      throw new ApiError(err.message || res.statusText || `HTTP ${res.status}`,
+                         { code: err.code, hint: err.hint, status: res.status })
+    }
+    return res.text()
+  },
+
+  // Shares (J.17): a share is a key with one room. The token rides once,
+  // inside the URL the create answers with; the listing never carries it.
+  createShare: (forest, node, days) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/share`,
+            { method: 'POST', body: days ? { node, days } : { node } }),
+  shares: (forest) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/shares`),
+  revokeShare: (forest, id) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/shares/${encodeURIComponent(id)}`,
+            { method: 'DELETE' }),
+  // The anonymous half: no Authorization on purpose — the token IS the
+  // authority, re-checked server-side at every serve.
+  sharedDocument: async (token) => {
+    const res = await fetch(`/v1/share/${encodeURIComponent(token)}`)
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const err = payload?.error || {}
+      throw new ApiError(err.message || res.statusText || `HTTP ${res.status}`,
+                         { code: err.code, hint: err.hint, status: res.status })
+    }
+    return payload
+  },
+
   // credentials (J.2.1 / J.2.2)
   login: (username, password) =>
     request('/v1/auth/login', { method: 'POST', body: { username, password } }),

@@ -20,6 +20,7 @@ import json
 import math
 import mimetypes
 import re
+import shutil
 import sqlite3
 import threading
 import time
@@ -31,6 +32,7 @@ from monkeyllm.canopy import CanopyIndex, cosine, rrf_fuse
 from monkeyllm.catalog import Catalog
 from monkeyllm.dialect import MAX_LINKS_PER_NODE
 from monkeyllm.errors import (
+    E_ANCHORED,
     E_NOT_FOUND,
     E_QUERY_FORBIDDEN,
     E_QUERY_INVALID,
@@ -98,6 +100,25 @@ SNIFF_MAX_K = 20
 SNIFF_MATCHES_PER_NODE = 3
 SNIFF_SNIPPET_CHARS = 100  # ~25 tokens
 PICK_MAX_BODY_TOKENS = 4000
+# C.4.1 (v0.56): a list of sections is one call with one budget.
+MAX_PICK_SECTIONS = 10
+# C.14 (v0.56): how many anchors an E_ANCHORED refusal names; the exact
+# total always rides beside them as `anchor_count`.
+MAX_PRUNE_ANCHORS_SHOWN = 20
+# C.4.1: paragraph blocks — the page unit. Each block keeps its trailing
+# blank run, so `"".join(blocks) == body` holds by construction and pages
+# reassemble byte-identically (F.80).
+_BLOCK_BOUNDARY = re.compile(r"\n{2,}")
+
+
+def _split_blocks(body: str) -> list[str]:
+    blocks, start = [], 0
+    for m in _BLOCK_BOUNDARY.finditer(body):
+        blocks.append(body[start:m.end()])
+        start = m.end()
+    if start < len(body):
+        blocks.append(body[start:])
+    return blocks
 # C.11 (v0.52): a batch is one call, so it is sized by ONE budget — never
 # the per-item budget times the number of items. `look`'s ceiling is above
 # a single digest's 500 because a batch exists to replace several calls;
@@ -116,8 +137,18 @@ LOCATE_INCLUDE = {"outline"}
 # C.12 rule 7 (v0.54): an enum refuses what it does not accept. A value
 # outside these sets used to fall back silently — `direction="all"` read
 # as an isolated node, `scope="typo"` as an unfiltered search.
-LOCATE_SCOPES = ("all", "branches", "bananas")
+LOCATE_SCOPES = ("all", "branches", "notes")
+# C.1 (v0.56): the metaphor stays in the prose. The wire's leaf token is
+# "notes"/"note"; the old scope word remains accepted for one minor
+# version, and the catalog's internal spelling never crosses the wire.
+_SCOPE_ALIASES = {"bananas": "notes"}
+_KIND_LEAF = "banana"          # catalog-internal spelling (C.6.1 storage)
 MOVE_DIRECTIONS = ("out", "in", "both")
+
+
+def _wire_kind(kind: str) -> str:
+    """C.1/C.6 (v0.56): every emitted `kind` speaks the wire's spelling."""
+    return "note" if kind == _KIND_LEAF else kind
 # C.6 (v0.54): what `scan`'s `fields` may name — the catalog's
 # caller-facing columns plus computed heat. `payload`, `payload_hash` and
 # the internal columns are absent on purpose: a payload location is
@@ -795,13 +826,14 @@ class Vine:
                     f"include accepts {sorted(LOCATE_INCLUDE)}; got {unknown or include!r}",
                     hint="include=['outline'] adds each result's section headers.",
                 )
+        scope = _SCOPE_ALIASES.get(scope, scope)
         if scope not in LOCATE_SCOPES:
             # C.12 rule 7 (v0.54): treated as "all", a typo returns a result
             # the caller believes was filtered.
             raise VineError(
                 E_SCHEMA,
                 f"scope expects one of {sorted(LOCATE_SCOPES)}, got {scope!r}",
-                hint="'branches' lands in regions, 'bananas' on leaves, "
+                hint="'branches' lands in regions, 'notes' on leaves, "
                      "'all' searches both.",
             )
         # C.13.1: the window is decided here, where the candidates are
@@ -852,8 +884,8 @@ class Vine:
         candidates = list(by_id.values())
         if scope == "branches":
             candidates = [r for r in candidates if r["kind"] == "branch"]
-        elif scope == "bananas":
-            candidates = [r for r in candidates if r["kind"] == "banana"]
+        elif scope == "notes":
+            candidates = [r for r in candidates if r["kind"] == _KIND_LEAF]
         if type_filter:
             candidates = [r for r in candidates if r["type"] == type_filter]
 
@@ -865,7 +897,7 @@ class Vine:
             score = strength * (1 + self.alpha * heat)
             item = {
                 "id": r["id"],
-                "kind": r["kind"],
+                "kind": _wire_kind(r["kind"]),
                 "type": r["type"],
                 "title": r["title"],
                 "summary": r["summary"],
@@ -1032,8 +1064,16 @@ class Vine:
             "summary": row["summary"],
             "tags": json.loads(row["tags"]),
             "confidence": row["confidence"],
+            # C.2 (v0.56): the passport says who and when. Both were in
+            # every passport and the catalog since their birth; the digest
+            # just never said them, so provenance read as absent.
+            "created": row["created"],
             "updated": row["updated"],
+            "source": row["source"],
         }
+        aliases = json.loads(row["aliases"]) if row["aliases"] else []
+        if aliases:
+            digest["aliases"] = aliases
 
         edges_out = []
         for e in self.catalog.edges_out(id):
@@ -1393,8 +1433,15 @@ class Vine:
         return node.body
 
     @_traced
-    def pick(self, id, section: str | None = None) -> dict:
+    def pick(self, id, section=None, after: str | None = None) -> dict:
         if isinstance(id, (list, tuple)):
+            if after is not None:
+                raise VineError(
+                    E_SCHEMA,
+                    "after pages one document; pass a single id",
+                    hint="A cursor resumes one body (C.4.1); a batch of ids "
+                         "has no single body to resume.",
+                )
             ids = batch_ids(id, MAX_BATCH_PICK, "pick")
             nodes, missing = [], []
             for nid in ids:
@@ -1409,15 +1456,26 @@ class Vine:
                         continue
                     raise
             return batch_shape(nodes, missing, BUDGET_PICK_BATCH)
-        return self._pick(id, section=section)
+        return self._pick(id, section=section, after=after)
 
-    def _pick(self, id: str, section: str | None = None) -> dict:
+    def _pick(self, id: str, section=None, after: str | None = None) -> dict:
         node = self.forest.read(id)
         body, outline = node.body, node.outline
         if node.frontmatter.get("content") in ("cached", "reference"):
             body = self._resolved_body(node)
             _, _, outline = extract_outline(body)
         body_tokens = estimate_tokens(body)
+        if section is not None and after is not None:
+            # C.4.1 rule 5: two addressing schemes in one call.
+            raise VineError(
+                E_SCHEMA,
+                "after and section cannot be combined",
+                hint="after pages the whole body; section addresses pieces "
+                     "of it by name. Pass one.",
+            )
+        if isinstance(section, (list, tuple)):
+            return self._pick_sections(id, node.title, body, outline,
+                                       list(section))
         if section:
             content = extract_section(body, section)
             if content is None:
@@ -1434,15 +1492,9 @@ class Vine:
                 "body_tokens": estimate_tokens(content),
                 "truncated": False,
             }
-        if body_tokens > PICK_MAX_BODY_TOKENS:
-            return {
-                "id": id,
-                "title": node.title,
-                "outline": outline,
-                "body_tokens": body_tokens,
-                "truncated": True,
-                "hint": "Body exceeds 4000 tokens. Use section=<header> to harvest one section.",
-            }
+        if after is not None or body_tokens > PICK_MAX_BODY_TOKENS:
+            return self._pick_page(id, node.title, body, body_tokens,
+                                   outline, after)
         return {
             "id": id,
             "title": node.title,
@@ -1450,6 +1502,127 @@ class Vine:
             "body_tokens": body_tokens,
             "truncated": False,
         }
+
+    def _pick_sections(self, id: str, title: str, body: str,
+                       outline: list, names: list) -> dict:
+        """C.4.1 rule 4: a list of sections is one call with one budget."""
+        if not names:
+            raise VineError(E_SCHEMA, "section list must not be empty",
+                            hint="Name at least one header, or drop the "
+                                 "parameter to read the body.")
+        if len(names) > MAX_PICK_SECTIONS:
+            raise VineError(
+                E_SCHEMA,
+                f"pick accepts at most {MAX_PICK_SECTIONS} sections, "
+                f"got {len(names)}",
+            )
+        found, missing = [], []
+        for name in names:
+            content = extract_section(body, str(name))
+            if content is None:
+                missing.append(str(name))
+                continue
+            found.append({"section": str(name), "body": content,
+                          "body_tokens": estimate_tokens(content)})
+        # Whole sections drop from the tail, in request order, and are
+        # named — C.11's rule at section grain.
+        kept, dropped, used = [], [], 0
+        for item in found:
+            if not dropped and used + item["body_tokens"] <= PICK_MAX_BODY_TOKENS:
+                kept.append(item)
+                used += item["body_tokens"]
+            else:
+                dropped.append(item["section"])
+        result = {"id": id, "title": title, "sections": kept,
+                  "missing": missing, "dropped": dropped,
+                  "truncated": bool(dropped)}
+        if missing:
+            result["hint"] = f"Available sections: {outline}"
+        return result
+
+    def _pick_page(self, id: str, title: str, body: str, body_tokens: int,
+                   outline: list, after: str | None) -> dict:
+        """C.4.1: the body of one large node is the same problem as one
+        large forest — pages, a cursor, totals. Every page is a byte-exact
+        substring; pages concatenated in cursor order reproduce the body
+        byte-identically (F.80)."""
+        blocks = _split_blocks(body)
+        total = len(blocks)
+        if after in (None, ""):
+            start = 0
+        else:
+            m = re.fullmatch(r"b(\d+)", after)
+            if m is None:
+                raise VineError(
+                    E_SCHEMA,
+                    f"unknown cursor {after!r}",
+                    hint='Pass the `next` value from the previous page, or '
+                         '"" for the first.',
+                )
+            start = int(m.group(1)) + 1
+        result: dict = {"id": id, "title": title, "total": total}
+        if start >= total:
+            # A cursor past the end states the truth rather than guessing
+            # what moved: nothing lies after it.
+            result.update({"body": "", "body_tokens": 0, "returned": 0,
+                           "truncated": False})
+            return result
+        end, used = start, 0
+        while end < total:
+            cost = estimate_tokens(blocks[end])
+            if end > start and used + cost > PICK_MAX_BODY_TOKENS:
+                break
+            used += cost
+            end += 1
+            if used > PICK_MAX_BODY_TOKENS:
+                break
+        page = "".join(blocks[start:end])
+        cut = False
+        if estimate_tokens(page) > PICK_MAX_BODY_TOKENS:
+            # C.4.1 rule 3: one block wider than the whole budget arrives
+            # alone, hard-cut and flagged — and the cursor still advances,
+            # so progress is guaranteed along with the flag.
+            page = truncate_text(page, PICK_MAX_BODY_TOKENS)
+            cut = True
+        result.update({
+            "body": page,
+            "body_tokens": estimate_tokens(page),
+            "returned": end - start,
+            "truncated": cut or end < total,
+        })
+        if cut:
+            result["cut"] = True
+        if end < total:
+            result["next"] = f"b{end - 1}"
+        if after is None:
+            # The first page a caller did not ask to page: say why it is
+            # partial and how to continue (the old dead-end said only
+            # `section=`).
+            result["outline"] = outline
+            result["hint"] = (
+                f"Body is {body_tokens} tokens (> {PICK_MAX_BODY_TOKENS}); "
+                "this is the first page. Pass after=<next> for the rest, "
+                "or section=<header> for one section."
+            )
+        return result
+
+    def export(self, id: str) -> str:
+        """J.14.1 (v0.56): the document as text/markdown for people and
+        pipelines. No token budget — none is on this path; budgets protect
+        a model's context window and this never enters one.
+
+        `content: inline` returns the passport file VERBATIM (byte-identical
+        to what was planted, F.84); `cached`/`reference` return the
+        frontmatter plus the resolved body (G.7 — an unreachable body is
+        E_NOT_FOUND with the map intact).
+        """
+        self._row_or_raise(id)
+        node = self.forest.read(id)
+        assert node.path is not None
+        if node.frontmatter.get("content") in ("cached", "reference"):
+            body = self._resolved_body(node)
+            return serialize_node(dict(node.frontmatter), body)
+        return node.path.read_text(encoding="utf-8")
 
     # =======================================================================
     # C.6d view — the image payload, resolved for a multimodal client
@@ -1675,6 +1848,9 @@ class Vine:
                     continue
                 if f in ("tags", "aliases", "trail", "outline"):
                     item[f] = json.loads(r[f])
+                elif f == "kind":
+                    # C.6 (v0.56): the wire's spelling, never the catalog's.
+                    item[f] = _wire_kind(r["kind"])
                 elif f == "heat":
                     item[f] = self._heat(r["id"])
                 elif f == "coverage":
@@ -1752,6 +1928,12 @@ class Vine:
                     return False
             elif key == "min_confidence":
                 if row["confidence"] < float(want):
+                    return False
+            elif key == "kind":
+                # C.6 (v0.56): the filter MUST match what the field emits —
+                # a filter that only matched the storage spelling would make
+                # {"kind": "note"} silently empty.
+                if _wire_kind(row["kind"]) != want:
                     return False
             elif key in row.keys():
                 if row[key] != want:
@@ -2243,7 +2425,25 @@ class Vine:
     @_traced
     def graft(self, id: str, patch: dict | GraftPatch) -> dict:
         self._require_writable()
-        p = patch if isinstance(patch, GraftPatch) else GraftPatch.model_validate(patch)
+        if isinstance(patch, GraftPatch):
+            p = patch
+        else:
+            # C.8 (v0.56): an unknown patch key is refused before anything
+            # is written — beside a legal operation it used to be silently
+            # dropped, and the call answered 200 while doing less than it
+            # was asked. Checked here for the message; the model's
+            # extra="forbid" is the backstop for every other constructor.
+            unknown = [k for k in patch
+                       if k not in GraftPatch.model_fields] \
+                if isinstance(patch, dict) else []
+            if unknown:
+                raise VineError(
+                    E_SCHEMA,
+                    f"unknown patch key {unknown[0]!r}",
+                    hint="A patch accepts: "
+                         f"{sorted(GraftPatch.model_fields)}.",
+                )
+            p = GraftPatch.model_validate(patch)
         with self._write_mutex:
             return self._graft(id, p)
 
@@ -2420,6 +2620,177 @@ class Vine:
                 )
                 changed_paths.append(idx_node.path)
         return changed_paths
+
+    # =======================================================================
+    # C.14 prune — the write you can take back (v0.56)
+    # =======================================================================
+
+    @_traced
+    def prune(self, id: str, force: bool = False, *, visible=None) -> dict:
+        """Remove one node: passport through git (history keeps it), parent
+        index entry and coverage refreshed, catalog row gone, local payload
+        moved to `_derived/graveyard/`. `visible` is the host policy's
+        predicate (J.3), keyword-only and unreachable from the wire — same
+        construction as `scan`'s.
+        """
+        self._require_writable()
+        with self._write_mutex:
+            return self._prune(id, bool(force), visible)
+
+    def _prune(self, id: str, force: bool, visible) -> dict:
+        row = self._row_or_raise(id)
+        if id == "_index":
+            raise VineError(
+                E_SCHEMA,
+                "the forest root cannot be pruned",
+                hint="The root index has no parent to account for it.",
+            )
+        if _is_system(id):
+            raise VineError(
+                E_SCHEMA,
+                f"'{id}' is a system node",
+                hint="`_meta/` is the dialect, not content; edit it as an "
+                     "operator, never through prune.",
+            )
+        node = self.forest.read(id)
+
+        # C.14 rule 4: a branch with children is never prunable — recursive
+        # deletion is a loop the CALLER writes, one audited decision at a
+        # time, not a flag that can erase a subtree in one call.
+        if row["kind"] == "branch":
+            children = self.catalog.children(id)
+            if children:
+                raise VineError(
+                    E_ANCHORED,
+                    f"branch has {len(children)} children; prune them first",
+                    hint="No recursive deletion exists (C.14). Remove the "
+                         "children, then the branch.",
+                )
+
+        # C.14 rule 3: what points at the node refuses the removal.
+        anchors = [{"source": e["src"], "rel": e["rel"]}
+                   for e in self.catalog.edges_in(id)]
+        hidden = 0
+        if visible is not None:
+            shown = [a for a in anchors if visible(a["source"])]
+            hidden = len(anchors) - len(shown)
+        else:
+            shown = anchors
+        if anchors and not force:
+            # The list is what the caller needs to decide. Out-of-scope
+            # anchors are a count, never names (J.3).
+            data = {"anchors": shown[:MAX_PRUNE_ANCHORS_SHOWN],
+                    "anchor_count": len(anchors)}
+            if hidden:
+                data["out_of_scope"] = hidden
+            raise VineError(
+                E_ANCHORED,
+                f"{len(anchors)} node(s) point at {id}",
+                hint="Pass force=true to remove the node and strip these "
+                     "backlinks in the same commit.",
+                data=data,
+            )
+        if anchors and force and hidden:
+            # A write the caller cannot see is a write it cannot have
+            # authorized: force edits every pointing node, so every pointing
+            # node must be the caller's to edit.
+            raise VineError(
+                E_ANCHORED,
+                f"{hidden} anchor(s) lie outside your scope",
+                hint="force strips backlinks from every pointing node; ask "
+                     "a principal whose scope covers them.",
+            )
+
+        assert node.path is not None
+        node_path = node.path
+        parent_idx_id = self.forest.parent_index_id(id)
+        idx_node = self.forest.read(parent_idx_id)
+        assert idx_node.path is not None
+
+        touched: list[tuple[Path, str]] = []
+        removed_original = node_path.read_text(encoding="utf-8")
+        paths: list[Path] = [node_path]
+        backlinks_removed = 0
+        payload_moved = None
+        moved_pair = None
+        try:
+            # Backlinks first (force path): the same commit that removes the
+            # node leaves nothing pointing at the hole.
+            for src in dict.fromkeys(a["source"] for a in anchors):
+                src_node = self.forest.read(src)
+                fm = dict(src_node.frontmatter)
+                links = [Link.model_validate(l) for l in (fm.get("links") or [])]
+                kept = [l for l in links if l.target != id]
+                if len(kept) == len(links):
+                    continue
+                backlinks_removed += len(links) - len(kept)
+                fm["links"] = [l.model_dump(exclude_none=True) for l in kept]
+                if not fm["links"]:
+                    fm.pop("links")
+                fm["updated"] = dt.date.today().isoformat()
+                assert src_node.path is not None
+                touched.append((src_node.path,
+                                src_node.path.read_text(encoding="utf-8")))
+                src_node.path.write_text(
+                    serialize_node(fm, src_node.body),
+                    encoding="utf-8", newline="\n")
+                paths.append(src_node.path)
+
+            # Parent index: the reverse of planting, with the same indexer.
+            new_body = indexer.remove_entry_from_body(idx_node.body, id)
+            if new_body != idx_node.body:
+                touched.append((idx_node.path,
+                                idx_node.path.read_text(encoding="utf-8")))
+                idx_node.path.write_text(
+                    indexer.render_index(idx_node, new_body),
+                    encoding="utf-8", newline="\n")
+                paths.append(idx_node.path)
+
+            # C.14 rule 2: a local payload moves to the graveyard — binaries
+            # are not in git, so unlink would be the one irreversible byte
+            # of a primitive that promises to be reversible.
+            payload = node.frontmatter.get("payload")
+            if payload and not is_remote(payload):
+                src_file = self.forest.payload_path(node)
+                if src_file.is_file():
+                    grave = (Path(self.forest.root) / "_derived" / "graveyard"
+                             / id)
+                    grave.mkdir(parents=True, exist_ok=True)
+                    dest = grave / src_file.name
+                    shutil.move(str(src_file), str(dest))
+                    moved_pair = (src_file, dest)
+                    payload_moved = str(
+                        dest.relative_to(Path(self.forest.root)))
+
+            node_path.unlink()
+            commit = self.git.commit(paths, f"prune({id})")
+        except Exception:
+            for path, original in reversed(touched):
+                path.write_text(original, encoding="utf-8", newline="\n")
+            if not node_path.exists():
+                node_path.write_text(removed_original,
+                                     encoding="utf-8", newline="\n")
+            if moved_pair is not None and moved_pair[1].exists():
+                shutil.move(str(moved_pair[1]), str(moved_pair[0]))
+            raise
+
+        if row["kind"] == "branch":
+            # An empty branch directory after its _index left: remove it,
+            # best effort — stray non-forest files keep it, harmlessly.
+            try:
+                node_path.parent.rmdir()
+            except OSError:
+                pass
+        self.catalog.delete_node(id)
+        self.catalog.upsert_node(self.forest.read(parent_idx_id))
+        for path in paths:
+            if path in (node_path, idx_node.path):
+                continue
+            src_id = self.forest.id_for(path)
+            self.catalog.upsert_node(self.forest.read(src_id))
+        return {"id": id, "pruned": True,
+                "backlinks_removed": backlinks_removed,
+                "payload_moved": payload_moved, "commit": commit}
 
     def _require_writable(self) -> None:
         if not self.writable:

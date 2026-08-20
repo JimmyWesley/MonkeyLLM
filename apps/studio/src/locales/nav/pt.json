@@ -31,6 +31,8 @@
   "nav.pin_full": "A barra comporta {n} tire um antes.",
   "nav.pin_hint": "A estrela fixa o atalho na barra de baixo.",
   "nav.playground": "Playground",
+  "nav.read": "Leitura",
+  "nav.read.blurb": "Um documento inteiro, formatado para pessoas — e um link para compartilhar",
   "nav.playground.blurb": "Veja exatamente o que um agente vê, chamada a chamada",
   "nav.skills": "Skills",
   "nav.skills.blurb": "Ensine a sua IA a usar esta floresta como memória",

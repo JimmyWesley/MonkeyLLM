@@ -17,6 +17,8 @@
  * addresses a model, not the reader (J.5.3's content-not-chrome, applied
  * outward). The walkthrough around it is translated like any other chrome.
  */
+import { useEffect, useState } from 'react'
+import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { Card, CopyButton, Note } from '../design/ui.jsx'
 import { Highlighted } from '../design/highlight.jsx'
@@ -24,13 +26,14 @@ import { Download, Key, Plug, Sparkle } from '../design/icons.jsx'
 import { NeedsCapability, has } from './shared.jsx'
 
 /** One file, addressed to the model that will load it. English on purpose;
- *  origin and forest are the only moving parts. */
-const skillFile = (origin, forest) => `---
+ *  origin, forest and the Station version are the only moving parts. */
+const skillFile = (origin, forest, station) => `---
 name: monkeyllm-memory
 description: >-
   Use the MonkeyLLM forest "${forest}" at ${origin} as persistent memory.
   Recall from it before answering anything in its domain, save durable new
   knowledge into it, and cite the node ids you read.
+station: "${station}"
 ---
 
 # This forest is your memory
@@ -40,10 +43,18 @@ ${origin}. Treat it as persistent memory for its domain: it outlives this
 conversation, other people and agents feed it too, and everything you read
 carries a node id you can cite.
 
+**This skill was generated against Station ${station}, and the server tells
+you when it has aged:** the \`forests()\` reply — your first call — carries
+\`station\`, the server's current version. When it is newer than the
+\`station\` in this file's frontmatter, tell your operator to re-download
+this skill from the Studio's Skills console before relying on it: a stale
+skill is a stale map of the surface, and tools it does not name still
+exist.
+
 A **node** is one markdown document with a curated passport (title, summary,
 tags) and a body. A **branch** is a node that holds others; its id ends in
-\`/_index\`. Everything else is a leaf — the forest calls them bananas, but
-every parameter you pass is spelled the ordinary way.
+\`/_index\`; \`kind\` on the wire is \`branch\` or \`note\`. Everything else
+is a leaf note.
 
 ## Recall before you answer
 
@@ -58,14 +69,21 @@ documents, data), recall first and reason after:
 - \`harvest(query)\` — retrieval without a model call: top items and matched
   passages. Prefer it when you will reason over the material yourself.
 - \`locate(query)\` → \`look(id)\` → \`pick(id)\` — navigate: rank entry points,
-  read a node's passport, open its body or one section of it.
+  read a node's passport, open its body. \`pick\` reads one section
+  (\`section: "Header"\`), several at once (\`section: ["A", "B"]\`), and a
+  body over its 4000-token budget arrives in PAGES: pass the response's
+  \`next\` back as \`after\` until none comes, and the concatenated pages are
+  the body, byte for byte. \`look\` also says who and when: \`source\`,
+  \`created\`, \`updated\`, and the node's \`aliases\` when it has any.
 - \`sniff(terms)\` — literal text search inside bodies (substring, not regex).
 - \`scan(parent_id)\`, \`move(id)\` — list a branch's nodes by metadata; follow
   a node's typed edges. \`scan("_index", recursive: true)\` is the cheapest
   map of the whole forest when you need to see its shape first. Every scan
   says \`total\` and \`returned\`; to walk everything, start it with
   \`after: ""\` and keep passing the response's \`next\` back as \`after\` —
-  id order, complete, no duplicates.
+  id order, complete, no duplicates. \`filter\` matches any passport field:
+  \`filter: {"source": "agent"}\` lists what agents wrote,
+  \`filter: {"kind": "note"}\` leaves the branches out.
 - \`calendar()\` — where the material sits in time: how many nodes each
   period holds, most recent first.
 - \`view(id)\` — the image behind a \`type: media\` node, if you can see images.
@@ -130,6 +148,12 @@ use the write it actually allows:
   answers \`summary_stale: true\` — rewrite the summary in the same turn
   (\`set_frontmatter: {summary}\`), or the note keeps being found by what
   it used to say.
+- \`prune(id)\` (also \`write\`): remove a node you created wrongly — a test
+  artifact, a duplicate, a note planted in the wrong place. If other nodes
+  point at it the refusal lists them; \`force: true\` removes it and strips
+  those backlinks in one commit. History keeps everything, so this undoes
+  a mistake without hiding that it happened. Clean up after yourself: a
+  probe node left behind is somebody else's search result.
 
 Write in English, keep the summary honest (it is how the note will be
 found, and \`locate\` sees nothing else), and never invent structure the
@@ -183,13 +207,20 @@ function saveFile(name, text) {
 
 export default function Skills({ forest, grant }) {
   const { t } = useI18n()
+  // J.5.12 (v0.56): the skill states its age. The version comes off the
+  // Station's own health probe — the same string forests() serves — so the
+  // stamped file cannot drift from the deployment it documents.
+  const [station, setStation] = useState('')
+  useEffect(() => {
+    api.health().then((h) => setStation(h.version || '')).catch(() => {})
+  }, [])
 
   if (!has(grant, 'read')) {
     return <NeedsCapability message={t('skills.locked')} hint={t('cap.read')} />
   }
 
   const origin = window.location.origin
-  const skill = skillFile(origin, forest)
+  const skill = skillFile(origin, forest, station || 'unknown')
 
   return (
     <div className="max-w-[860px] space-y-5">

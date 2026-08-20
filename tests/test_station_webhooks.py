@@ -418,6 +418,16 @@ def test_a_retry_re_sends_the_same_body_under_one_delivery_id(station,
         str(i) for i in range(1, wh.MAX_ATTEMPTS + 1)]
 
     hook = registry.webhooks()[0]
+    # The receiver sees the last attempt BEFORE the dispatcher records its
+    # outcome — one wire, two writers — so on a slow runner the streak and
+    # the delivery rows land moments after `wait` returns. Poll the
+    # registry the way the suspension test below does, then assert.
+    deadline = time.monotonic() + 6.0
+    while time.monotonic() < deadline:
+        if (registry.webhook(hook["id"])["fail_streak"] == 1
+                and len(registry.deliveries(hook["id"])) == wh.MAX_ATTEMPTS):
+            break
+        time.sleep(0.05)
     assert registry.webhook(hook["id"])["fail_streak"] == 1
     rows = registry.deliveries(hook["id"])
     assert len(rows) == wh.MAX_ATTEMPTS
