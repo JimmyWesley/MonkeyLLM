@@ -477,7 +477,14 @@ class SectionPatch(BaseModel):
 class GraftPatch(BaseModel):
     """Input of graft() (C.8). All operations optional and combinable —
     except `replace_body` with the section operations: one patch states
-    one truth about the body (v0.43)."""
+    one truth about the body (v0.43).
+
+    C.8 (v0.56): a patch key is a claim about what the write does, so an
+    unknown one is refused, never absorbed — beside a legal operation it
+    used to be silently dropped, and the call answered 200 while doing
+    less than it was asked."""
+
+    model_config = ConfigDict(extra="forbid")
 
     set_frontmatter: dict[str, Any] = Field(default_factory=dict)
     add_links: list[Link] = Field(default_factory=list)

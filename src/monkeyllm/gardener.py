@@ -37,7 +37,7 @@ import yaml
 from monkeyllm import indexer
 from monkeyllm.errors import E_SCHEMA, VineError
 from monkeyllm.models import (
-    MANUAL_SECTION, SAMPLE_ROWS, SAMPLE_SECTION,
+    MANUAL_SECTION, MAX_ALIASES, SAMPLE_ROWS, SAMPLE_SECTION,
     dataset_map, rows_label, validate_summary,
 )
 from monkeyllm.parser import (
@@ -726,9 +726,13 @@ class IngestReport:
     # in the order it would have planted them. Empty on every ordinary run,
     # so `as_dict` keeps reporting the same shape it always did.
     drafts: list[dict] = field(default_factory=list)
+    # G.2.6 (v0.56): derived alias forms that no longer fit the 16-alias
+    # cap beside hand-added ones — dropped, and said, never silently.
+    aliases_clipped: int = 0
 
     def as_dict(self) -> dict:
-        return {k: list(v) for k, v in self.__dict__.items()}
+        return {k: (list(v) if isinstance(v, list) else v)
+                for k, v in self.__dict__.items()}
 
 
 # G.10: which report list a step grew names what the step did. Ordered by
@@ -1470,13 +1474,57 @@ class Gardener:
         # G.8 fast-path (rsync's trick): same size + mtime -> skip hashing
         if (info.get("size") == st.st_size
                 and info.get("mtime") == round(st.st_mtime, 3)):
-            report.unchanged.append(info["id"])
+            self._settle_unchanged(info["id"], rel, report)
             return
         new_hash = hashlib.sha256(f.read_bytes()).hexdigest()
         if new_hash == info["hash"]:
-            report.unchanged.append(info["id"])
+            self._settle_unchanged(info["id"], rel, report)
             return
         self._update_passport(info["id"], f, new_hash, report, rel)
+
+    def _settle_unchanged(self, node_id: str, rel: str,
+                          report: IngestReport) -> None:
+        """G.2.6 rule 3 (v0.56): the fast-path skips the CONVERSION, not the
+        alias check — an `aliases:` map added to the config was invisible to
+        every already-ingested file, which is exactly where it was aimed.
+        The union adds missing derived forms and removes nothing."""
+        merged = self._merge_aliases(node_id, rel, report)
+        if merged is None:
+            report.unchanged.append(node_id)
+            return
+        if self.dry_run:
+            report.updated.append(node_id)
+            return
+        node = self.forest.read(node_id)
+        fm = dict(node.frontmatter)
+        fm["aliases"] = merged
+        assert node.path is not None
+        node.path.write_text(serialize_node(fm, node.body),
+                             encoding="utf-8", newline="\n")
+        self.vine.git.commit([node.path], f"gardener(sync): aliases {node_id}")
+        self.vine.catalog.upsert_node(self.forest.read(node_id))
+        report.updated.append(node_id)
+
+    def _merge_aliases(self, node_id: str, rel: str,
+                       report: IngestReport) -> list[str] | None:
+        """Union of the node's aliases with the derived forms; None when
+        nothing is missing. Existing aliases are never displaced by the cap
+        — derived forms that no longer fit are counted, never silent."""
+        derived = derive_aliases(Path(rel), self.config.get("aliases") or {})
+        if not derived:
+            return None
+        node = self.forest.read(node_id)
+        have = [str(a) for a in (node.frontmatter.get("aliases") or [])]
+        missing = [a for a in derived if a not in have]
+        if not missing:
+            return None
+        merged = have + missing
+        if len(merged) > MAX_ALIASES:
+            report.aliases_clipped += len(merged) - MAX_ALIASES
+            merged = merged[:MAX_ALIASES]
+        if merged == have:
+            return None
+        return merged
 
     def _update_passport(self, node_id: str, f: Path, new_hash: str,
                          report: IngestReport, rel: str | None = None) -> None:
@@ -1540,6 +1588,12 @@ class Gardener:
         fm["source_size"] = st.st_size
         fm["source_mtime"] = round(st.st_mtime, 3)
         fm["updated"] = dt.date.today().isoformat()
+        if rel is not None:
+            # G.2.6 rule 3 (v0.56): a refresh unions derived aliases in,
+            # exactly as the fast-path does for untouched files.
+            merged = self._merge_aliases(node_id, rel, report)
+            if merged is not None:
+                fm["aliases"] = merged
         body = node.body
 
         if conversion.kind == "dataset":

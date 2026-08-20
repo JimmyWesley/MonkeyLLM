@@ -24,9 +24,12 @@ import Health from './views/Health.jsx'
 import Integrations from './views/Integrations.jsx'
 import Webhooks from './views/Webhooks.jsx'
 import Skills from './views/Skills.jsx'
+import Read from './views/Read.jsx'
+import SharedRead from './views/SharedRead.jsx'
 
 const VIEWS = {
-  overview: Overview, ask: Ask, explore: Explore, playground: Playground,
+  overview: Overview, ask: Ask, explore: Explore, read: Read,
+  playground: Playground,
   data: Data, ingest: Ingest, models: Models, people: People, audit: Audit,
   health: Health, webhooks: Webhooks,
   integrations: Integrations,
@@ -40,6 +43,10 @@ export default function App() {
   // Where the console is (J.5.8). Read from the address on every render, so
   // there is no second copy of it to disagree with the address bar.
   const here = useUrl()
+  // A share link (J.17) renders BEFORE any identity gate: the token in the
+  // address is the whole authority, and asking the anonymous reader to sign
+  // in would refuse exactly the person the link exists for.
+  const shared = here.split('?')[0].match(/^\/s\/([A-Za-z0-9_-]+)$/)
   const { forest, view, params } = parse(here)
   const node = params.get('node') || null
 
@@ -68,6 +75,7 @@ export default function App() {
   const servable = known && visible.some((c) => c.key === view)
 
   useEffect(() => {
+    if (shared) return       // a share URL is a place, not a missing forest
     if (!session || !ids.length) return
     if (!forest) {
       // A bare `/`. The remembered place is a starting point and nothing
@@ -86,6 +94,8 @@ export default function App() {
     rememberPlace(forest, view)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, here])
+
+  if (shared) return <SharedRead token={shared[1]} />
 
   if (booting) {
     return (

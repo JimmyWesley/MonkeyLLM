@@ -11,6 +11,7 @@
   "explore.mode_graph": "Graph",
   "explore.mode_tree": "Tree",
   "explore.no_hits": "Nothing matched inside your scope.",
+  "explore.open_read": "Open in Read",
   "explore.read": "Read the body",
   "explore.tokens": "Body size",
   "explore.tree": "Tree",

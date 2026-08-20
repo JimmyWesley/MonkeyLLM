@@ -84,7 +84,11 @@ SIGNATURES: dict[str, dict[str, dict]] = {
     },
     "pick": {
         "id": _param("string|string[]", required=True),
-        "section": _param("string"),
+        # C.4.1 (v0.56): a list of sections is one call with one budget.
+        "section": _param("string|string[]"),
+        # C.4.1: the page cursor — scan's idiom on one body. "" starts at
+        # the beginning; the response's `next` is what the next call takes.
+        "after": _param("string"),
     },
     "view": {
         "id": _param("string", required=True),
@@ -136,6 +140,13 @@ SIGNATURES: dict[str, dict[str, dict]] = {
     "tend": {
         "id": _param("string", required=True),
         "sql": _param("string", required=True),
+    },
+    # C.14 (v0.56): the write you can take back. `visible` (the host
+    # policy's predicate) is keyword-only in the engine and deliberately
+    # absent here — same construction as `adopted`.
+    "prune": {
+        "id": _param("string", required=True),
+        "force": _param("boolean"),
     },
     # Composites (C.6c, J.10.5): not primitives, same wire, same rule.
     "harvest": {

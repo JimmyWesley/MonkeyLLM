@@ -428,7 +428,11 @@ class Catalog:
     def delete_node(self, node_id: str) -> None:
         self.conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
         self.conn.execute("DELETE FROM nodes_fts WHERE id = ?", (node_id,))
-        self.conn.execute("DELETE FROM edges WHERE src = ?", (node_id,))
+        # Both directions: a deleted row must not keep answering edges_in
+        # for its neighbours (C.14) — the catalog is rebuildable, never the
+        # place a ghost lives on.
+        self.conn.execute("DELETE FROM edges WHERE src = ? OR dst = ?",
+                          (node_id, node_id))
         self.conn.commit()
 
     def mark_stale(self, node_id: str) -> None:

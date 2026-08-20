@@ -31,6 +31,8 @@
   "nav.pin_full": "The bar holds {n} remove one first.",
   "nav.pin_hint": "The star pins a shortcut to the bar below.",
   "nav.playground": "Playground",
+  "nav.read": "Read",
+  "nav.read.blurb": "A document, whole, formatted for people — and a link to hand out",
   "nav.playground.blurb": "See exactly what an agent sees, call by call",
   "nav.skills": "Skills",
   "nav.skills.blurb": "Teach your AI to use this forest as its memory",

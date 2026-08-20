@@ -175,7 +175,7 @@ def build_server(
             "locate(query) to be dropped near the target, sniff(terms) to grep "
             "bodies for exact terms the summaries miss, look(id) for a cheap "
             "digest, move(id) for neighbors, pick(id) only when the summary "
-            "says it is the banana, query(id, sql) for datasets. "
+            "says the body is the answer, query(id, sql) for datasets. "
             "plant/graft to write nodes (plant with schema= births a new "
             "dataset); tend(id, sql) to write dataset rows. "
             "When this server hosts multiple forests, call forests() and pass "
@@ -199,7 +199,7 @@ def build_server(
     @mcp.tool()
     def harvest(query: str, terms: list[str] | None = None, k: int = 3,
                 forest: str | None = None) -> dict:
-        """One-shot retrieval (zero LLM server-side): ranked bananas with body or
+        """One-shot retrieval (zero LLM server-side): ranked notes with body or
         matched sections + exact snippets. Use it when you want evidence in a
         single call and will reason over it yourself; use the primitives below
         when you want to navigate step by step."""
@@ -218,7 +218,7 @@ def build_server(
                since: str | None = None, until: str | None = None,
                date_field: str | None = None,
                forest: str | None = None) -> dict:
-        """Find entry points (the helicopter). scope: all|branches|bananas.
+        """Find entry points (the helicopter). scope: all|branches|notes.
 
         Results carry `body_tokens`; include=["outline"] adds each result's
         section headers. An empty result says how many nodes were searched
@@ -271,11 +271,14 @@ def build_server(
         return guarded("move", forest, id, rel=rel, direction=direction)
 
     @mcp.tool()
-    def pick(id: str | list[str], section: str | None = None,
-             forest: str | None = None) -> dict:
-        """Harvest the body (or one section) of a node. `id` may be a list
-        of up to 5, sharing one 4000-token budget (spec C.11)."""
-        return guarded("pick", forest, id, section=section)
+    def pick(id: str | list[str], section: str | list[str] | None = None,
+             after: str | None = None, forest: str | None = None) -> dict:
+        """Harvest the body (or sections) of a node. `id` may be a list of
+        up to 5, `section` a list of up to 10 — one call, one 4000-token
+        budget (spec C.11/C.4.1). A body over the budget arrives in pages:
+        the response carries `next`; pass it back as `after` to continue,
+        and the concatenated pages reproduce the body byte-identically."""
+        return guarded("pick", forest, id, section=section, after=after)
 
     @mcp.tool()
     def view(id: str, forest: str | None = None):
@@ -328,6 +331,15 @@ def build_server(
     def graft(id: str, patch: dict, forest: str | None = None) -> dict:
         """Edit a node: set_frontmatter / add_links / remove_links / append_section / replace_section."""
         return guarded("graft", forest, id, patch)
+
+    @mcp.tool()
+    def prune(id: str, force: bool = False, forest: str | None = None) -> dict:
+        """Remove one node (spec C.14): passport through git (history keeps
+        it), parent index refreshed, local payload moved to
+        _derived/graveyard/. A node other nodes point at refuses with
+        E_ANCHORED naming them; force=true also strips those backlinks in
+        the same commit. A branch with children never prunes."""
+        return guarded("prune", forest, id, force=force)
 
     @mcp.tool()
     def close_session(success: bool, answer_nodes: list[str],

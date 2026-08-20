@@ -50,6 +50,12 @@ export const Audit = (p) => (
 export const Forest = (p) => (
   <S {...p}><path d="M12 2.5L6.5 11h3L5 17.5h14L14.5 11h3z" /><path d="M12 17.5v4" /></S>
 )
+export const Book = (p) => (
+  <S {...p}><path d="M12 6.5c-1.6-1.6-3.9-2.3-8-2.3v13.6c4.1 0 6.4.7 8 2.2 1.6-1.5 3.9-2.2 8-2.2V4.2c-4.1 0-6.4.7-8 2.3z" /><path d="M12 6.5V20" /></S>
+)
+export const Share = (p) => (
+  <S {...p}><circle cx="6" cy="12" r="2.6" /><circle cx="17.5" cy="5.5" r="2.6" /><circle cx="17.5" cy="18.5" r="2.6" /><path d="M8.4 10.8l6.8-4M8.4 13.2l6.8 4" /></S>
+)
 
 export const Plus = (p) => <S {...p}><path d="M12 5v14M5 12h14" /></S>
 export const Search = (p) => <S {...p}><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></S>
@@ -206,7 +212,8 @@ export const Webhook = (p) => (
 )
 
 export const CONSOLE_ICON = {
-  overview: Overview, ask: Ask, explore: Explore, playground: Playground,
+  overview: Overview, ask: Ask, explore: Explore, read: Book,
+  playground: Playground,
   data: Data, skills: Sparkle, ingest: Ingest, models: Models, people: Users,
   audit: Audit, integrations: Plug, health: Health, webhooks: Webhook,
 }

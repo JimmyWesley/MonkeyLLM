@@ -32,6 +32,8 @@
   "nav.pin_hint": "La estrella fija el acceso en la barra de abajo.",
   "nav.playground": "Playground",
   "nav.playground.blurb": "Mira exactamente lo que ve un agente, llamada a llamada",
+  "nav.read": "Lectura",
+  "nav.read.blurb": "Un documento entero, con formato para personas — y un enlace para compartir",
   "nav.skills": "Skills",
   "nav.skills.blurb": "Enseña a tu IA a usar este bosque como su memoria",
   "nav.tokens": "Tokens",

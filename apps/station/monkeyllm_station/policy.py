@@ -169,6 +169,10 @@ REQUIRED_CAP = {
     "scan": "read", "sniff": "read", "harvest": "read", "view": "read",
     "calendar": "read",
     "query": "query", "tend": "tend", "plant": "write", "graft": "write",
+    # C.14 (v0.56): prune rides the same write capability as plant/graft —
+    # J.2.6's mask ceiling is a closed set, and a fourth token would
+    # invalidate every issued key.
+    "prune": "write",
 }
 
 
@@ -370,12 +374,20 @@ class ScopedVine:
         ]
         return payload
 
-    def pick(self, id, section: str | None = None) -> dict:
+    def pick(self, id, section=None, after: str | None = None) -> dict:
         if isinstance(id, (list, tuple)):
+            if after is not None:
+                # C.4.1: the engine's refusal, kept identical under a policy.
+                raise VineError(
+                    E_SCHEMA,
+                    "after pages one document; pass a single id",
+                    hint="A cursor resumes one body (C.4.1); a batch of ids "
+                         "has no single body to resume.",
+                )
             return self._batch(id, MAX_BATCH_PICK, BUDGET_PICK_BATCH, "pick",
                                lambda nid: self.pick(nid, section=section))
         self._gate(id)
-        return self._vine.pick(id, section=section)
+        return self._vine.pick(id, section=section, after=after)
 
     def _batch(self, ids, cap: int, budget: int, primitive: str, read_one) -> dict:
         """C.11 under a policy: same shape, same budget, same accounting."""
@@ -478,6 +490,22 @@ class ScopedVine:
         # of reading, so a scope applied to only one of them is a scope that
         # can be worked around. The engine holds that line for both.
         return self._vine.tend(id, sql, tables=self.policy.tables_for(id))
+
+    def prune(self, id: str, force: bool = False) -> dict:
+        # C.14: out of scope answers exactly as absent, like every read —
+        # and under `force` the engine refuses when an anchor lies outside
+        # this predicate, because force edits every pointing node.
+        self._gate(id)
+        if self.policy.unrestricted:
+            return self._vine.prune(id, force=bool(force))
+        return self._vine.prune(id, force=bool(force),
+                                visible=self.policy.in_scope)
+
+    def export(self, id: str) -> str:
+        # J.14.1: J.14's discipline verbatim — the gate answers
+        # byte-identical E_NOT_FOUND for out-of-scope and absent alike.
+        self._gate(id)
+        return self._vine.export(id)
 
     # -- dispatcher used by the surfaces ------------------------------------
 

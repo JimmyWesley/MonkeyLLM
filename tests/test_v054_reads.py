@@ -14,6 +14,7 @@ that ages the summary with nobody told, and the team's own vocabulary
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -221,6 +222,38 @@ class TestIngestAliases:
         node = vine.forest.read("targets/291-budget")
         assert "aliases" not in node.frontmatter
         assert not vine.locate("BE-291", k=3)["results"]
+        vine.close()
+
+    def test_a_map_added_later_reaches_unchanged_files_via_sync(self, tmp_path):
+        # G.2.6 rule 3 (v0.56): the operator's exact field sequence — adopt
+        # with no map, add the map, run sync. The fast-path skips the
+        # conversion, never the alias check, so the union lands anyway.
+        vine = _adopted(tmp_path, with_map=False)
+        cfg = Path(vine.forest.root) / "_meta" / "gardener.yaml"
+        cfg.write_text(cfg.read_text(encoding="utf-8")
+                       + "aliases:\n  targets: BE\n", encoding="utf-8")
+        report = Gardener(vine, hooks=[]).sync()
+        assert "targets/291-budget" in report["updated"]
+        node = vine.forest.read("targets/291-budget")
+        assert node.frontmatter["aliases"] == ["BE-291", "targets/291"]
+        assert vine.locate("BE-291", k=3)["results"]
+        # A second sync has nothing to add: unchanged again, not rewritten.
+        again = Gardener(vine, hooks=[]).sync()
+        assert "targets/291-budget" in again["unchanged"]
+        vine.close()
+
+    def test_the_union_adds_and_never_removes(self, tmp_path):
+        vine = _adopted(tmp_path, with_map=True)
+        # Somebody curated their own name onto the node…
+        vine.graft("targets/291-budget", {
+            "set_frontmatter": {"aliases": ["BE-291", "targets/291",
+                                            "the-budget-task"]}})
+        report = Gardener(vine, hooks=[]).sync()
+        assert report["aliases_clipped"] == 0
+        node = vine.forest.read("targets/291-budget")
+        # …and the refresh left it exactly where they put it.
+        assert node.frontmatter["aliases"] == ["BE-291", "targets/291",
+                                               "the-budget-task"]
         vine.close()
 
 

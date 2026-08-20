@@ -30,7 +30,7 @@ import NodeEditor from './editor.jsx'
  *  answer, and letting the tree mode pay for it would slow down the console
  *  a principal with a narrow scope actually uses.
  */
-export default function Explore({ forest, grant, node, setNode }) {
+export default function Explore({ forest, grant, node, setNode, goto }) {
   const { t } = useI18n()
   // In the address, with the selection (J.5.8): "look at this node on the
   // graph" is a link, and a reload lands on the same view of the same node
@@ -224,7 +224,7 @@ function BrowseAndSearch({ forest, grant, current, setNode }) {
         </div>
 
         <NodeDetail forest={forest} grant={grant} id={current} digest={digest}
-                    setNode={setNode} />
+                    setNode={setNode} goto={goto} />
       </div>
 
       <NewBranch
@@ -239,7 +239,7 @@ function BrowseAndSearch({ forest, grant, current, setNode }) {
   )
 }
 
-function NodeDetail({ forest, grant, id, digest, setNode }) {
+function NodeDetail({ forest, grant, id, digest, setNode, goto }) {
   const { t } = useI18n()
   const [body, setBody] = useState(null)
   const crumbs = useCrumbs(id, grant)
@@ -274,6 +274,12 @@ function NodeDetail({ forest, grant, id, digest, setNode }) {
             actions={<>
               <Badge tone="accent">{d.type}</Badge>
               <button className="btn btn-sm" onClick={read}>{t('explore.read')}</button>
+              {/* J.5.14 rule 5: reachable from where the document is found. */}
+              {goto && (
+                <button className="btn btn-sm" onClick={() => goto('read', d.id)}>
+                  {t('explore.open_read')}
+                </button>
+              )}
             </>}>
         <p className="text-[14px] leading-relaxed text-text">{d.summary}</p>
 

@@ -6,7 +6,7 @@
 import json
 
 from monkeyllm.parser import serialize_node
-from monkeyllm.tokens import estimate_payload_tokens
+from monkeyllm.tokens import estimate_payload_tokens, estimate_tokens
 from monkeyllm.vine import BUDGET_LOOK, BUDGET_MOVE, MAX_EDGES_SHOWN, PICK_MAX_BODY_TOKENS
 
 
@@ -47,11 +47,14 @@ class TestGiantNodeBudgets:
         assert len(d["edges_out"]) <= MAX_EDGES_SHOWN
         assert d["stats"]["degree"] >= 20  # excess indicated via degree
 
-    def test_pick_giant_returns_outline_not_body(self, vine_rw, forest_rw):
+    def test_pick_giant_returns_first_page_within_budget(self, vine_rw, forest_rw):
+        # C.4.1 (v0.56): the old dead end (empty body + hint) became the
+        # first page — non-empty, within the budget, with the cursor.
         plant_giant_node(vine_rw, forest_rw)
         p = vine_rw.pick("notes/monster")
-        assert p["truncated"] is True and "body" not in p
-        assert p["body_tokens"] > PICK_MAX_BODY_TOKENS
+        assert p["truncated"] is True
+        assert p["body"] and estimate_tokens(p["body"]) <= PICK_MAX_BODY_TOKENS
+        assert p["next"] and p["total"] > p["returned"] > 0
 
     def test_move_truncates_explicitly(self, vine_rw, forest_rw):
         plant_giant_node(vine_rw, forest_rw)
