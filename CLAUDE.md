@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.51.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.52.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -295,6 +295,88 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   `<a>`); the `.md` export rewrites `media:` to the absolute payload
   route. And the reading fingerprint now hashes `notes` too a
   teaching edited is a reading changed.
+- **A read says what it did not do (spec C.1.1 + C.6c, v0.52)**: `locate`
+  searches curated metadata only, so a term living in a body returns `[]`
+  byte-identical to a forest that never heard of it and a live agent read
+  that as "the forest does not know" and answered from its own parameters,
+  which is the one failure the product exists to prevent. An EMPTY `locate`
+  (and an empty sweep) now carries `searched` + a `hint` naming `sniff`;
+  computed only on the empty path, because a caller holding results was
+  already told what it needed. Every result carries `body_tokens` and
+  `include: ["outline"]` adds the section list both read off the catalog
+  row the search already loaded, so neither opens a file. Under a policy
+  `searched` counts only nodes in scope: a global count would make an empty
+  entry search a size oracle for the region nobody granted.
+- **Where the material sits in time (spec C.13, v0.52)**: `locate`, `sniff`,
+  `scan` and `harvest` take optional `since`/`until`/`date_field`
+  (`created` default, `updated` the other; **never** an "indexed" date
+  `_derived/` is disposable and a `reindex` would silently move every such
+  timestamp). Bounds accept `YYYY` / `YYYY-MM` / `YYYY-MM-DD` and expand to
+  their own period; a bound it cannot read is `E_SCHEMA`, NEVER ignored a
+  filter silently dropped is a lie about what was searched. The predicate is
+  a **bare comparison on the indexed column** (`created >= ?`, upper bound
+  exclusive at +1 day) `substr()` there computes the same answer and
+  throws the index away and it is applied where CANDIDATES are chosen, so
+  `k` is still met inside a window. Undated nodes are in no window and the
+  count says so (`undated_excluded`). `calendar` (C.13.3) is the map that
+  makes a window a choice instead of a guess: periods most recent first,
+  empty ones omitted, **grouped in SQLite** (one row per period, never one
+  per node), each bucket carrying the exact `since`/`until` the reads take.
+  Under a policy the counts are filtered by the policy's own prefixes as
+  SQL (`Policy.sql_scope`), because a global count here is a finer size
+  oracle than `locate` could ever be. An empty windowed read says whether
+  the WINDOW was the reason (`matched_window`) and names the nearest
+  populated periods otherwise "nothing in that week" reads as "nothing
+  anywhere", which is the failure the window was supposed to avoid.
+- **A batch is one call, so it has one budget (spec C.11, v0.52)**: `look`
+  takes ≤10 ids, `pick` ≤5, sized by ONE budget (2000 / 4000) never the
+  per-item budget times the count. Whole items drop from the tail and are
+  NAMED in `dropped`; every id sent comes back in exactly one of `nodes` /
+  `missing` / `dropped`; `missing` covers absent and out-of-scope alike
+  (J.3 survives the new shape). A string in returns the old single shape to
+  the byte; a one-element list still returns a list.
+- **Every exit is an envelope (spec C.12, v0.52)**: one signature table in
+  `src/monkeyllm/signatures.py` both surfaces read (a test compares it to
+  the MCP tool schemas two descriptions of one contract agree only where
+  somebody compared them). Argument shape is `E_SCHEMA` naming the
+  parameter, what arrived and what was expected never a `TypeError`'s
+  text; `null` is a MISSING argument, never the string `"None"` looked up;
+  the last resort is `E_INTERNAL`/500 in the envelope shape, naming the
+  primitive and the exception type and nothing else. And a missing
+  parameter is not a denial: a route that wanted `?forest=` says so
+  (`E_SCHEMA`), instead of telling an admin they lack `admin`.
+- **A pointer never outranks what it points at (spec C.6b, v0.52)**:
+  `sniff` scores `strength x density x (1 + alpha*heat)` with
+  `density = 1 + 0.15*log2(match_count)` `match_count` as a tie-break
+  alone left `heat` deciding every literal search. An `_index` node ranks
+  below every content node in the same result set (it carries the summary
+  of every child, so it matches almost anything and gathers heat by being
+  the way through), demoted in the ORDER and never in the `score`. And
+  derived terms keep any code-shaped token whatever its length (a digit,
+  all caps, `-`/`_`/`.`/`/`) and order those first: the 4-char floor was
+  dropping `RAG`, `MCP`, `421`, `p95` the tokens a technical corpus is
+  searched BY while keeping the question's verb.
+- **A write you can repeat (spec C.7.2, v0.52)**: `plant(node,
+  if_absent=true)` answers `created: false` for an id already taken,
+  writing nothing, committing nothing and comparing nothing (changing what
+  is there is `graft`). Keyword-only in the engine, so `plant(node, True)`
+  is still a `TypeError` that is the property G.2.5 relies on to keep
+  `adopted` unreachable. Every `plant` result now carries `created`.
+- **The dark surface says so (spec J.1.1, v0.52)**: the MCP mount's `421`
+  wears the envelope (`E_HOST_NOT_ALLOWED`, naming the refused Host and
+  `MONKEYLLM_STATION_ALLOWED_HOSTS`) the SDK still DECIDES, the host only
+  rewrites the sentence; a Station serving MCP with no explicit allow-list
+  warns at boot; `/v1/health` carries `mcp.host_allowed` for **this
+  request's own Host**. The allow-list is never listed. A deployment behind
+  a domain is dark until the domain is named, and every other signal stays
+  green while it is.
+- **The answer it should not give (spec J.10.10, v0.52)**: `answer(...,
+  min_evidence=n)` counts the sweep's items that carry content BEFORE the
+  store is consulted and before the provider is called; below the floor it
+  returns `{answer: null, reason: "insufficient_evidence", harvest}`. Off
+  by default (`0`), never in the J.10.7 key (it cannot change what the
+  model would write, only whether it is asked) and a refusal is never
+  billed and never stored.
 - **A page capture is the page, not the window (spec J.15, v0.51)**:
   the Clipper's page screenshot scrolls the document to its end and
   composes the viewports into one image. It is read ONCE, at ingest, by
