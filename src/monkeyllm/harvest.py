@@ -36,17 +36,47 @@ STOPWORDS = {
 }
 
 
+def _code_shaped(word: str) -> bool:
+    """A token a technical corpus is searched BY, whatever its length
+    (C.6c, v0.52): it carries a digit, is written in capitals, or holds one
+    of `-`, `_`, `.`, `/`.
+
+    The four-character floor below is right for grammar and wrong for
+    exactly these: `RAG`, `MCP`, `JWT`, `SSO`, `421`, `p95` are the most
+    discriminative tokens in the question and the shortest ones in it.
+    """
+    if any(ch.isdigit() for ch in word):
+        return True
+    letters = [ch for ch in word if ch.isalpha()]
+    if letters and all(ch.isupper() for ch in letters):
+        return True
+    return any(ch in "-_./" for ch in word)
+
+
 def derive_terms(query: str) -> list[str]:
-    """Sniffable terms from a free-text query: rare-ish words, no stopwords."""
-    words = re.findall(r"[\w-]{4,}", query, re.UNICODE)
-    seen, terms = set(), []
+    """Sniffable terms from a free-text query: rare-ish words, no stopwords.
+
+    Code-shaped tokens survive the length floor AND are ordered first, so
+    the MAX_TERMS cap drops grammar before it drops signal. The floor stays
+    for ordinary words: a short common word is grammar, and every junk term
+    lowers the `strength` of a real hit (C.6b).
+    """
+    words = re.findall(r"[\w\-./]{2,}", query, re.UNICODE)
+    seen, ordinary, coded = set(), [], []
     for w in words:
+        w = w.strip("./-")
+        if len(w) < 2:
+            continue
         folded = "".join(unicodedata.normalize("NFD", ch)[0] for ch in w).lower()
         if folded in STOPWORDS or folded in seen:
             continue
-        seen.add(folded)
-        terms.append(w)
-    return terms[:MAX_TERMS]
+        if _code_shaped(w):
+            seen.add(folded)
+            coded.append(w)
+        elif len(w) >= 4:
+            seen.add(folded)
+            ordinary.append(w)
+    return (coded + ordinary)[:MAX_TERMS]
 
 
 def _refined_matches(vine, node_id: str, terms: list[str]) -> list[dict]:
@@ -137,11 +167,17 @@ def clamp_k(k: int) -> int:
     return min(max(1, int(k)), harvest_max_k())
 
 
-def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3) -> dict:
+def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
+            since: str | None = None, until: str | None = None,
+            date_field: str | None = None) -> dict:
     k = clamp_k(k)
-    loc = vine.locate(query, k=k * 2)
+    # C.13.1: the window rides both legs or neither. A sweep whose lexical
+    # half was bounded and whose literal half was not would return material
+    # from outside the window under a response that says it was bounded.
+    win = {"since": since, "until": until, "date_field": date_field}
+    loc = vine.locate(query, k=k * 2, **win)
     terms = terms or derive_terms(query)
-    sn = vine.sniff(terms, k=k * 2) if terms else {"results": []}
+    sn = vine.sniff(terms, k=k * 2, **win) if terms else {"results": []}
 
     loc_ids = [r["id"] for r in loc["results"]]
     sniff_ids = [r["id"] for r in sn["results"]]
@@ -179,5 +215,28 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3) -> dic
                 item["notes"] = notes
         results.append(item)
     payload = {"query": query, "terms": terms, "results": results, "truncated": False}
+    if loc.get("window") or sn.get("window"):
+        payload["window"] = loc.get("window") or sn.get("window")
+    excluded = max(loc.get("undated_excluded", 0), sn.get("undated_excluded", 0))
+    if excluded:
+        payload["undated_excluded"] = excluded
     # budget: drop whole tail results, never slice a body silently (C.6c)
-    return shrink_list_to_budget(payload, "results", BUDGET_HARVEST)
+    payload = shrink_list_to_budget(payload, "results", BUDGET_HARVEST)
+    if not payload["results"]:
+        # C.6c rule 5 (v0.52): the sweep is the call a caller makes INSTEAD
+        # of navigating, so an empty one with no coverage is C.1.1's silence
+        # arriving where there is no next primitive to try.
+        payload["searched"] = loc.get("searched", sn.get("scanned_nodes", 0))
+        if "matched_window" in loc:
+            # C.13.2: whether the WINDOW was the reason is the first thing a
+            # caller needs, and the sweep is the call made INSTEAD of
+            # navigating — there is no next primitive to try.
+            payload["matched_window"] = loc["matched_window"]
+            payload["hint"] = loc.get("hint", "")
+        else:
+            payload["hint"] = (
+                "Nothing matched the curated scent or the bodies. The terms "
+                "above were derived from the question — pass `terms` "
+                "explicitly, or ask a narrower question."
+            )
+    return payload

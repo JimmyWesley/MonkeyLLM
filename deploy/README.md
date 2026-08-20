@@ -123,9 +123,52 @@ rotate by editing the variable and redeploying.
 
 Point any MCP harness at `https://<your-domain>/mcp/` (streamable HTTP)
 with an `Authorization: Bearer <key>` header. The MCP surface only answers
-hosts listed in `MONKEYLLM_STATION_ALLOWED_HOSTS` set it to your domain
-as above (the compose file defaults it to `*`, which skips the host check;
-every request still needs an API key). REST and the Studio are unaffected.
+hosts listed in `MONKEYLLM_STATION_ALLOWED_HOSTS`, and the compose file
+defaults it to **localhost only** so **a deployment behind a domain
+refuses every MCP request until you name the domain there**. Nothing else
+goes red when that happens: REST serves, Studio opens, `/v1/health` says
+`ok`, and the client reports `Failed to connect`.
+
+Set it to your domain (add `:443` too if your proxy passes the port
+through), and never to `*` — that turns off the `Origin` check as well:
+
+```dotenv
+MONKEYLLM_STATION_ALLOWED_HOSTS=monkeyllm.dev.example.com,localhost,127.0.0.1
+```
+
+**Smoke-test the surface, not just the container.** A green deploy proves
+REST answers; only this proves MCP does:
+
+```bash
+BASE=https://monkeyllm.dev.example.com
+KEY=mk_...
+
+# 1) the host verdict, from the domain itself — `host_allowed: false` is
+#    the whole diagnosis, and it needs no key
+curl -s $BASE/v1/health | jq .mcp
+
+# 2) the handshake — expect 200; a 421 answers with the reason
+curl -s -X POST $BASE/mcp/ \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}'
+```
+
+The Station also warns at boot (`docker compose logs station`) when its
+allow-list names local addresses only. REST and the Studio are unaffected
+by any of this — which is exactly why the failure is easy to miss.
+
+### A CDN in front can refuse clients you did not think about
+
+If the Station sits behind a WAF (Cloudflare and friends), its bot rules
+apply before anything here does. Measured on one deployment: identical
+requests answered 200 for `python-httpx`, `python-requests`, `node-fetch`
+and an empty user agent, and **403 for `Python-urllib/3.12`** — the
+standard library's default. MCP clients were unaffected (the Python SDK
+uses httpx), but any integration or CI script written with `urllib` sees a
+403 that carries the CDN's HTML, not the Station's envelope, and therefore
+reads like a bad key. Allow-list what you script with, or send a user agent
+of your own.
 
 ## Updates, restarts, persistence
 

@@ -17,6 +17,7 @@ import datetime as dt
 import hashlib
 import inspect
 import json
+import math
 import mimetypes
 import re
 import sqlite3
@@ -71,12 +72,22 @@ from monkeyllm.tokens import (
     truncate_text,
 )
 from monkeyllm.trails import Trails
+from monkeyllm.windows import (
+    buckets_from_rows,
+    in_window,
+    nearest_periods,
+    normalize_window,
+    parse_field,
+    window_sql,
+)
 
 BUDGET_LOCATE = 800
 BUDGET_LOOK = 500
 BUDGET_MOVE = 600
 BUDGET_SCAN = 800
 BUDGET_SNIFF = 800
+# C.13.3: the time map, on the same shelf as the other searching reads.
+BUDGET_CALENDAR = 800
 # C.2.1: the operator's notes ride inside BUDGET_LOOK, with their own
 # ceiling — a long note must not starve the digest it travels in.
 BUDGET_NOTES = 200
@@ -85,6 +96,21 @@ SNIFF_MAX_K = 20
 SNIFF_MATCHES_PER_NODE = 3
 SNIFF_SNIPPET_CHARS = 100  # ~25 tokens
 PICK_MAX_BODY_TOKENS = 4000
+# C.11 (v0.52): a batch is one call, so it is sized by ONE budget — never
+# the per-item budget times the number of items. `look`'s ceiling is above
+# a single digest's 500 because a batch exists to replace several calls;
+# `pick`'s is the wall a single body already meets, unchanged.
+MAX_BATCH_LOOK = 10
+MAX_BATCH_PICK = 5
+BUDGET_LOOK_BATCH = 2000
+BUDGET_PICK_BATCH = PICK_MAX_BODY_TOKENS
+# C.6b (v0.52): occurrences enter the score instead of only breaking its
+# ties. log2, so the tenth match is worth less than the second, and beta
+# sized so ten occurrences outweigh a maximal pheromone bonus.
+SNIFF_DENSITY_BETA = 0.15
+# C.1.1 (v0.52): what `include` may ask for — a closed set, so a
+# misspelling is refused rather than silently ignored.
+LOCATE_INCLUDE = {"outline"}
 NEIGHBOR_SUMMARY_TOKENS = 25
 MAX_EDGES_SHOWN = 12
 QUERY_DEFAULT_LIMIT = 200
@@ -378,6 +404,57 @@ def _sniff_body(body: str, folded_terms: list[str]) -> tuple[list[dict], set[int
             {"section": section, "line": line_no, "snippet": _sniff_snippet(line, first_pos)}
         )
     return matches, terms_hit
+
+
+def _is_index(node_id: str) -> bool:
+    """A branch's auto-generated index (C.6b, C.6c.2)."""
+    return node_id == "_index" or node_id.endswith("/_index")
+
+
+def batch_ids(ids, cap: int, primitive: str) -> list[str]:
+    """The id list of a C.11 batch, validated once for every surface.
+
+    Duplicates collapse keeping first position: the same node read twice in
+    one call is a mistake with no meaning worth preserving.
+    """
+    if not isinstance(ids, (list, tuple)):
+        raise VineError(E_SCHEMA, f"{primitive} expects an id or a list of ids")
+    if not ids:
+        raise VineError(
+            E_SCHEMA,
+            f"{primitive} received an empty id list",
+            hint="An empty batch is not a request for nothing; send at least one id.",
+        )
+    if len(ids) > cap:
+        raise VineError(
+            E_SCHEMA,
+            f"{primitive} accepts at most {cap} ids in one call; got {len(ids)}",
+            hint="A batch is one call and one budget (spec C.11): split it.",
+        )
+    out, seen = [], set()
+    for i in ids:
+        if not isinstance(i, str):
+            raise VineError(
+                E_SCHEMA,
+                f"{primitive}: every id must be a string, got {type(i).__name__}",
+            )
+        if i not in seen:
+            seen.add(i)
+            out.append(i)
+    return out
+
+
+def batch_shape(nodes: list[dict], missing: list[str], budget: int) -> dict:
+    """C.11's response: one budget, whole items dropped from the tail, and
+    every id the caller sent accounted for in exactly one list."""
+    dropped: list[str] = []
+    payload = {"nodes": nodes, "missing": missing, "dropped": dropped,
+               "truncated": False}
+    while nodes and estimate_payload_tokens(payload) > budget:
+        gone = nodes.pop()
+        dropped.insert(0, gone.get("id"))
+        payload["truncated"] = True
+    return payload
 
 
 def _traced(fn):
@@ -682,9 +759,28 @@ class Vine:
         k: int = 5,
         scope: str = "all",
         type_filter: str | None = None,
+        include: list[str] | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        date_field: str | None = None,
     ) -> dict:
+        if include is not None:
+            unknown = [i for i in include if i not in LOCATE_INCLUDE]
+            if not isinstance(include, list) or unknown:
+                raise VineError(
+                    E_SCHEMA,
+                    f"include accepts {sorted(LOCATE_INCLUDE)}; got {unknown or include!r}",
+                    hint="include=['outline'] adds each result's section headers.",
+                )
+        # C.13.1: the window is decided here, where the candidates are
+        # chosen — a filter applied to the ranked top-k returns fewer than
+        # k while the forest still holds matches, and the caller reads a
+        # scarcity the implementation invented.
+        window = normalize_window(since, until, date_field)
+        win_where, win_params = window_sql(window)
         cand = max(k * 5, 25)
-        rows = self.catalog.fts_search(query, limit=cand)
+        rows = self.catalog.fts_search(query, limit=cand, where=win_where,
+                                       params=win_params)
         by_id = {r["id"]: r for r in rows}
 
         # base strength per id, in [0, 1]. BM25-only by default (Phase 0);
@@ -703,7 +799,12 @@ class Vine:
             for vid, _cos in vec_hits:
                 if vid not in by_id:
                     extra = self.catalog.get(vid)
-                    if extra is not None:
+                    # The dense half meets the same window as the lexical
+                    # one: a filter that holds for only one of two fused
+                    # rankings is not a filter (C.13.1 rule 2).
+                    if extra is not None and (
+                            window is None
+                            or in_window(extra[window["date_field"]], window)):
                         by_id[vid] = extra
             bm25_ids = [r["id"] for r in rows]
             vec_ids = [vid for vid, _ in vec_hits]
@@ -724,6 +825,7 @@ class Vine:
         if type_filter:
             candidates = [r for r in candidates if r["type"] == type_filter]
 
+        wants_outline = bool(include) and "outline" in include
         results = []
         for r in candidates:
             strength = strength_of.get(r["id"], 0.0)
@@ -738,21 +840,154 @@ class Vine:
                 "trail": json.loads(r["trail"]),
                 "score": round(score, 4),
                 "heat": heat,
+                # C.1.1 (v0.52): the size of what the caller is about to
+                # open, at the one moment it changes the decision. The
+                # catalog row is already in hand, so it costs nothing.
+                "body_tokens": r["body_tokens"],
             }
             if r["kind"] == "branch" and r["coverage"]:
                 item["coverage"] = r["coverage"]
+            if wants_outline:
+                # Same row again: the hop whose only purpose was learning
+                # which section to pick (C.1.1 rule 2).
+                item["outline"] = json.loads(r["outline"])
             results.append(item)
         results.sort(key=lambda x: x["score"], reverse=True)
         payload = {"results": results[:k], "truncated": len(results) > k}
-        return shrink_list_to_budget(payload, "results", BUDGET_LOCATE)
+        payload = shrink_list_to_budget(payload, "results", BUDGET_LOCATE)
+        if window:
+            payload["window"] = window
+            undated = self.undated_count(window["date_field"])
+            if undated:
+                payload["undated_excluded"] = undated
+        if not payload["results"]:
+            # C.1.1 rule 3 / C.13.2: an empty entry list is indistinguishable
+            # from a forest that knows nothing — and, under a window, from a
+            # window that holds nothing. Three situations, three repairs, so
+            # the response says which one it is. Computed HERE and nowhere
+            # else: a caller holding results was already told what it needed.
+            payload.update(self.empty_context(window, "No curated scent "
+                                              "matched"))
+        return payload
+
+    def _scope_where(self, scope: str | None) -> tuple[list[str], list]:
+        """A scope as a predicate: one node, one subtree, or the forest.
+
+        Shared by `sniff` (C.6b) and `calendar` (C.13.3) so that "scope" is
+        one idea with one resolution — a second reading of the same word
+        would agree only where somebody compared them.
+        """
+        where: list[str] = []
+        params: list = []
+        if not scope:
+            return where, params
+        scope = scope.strip().strip("/")
+        row = self.catalog.get(scope)
+        if row is not None and row["kind"] == "banana":
+            where.append("{n}id = ?")
+            params.append(scope)
+            return where, params
+        scope_id = (scope if scope == "_index" or scope.endswith("/_index")
+                    else f"{scope}/_index")
+        self._row_or_raise(scope_id)
+        if scope_id != "_index":
+            prefix = scope_id[: -len("_index")]  # "<branch>/_index" -> "<branch>/"
+            # substr, not LIKE: '_' is a single-character wildcard there and
+            # node ids are full of them ('_index'), so LIKE would silently
+            # widen the scope the caller asked to narrow.
+            where.append("substr({n}id, 1, ?) = ?")
+            params.extend([len(prefix), prefix])
+        return where, params
+
+    def undated_count(self, field: str, *,
+                      policy_where: tuple[list[str], list] | None = None) -> int:
+        """Nodes a window can never match (C.13.1 rule 5). Reported only
+        when there are any: a forest with complete passports should not pay
+        a line of response for a zero.
+
+        `policy_where` is the host's scope predicate (J.3) — every number a
+        scoped caller reads must be about the nodes it may see, and this one
+        is no exception: a global count of undated nodes describes a region
+        nobody granted.
+        """
+        where, params = policy_where or ([], [])
+        return self.catalog.count_nodes(
+            where + [f"({{n}}{field} IS NULL OR {{n}}{field} = '')"], list(params))
+
+    def empty_context(self, window: dict | None, what: str, *,
+                      policy_where: tuple[list[str], list] | None = None) -> dict:
+        """What an empty read owes its caller (C.1.1 rule 3, C.13.2).
+
+        Without a window: how large the space was, and the search this
+        primitive does not perform. With one: whether the WINDOW was the
+        reason — which is a different mistake from a question that matched
+        nothing, and needs a different repair — plus where the material
+        actually sits, so the next call is a correction and not a guess.
+
+        Every count and every period here passes through `policy_where`
+        (J.3). A hint is prose, but "this forest holds 82 nodes from January
+        to August" is a measurement, and a scoped caller must not read one
+        about a region it was never granted — which is exactly the oracle
+        C.1.1 refused for `searched`.
+        """
+        pol_where, pol_params = policy_where or ([], [])
+        out: dict = {"searched": self.catalog.count_nodes(pol_where,
+                                                          list(pol_params))}
+        if not window:
+            out["hint"] = (
+                f"{what}. locate() searches titles, summaries and tags only "
+                "— sniff(terms) searches the bodies, where an exact term may "
+                "be waiting.")
+            return out
+        where, params = window_sql(window)
+        matched = self.catalog.count_nodes(pol_where + where,
+                                           list(pol_params) + params)
+        out["matched_window"] = matched
+        span = nearest_periods(
+            self.catalog.date_buckets(window["date_field"], "month",
+                                      pol_where, list(pol_params)), window)
+        edges = span["range"]
+        nearest = ", ".join(f"{b['period']} ({b['nodes']})"
+                            for b in span["nearest"]) or "none"
+        if matched:
+            out["hint"] = (
+                f"{what}, though {matched} node(s) fall in that window — the "
+                "window is not the reason. Try sniff(terms) for exact text in "
+                "bodies, or ask a wider question.")
+        else:
+            out["hint"] = (
+                f"No node has a {window['date_field']} date inside that "
+                f"window, so the question was never tested against anything. "
+                f"This forest holds {edges['nodes']} dated node(s) from "
+                f"{edges['first']} to {edges['last']}; nearest periods with "
+                f"material: {nearest}. Widen the window, drop it, or call "
+                "calendar() to see where the material sits.")
+        return out
 
     # =======================================================================
     # C.2 look — the central operation (<= 500 tokens)
     # =======================================================================
 
     @_traced
-    def look(self, id: str, fields: list[str] | None = None,
+    def look(self, id, fields: list[str] | None = None,
              gauntlet: bool | None = None, toward: str | None = None) -> dict:
+        if isinstance(id, (list, tuple)):
+            ids = batch_ids(id, MAX_BATCH_LOOK, "look")
+            nodes, missing = [], []
+            for nid in ids:
+                try:
+                    nodes.append(self._look(nid, fields=fields, gauntlet=gauntlet,
+                                            toward=toward))
+                except VineError as e:
+                    if e.code == E_NOT_FOUND and not self.forest.exists(nid):
+                        missing.append(nid)
+                        continue
+                    raise
+            return batch_shape(nodes, missing, BUDGET_LOOK_BATCH)
+        return self._look(id, fields=fields, gauntlet=gauntlet, toward=toward)
+
+    def _look(self, id: str, fields: list[str] | None = None,
+              gauntlet: bool | None = None, toward: str | None = None) -> dict:
         row = self._row_or_raise(id)
         node = self.forest.read(id)
         digest: dict = {
@@ -1110,7 +1345,25 @@ class Vine:
         return node.body
 
     @_traced
-    def pick(self, id: str, section: str | None = None) -> dict:
+    def pick(self, id, section: str | None = None) -> dict:
+        if isinstance(id, (list, tuple)):
+            ids = batch_ids(id, MAX_BATCH_PICK, "pick")
+            nodes, missing = [], []
+            for nid in ids:
+                try:
+                    nodes.append(self._pick(nid, section=section))
+                except VineError as e:
+                    # A missing SECTION is not a missing node: it names an
+                    # id the caller can see and a header it cannot, and
+                    # burying that in `missing` would report the node absent.
+                    if e.code == E_NOT_FOUND and not self.forest.exists(nid):
+                        missing.append(nid)
+                        continue
+                    raise
+            return batch_shape(nodes, missing, BUDGET_PICK_BATCH)
+        return self._pick(id, section=section)
+
+    def _pick(self, id: str, section: str | None = None) -> dict:
         node = self.forest.read(id)
         body, outline = node.body, node.outline
         if node.frontmatter.get("content") in ("cached", "reference"):
@@ -1322,8 +1575,12 @@ class Vine:
         limit: int = 50,
         gauntlet: bool | None = None,
         toward: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        date_field: str | None = None,
     ) -> dict:
         self._row_or_raise(parent_id)
+        window = normalize_window(since, until, date_field)
         filter = filter or {}
         fields = fields or ["id", "type", "summary"]
         limit = min(max(1, limit), 50)
@@ -1332,6 +1589,8 @@ class Vine:
         out = []
         for r in rows:
             if not self._match_filter(r, filter):
+                continue
+            if window and not in_window(r[window["date_field"]], window):
                 continue
             item = {"id": r["id"]}
             for f in fields:
@@ -1357,6 +1616,8 @@ class Vine:
         payload = {"nodes": out[:limit], "truncated": len(out) > limit}
         if goal is not None:
             payload["frontier"] = {"ranked": True, "toward": goal[1]}
+        if window:
+            payload["window"] = window
         return shrink_list_to_budget(payload, "nodes", BUDGET_SCAN)
 
     @staticmethod
@@ -1396,6 +1657,9 @@ class Vine:
         scope: str | None = None,
         k: int = 5,
         type_filter: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        date_field: str | None = None,
     ) -> dict:
         if isinstance(terms, str):
             terms = [terms]
@@ -1424,37 +1688,21 @@ class Vine:
                 "scope must be a single node or branch id (string)",
                 hint="Pass scope as one string: a branch id or a node id, not a list.",
             )
-        prefix = None
-        only_id = None
-        if scope:
-            scope = scope.strip().strip("/")
-            row = self.catalog.get(scope)
-            if row is not None and row["kind"] == "banana":
-                only_id = scope
-            else:
-                scope_id = scope if scope == "_index" or scope.endswith("/_index") else f"{scope}/_index"
-                self._row_or_raise(scope_id)
-                if scope_id != "_index":
-                    prefix = scope_id[: -len("_index")]  # "<branch>/_index" -> "<branch>/"
-
         k = min(max(1, k), SNIFF_MAX_K)
         # The scope is a WHERE, never a Python skip. Fetching every row to
         # discard all but one made a single-node sniff cost the whole
         # forest — and the sweep (C.6c) issues one per term per result.
-        where: list[str] = []
-        params: list = []
-        if only_id:
-            where.append("{n}id = ?")
-            params.append(only_id)
-        elif prefix:
-            # substr, not LIKE: '_' is a single-character wildcard there and
-            # node ids are full of them ('_index'), so LIKE would silently
-            # widen the scope the caller asked to narrow.
-            where.append("substr({n}id, 1, ?) = ?")
-            params.extend([len(prefix), prefix])
+        where, params = self._scope_where(scope)
         if type_filter:
             where.append("{n}type = ?")
             params.append(type_filter)
+        # C.13.1: the cheapest filter in the system, and the one that pays
+        # most here — a windowed sniff opens the files of those days and no
+        # others, instead of every body in the forest.
+        window = normalize_window(since, until, date_field)
+        win_where, win_params = window_sql(window)
+        where.extend(win_where)
+        params.extend(win_params)
         clauses = [c.format(n="") for c in where]
         rows = self.catalog.conn.execute(
             "SELECT * FROM nodes"
@@ -1504,13 +1752,18 @@ class Vine:
                 continue
             strength = len(terms_hit) / len(folded_terms)
             heat = self._heat(nid)
+            # C.6b (v0.52): occurrences are part of the score. `strength` is
+            # frequently constant across literal hits, which left `heat` —
+            # the traversal that came before — as the only thing separating
+            # a note holding ten occurrences from an index holding one.
+            density = 1 + SNIFF_DENSITY_BETA * math.log2(len(matches))
             hits.append(
                 {
                     "id": nid,
                     "type": r["type"],
                     "title": r["title"],
                     "trail": json.loads(r["trail"]),
-                    "score": round(strength * (1 + self.alpha * heat), 4),
+                    "score": round(strength * density * (1 + self.alpha * heat), 4),
                     "heat": heat,
                     "match_count": len(matches),
                     "truncated_matches": len(matches) > SNIFF_MATCHES_PER_NODE,
@@ -1521,13 +1774,71 @@ class Vine:
         # is latency for the next caller, and it must not be able to change
         # this one's result.
         self.catalog.sniff_memo_store(learned)
-        hits.sort(key=lambda h: (h["score"], h["match_count"]), reverse=True)
+        # C.6b (v0.52): a pointer never outranks what it points at. An index
+        # carries the summary of every child, so it matches nearly any term
+        # and gathers heat by being the way through; a term found inside it
+        # is evidence about a child. Demoted in the ORDER, never in the
+        # `score` — a number adjusted to force a position is a number that
+        # lies, and the order is what this contract publishes.
+        hits.sort(key=lambda h: (not _is_index(h["id"]), h["score"],
+                                 h["match_count"]), reverse=True)
         payload = {
             "results": hits[:k],
             "scanned_nodes": scanned,
             "truncated": len(hits) > k,
         }
-        return shrink_list_to_budget(payload, "results", BUDGET_SNIFF)
+        payload = shrink_list_to_budget(payload, "results", BUDGET_SNIFF)
+        if window:
+            payload["window"] = window
+            undated = self.undated_count(window["date_field"])
+            if undated:
+                payload["undated_excluded"] = undated
+            if not payload["results"]:
+                payload.update(self.empty_context(window, "No body matched"))
+        return payload
+
+    # =======================================================================
+    # C.13 calendar — where the material sits in time (<= 800 tokens)
+    # =======================================================================
+
+    @_traced
+    def calendar(self, scope: str | None = None, date_field: str | None = None,
+                 granularity: str = "month", since: str | None = None,
+                 until: str | None = None, limit: int = 24, *,
+                 policy_where: tuple[list[str], list] | None = None) -> dict:
+        """The map that makes a window a choice instead of a guess (C.13.3).
+
+        Answered from the catalog alone: which periods hold anything, how
+        much, and the two dates of each — which are exactly the strings the
+        windowed reads take, so there is no arithmetic between finding a
+        period and searching it.
+        """
+        field = parse_field(date_field)
+        window = normalize_window(since, until, field)
+        where, params = self._scope_where(scope)
+        win_where, win_params = window_sql(window)
+        # J.3: under a policy every count covers only nodes in scope — a
+        # global count here would be a finer size oracle than `locate` could
+        # ever be, describing the shape of a region nobody granted, period by
+        # period. The predicate is the policy's own prefixes as SQL, so the
+        # filtering happens inside the GROUP BY rather than after it; it is
+        # keyword-only and supplied by the host, unreachable from the wire
+        # (G.2.5's construction).
+        pol_where, pol_params = policy_where or ([], [])
+        rows = self.catalog.date_buckets(
+            field, granularity,
+            where + win_where + pol_where,
+            params + win_params + pol_params)
+        payload = buckets_from_rows(rows, granularity, limit)
+        undated_where = [f"({{n}}{field} IS NULL OR {{n}}{field} = '')"]
+        payload = {"date_field": field, "granularity": granularity, **payload,
+                   "undated": self.catalog.count_nodes(
+                       where + undated_where + pol_where, params + pol_params)}
+        if scope:
+            payload["scope"] = scope
+        if window:
+            payload["window"] = window
+        return shrink_list_to_budget(payload, "buckets", BUDGET_CALENDAR)
 
     # =======================================================================
     # C.10 tend — dataset writes (spec v0.7, Phase 2: the living bank)
@@ -1647,7 +1958,8 @@ class Vine:
     # =======================================================================
 
     @_traced
-    def plant(self, node: dict | NodeSpec, *, adopted: bool = False) -> dict:
+    def plant(self, node: dict | NodeSpec, *, if_absent: bool = False,
+              adopted: bool = False) -> dict:
         """`adopted` (G.2.5, v0.45) says the schema was READ off a source the
         operator already owns, not declared by a model: the C.7.1 count
         limits are guards against hallucinated DDL and do not apply to it.
@@ -1655,13 +1967,20 @@ class Vine:
 
         Keyword-only, and deliberately unreachable from the wire — the host
         dispatches `getattr(scoped, "plant")(**payload)` and
-        `ScopedVine.plant(self, node)` forwards `node` alone, so an extra
-        key in a request body is a TypeError, never a relaxed guard.
+        `ScopedVine.plant` forwards `node` and `if_absent` and nothing else,
+        so an extra key in a request body is a TypeError, never a relaxed
+        guard.
+
+        `if_absent` (C.7.2, v0.52) IS caller-facing, and is keyword-only for
+        a different reason: a second positional argument here used to be a
+        TypeError, and that is the property the G.2.5 suite checks. Keeping
+        it keyword-only keeps `plant(node, True)` refused, which is what
+        stops a positional call from ever landing on `adopted`.
         """
         self._require_writable()
         spec = node if isinstance(node, NodeSpec) else NodeSpec.model_validate(node)
         with self._write_mutex:
-            return self._plant(spec, adopted=adopted)
+            return self._plant(spec, adopted=adopted, if_absent=bool(if_absent))
 
     def _prepare_dataset_spec(self, spec: NodeSpec, *, adopted: bool = False) -> None:
         """C.7.1: the schema is data, never DDL — validate it whole and
@@ -1686,7 +2005,8 @@ class Vine:
         if spec.payload_type != "sqlite":
             raise VineError(E_SCHEMA, "schema requires payload_type: sqlite")
 
-    def _plant(self, spec: NodeSpec, *, adopted: bool = False) -> dict:
+    def _plant(self, spec: NodeSpec, *, adopted: bool = False,
+               if_absent: bool = False) -> dict:
         if spec.rows and spec.table_schema is None:
             raise VineError(E_SCHEMA, "rows require a schema (C.7.1 rule 7)")
         if spec.table_schema is not None:
@@ -1694,6 +2014,12 @@ class Vine:
         fm = spec.frontmatter_dict()
         validate_frontmatter(fm, self.forest.dialect)
         if self.forest.exists(spec.id):
+            if if_absent:
+                # C.7.2 (v0.52): "make sure this exists". Nothing is written,
+                # nothing is committed, and the submitted content is not
+                # compared to what is there — changing it is graft's job.
+                return {"id": spec.id, "created": False,
+                        "trail": self.forest.trail(spec.id)}
             raise VineError(E_SCHEMA, f"id already exists: {spec.id}", hint="ids are immutable and unique.")
         parent_row = self.catalog.get(spec.parent)
         if parent_row is None or parent_row["kind"] != "branch":
@@ -1785,7 +2111,8 @@ class Vine:
         self.catalog.upsert_node(self.forest.read(spec.id))
         self.catalog.upsert_node(self.forest.read(spec.parent))
         self.catalog.mark_stale(spec.id)
-        return {"id": spec.id, "commit": commit, "trail": self.forest.trail(spec.id)}
+        return {"id": spec.id, "created": True, "commit": commit,
+                "trail": self.forest.trail(spec.id)}
 
     # =======================================================================
     # C.8 graft — atomic edit with reinforce-before-create

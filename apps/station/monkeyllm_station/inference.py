@@ -503,7 +503,8 @@ def _teach_datasets(scoped_vine, entry: dict) -> None:
 
 
 def forage(scoped_vine, question: str, binding: dict, k: int = 3,
-           max_hops: int = 6, reply_tokens: int | None = None) -> dict:
+           max_hops: int = 6, reply_tokens: int | None = None,
+           window: dict | None = None) -> dict:
     """Answer by navigating (J.10.5), instead of by one deterministic sweep.
 
     `answer`'s default is `harvest`: entry search, no hops, one model call —
@@ -526,12 +527,25 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
             words=int(reply_tokens * 0.75))
     chat, model = chat_from_binding(binding, reply_tokens=reply_tokens)
 
-    entry = scoped_vine.call("locate", query=question, k=k)
+    # C.13.1: a bounded hunt is bounded at every hop, not only at the entry.
+    # The window is forced onto each searching call below rather than left to
+    # the model to remember — an answer labelled with a window whose second
+    # hop left it is worse than no window at all.
+    bounds = {k2: v for k2, v in (window or {}).items() if v} if window else {}
+    entry = scoped_vine.call("locate", query=question, k=k, **bounds)
     _teach_datasets(scoped_vine, entry)
+    asked_about = f"QUESTION: {question}"
+    if bounds:
+        asked_about += (
+            f"\n\nEvery search on this hunt is bounded to "
+            f"{bounds.get('since') or 'the beginning'} … "
+            f"{bounds.get('until') or 'now'} "
+            f"({bounds.get('date_field', 'created')} date). Material outside "
+            "that window is not available to you; say so if the answer needs it.")
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content":
-            f"QUESTION: {question}\n\nlocate({question!r}) returned:\n"
+            f"{asked_about}\n\nlocate({question!r}) returned:\n"
             + json.dumps(entry, ensure_ascii=False)},
     ]
 
@@ -605,6 +619,8 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
         asked.add(key)
 
         h0 = time.perf_counter()
+        if bounds and tool in ("locate", "sniff", "scan", "harvest"):
+            args = {**args, **bounds}
         result = scoped_vine.call(tool, **args)
         hop_ms = (time.perf_counter() - h0) * 1000
         failed = isinstance(result, dict) and "error" in result

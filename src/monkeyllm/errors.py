@@ -17,6 +17,11 @@ E_QUERY_FORBIDDEN = "E_QUERY_FORBIDDEN"
 E_QUERY_INVALID = "E_QUERY_INVALID"
 E_TIMEOUT = "E_TIMEOUT"
 E_LOCKED = "E_LOCKED"
+# C.12 (v0.52): the last resort. An unhandled path is a defect in the
+# server, and served as a bare 500 with no code it becomes the caller's
+# defect too — a model cannot tell it apart from its own bad argument, and
+# the two demand opposite reactions.
+E_INTERNAL = "E_INTERNAL"
 
 
 class VineError(Exception):

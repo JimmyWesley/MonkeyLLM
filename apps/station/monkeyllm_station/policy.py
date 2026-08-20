@@ -28,6 +28,15 @@ import re
 from dataclasses import dataclass, field, replace
 
 from monkeyllm.errors import E_NOT_FOUND, E_SCHEMA, VineError
+from monkeyllm.signatures import validate_args
+from monkeyllm.vine import (
+    BUDGET_LOOK_BATCH,
+    BUDGET_PICK_BATCH,
+    MAX_BATCH_LOOK,
+    MAX_BATCH_PICK,
+    batch_ids,
+    batch_shape,
+)
 
 # Host-level code: the node is visible, the action is not permitted. Never
 # used for out-of-scope nodes — an authorization error there would be an
@@ -111,6 +120,32 @@ class Policy:
             return self
         return replace(self, caps=self.caps & frozenset(mask))
 
+    def sql_scope(self, alias: str = "{n}") -> tuple[list[str], list]:
+        """This policy's subtrees as a predicate over the catalog (C.13.3).
+
+        `in_scope` decides one id at a time, which is right for filtering a
+        handful of results and wrong for counting: an aggregate that has to
+        call Python per row cannot be a GROUP BY. The prefixes are the same
+        prefixes, spelled for SQLite — and `test_windows.py` compares the
+        two over every node in the fixture, because a second reading of one
+        rule agrees only where somebody checked.
+
+        `substr(id, 1, n) = ?`, never LIKE: `_` is a single-character
+        wildcard there and node ids are full of them (`_index`).
+        """
+        where: list[str] = []
+        params: list = []
+        if self.allow != WHOLE_FOREST:
+            ors = []
+            for prefix in self.allow:
+                ors.append(f"substr({alias}id, 1, ?) = ?")
+                params.extend([len(prefix), prefix])
+            where.append("(" + " OR ".join(ors) + ")")
+        for prefix in self.deny:
+            where.append(f"substr({alias}id, 1, ?) != ?")
+            params.extend([len(prefix), prefix])
+        return where, params
+
     def roots(self) -> list[str]:
         """Where a scoped principal starts. There is no implicit grant on the
         ancestors of a granted subtree: the master `_index` names every branch
@@ -132,6 +167,7 @@ class Policy:
 REQUIRED_CAP = {
     "locate": "read", "look": "read", "move": "read", "pick": "read",
     "scan": "read", "sniff": "read", "harvest": "read", "view": "read",
+    "calendar": "read",
     "query": "query", "tend": "tend", "plant": "write", "graft": "write",
 }
 
@@ -184,45 +220,106 @@ class ScopedVine:
     # -- read surface (engine-compatible signatures) ------------------------
 
     def locate(self, query: str, k: int = 5, scope: str = "all",
-               type_filter: str | None = None) -> dict:
+               type_filter: str | None = None,
+               include: list[str] | None = None,
+               since: str | None = None, until: str | None = None,
+               date_field: str | None = None) -> dict:
+        win = {"since": since, "until": until, "date_field": date_field}
         if self.policy.unrestricted:
-            return self._vine.locate(query, k=k, scope=scope, type_filter=type_filter)
-        raw = self._vine.locate(query, k=self._fetch(k), scope=scope, type_filter=type_filter)
-        return self._trim(raw, "results", k)
+            return self._vine.locate(query, k=k, scope=scope,
+                                     type_filter=type_filter, include=include,
+                                     **win)
+        raw = self._vine.locate(query, k=self._fetch(k), scope=scope,
+                                type_filter=type_filter, include=include,
+                                **win)
+        out = self._trim(raw, "results", k)
+        if "window" in raw:
+            out["window"] = raw["window"]
+            out.pop("undated_excluded", None)
+            excluded = self._vine.undated_count(
+                raw["window"]["date_field"], policy_where=self.policy.sql_scope())
+            if excluded:
+                out["undated_excluded"] = excluded
+        if not out["results"]:
+            # C.1.1 / C.13.2 (v0.52): every number an empty read carries is
+            # bounded by what this principal may see — the counts they could
+            # reach by walking, never the forest's, which would make an empty
+            # search a size oracle for the region they were not granted. The
+            # engine composes the sentence; the predicate decides the facts
+            # in it, so there is one wording and no scoped copy of it.
+            out.update(self._empty_context(raw))
+        else:
+            for key in ("searched", "hint", "matched_window"):
+                out.pop(key, None)
+        return out
+
+    def _empty_context(self, raw: dict) -> dict:
+        return self._vine.empty_context(
+            raw.get("window"), "No curated scent matched",
+            policy_where=self.policy.sql_scope())
 
     def sniff(self, terms, scope: str | None = None, k: int = 5,
-              type_filter: str | None = None) -> dict:
+              type_filter: str | None = None, since: str | None = None,
+              until: str | None = None, date_field: str | None = None) -> dict:
         if scope is not None:
             self._gate(scope)
+        win = {"since": since, "until": until, "date_field": date_field}
         if self.policy.unrestricted:
-            return self._vine.sniff(terms, scope=scope, k=k, type_filter=type_filter)
-        raw = self._vine.sniff(terms, scope=scope, k=self._fetch(k), type_filter=type_filter)
+            return self._vine.sniff(terms, scope=scope, k=k,
+                                    type_filter=type_filter, **win)
+        raw = self._vine.sniff(terms, scope=scope, k=self._fetch(k),
+                               type_filter=type_filter, **win)
         out = self._trim(raw, "results", k)
         # The engine counts every body it opened, most of which a scoped
         # principal may not know exists — that number is a forest-size oracle,
         # so it is replaced by what the caller can actually see.
         out["scanned_nodes"] = len(out["results"])
+        out.pop("undated_excluded", None)
+        if "window" in raw:
+            out["window"] = raw["window"]
+            excluded = self._vine.undated_count(
+                raw["window"]["date_field"], policy_where=self.policy.sql_scope())
+            if excluded:
+                out["undated_excluded"] = excluded
+            if not out["results"]:
+                out.update(self._vine.empty_context(
+                    raw["window"], "No body matched",
+                    policy_where=self.policy.sql_scope()))
         return out
 
     def scan(self, parent_id: str, filter: dict | None = None,
              fields: list[str] | None = None, recursive: bool = False,
              limit: int = 50, gauntlet: bool | None = None,
-             toward: str | None = None) -> dict:
+             toward: str | None = None, since: str | None = None,
+             until: str | None = None, date_field: str | None = None) -> dict:
         self._gate(parent_id)
         # Part K is ordering, not access: it changes which in-scope nodes come
         # first, never which nodes are in scope. So it is forwarded as-is and
         # the filtering below is unchanged.
+        win = {"since": since, "until": until, "date_field": date_field}
         if self.policy.unrestricted:
             return self._vine.scan(parent_id, filter=filter, fields=fields,
                                    recursive=recursive, limit=limit,
-                                   gauntlet=gauntlet, toward=toward)
+                                   gauntlet=gauntlet, toward=toward, **win)
         raw = self._vine.scan(parent_id, filter=filter, fields=fields,
                               recursive=recursive, limit=self._fetch(limit),
-                              gauntlet=gauntlet, toward=toward)
-        return self._trim(raw, "nodes", limit)
+                              gauntlet=gauntlet, toward=toward, **win)
+        out = self._trim(raw, "nodes", limit)
+        if "window" in raw:
+            out["window"] = raw["window"]
+        return out
 
-    def look(self, id: str, fields: list[str] | None = None,
+    def look(self, id, fields: list[str] | None = None,
              gauntlet: bool | None = None, toward: str | None = None) -> dict:
+        if isinstance(id, (list, tuple)):
+            # C.11: the batch is assembled from the SCOPED single read, so
+            # every digest is gated and scrubbed exactly as it would be on
+            # its own — and an id this principal may not see joins the
+            # absent ones in `missing`, byte-identically (J.3).
+            return self._batch(id, MAX_BATCH_LOOK, BUDGET_LOOK_BATCH, "look",
+                               lambda nid: self.look(nid, fields=fields,
+                                                     gauntlet=gauntlet,
+                                                     toward=toward))
         self._gate(id)
         digest = self._vine.look(id, fields=fields, gauntlet=gauntlet, toward=toward)
         if self.policy.unrestricted:
@@ -267,9 +364,31 @@ class ScopedVine:
         ]
         return payload
 
-    def pick(self, id: str, section: str | None = None) -> dict:
+    def pick(self, id, section: str | None = None) -> dict:
+        if isinstance(id, (list, tuple)):
+            return self._batch(id, MAX_BATCH_PICK, BUDGET_PICK_BATCH, "pick",
+                               lambda nid: self.pick(nid, section=section))
         self._gate(id)
         return self._vine.pick(id, section=section)
+
+    def _batch(self, ids, cap: int, budget: int, primitive: str, read_one) -> dict:
+        """C.11 under a policy: same shape, same budget, same accounting."""
+        wanted = batch_ids(ids, cap, primitive)
+        nodes, missing = [], []
+        for nid in wanted:
+            try:
+                nodes.append(read_one(nid))
+            except VineError as e:
+                if e.code == E_NOT_FOUND and not self._exists(nid):
+                    missing.append(nid)
+                    continue
+                raise
+        return batch_shape(nodes, missing, budget)
+
+    def _exists(self, node_id: str) -> bool:
+        """Out of scope counts as absent here, exactly as `_gate` reports it:
+        a batch MUST NOT become the surface that tells the two apart."""
+        return self._visible(node_id) and self._vine.forest.exists(node_id)
 
     def view(self, id: str) -> dict:
         # C.6d resolves like J.14: out-of-scope, absent and payload-less all
@@ -277,11 +396,32 @@ class ScopedVine:
         self._gate(id)
         return self._vine.view(id)
 
-    def harvest(self, query: str, terms: list[str] | None = None, k: int = 3) -> dict:
+    def harvest(self, query: str, terms: list[str] | None = None, k: int = 3,
+                since: str | None = None, until: str | None = None,
+                date_field: str | None = None) -> dict:
         from monkeyllm.harvest import harvest as _harvest
 
         # `self`, not `self._vine`: the composite runs on the scoped surface.
-        return _harvest(self, query, terms=terms, k=k)
+        return _harvest(self, query, terms=terms, k=k, since=since,
+                        until=until, date_field=date_field)
+
+    def calendar(self, scope: str | None = None, date_field: str | None = None,
+                 granularity: str = "month", since: str | None = None,
+                 until: str | None = None, limit: int = 24) -> dict:
+        if scope is not None:
+            self._gate(scope)
+        if self.policy.unrestricted:
+            return self._vine.calendar(scope=scope, date_field=date_field,
+                                       granularity=granularity, since=since,
+                                       until=until, limit=limit)
+        # J.3: the predicate is the whole difference — every bucket counts
+        # only nodes this principal may see, so the map never describes the
+        # shape of a region they were not granted. It travels as SQL so the
+        # filtering happens inside the GROUP BY, not after it.
+        return self._vine.calendar(scope=scope, date_field=date_field,
+                                   granularity=granularity, since=since,
+                                   until=until, limit=limit,
+                                   policy_where=self.policy.sql_scope())
 
     def query(self, id: str, sql: str) -> dict:
         self._gate(id)
@@ -306,7 +446,7 @@ class ScopedVine:
 
     # -- write surface ------------------------------------------------------
 
-    def plant(self, node) -> dict:
+    def plant(self, node, if_absent: bool = False) -> dict:
         node_id = node.get("id") if isinstance(node, dict) else getattr(node, "id", None)
         if not node_id:
             raise VineError(E_SCHEMA, "plant requires an 'id'")
@@ -318,7 +458,9 @@ class ScopedVine:
                 f"'{node_id}' is outside this principal's grant",
                 hint=f"Writable subtrees: {list(self.policy.allow)}.",
             )
-        return self._vine.plant(node)
+        # C.7.2 (v0.52): a caller-facing option, unlike `adopted` — which
+        # stays keyword-only and unreachable from the wire (G.2.5).
+        return self._vine.plant(node, if_absent=bool(if_absent))
 
     def graft(self, id: str, patch) -> dict:
         self._gate(id)
@@ -346,7 +488,11 @@ class ScopedVine:
                 hint=f"This principal holds: {sorted(self.policy.caps)}.",
             ).to_dict()
         try:
-            return getattr(self, primitive)(**kwargs)
+            # C.12: argument shape is decided by the one declaration both
+            # surfaces read, before anything reaches the primitive. The
+            # TypeError below stays as a belt: a signature that drifts from
+            # the table is a defect, and it must not become a bare 500.
+            return getattr(self, primitive)(**validate_args(primitive, kwargs))
         except VineError as e:
             return e.to_dict()
         except TypeError as e:  # bad/missing arguments from an API client

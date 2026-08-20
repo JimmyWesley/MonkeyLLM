@@ -40,25 +40,74 @@ ${origin}. Treat it as persistent memory for its domain: it outlives this
 conversation, other people and agents feed it too, and everything you read
 carries a node id you can cite.
 
+A **node** is one markdown document with a curated passport (title, summary,
+tags) and a body. A **branch** is a node that holds others; its id ends in
+\`/_index\`. Everything else is a leaf — the forest calls them bananas, but
+every parameter you pass is spelled the ordinary way.
+
 ## Recall before you answer
 
 For any question the forest could answer (its projects, people, decisions,
 documents, data), recall first and reason after:
 
-- \`answer\` — the one-shot: retrieval plus a grounded reply with sources.
-  Prefer it when the forest's answer is the answer.
-- \`harvest\` — retrieval without a model call: top items and matched
+- \`answer(question)\` — the one-shot: retrieval plus a grounded reply with
+  sources. Prefer it when the forest's answer is the answer. Pass
+  \`min_evidence: 2\` when you would rather see the evidence than a confident
+  paragraph over one weak snippet — below the floor it replies
+  \`answer: null\` and hands you the retrieval instead.
+- \`harvest(query)\` — retrieval without a model call: top items and matched
   passages. Prefer it when you will reason over the material yourself.
-- \`locate\` → \`look\` → \`pick\` — navigate: find nodes by their curated
-  scent, read a node's passport, open one section of its body.
-- \`sniff\` — literal text search inside bodies (grep, not regex).
-- \`query\` — read-only SQL over \`type: dataset\` nodes, if your key
+- \`locate(query)\` → \`look(id)\` → \`pick(id)\` — navigate: rank entry points,
+  read a node's passport, open its body or one section of it.
+- \`sniff(terms)\` — literal text search inside bodies (substring, not regex).
+- \`scan(parent_id)\`, \`move(id)\` — list a branch's nodes by metadata; follow
+  a node's typed edges. \`scan("_index", recursive: true)\` is the cheapest
+  map of the whole forest when you need to see its shape first.
+- \`calendar()\` — where the material sits in time: how many nodes each
+  period holds, most recent first.
+- \`view(id)\` — the image behind a \`type: media\` node, if you can see images.
+- \`query(id, sql)\` — read-only SQL over \`type: dataset\` nodes, if your key
   carries the \`query\` capability. \`look\` at the dataset first: its
   \`notes\` say what the columns mean.
 
-Cite node ids for anything you assert from the forest. If the forest and
-the user disagree, say so: the forest owns its documents, the user owns
-the present.
+**\`locate\` and \`sniff\` search different things, and that is the one thing
+worth remembering about this surface.** \`locate\` reads curated metadata —
+titles, summaries, tags — and never bodies. So an exact term nobody lifted
+into a summary (an error code, an invoice number, a library name) returns
+\`{"results": []}\` from \`locate\` and is found instantly by \`sniff\`. When a
+\`locate\` comes back empty it tells you how many nodes it searched and points
+you at \`sniff\`: an empty result is never evidence that the forest does not
+know. Do not answer from your own knowledge until \`sniff\` has come back
+empty too.
+
+**When the question is about a period** — "last week", "since the contract",
+"what changed in June" — do not sweep the forest hoping something recent
+floats up. Call \`calendar()\` (add \`granularity: "week"\` for weeks), read
+the period you want, and pass that bucket's \`since\` and \`until\` straight
+into \`locate\`, \`sniff\`, \`scan\` or \`harvest\`. A window is decided from
+curated metadata before any body is opened, so on a large forest it is the
+cheapest filter available — and if the window turns out to hold nothing, the
+answer says so explicitly (\`matched_window: 0\`) instead of looking like an
+empty forest. Bounds are \`YYYY\`, \`YYYY-MM\` or \`YYYY-MM-DD\`, inclusive.
+Never invent a window the user did not ask for: a search bounded to a period
+they did not name is a search that quietly lost the rest of the forest.
+
+Two things that save round trips, both worth using by default:
+
+- \`look\` takes up to 10 ids at once and \`pick\` up to 5 — one call, one
+  budget, every id you sent accounted for in \`nodes\`, \`missing\` or
+  \`dropped\`.
+- \`locate(query, include: ["outline"])\` returns each result's section
+  headers, which is exactly what \`pick(id, section)\` takes — so you can go
+  from search to passage without the \`look\` in between. Every result also
+  carries \`body_tokens\`, so you know the size of what you are about to open.
+
+Cite node ids for anything you assert from the forest — and cite them the
+way a person can read: the title first, the id in brackets, as in
+\`Pheromone (projects/monkeyllm/pheromone)\`. Every result you get already
+carries both, so this costs nothing; an id alone means nothing to whoever
+reads your answer. If the forest and the user disagree, say so: the forest
+owns its documents, the user owns the present.
 
 ## Save what is worth keeping
 
@@ -72,9 +121,13 @@ use the write it actually allows:
 - \`plant\` / \`graft\` (only if your key carries \`write\`): plant a new
   note under the branch where it belongs (\`locate\` the branch first; if
   nothing fits, ask the user), or graft to extend a node you can name.
+  If a \`plant\` fails and you cannot tell whether it landed, repeat it with
+  \`if_absent: true\`: an id already taken answers \`created: false\` and
+  writes nothing.
 
 Write in English, keep the summary honest (it is how the note will be
-found), and never invent structure the forest does not have.
+found, and \`locate\` sees nothing else), and never invent structure the
+forest does not have.
 
 ## Respect the contract
 
@@ -83,6 +136,10 @@ found), and never invent structure the forest does not have.
   refused and which capability it needs.
 - Every read is budgeted. \`truncated: true\` means ask narrower, not
   retry harder.
+- Every refusal is \`{error: {code, message, hint}}\` and the hint is
+  actionable: \`E_SCHEMA\` means fix the argument it names, \`E_NOT_FOUND\`
+  means the node is absent or outside your key, \`E_INTERNAL\` means the
+  server failed and repeating the call will not help.
 - Datasets change through \`tend\` only if your key carries it: one
   statement at a time, never DDL.
 `

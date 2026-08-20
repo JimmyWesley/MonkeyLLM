@@ -81,7 +81,8 @@ def normalize(question: str) -> str:
 
 def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
               binding: dict, policy, head: str | None = None,
-              reply_tokens: int | None = None) -> str:
+              reply_tokens: int | None = None,
+              window: dict | None = None) -> str:
     """The closed list of J.10.7 — and nothing off it.
 
     Every component here can change the answer; nothing else may enter,
@@ -94,7 +95,9 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
     the reading fingerprint rather than by the forest's clock.
     `reply_tokens` (J.10.8) enters only when the caller set one — the
     material keeps its old shape otherwise, so an upgrade invalidates
-    nothing.
+    nothing. `window` (C.13.1) enters on the same terms and MUST: it
+    changes which nodes the retrieval could reach at all, so the same
+    question bounded to June and to July are two questions.
     """
     material = json.dumps({
         "question": normalize(question),
@@ -117,6 +120,10 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
         },
         "head": head,
         **({"reply_tokens": int(reply_tokens)} if reply_tokens else {}),
+        **({"window": {"since": window.get("since"),
+                       "until": window.get("until"),
+                       "date_field": window.get("date_field")}}
+           if window else {}),
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 

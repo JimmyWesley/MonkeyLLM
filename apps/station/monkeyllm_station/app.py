@@ -50,6 +50,7 @@ from starlette.staticfiles import StaticFiles
 
 from monkeyllm.errors import (
     E_FRONTMATTER,
+    E_INTERNAL,
     E_LOCKED,
     E_NOT_FOUND,
     E_QUERY_FORBIDDEN,
@@ -60,6 +61,8 @@ from monkeyllm.errors import (
     VineError,
 )
 from monkeyllm.server import ForestPool
+from monkeyllm.signatures import validate_args
+from monkeyllm.windows import normalize_window
 from monkeyllm_station import answer_store, vision
 from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
@@ -68,7 +71,10 @@ from monkeyllm_station.registry import Registry
 log = logging.getLogger("monkeyllm_station")
 
 READ_PRIMITIVES = frozenset(
-    {"locate", "look", "move", "pick", "scan", "sniff", "harvest", "query"}
+    {"locate", "look", "move", "pick", "scan", "sniff", "harvest", "query",
+     # C.13.3 (v0.52): the time map. A read like any other — catalog only,
+     # no body opened, and scoped by the same policy.
+     "calendar"}
 )
 WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend"})
 # Not engine primitives: retrieval composed with the forest's bound model
@@ -378,6 +384,9 @@ STATUS_BY_CODE = {
     E_QUERY_INVALID: 400,
     E_LOCKED: 409,
     E_TIMEOUT: 504,
+    # C.12 rule 5 (v0.52): a defect on this side, said in the shape every
+    # other refusal uses — so a caller can classify it instead of guessing.
+    E_INTERNAL: 500,
 }
 
 
@@ -908,6 +917,25 @@ def build_app(
             return None, _envelope(VineError(E_FORBIDDEN, "missing or invalid API key"), 401)
         return principal, None
 
+    def admin_gate(principal: str, forest: str, request: Request):
+        """The two questions, answered separately (C.12 rule 6, v0.52).
+
+        "Which forest" is a question about the request; "may I" is a
+        question about the principal. Collapsing the first into the second
+        told a key holding `admin` on every forest that it lacked `admin` —
+        and sent its holder to audit grants over a missing query parameter.
+        Naming the parameter discloses nothing: the caller already knows
+        which forests it may name, and one it may not is still 403.
+        """
+        if not forest:
+            return _envelope(VineError(
+                E_SCHEMA, "parameter 'forest' is required",
+                hint="Name the forest: ?forest=<id>, or \"forest\" in the body."))
+        if not is_admin(principal, forest, mask=mask_of(request)):
+            return _envelope(VineError(
+                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+        return None
+
     def is_admin(principal: str, forest: str | None = None,
                  mask: frozenset[str] | None = None) -> bool:
         # J.2.6: the mask filters live authority at the moment of use, so a
@@ -1037,6 +1065,18 @@ def build_app(
         try:
             return dispatch(principal, forest, name, payload, sample,
                             caps_mask=caps_mask)
+        except VineError as e:
+            return e.to_dict()
+        except Exception as e:
+            # C.12 rule 5, on the path both surfaces share: MCP has no HTTP
+            # handler of ours to fall back to, and an agent reading a
+            # transport-level failure cannot tell it from its own bad call.
+            log.exception("unhandled error in %s on %s", name, forest)
+            return VineError(
+                E_INTERNAL,
+                f"'{name}' failed inside the Station ({type(e).__name__})",
+                hint="This is a defect on the server, not in your call.",
+            ).to_dict()
         finally:
             if clocks is not None:
                 tracer, mark = sample.get("tracer"), sample.get("mark", 0)
@@ -1089,6 +1129,13 @@ def build_app(
 
         if name in COMPOSITES or name in HOST_ACTIONS:
             if name in COMPOSITES:
+                try:
+                    # C.12 rule 1: the composites read the same declaration
+                    # the primitives do. `hybrid` was popped above, so what
+                    # is checked here is what the composite will read.
+                    payload = validate_args(name, payload)
+                except VineError as e:
+                    return e.to_dict()
                 result = run_composite(principal, forest, vine, policy, name,
                                        payload, sample)
             else:
@@ -1256,7 +1303,8 @@ def build_app(
             vine.trails.add_heat(ids)
 
     def consult_walk_store(sample, forest, vine, policy, binding, payload,
-                           question, k, budget, reply_tokens=None):
+                           question, k, budget, reply_tokens=None,
+                           window=None):
         """The walk's J.10.7 lookup, unchanged from v0.33: HEAD in the key
         (a walk cannot be re-walked without paying the model per hop), the
         stored response served whole, and heat deposited through the trails
@@ -1276,7 +1324,7 @@ def build_app(
         # The walk's `k` is not capped by C.6c and keys as given.
         key = answer_store.build_key(
             question=question, terms=derive_terms(question),
-            k=k, hops=budget,
+            k=k, hops=budget, window=window,
             hybrid=bool(getattr(vine, "hybrid_locate", False)),
             binding=binding, policy=policy, head=head,
             reply_tokens=reply_tokens)
@@ -1313,7 +1361,8 @@ def build_app(
         return result
 
     def serve_from_reading(sample, forest, vine, policy, binding, payload,
-                           question, k, bundle, reply_tokens=None):
+                           question, k, bundle, reply_tokens=None,
+                           window=None):
         """The sweep's J.10.7 check (v0.35): the key finds the entry, the
         reading decides the model. The sweep already ran — this function
         never touches a primitive, so a hit's trace and pheromone are the
@@ -1336,7 +1385,7 @@ def build_app(
         # promise.
         key = answer_store.build_key(
             question=question, terms=derive_terms(question),
-            k=clamp_k(k), hops=None,
+            k=clamp_k(k), hops=None, window=window,
             hybrid=bool(getattr(vine, "hybrid_locate", False)),
             binding=binding, policy=policy, head=None,
             reply_tokens=reply_tokens)
@@ -1404,6 +1453,29 @@ def build_app(
         sample["cache"] = sample.get("cache", 0.0) \
             + (time.perf_counter() - t0) * 1000
 
+    def declined_for_evidence(payload: dict, bundle: dict, k: int):
+        """J.10.10: `answer` that does not answer, and says why.
+
+        `min_evidence` is NOT part of the J.10.7 key: it cannot change what
+        the model would write, only whether it is asked — and a refusal
+        never enters the store, so no entry can be created under it. The
+        count is of items that carry content: a result with a title and no
+        body is a pointer, and a floor that counted pointers would be
+        satisfied by exactly the material it exists to refuse.
+        """
+        from monkeyllm.harvest import clamp_k
+
+        raw = payload.get("min_evidence") or 0
+        floor = max(0, min(int(raw), clamp_k(k)))
+        if not floor:
+            return None
+        items = [r for r in bundle.get("results") or [] if r.get("content")]
+        if len(items) >= floor:
+            return None
+        return {"answer": None, "reason": "insufficient_evidence",
+                "evidence_count": len(items), "min_evidence": floor,
+                "harvest": bundle}
+
     def run_composite(principal, forest, vine, policy, name, payload,
                       sample: dict | None = None) -> dict:
         """Retrieval (scoped, deterministic) plus the forest's bound model.
@@ -1430,6 +1502,13 @@ def build_app(
             if name == "answer":
                 question = payload.get("question") or payload.get("query") or ""
                 k = int(payload.get("k", 3))
+                # C.13.1 through the composite: the window bounds the sweep's
+                # retrieval, so it also names the entry (J.10.7). The same
+                # question asked of June and of July is two questions, and an
+                # entry shared between them would answer one with the other.
+                window = normalize_window(payload.get("since"),
+                                          payload.get("until"),
+                                          payload.get("date_field"))
                 # J.10.8: per-call reply size, clamped once — the same value
                 # caps the model call, rides the prompt and names the key.
                 # Zero and absent both mean "the binding rules": a console's
@@ -1446,22 +1525,32 @@ def build_app(
                 if budget:
                     served = consult_walk_store(
                         sample, forest, vine, policy, binding, payload,
-                        question, k, budget, reply)
+                        question, k, budget, reply, window)
                     if served is None:
                         served = inference.forage(
                             scoped, question, binding, k=k, max_hops=budget,
-                            reply_tokens=reply)
+                            reply_tokens=reply, window=window)
                         whisper(vine, served.get("evidence")
                                 if isinstance(served, dict) else None)
                     return served
                 # The sweep's retrieval always runs — it is the cheap half,
                 # and its reading is what decides the hit (J.10.7 v0.35).
-                bundle = scoped.harvest(question, k=k)
+                bundle = scoped.harvest(question, k=k,
+                                        since=payload.get("since"),
+                                        until=payload.get("until"),
+                                        date_field=payload.get("date_field"))
                 if isinstance(bundle, dict) and "error" in bundle:
                     return bundle
+                # J.10.10 (v0.52): the floor, counted before the store is
+                # consulted and before the provider is called — so a refusal
+                # is never billed, never cached, and never a stored answer
+                # served back under a question it was too thin to answer.
+                floor = declined_for_evidence(payload, bundle, k)
+                if floor is not None:
+                    return floor
                 served = serve_from_reading(
                     sample, forest, vine, policy, binding, payload,
-                    question, k, bundle, reply)
+                    question, k, bundle, reply, window)
                 if served is None:
                     served = inference.answer(scoped, question, binding, k=k,
                                               bundle=bundle,
@@ -2089,6 +2178,29 @@ def build_app(
         setup route does not exist there — the two must never race for it."""
         return super_admin is None and registry.setup_available()
 
+    # J.1.1 rule 3 (v0.52): whether the MCP surface is mounted at all is
+    # decided further down, when the routes are built — health closes over
+    # the holder so the answer is the deployment's, not a guess.
+    mcp_state = {"enabled": False}
+
+    def mcp_status(request: Request) -> dict:
+        """What MCP would say to THIS request's Host.
+
+        The operator curls the domain they published and reads the verdict
+        for that domain, in the document they were already looking at. The
+        allow-list is never listed: the only host named is the one the
+        caller sent.
+        """
+        if not mcp_state["enabled"]:
+            return {"enabled": False}
+        from monkeyllm_station.mcp_surface import host_allowed
+
+        out: dict = {"enabled": True}
+        verdict = host_allowed(request.headers.get("host"))
+        if verdict is not None:
+            out["host_allowed"] = verdict
+        return out
+
     async def health(request: Request) -> JSONResponse:
         # `password_login` lets the console decide whether to offer the door
         # at all. It reveals that a door exists, not who may walk through it.
@@ -2100,6 +2212,7 @@ def build_app(
             "status": "ok", "mode": pool.mode, "writable": writable,
             "setup_required": setup_open(),
             "password_login": super_admin is not None or registry.has_any_password(),
+            "mcp": mcp_status(request),
         })
 
     def effective_grants(principal: str,
@@ -2849,10 +2962,9 @@ def build_app(
             return err
         body = await request.json()
         forest = body.get("forest")
-        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
-            return _envelope(
-                VineError(E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403
-            )
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
         caps = set(body.get("caps") or ["read"])
         if caps - CAPS:
             return _envelope(VineError(E_SCHEMA, f"unknown capabilities: {sorted(caps - CAPS)}"))
@@ -3236,9 +3348,9 @@ def build_app(
         if err:
             return err
         forest = request.query_params.get("forest") or ""
-        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
-            return _envelope(VineError(
-                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
         policy = registry.policy_for(principal, forest)
         # J.13: the report counts and names things across the whole forest, so
         # a scoped principal cannot be served a filtered version — the numbers
@@ -3289,9 +3401,9 @@ def build_app(
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
-        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
-            return _envelope(VineError(
-                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
         policy = registry.policy_for(principal, forest)
         # J.13.3, health's rule with one addition: the count IS the size of
         # the whole forest, and every row rewritten includes nodes a scoped
@@ -3345,9 +3457,9 @@ def build_app(
             except json.JSONDecodeError as e:
                 return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
             forest = str(body.get("forest") or "")
-        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
-            return _envelope(VineError(
-                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
 
         if request.method == "POST":
             cfg = cache_settings(forest)
@@ -3425,9 +3537,9 @@ def build_app(
             except json.JSONDecodeError as e:
                 return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
             forest = str(body.get("forest") or "")
-        if not forest or not is_admin(principal, forest, mask=mask_of(request)):
-            return _envelope(VineError(
-                E_FORBIDDEN, "requires the 'admin' capability on that forest"), 403)
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
 
         directory = snapshot_dir(forest)
         if request.method == "GET":
@@ -3779,6 +3891,7 @@ def build_app(
                                                 run_primitive, _launch_ingest)
         if mcp_app is not None:
             routes.append(Mount("/mcp", app=mcp_app))
+            mcp_state["enabled"] = True
 
     # Before the SPA: anything under /v1 that reached here matched no route,
     # so it answers as the API rather than falling through to the static file
@@ -3805,7 +3918,27 @@ def build_app(
         routes.append(Route("/", studio_missing))
         routes.append(Route("/{rest:path}", studio_missing))
 
+    async def unhandled(request: Request, exc: Exception) -> JSONResponse:
+        """C.12 rule 5: no route answers a bare 500.
+
+        The name of the exception is the whole disclosure — no message, no
+        traceback, no path, no SQL. What the caller needs is the
+        classification ("this is the server's fault, not my argument"), and
+        what the operator needs is in the log, where it already is.
+        """
+        log.exception("unhandled error on %s %s", request.method, request.url.path)
+        return _envelope(
+            VineError(
+                E_INTERNAL,
+                f"the Station failed handling this request ({type(exc).__name__})",
+                hint="This is a defect on the server, not in your call; the "
+                     "Station's log carries the detail.",
+            ),
+            500,
+        )
+
     app = Starlette(routes=routes, lifespan=lifespan,
+                    exception_handlers={Exception: unhandled},
                     middleware=[Middleware(SecurityHeaders, csp=studio_csp())])
     app.state.pool = pool
     app.state.registry = registry
