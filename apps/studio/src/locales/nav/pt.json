@@ -36,5 +36,7 @@
   "nav.skills.blurb": "Ensine a sua IA a usar esta floresta como memória",
   "nav.tokens": "Tokens",
   "nav.tokens.blurb": "Quais credenciais existem, e até quando",
-  "nav.unpin": "Tirar da barra"
+  "nav.unpin": "Tirar da barra",
+  "nav.webhooks": "Webhooks",
+  "nav.webhooks.blurb": "Avise as suas outras ferramentas quando algo acontece aqui"
 }

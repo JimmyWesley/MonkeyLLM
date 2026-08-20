@@ -113,6 +113,56 @@ CREATE TABLE IF NOT EXISTS forest_settings (
     value  TEXT NOT NULL,
     PRIMARY KEY (forest, key)
 );
+-- Webhooks (J.16): the outbound half. `scope` is a forest id, or '-' for
+-- the deployment — the same no-forest placeholder a governance audit row
+-- carries, so the two agree about what "belongs to no forest" looks like.
+-- `owner` is the principal whose authority the webhook rides on: it is
+-- re-read at every delivery, never only at creation (J.16.2), which is what
+-- keeps a standing instruction from outliving the grant behind it.
+CREATE TABLE IF NOT EXISTS webhooks (
+    id               TEXT PRIMARY KEY,
+    scope            TEXT NOT NULL,
+    owner            TEXT NOT NULL,
+    label            TEXT,
+    url              TEXT NOT NULL,
+    -- Shown once, at creation, and never read back over the API (J.16.4).
+    secret           TEXT NOT NULL,
+    events           TEXT NOT NULL,                 -- JSON list
+    branches         TEXT NOT NULL DEFAULT '[]',    -- JSON list; [] = every node
+    -- Write-only over the API, like a provider's key: the wire gets names.
+    headers          TEXT NOT NULL DEFAULT '{}',    -- JSON map
+    -- J.16.1's one opt-in: `title` and `summary` on events that name a
+    -- node. Never a body, in any mode.
+    include_metadata INTEGER NOT NULL DEFAULT 0,
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    -- NULL, 'failing' or 'authority'. Suspended rather than deleted: the
+    -- same fact delivered as silence reads as an integration that works.
+    suspended        TEXT,
+    fail_streak      INTEGER NOT NULL DEFAULT 0,
+    created          TEXT NOT NULL,
+    last_status      INTEGER,
+    last_at          TEXT
+);
+-- One row per ATTEMPT, so a delivery that retried four times is four rows
+-- sharing one `delivery` id and one body. `body` is kept because that is
+-- what makes redelivery a re-send rather than a reconstruction (J.16.4).
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    webhook  TEXT NOT NULL,
+    delivery TEXT NOT NULL,
+    event    TEXT NOT NULL,
+    attempt  INTEGER NOT NULL,
+    ts       TEXT NOT NULL,
+    status   INTEGER,
+    ms       REAL,
+    error    TEXT,
+    response TEXT,
+    body     TEXT NOT NULL
+);
+-- Just the webhook: SQLite will not index `rowid`, and it does not need
+-- to — the rows come back newest-first by rowid, which is the order they
+-- were inserted in.
+CREATE INDEX IF NOT EXISTS idx_deliveries_hook
+    ON webhook_deliveries(webhook);
 """
 
 # Indexes over columns that MIGRATIONS may still be about to add. Running
@@ -778,6 +828,133 @@ class Registry:
         out["endpoint"] = secret["endpoint"]
         out["api_key"] = secret["api_key"]
         return out
+
+    # -- webhooks (J.16) ----------------------------------------------------
+
+    def _webhook(self, row) -> dict:
+        """One row, with its JSON columns decoded.
+
+        The secret and the header VALUES are in here: this is the host's own
+        storage and the dispatcher needs both. Stripping them for the wire is
+        the API layer's job, in one place, so there is exactly one shaper to
+        get right (J.16.4).
+        """
+        out = dict(row)
+        out["events"] = json.loads(out["events"] or "[]")
+        out["branches"] = json.loads(out["branches"] or "[]")
+        out["headers"] = json.loads(out["headers"] or "{}")
+        out["include_metadata"] = bool(out["include_metadata"])
+        out["enabled"] = bool(out["enabled"])
+        return out
+
+    def webhooks(self, scopes: list[str] | None = None) -> list[dict]:
+        sql = "SELECT * FROM webhooks"
+        params: list = []
+        if scopes is not None:
+            if not scopes:
+                return []
+            sql += f" WHERE scope IN ({','.join('?' * len(scopes))})"
+            params.extend(scopes)
+        return [self._webhook(r) for r in
+                self.conn.execute(sql + " ORDER BY created DESC", params)]
+
+    def webhook(self, webhook_id: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM webhooks WHERE id = ?",
+                                (webhook_id,)).fetchone()
+        return self._webhook(row) if row else None
+
+    def put_webhook(self, *, webhook_id: str | None, scope: str, owner: str,
+                    url: str, events: list[str], label: str | None = None,
+                    branches: list[str] | None = None,
+                    headers: dict | None = None,
+                    include_metadata: bool = False, enabled: bool = True,
+                    secret: str | None = None) -> dict:
+        """Create or replace one webhook.
+
+        `secret` is written only when supplied — absent on an edit means
+        "keep the one you have", which is what makes a shown-once secret
+        survive every later change to the subscription (J.16.4). Editing
+        also clears `suspended` and the streak: an operator who changed the
+        address has answered the reason it was suspended for.
+        """
+        existing = self.webhook(webhook_id) if webhook_id else None
+        if webhook_id and existing is None:
+            raise ValueError(f"unknown webhook: {webhook_id}")
+        wid = webhook_id or f"wh-{secrets.token_hex(5)}"
+        if existing is None:
+            self.conn.execute(
+                "INSERT INTO webhooks (id, scope, owner, label, url, secret, "
+                "events, branches, headers, include_metadata, enabled, created) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (wid, scope, owner, label, url, secret or "",
+                 json.dumps(sorted(set(events))), json.dumps(branches or []),
+                 json.dumps(headers or {}), int(bool(include_metadata)),
+                 int(bool(enabled)), _now()))
+        else:
+            self.conn.execute(
+                "UPDATE webhooks SET scope = ?, owner = ?, label = ?, url = ?, "
+                "events = ?, branches = ?, headers = ?, include_metadata = ?, "
+                "enabled = ?, suspended = NULL, fail_streak = 0"
+                + (", secret = ?" if secret else "") + " WHERE id = ?",
+                (scope, owner, label, url, json.dumps(sorted(set(events))),
+                 json.dumps(branches or []), json.dumps(headers or {}),
+                 int(bool(include_metadata)), int(bool(enabled)))
+                + ((secret,) if secret else ()) + (wid,))
+        self.conn.commit()
+        return self.webhook(wid)
+
+    def delete_webhook(self, webhook_id: str) -> bool:
+        cur = self.conn.execute("DELETE FROM webhooks WHERE id = ?", (webhook_id,))
+        self.conn.execute("DELETE FROM webhook_deliveries WHERE webhook = ?",
+                          (webhook_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def set_webhook_state(self, webhook_id: str, **fields) -> None:
+        """The dispatcher's write-back: streak, suspension, last outcome.
+
+        Deliberately narrow. Everything an operator edits goes through
+        `put_webhook`; this is the worker thread reporting what the world
+        did, and it must not be able to change a subscription.
+        """
+        allowed = ("fail_streak", "suspended", "last_status", "last_at",
+                   "enabled")
+        sets = {k: v for k, v in fields.items() if k in allowed}
+        if not sets:
+            return
+        assignments = ", ".join(f"{k} = ?" for k in sets)
+        self.conn.execute(f"UPDATE webhooks SET {assignments} WHERE id = ?",
+                          (*sets.values(), webhook_id))
+        self.conn.commit()
+
+    def record_delivery(self, *, webhook: str, delivery: str, event: str,
+                        attempt: int, ts: str, status: int | None,
+                        ms: float | None, error: str | None,
+                        response: str | None, body: str,
+                        keep: int = 100) -> None:
+        """One attempt, kept. Bounded per webhook, the C.6 rule applied to a
+        store: the oldest rows go rather than the file growing forever."""
+        self.conn.execute(
+            "INSERT INTO webhook_deliveries (webhook, delivery, event, attempt, "
+            "ts, status, ms, error, response, body) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (webhook, delivery, event, int(attempt), ts, status, ms, error,
+             response, body))
+        self.conn.execute(
+            "DELETE FROM webhook_deliveries WHERE webhook = ? AND rowid NOT IN "
+            "(SELECT rowid FROM webhook_deliveries WHERE webhook = ? "
+            " ORDER BY rowid DESC LIMIT ?)", (webhook, webhook, int(keep)))
+        self.conn.commit()
+
+    def deliveries(self, webhook: str, limit: int = 50) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM webhook_deliveries WHERE webhook = ? "
+            "ORDER BY rowid DESC LIMIT ?", (webhook, int(limit)))]
+
+    def delivery(self, webhook: str, delivery: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM webhook_deliveries WHERE webhook = ? AND delivery = ? "
+            "ORDER BY rowid DESC LIMIT 1", (webhook, delivery)).fetchone()
+        return dict(row) if row else None
 
     # -- bootstrap ----------------------------------------------------------
 
