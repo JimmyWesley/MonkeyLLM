@@ -190,6 +190,7 @@ todo lo demás está detrás de la puerta que se indica.
 | `pick` | `read` | Lee el cuerpo, o una sección de él. |
 | `scan` | `read` | Filtra los nodos de una rama por metadatos. |
 | `sniff` | `read` | Búsqueda literal dentro de los cuerpos los hechos que los resúmenes no llevan. |
+| `calendar` | `read` | Dónde está en el tiempo el material del bosque: cuántos nodos guarda cada período, del más reciente hacia atrás. |
 | `harvest` | `read` | Recuperación de un solo tiro: evidencia ordenada con fragmentos exactos, sin saltos. |
 | `answer` | `read` | Una respuesta fundamentada escrita por el modelo enlazado al bosque, con su evidencia. |
 | `view` | `read` | El payload de imagen de un nodo media, como contenido de imagen que un cliente multimodal lee en su propio contexto. |
@@ -198,6 +199,12 @@ todo lo demás está detrás de la puerta que se indica.
 | `graft` | `write` | Edita un nodo. |
 | `tend` | `tend` | Escritura de dataset de una sola sentencia. |
 | `ingest` | `ingest` | Mete documentos en el bosque a través del Gardener. |
+
+Toda llamada de búsqueda acepta una ventana opcional `since`/`until` sobre
+las fechas de los nodos, y `calendar` dice qué períodos guardan algo — así
+"qué decidimos la semana pasada" son dos fechas leídas de un mapa en lugar de
+un barrido del bosque entero. `look` y `pick` también aceptan una lista de
+ids: una llamada, un presupuesto, cada id rendido cuentas.
 
 Un modelo mental razonable: `answer` y `harvest` son los de un solo tiro, la
 familia `locate`/`look`/`move`/`pick`/`scan`/`sniff` es navegación, `query`
@@ -319,7 +326,7 @@ de un presupuesto de tokens declarado, y un resultado recortado siempre dice
 |---|---|
 | `look` | 500 |
 | `move` | 600 |
-| `locate`, `scan`, `sniff` | 800 cada uno |
+| `locate`, `scan`, `sniff`, `calendar` | 800 cada uno |
 | `query` | 2000 |
 | `pick`, `harvest` | 4000 |
 

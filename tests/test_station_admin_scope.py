@@ -119,8 +119,15 @@ def test_every_admin_route_refuses_a_non_admin(station):
 
     got = {}
     for path, method in _admin_routes(app):
+        # The forest travels in the query AND in the body: since v0.52 a
+        # route that was not told which forest answers E_SCHEMA (C.12 rule
+        # 6), and a sweep that sent malformed requests would be asserting
+        # that a missing parameter is a denial — the exact confusion that
+        # rule removes. Every request here is well-formed, so the status is
+        # about authority and nothing else.
         got[f"{method} {path}"] = client.request(
-            method, path, json={"forest": MINE, "principal": "reader"},
+            method, path, params={"forest": MINE},
+            json={"forest": MINE, "principal": "reader"},
             headers=head).status_code
 
     assert got, "the sweep found no routes, which would make it vacuous"

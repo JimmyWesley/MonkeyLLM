@@ -95,7 +95,7 @@ export const MESSAGES = {
 
     btnClipPage: 'Clip page',
     btnClipSelection: 'Clip selection',
-    btnScreenshot: 'Screenshot',
+    btnScreenshot: 'Page as image',
     btnClipBoth: 'Page + screenshot',
     btnRegion: 'Capture region',
     btnWrite: 'Write',
@@ -215,7 +215,7 @@ export const MESSAGES = {
 
     btnClipPage: 'Recortar página',
     btnClipSelection: 'Recortar seleção',
-    btnScreenshot: 'Captura de tela',
+    btnScreenshot: 'Página como imagem',
     btnClipBoth: 'Página + captura',
     btnRegion: 'Capturar região',
     btnWrite: 'Escrever',
@@ -335,7 +335,7 @@ export const MESSAGES = {
 
     btnClipPage: 'Recortar página',
     btnClipSelection: 'Recortar selección',
-    btnScreenshot: 'Captura de pantalla',
+    btnScreenshot: 'Página como imagen',
     btnClipBoth: 'Página + captura',
     btnRegion: 'Capturar región',
     btnWrite: 'Escribir',

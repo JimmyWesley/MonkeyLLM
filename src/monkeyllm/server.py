@@ -202,19 +202,54 @@ def build_server(
 
     @mcp.tool()
     def locate(query: str, k: int = 5, scope: str = "all",
-               type_filter: str | None = None, forest: str | None = None) -> dict:
-        """Find entry points (the helicopter). scope: all|branches|bananas."""
-        return guarded("locate", forest, query, k=k, scope=scope, type_filter=type_filter)
+               type_filter: str | None = None, include: list[str] | None = None,
+               since: str | None = None, until: str | None = None,
+               date_field: str | None = None,
+               forest: str | None = None) -> dict:
+        """Find entry points (the helicopter). scope: all|branches|bananas.
+
+        Results carry `body_tokens`; include=["outline"] adds each result's
+        section headers. An empty result says how many nodes were searched
+        and points at sniff(), which is what searches bodies.
+        since/until (YYYY, YYYY-MM or YYYY-MM-DD, inclusive) bound the search
+        by when nodes were created; calendar() says which periods hold any."""
+        return guarded("locate", forest, query, k=k, scope=scope,
+                       type_filter=type_filter, include=include, since=since,
+                       until=until, date_field=date_field)
 
     @mcp.tool()
     def sniff(terms: str | list[str], scope: str | None = None, k: int = 5,
-              type_filter: str | None = None, forest: str | None = None) -> dict:
-        """Literal grep over node bodies (the tracker): exact terms -> node + section + snippet."""
-        return guarded("sniff", forest, terms, scope=scope, k=k, type_filter=type_filter)
+              type_filter: str | None = None, since: str | None = None,
+              until: str | None = None, date_field: str | None = None,
+              forest: str | None = None) -> dict:
+        """Literal grep over node bodies (the tracker): exact terms -> node +
+        section + snippet. since/until bound it by date, which is also the
+        cheapest filter here: a windowed sniff opens those days' files only."""
+        return guarded("sniff", forest, terms, scope=scope, k=k,
+                       type_filter=type_filter, since=since, until=until,
+                       date_field=date_field)
 
     @mcp.tool()
-    def look(id: str, fields: list[str] | None = None, forest: str | None = None) -> dict:
-        """Digest of a node (<=500 tokens): summary, outline/children, edges, stats."""
+    def calendar(scope: str | None = None, date_field: str = "created",
+                 granularity: str = "month", since: str | None = None,
+                 until: str | None = None, limit: int = 24,
+                 forest: str | None = None) -> dict:
+        """Where the forest's material sits in time (spec C.13.3): how many
+        nodes each period holds, most recent first, from curated metadata
+        alone. Each bucket carries the exact since/until that locate, sniff,
+        scan and harvest take, so a question about "last week" becomes two
+        dates read off this map instead of arithmetic. granularity:
+        day|week|month|year."""
+        return guarded("calendar", forest, scope=scope, date_field=date_field,
+                       granularity=granularity, since=since, until=until,
+                       limit=limit)
+
+    @mcp.tool()
+    def look(id: str | list[str], fields: list[str] | None = None,
+             forest: str | None = None) -> dict:
+        """Digest of a node (<=500 tokens): summary, outline/children, edges,
+        stats. `id` may be a list of up to 10 — one call, one budget
+        (spec C.11)."""
         return guarded("look", forest, id, fields=fields)
 
     @mcp.tool()
@@ -224,8 +259,10 @@ def build_server(
         return guarded("move", forest, id, rel=rel, direction=direction)
 
     @mcp.tool()
-    def pick(id: str, section: str | None = None, forest: str | None = None) -> dict:
-        """Harvest the body (or one section) of a node."""
+    def pick(id: str | list[str], section: str | None = None,
+             forest: str | None = None) -> dict:
+        """Harvest the body (or one section) of a node. `id` may be a list
+        of up to 5, sharing one 4000-token budget (spec C.11)."""
         return guarded("pick", forest, id, section=section)
 
     @mcp.tool()
@@ -265,12 +302,15 @@ def build_server(
                        recursive=recursive, limit=limit)
 
     @mcp.tool()
-    def plant(node: dict, forest: str | None = None) -> dict:
+    def plant(node: dict, if_absent: bool = False,
+              forest: str | None = None) -> dict:
         """Create a node: frontmatter + body + parent (atomic: file+index+git commit).
         For type:dataset, pass schema={table: {columns: {name: TEXT|INTEGER|REAL|BLOB},
         primary_key?: [...]}} and Vine births the SQLite payload + query manual
-        (spec C.7.1); rows then enter via tend()."""
-        return guarded("plant", forest, node)
+        (spec C.7.1); rows then enter via tend().
+        if_absent=True makes the write repeatable: an id already taken
+        answers created:false and writes nothing (spec C.7.2)."""
+        return guarded("plant", forest, node, if_absent=if_absent)
 
     @mcp.tool()
     def graft(id: str, patch: dict, forest: str | None = None) -> dict:

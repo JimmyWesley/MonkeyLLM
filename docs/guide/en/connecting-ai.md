@@ -172,6 +172,7 @@ gated as shown.
 | `pick` | `read` | Reads the body, or one section of it. |
 | `scan` | `read` | Filters a branch's nodes by metadata. |
 | `sniff` | `read` | Literal search inside bodies the facts summaries do not carry. |
+| `calendar` | `read` | Where the forest's material sits in time: how many nodes each period holds, most recent first. |
 | `harvest` | `read` | One-shot retrieval: ranked evidence with exact snippets, no hops. |
 | `answer` | `read` | A grounded answer written by the model bound to the forest, with its evidence. |
 | `view` | `read` | The image payload of a media node, as image content a multimodal client reads into its own context. |
@@ -180,6 +181,12 @@ gated as shown.
 | `graft` | `write` | Edits a node. |
 | `tend` | `tend` | Single-statement dataset write. |
 | `ingest` | `ingest` | Puts documents into the forest through the Gardener. |
+
+Every searching call takes an optional `since`/`until` window over node
+dates, and `calendar` says which periods hold anything — so "what did we
+decide last week" becomes two dates read off a map instead of a sweep of the
+whole forest. `look` and `pick` also accept a list of ids: one call, one
+budget, every id accounted for.
 
 A reasonable mental model: `answer` and `harvest` are the one-shots, the
 `locate`/`look`/`move`/`pick`/`scan`/`sniff` family is navigation, `query` and
@@ -294,7 +301,7 @@ budget, and a cut result always says `truncated: true` never a silent cut:
 |---|---|
 | `look` | 500 |
 | `move` | 600 |
-| `locate`, `scan`, `sniff` | 800 each |
+| `locate`, `scan`, `sniff`, `calendar` | 800 each |
 | `query` | 2000 |
 | `pick`, `harvest` | 4000 |
 

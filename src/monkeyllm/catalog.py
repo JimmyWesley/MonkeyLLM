@@ -67,6 +67,12 @@ CREATE TABLE IF NOT EXISTS nodes (
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent);
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
+-- C.13 (v0.52): the two clocks a read may be windowed by. The predicates
+-- are bare range comparisons on these columns for exactly this reason —
+-- a `substr()` around one computes the same answer and cannot use the
+-- index, which is the whole difference on a forest worth windowing.
+CREATE INDEX IF NOT EXISTS idx_nodes_created ON nodes(created);
+CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated);
 
 -- C.6b.1: the memoized literal scan. One row per (folded term, node),
 -- valid while `body_hash` still matches the node's. `lines` is the
@@ -165,6 +171,71 @@ class Catalog:
             self.fts_search(term, limit=1)
 
     # -- write -------------------------------------------------------------
+
+    # -- counts and clocks (C.1.1, C.13) ------------------------------------
+
+    def count_nodes(self, where: list[str] | None = None,
+                    params: list | None = None) -> int:
+        """How many nodes carry curated scent (C.1.1, v0.52).
+
+        Asked only when an entry search came back empty, so the caller can
+        tell "nothing matched" from "there was nothing to match" — and,
+        with a window's predicate (C.13.2), "nothing was in that window"
+        from "the window held material and the question missed it".
+        """
+        sql = "SELECT count(*) FROM nodes"
+        if where:
+            sql += " WHERE " + " AND ".join(c.format(n="") for c in where)
+        return int(self.conn.execute(sql, params or []).fetchone()[0])
+
+    def date_column(self, field: str, where: list[str] | None = None,
+                    params: list | None = None) -> list[str]:
+        """Every node's date, for the C.13.3 fold.
+
+        Ids are not returned: this answers "when", never "what", and a
+        count is the only thing built from it.
+        """
+        if field not in ("created", "updated"):  # never interpolated blind
+            raise ValueError(f"not a date column: {field}")
+        sql = f"SELECT {field} FROM nodes"
+        if where:
+            sql += " WHERE " + " AND ".join(c.format(n="") for c in where)
+        return [r[0] for r in self.conn.execute(sql, params or []).fetchall()]
+
+    def date_buckets(self, field: str, granularity: str,
+                     where: list[str] | None = None,
+                     params: list | None = None) -> list[tuple]:
+        """(period_start, nodes, first, last) per period, grouped by SQLite
+        (C.13.3).
+
+        One row per period rather than one per node: the counting happens
+        in C, and a forest of forty thousand nodes answers with a dozen
+        rows. The period expression comes from `windows.period_sql` so the
+        grouping and the labelling cannot drift apart.
+        """
+        from monkeyllm.windows import period_sql
+
+        if field not in ("created", "updated"):
+            raise ValueError(f"not a date column: {field}")
+        expr = period_sql(field, granularity)
+        clauses = [f"{field} != ''", f"{field} IS NOT NULL"]
+        clauses += [c.format(n="") for c in (where or [])]
+        return [tuple(r) for r in self.conn.execute(
+            f"SELECT {expr} AS period, count(*), min({field}), max({field}) "
+            f"FROM nodes WHERE " + " AND ".join(clauses) +
+            " GROUP BY period ORDER BY period DESC", params or []).fetchall()]
+
+    def dates_by_id(self, field: str, where: list[str] | None = None,
+                    params: list | None = None) -> list[tuple[str, str]]:
+        """(id, date) pairs — the scoped path's raw material (J.3): a policy
+        filters ids, and only then are the dates counted."""
+        if field not in ("created", "updated"):
+            raise ValueError(f"not a date column: {field}")
+        sql = f"SELECT id, {field} FROM nodes"
+        if where:
+            sql += " WHERE " + " AND ".join(c.format(n="") for c in where)
+        return [(r["id"], r[field]) for r in
+                self.conn.execute(sql, params or []).fetchall()]
 
     # -- the memoized scan (C.6b.1) -----------------------------------------
 
@@ -430,20 +501,31 @@ class Catalog:
     # in prose; id is UNINDEXED so its slot is 0.
     FTS_WEIGHTS = (0.0, 4.0, 3.0, 2.0, 1.0)
 
-    def fts_search(self, query: str, limit: int = 50) -> list[sqlite3.Row]:
+    def fts_search(self, query: str, limit: int = 50,
+                   where: list[str] | None = None,
+                   params: list | None = None) -> list[sqlite3.Row]:
         """BM25 search. User query is sanitized into quoted terms (no FTS
-        syntax injection); bm25 rank: lower = better."""
+        syntax injection); bm25 rank: lower = better.
+
+        `where`/`params` are C.13.1's window, applied HERE rather than to
+        the ranked result: a filter after the cut returns fewer than `k`
+        while the forest still holds matches, and the caller reads a
+        scarcity the implementation invented. Clauses carry `{n}` where the
+        node table's alias belongs, so one predicate serves this join and
+        the plain scans elsewhere.
+        """
         terms = [t.replace('"', '""') for t in query.split() if t.strip()]
         if not terms:
             return []
         match = " OR ".join(f'"{t}"' for t in terms)
         weights = ", ".join(str(w) for w in self.FTS_WEIGHTS)
+        extra = "".join(" AND " + c.format(n="n.") for c in (where or []))
         return self.conn.execute(
             f"""SELECT n.*, bm25(nodes_fts, {weights}) AS rank
                FROM nodes_fts f JOIN nodes n ON n.id = f.id
-               WHERE nodes_fts MATCH ?
+               WHERE nodes_fts MATCH ?{extra}
                ORDER BY rank LIMIT ?""",
-            (match, limit),
+            (match, *(params or []), limit),
         ).fetchall()
 
     def children(self, parent_id: str, recursive: bool = False) -> list[sqlite3.Row]:

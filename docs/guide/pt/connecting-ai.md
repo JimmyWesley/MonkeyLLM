@@ -189,6 +189,7 @@ o resto é guardado como mostrado.
 | `pick` | `read` | Lê o corpo, ou uma seção dele. |
 | `scan` | `read` | Filtra os nós de um galho por metadados. |
 | `sniff` | `read` | Busca literal dentro dos corpos os fatos que os resumos não carregam. |
+| `calendar` | `read` | Onde o material da floresta está no tempo: quantos nós cada período guarda, do mais recente para trás. |
 | `harvest` | `read` | Recuperação de um golpe só: evidência ordenada com trechos exatos, sem saltos. |
 | `answer` | `read` | Uma resposta fundamentada escrita pelo modelo ligado à floresta, com a sua evidência. |
 | `view` | `read` | O payload de imagem de um nó media, como conteúdo de imagem que um cliente multimodal lê para o próprio contexto. |
@@ -197,6 +198,12 @@ o resto é guardado como mostrado.
 | `graft` | `write` | Edita um nó. |
 | `tend` | `tend` | Escrita de dataset em uma instrução única. |
 | `ingest` | `ingest` | Coloca documentos dentro da floresta através do Gardener. |
+
+Toda chamada de busca aceita uma janela opcional `since`/`until` sobre as
+datas dos nós, e `calendar` diz quais períodos guardam alguma coisa — então
+"o que decidimos semana passada" vira duas datas lidas de um mapa, em vez de
+uma varredura da floresta inteira. `look` e `pick` também aceitam uma lista
+de ids: uma chamada, um orçamento, todo id prestado conta.
 
 Um modelo mental razoável: `answer` e `harvest` são os de-um-golpe-só, a
 família `locate`/`look`/`move`/`pick`/`scan`/`sniff` é navegação, `query` e
@@ -316,7 +323,7 @@ orçamento de tokens declarado, e um resultado cortado sempre diz
 |---|---|
 | `look` | 500 |
 | `move` | 600 |
-| `locate`, `scan`, `sniff` | 800 cada |
+| `locate`, `scan`, `sniff`, `calendar` | 800 cada |
 | `query` | 2000 |
 | `pick`, `harvest` | 4000 |
 
