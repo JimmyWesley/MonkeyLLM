@@ -13,6 +13,7 @@ thought of; this one catches the ones you did not — it is how `coverage`,
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -224,6 +225,83 @@ def test_query_table_allow_list(vine_ro):
     allowed = ScopedVine(vine_ro, Policy(forest="f", caps=frozenset({"read", "query"}),
                                          allow=("sales/",), tables={dataset: ("sales",)}))
     assert "rows" in allowed.call("query", id=dataset, sql="SELECT * FROM sales LIMIT 1")
+
+
+DATASET = "sales/report-q1-2026"
+
+# Five spellings of one statement. The first is the one a person writes; the
+# rest are the ones somebody writes on purpose, and each was chosen because a
+# name-matching regex reads it differently from SQLite: no space after FROM, a
+# comment where the space goes, the forbidden table hidden in a subquery
+# behind a permitted one, and a CTE. The point is not this list — it is that
+# the list has no end while the control is textual, which is why the control
+# is not textual any more.
+EQUIVALENT_TO_SELECTING_FROM_SALES = [
+    "SELECT * FROM sales LIMIT 1",
+    "SELECT * FROM(sales) LIMIT 1",
+    "SELECT * FROM/**/sales LIMIT 1",
+    "SELECT (SELECT COUNT(*) FROM(sales)) AS leaked",
+    "WITH c AS (SELECT * FROM(sales)) SELECT * FROM c",
+]
+
+
+@pytest.mark.parametrize("sql", EQUIVALENT_TO_SELECTING_FROM_SALES)
+def test_the_table_scope_is_decided_by_sqlite(vine_ro, sql):
+    """C.5/J.3 say the allow-list is checked against the *parsed* statement.
+
+    Reading table names out of SQL text is a second parser, and it disagrees
+    with the real one wherever nobody looked. SQLite's authorizer is asked
+    once per table the statement actually touches, so every spelling of the
+    same read is the same answer.
+    """
+    scoped = ScopedVine(vine_ro, Policy(
+        forest="f", caps=frozenset({"read", "query"}),
+        allow=("sales/",), tables={DATASET: ("nothing_here",)}))
+    out = scoped.call("query", id=DATASET, sql=sql)
+    assert out["error"]["code"] in ("E_FORBIDDEN", "E_QUERY_FORBIDDEN"), sql
+    assert "rows" not in out, sql
+
+
+def test_the_scope_does_not_narrow_what_it_was_not_asked_to(vine_ro):
+    """The refusals above must not be the primitive simply refusing: a
+    permitted table still reads, including through the same unusual syntax."""
+    scoped = ScopedVine(vine_ro, Policy(
+        forest="f", caps=frozenset({"read", "query"}),
+        allow=("sales/",), tables={DATASET: ("sales",)}))
+    assert "rows" in scoped.call("query", id=DATASET, sql="SELECT * FROM sales LIMIT 1")
+    assert "rows" in scoped.call("query", id=DATASET, sql="SELECT * FROM(sales) LIMIT 1")
+    # And an ungoverned principal keeps the whole dataset.
+    whole = ScopedVine(vine_ro, Policy(forest="f", caps=frozenset({"read", "query"}),
+                                       allow=("sales/",)))
+    assert "rows" in whole.call("query", id=DATASET, sql="SELECT * FROM sales LIMIT 1")
+
+
+def test_the_not_found_hint_does_not_name_what_is_withheld(vine_ro):
+    """Under a table scope, the hint names only permitted tables. An
+    inventory of everything in the file is, to a caller who may read part of
+    it, a list of what is being withheld — and a misspelling is not a reason
+    to hand that over."""
+    scoped = ScopedVine(vine_ro, Policy(
+        forest="f", caps=frozenset({"read", "query"}),
+        allow=("sales/",), tables={DATASET: ("nothing_here",)}))
+    out = scoped.call("query", id=DATASET, sql="SELECT * FROM no_such_table_here")
+    assert "sales" not in json.dumps(out)
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT * FROM pragma_database_list",
+    "SELECT * FROM pragma_table_list",
+    "SELECT * FROM pragma_table_info('sales')",
+])
+def test_the_pragma_functions_are_refused(vine_ro, sql):
+    """The keyword and the `pragma_*` functions are separate syntax and both
+    are refused. The read-only connection stops what changes state; these
+    describe instead — the schema, and where the payload sits — and neither
+    is the caller's to read."""
+    scoped = ScopedVine(vine_ro, Policy(forest="f", caps=frozenset({"read", "query"}),
+                                        allow=("sales/",)))
+    out = scoped.call("query", id=DATASET, sql=sql)
+    assert out["error"]["code"] in ("E_FORBIDDEN", "E_QUERY_FORBIDDEN"), sql
 
 
 def test_write_outside_grant_is_forbidden_not_notfound(vine_ro):

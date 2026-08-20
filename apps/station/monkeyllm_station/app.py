@@ -14,8 +14,10 @@ the Station is a privileged client, not a fork of the server.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import io
+import ipaddress
 import json
 import logging
 import math
@@ -24,6 +26,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -37,8 +40,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
-from starlette.datastructures import Headers
+from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
+from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
@@ -227,6 +231,108 @@ STUDIO_DIST = Path(__file__).resolve().parents[2] / "studio" / "dist"
 CLIPPER_DIR = Path(__file__).resolve().parents[2] / "clipper"
 CLIPPER_DIR_ENV = "MONKEYLLM_STATION_CLIPPER_DIR"
 
+# J.13.2 snapshot import: how many megabytes an uploaded bundle may be.
+IMPORT_MAX_MB_ENV = "MONKEYLLM_STATION_IMPORT_MAX_MB"
+DEFAULT_IMPORT_MAX_MB = 1024.0
+
+
+_INLINE_SCRIPT = re.compile(
+    rb"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.IGNORECASE | re.DOTALL)
+
+
+def _inline_script_hashes(shell: Path) -> list[str]:
+    """CSP sources for the shell's own inline scripts, read from the build.
+
+    The console boots the saved theme before first paint and registers its
+    service worker inline, and both have to keep running under a policy that
+    otherwise forbids inline script. Hashing the built file rather than
+    writing the digests down here is what keeps them true: a hash maintained
+    by hand goes stale the first time somebody edits the boot script, and it
+    fails silently — the page still loads, it just stops doing the one thing
+    the script was there for.
+    """
+    try:
+        html = shell.read_bytes()
+    except OSError:
+        return []
+    return [f"'sha256-{base64.b64encode(hashlib.sha256(body).digest()).decode()}'"
+            for body in _INLINE_SCRIPT.findall(html)]
+
+
+def studio_csp() -> str:
+    """What the console's page is allowed to load (J.5).
+
+    Studio renders two kinds of untrusted text as markdown: what a model
+    wrote, and the body of an ingested document. The product's own premise is
+    that ingested content comes from outside — the Clipper exists to capture
+    third-party pages. Whatever such text can talk the page into fetching, it
+    fetches from the operator's authenticated browser, and the Station is not
+    on that path at all: no server-side check can be the control here, which
+    is why the browser has to be told the rules up front.
+
+    `img-src 'self' data: blob:` is the load-bearing line. A legitimate image
+    is fetched through J.14 with the viewer's credential and shown as a
+    `blob:`, so it still renders; an off-origin address never loads, and
+    nothing legitimate needs one.
+    `style-src` keeps `'unsafe-inline'` because React style attributes and
+    mermaid's injected CSS both need it; script has no such need — the bundle
+    contains no `eval` or `new Function` — so it is hashes and same-origin
+    only.
+    """
+    hashes = " ".join(_inline_script_hashes(STUDIO_DIST / "index.html"))
+    return "; ".join([
+        "default-src 'self'",
+        "base-uri 'none'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+        "img-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "style-src 'self' 'unsafe-inline'",
+        f"script-src 'self' {hashes}".rstrip(),
+        "connect-src 'self'",
+        "worker-src 'self'",
+    ])
+
+
+class SecurityHeaders:
+    """Baseline response headers on every surface.
+
+    Pure ASGI rather than `BaseHTTPMiddleware`: headers are stamped on the
+    response-start message, so a file download and a job report stream
+    through untouched.
+
+    Set with `setdefault`, so a route that has a reason to state its own
+    policy keeps it.
+    """
+
+    def __init__(self, app, csp: str) -> None:
+        self.app = app
+        self.csp = csp
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers.setdefault("content-security-policy", self.csp)
+                # A JSON envelope sniffed as HTML is a stored-XSS primitive;
+                # the forest's own content is what fills those envelopes.
+                headers.setdefault("x-content-type-options", "nosniff")
+                # A console address names the forest and the node being read.
+                # That belongs to the reader, not to whatever host a page
+                # happens to reference.
+                headers.setdefault("referrer-policy", "no-referrer")
+                # `frame-ancestors` above says the same thing to browsers that
+                # implement CSP; this covers the ones that do not.
+                headers.setdefault("x-frame-options", "DENY")
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
 
 class StudioFiles(StaticFiles):
     """The build, plus the console's own addresses (J.5.8).
@@ -278,6 +384,56 @@ STATUS_BY_CODE = {
 def _envelope(err: VineError, status: int | None = None) -> JSONResponse:
     return JSONResponse(err.to_dict(),
                         status_code=status or STATUS_BY_CODE.get(err.code, 400))
+
+
+PROVIDER_ALLOW_PRIVATE_ENV = "MONKEYLLM_STATION_PROVIDER_ALLOW_PRIVATE"
+
+
+def _allow_private_endpoints() -> bool:
+    """Whether the provider-test route may reach loopback and private hosts.
+
+    Off by default. A local llama.cpp or Ollama lives on localhost, so a
+    deployment that runs its own inference turns this on explicitly; a
+    deployment that only reaches hosted providers never should.
+    """
+    raw = os.environ.get(PROVIDER_ALLOW_PRIVATE_ENV, "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _reject_internal_endpoint(endpoint: str) -> JSONResponse | None:
+    """Refuse a destination the server should not connect to on request.
+
+    The provider-test route lets the caller choose an address the Station
+    then fetches. Unguarded that is a request-forgery primitive aimed at the
+    host's own network — cloud metadata, internal ports, panels that trust
+    their origin. So the address is validated: http/https only, and every IP
+    the host name resolves to must be public. Returns an envelope to send, or
+    None when the endpoint is allowed.
+    """
+    parts = urlsplit(endpoint)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return _envelope(VineError(
+            E_SCHEMA, "endpoint must be an http(s) URL with a host"))
+    if _allow_private_endpoints():
+        return None
+    host = parts.hostname
+    try:
+        # Resolve the name and judge every address it maps to. Inspecting the
+        # string would decide on what the URL says rather than on where it
+        # goes, and a name can be made to say anything.
+        infos = socket.getaddrinfo(host, parts.port or None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        return _envelope(VineError(
+            E_SCHEMA, f"endpoint host does not resolve: {host}"))
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0])
+        if (addr.is_loopback or addr.is_private or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return _envelope(VineError(
+                E_SCHEMA, "endpoint resolves to a non-public address",
+                hint=f"Set {PROVIDER_ALLOW_PRIVATE_ENV}=1 to allow local or "
+                     "private providers (e.g. a llama.cpp on localhost)."))
+    return None
 
 
 def _server_timing(clocks: dict) -> str:
@@ -769,6 +925,56 @@ def build_app(
         if forest is not None:
             grants = [g for g in grants if g["forest"] == forest]
         return any("admin" in g["caps"] for g in grants)
+
+    # A governance action belongs to no forest: it is about who may open them
+    # (J.2), or about configuration every one of them shares (J.10). The audit
+    # table wants a forest, so these rows carry this — one value, so that
+    # "show me the governance trail" is a filter and not a guess.
+    NO_FOREST = "-"
+
+    def record_governance(principal: str, primitive: str, args: dict,
+                          result: str, forest: str = NO_FOREST) -> None:
+        """Audit a change to who may do what (J.4, A09).
+
+        Part D records what was read and what was written. This records the
+        changes that decide who gets to do either, because that is the
+        question any later review starts from: when was this key made, and by
+        whom.
+
+        Same discipline as every other row: `record` digests arguments, and
+        nothing secret is passed here in the first place. A key is identified
+        by its non-secret prefix, a password only by the fact that one was
+        set.
+        """
+        try:
+            registry.record(principal=principal, forest=forest,
+                            primitive=primitive, args=args, result=result)
+        except Exception:  # pragma: no cover - the log must never break the act
+            log.warning("could not audit %s by %s", primitive, principal)
+
+    def governs_deployment(principal: str, mask: frozenset[str] | None = None) -> bool:
+        """May this principal edit configuration shared by every forest?
+
+        A provider (J.10) is one row serving all forests: its endpoint decides
+        where every forest's material is sent, and its key pays for every
+        forest's calls. Authority over it is therefore authority over the whole
+        deployment, and administering *one* forest is not that. J.3.2 calls
+        providers a host resource and leaves the reach unstated; this is the
+        reach.
+
+        Expressed as reach rather than as the owner bit alone, so the two
+        accounts that legitimately have deployment-wide authority keep it: the
+        break-glass environment account, which falls back to grants on every
+        forest when the owner seat is taken (J.2.1), and any administrator of a
+        single-forest deployment, where there is no other forest to cross into.
+        A newly created forest narrows that authority the moment it exists.
+        """
+        if mask is not None and "admin" not in mask:
+            return False
+        if registry.is_owner(principal):
+            return True
+        forests = {f["id"] for f in pool.list()["forests"]}
+        return bool(forests) and forests <= administered(principal)
 
     def administered(principal: str) -> set[str]:
         """The forests this principal governs (J.3.2).
@@ -1971,9 +2177,22 @@ def build_app(
         # yet, which `mine` could not express.
         if registry.is_owner(principal):
             return True
+        # The owner's authority is a bit on the principal, not a row in
+        # `grants` (J.2.4), so a rule that reasons about grants has to name the
+        # owner in its own right rather than infer them: only the owner
+        # administers the owner.
+        if registry.is_owner(target):
+            return False
         theirs = {g["forest"] for g in registry.grants_of(target)}
         mine = {g["forest"] for g in registry.grants_of(principal)
                 if "admin" in g["caps"]}
+        # Sharing no forest with someone is not the same as administering
+        # every forest they hold, and the subset test below cannot tell those
+        # two apart on its own. Onboarding is unaffected: J.2.3 applies the
+        # grant before the password and the key, in that order and for this
+        # reason.
+        if not theirs:
+            return False
         return bool(mine) and theirs <= mine
 
     async def auth_setup(request: Request) -> JSONResponse:
@@ -2015,6 +2234,7 @@ def build_app(
             return _no_such_endpoint("/auth/setup")
 
         session = registry.open_session(username)
+        record_governance(username, "auth.setup", {"username": username}, "ok")
         return JSONResponse({"key": session["key"], "principal": username,
                              "expires_at": session["expires_at"],
                              "admin": True, "owner": True})
@@ -2057,6 +2277,12 @@ def build_app(
 
         if not verify_login(username, password):
             auth_window.failed(username, host)
+            # Recorded, because "was anyone trying yesterday?" has no other
+            # answer: the limiter counts in memory and forgets on restart.
+            # The attempted username is stored as given — it is what was
+            # tried, which is the fact worth keeping.
+            record_governance(username or "-", "auth.login",
+                              {"username": username, "host": host}, "refused")
             # One message for a wrong password, an unknown user and a user
             # with no password at all: distinguishing them would turn the
             # login form into a directory of who exists.
@@ -2064,6 +2290,8 @@ def build_app(
         auth_window.clear(username, host)
 
         session = registry.open_session(username)
+        record_governance(username, "auth.login",
+                          {"username": username, "host": host}, "ok")
         return JSONResponse({"key": session["key"], "principal": username,
                              "expires_at": session["expires_at"],
                              "admin": is_admin(username),
@@ -2091,6 +2319,8 @@ def build_app(
 
         if not verify_login(username, password):
             auth_window.failed(username, host)
+            record_governance(username or "-", "auth.pair",
+                              {"username": username, "host": host}, "refused")
             # Same single message as `login`, verbatim (J.2.6).
             return _envelope(VineError(E_FORBIDDEN, "invalid username or password"), 401)
         auth_window.clear(username, host)
@@ -2139,6 +2369,11 @@ def build_app(
         key = registry.issue_key(
             username, label=str(body.get("label") or "").strip() or "clipper",
             expires_in_days=days, kind="api", caps=caps)
+        # A pair key is self-service, so nobody else witnesses it being made.
+        # The row is how it can be accounted for later.
+        record_governance(username, "auth.pair",
+                          {"username": username, "caps": ",".join(sorted(caps)),
+                           "prefix": key[:9], "expires_in_days": days}, "ok")
         # Second-resolution, like `open_session`'s reply: the row's own
         # timestamp may differ by the second the mint took.
         expires_at = (datetime.now(timezone.utc)
@@ -2173,6 +2408,8 @@ def build_app(
                 return _envelope(VineError(
                     E_FORBIDDEN, f"'{owner}' holds forests you do not administer"), 403)
             registry.revoke_key(str(body["revoke"]))
+            record_governance(principal, "admin.key.revoke",
+                              {"target": owner, "key": str(body["revoke"])}, "ok")
             return JSONResponse({"revoked": body["revoke"], "principal": owner})
 
         target = str(body.get("principal") or "").strip()
@@ -2191,6 +2428,11 @@ def build_app(
             return _envelope(VineError(E_SCHEMA, "expires_in_days must be a number"))
         key = registry.issue_key(target, label=body.get("label") or None,
                                  expires_in_days=days)
+        # The key itself never enters the log — the prefix is the identifier
+        # meant for naming one out loud.
+        record_governance(principal, "admin.key.issue",
+                          {"target": target, "label": body.get("label") or "",
+                           "prefix": key[:9], "expires_in_days": days}, "ok")
         return JSONResponse({"api_key": key, "principal": target,
                              "keys": registry.keys_of([target])})
 
@@ -2214,6 +2456,10 @@ def build_app(
                 E_FORBIDDEN, "the environment account has no stored password",
                 hint="Rotate MONKEYLLM_STATION_PASSWORD and restart."), 403)
         registry.set_password(target, body.get("password") or None)
+        # That a password was set, never the password and never its hash.
+        record_governance(principal, "admin.password",
+                          {"target": target,
+                           "cleared": not body.get("password")}, "ok")
         return JSONResponse({"principal": target,
                              "has_password": registry.has_password(target)})
 
@@ -2425,6 +2671,17 @@ def build_app(
         out = {"principal": target, "applied": applied, "refused": refused}
         if issued:
             out["api_key"] = issued
+        # One row for the request, listing the steps that landed and the ones
+        # that did not: this route is where a person is made, credentialed and
+        # unmade, so "what happened to this account, and when" is answerable
+        # from a single place. A refusal is worth recording too — that is what
+        # an attempt looks like afterwards.
+        if applied or refused:
+            record_governance(
+                principal, "admin.people",
+                {"target": target, "applied": ",".join(applied) or "-",
+                 "refused": ",".join(r["step"] for r in refused) or "-"},
+                "ok" if applied else "refused")
         # 403 only when nothing at all could be done; a partial success has
         # to report as one, or the console cannot tell the two apart.
         return JSONResponse(out, status_code=200 if applied else
@@ -2506,6 +2763,9 @@ def build_app(
                 hint="Nothing was left behind; try again."))
         # A forest nobody can open is a silent failure with a 200 (J.7).
         registry.grant(principal, forest_id, set(CAPS))
+        record_governance(principal, "admin.forest.create",
+                          {"title": title, "seed": seed or "-"}, "ok",
+                          forest=forest_id)
         return JSONResponse({"forest": {"id": forest_id, "title": title,
                                         "commit": info.get("commit")},
                              "grants": registry.grants_of(principal)})
@@ -2605,9 +2865,17 @@ def build_app(
                            tables=body.get("tables"))
         except ValueError as e:
             return _envelope(VineError(E_SCHEMA, str(e)))
+        # A grant is recorded against the forest it is about, so the forest's
+        # own administrator can read it back (the audit filter is per forest).
+        record_governance(principal, "admin.grant",
+                          {"target": target, "caps": ",".join(sorted(caps))},
+                          "ok", forest=forest)
         out = {"principal": target, "grants": registry.grants_of(target)}
         if body.get("issue_key"):
             out["api_key"] = registry.issue_key(target, label=forest)
+            record_governance(principal, "admin.key.issue",
+                              {"target": target, "label": forest,
+                               "prefix": out["api_key"][:9]}, "ok")
         return JSONResponse(out)
 
     async def admin_audit(request: Request) -> JSONResponse:
@@ -2621,6 +2889,13 @@ def build_app(
         # over-fetch, then keep only the forests this caller governs, so a
         # short page is a short page rather than a leak.
         mine = administered(principal)
+        # Governance rows belong to no forest, and they describe the whole
+        # deployment: who was granted what, which keys exist, where the
+        # provider points. Showing those to an administrator of one forest
+        # would hand them the shape of every other one — the same mistake
+        # J.3.2 corrected for content.
+        if registry.is_owner(principal):
+            mine = mine | {NO_FOREST}
         entries = [e for e in registry.audit(
             limit=limit * 4, principal=request.query_params.get("principal"))
             if e["forest"] in mine]
@@ -2630,10 +2905,19 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
-        if not is_admin(principal, mask=mask_of(request)):
+        mask = mask_of(request)
+        if not is_admin(principal, mask=mask):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
         if request.method == "GET":
+            # Listing is readable by any forest administrator: the name and
+            # endpoint are what a per-forest model binding points at, and no
+            # secret is returned (`has_key` is a bool).
             return JSONResponse({"providers": registry.providers()})
+        if not governs_deployment(principal, mask):
+            return _envelope(VineError(
+                E_FORBIDDEN, "managing providers requires authority over every forest",
+                hint="A provider serves every forest; administering one of "
+                     "several does not cover it."), 403)
         body = await request.json()
         try:
             if body.get("remove"):
@@ -2642,23 +2926,60 @@ def build_app(
                 registry.put_provider(body.get("name"), body.get("endpoint"),
                                       body.get("api_key"))
         except (ValueError, KeyError) as e:
+            record_governance(principal, "admin.provider",
+                              {"name": str(body.get("name") or ""),
+                               "endpoint": str(body.get("endpoint") or "")}, "refused")
             return _envelope(VineError(E_SCHEMA, str(e)))
+        # Where a provider points is where every forest's material goes, so a
+        # change of address is the entry somebody will want to find later.
+        record_governance(
+            principal, "admin.provider",
+            {"name": str(body.get("name") or ""),
+             "endpoint": "" if body.get("remove") else str(body.get("endpoint") or ""),
+             "removed": bool(body.get("remove")),
+             "key_supplied": bool(body.get("api_key"))}, "ok")
         return JSONResponse({"providers": registry.providers()})
 
     async def admin_provider_test(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
         if err:
             return err
-        if not is_admin(principal, mask=mask_of(request)):
-            return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
+        # Testing a provider spends the deployment's stored credential against
+        # a destination the caller names, so it carries the same authority as
+        # editing one.
+        if not governs_deployment(principal, mask_of(request)):
+            return _envelope(VineError(
+                E_FORBIDDEN, "testing a provider requires authority over every forest",
+                hint="A provider serves every forest; administering one of "
+                     "several does not cover it."), 403)
         from monkeyllm_station import inference
 
         body = await request.json()
         secret = registry.provider_secret(body.get("name", ""))
-        endpoint = body.get("endpoint") or (secret or {}).get("endpoint")
+        stored_endpoint = (secret or {}).get("endpoint")
+        endpoint = body.get("endpoint") or stored_endpoint
         if not endpoint:
             return _envelope(VineError(E_SCHEMA, "endpoint is required"))
-        key = body.get("api_key") or (secret or {}).get("api_key")
+        # The stored key belongs to the address it was stored against. A
+        # caller-supplied endpoint that differs from the stored one is a new
+        # destination: it brings its own key, or it goes with none. Only when
+        # the target is the provider's own address does the stored key attach.
+        if body.get("endpoint") and endpoint.rstrip("/") != (stored_endpoint or "").rstrip("/"):
+            key = body.get("api_key")
+        else:
+            key = body.get("api_key") or (secret or {}).get("api_key")
+        guard = _reject_internal_endpoint(endpoint)
+        if guard is not None:
+            record_governance(principal, "admin.provider.test",
+                              {"name": str(body.get("name") or ""),
+                               "endpoint": endpoint}, "refused")
+            return guard
+        # This route makes the server open a connection to an address the
+        # caller chose. Even refused, that is worth a row.
+        record_governance(principal, "admin.provider.test",
+                          {"name": str(body.get("name") or ""),
+                           "endpoint": endpoint,
+                           "stored_key": bool(key and not body.get("api_key"))}, "ok")
         return JSONResponse(await asyncio.get_running_loop().run_in_executor(
             None, lambda: inference.probe(endpoint, key)))
 
@@ -2685,6 +3006,14 @@ def build_app(
                                     reasoning=body.get("reasoning", "off"))
         except (ValueError, KeyError, TypeError) as e:
             return _envelope(VineError(E_SCHEMA, str(e)))
+        # Which model reads a forest's material is a property of that forest,
+        # so this row carries its id and its administrator can read it back.
+        record_governance(principal, "admin.model.bind",
+                          {"role": str(body.get("role") or ""),
+                           "provider": str(body.get("provider") or ""),
+                           "model": str(body.get("model") or ""),
+                           "removed": bool(body.get("remove"))},
+                          "ok", forest=forest)
         return JSONResponse({"bindings": registry.bindings(forest)})
 
     async def forest_map(request: Request) -> JSONResponse:
@@ -3245,7 +3574,12 @@ def build_app(
 
         # The body is the source (J.13.2): staged outside every forest,
         # beside the bundles the host already keeps.
-        cap_mb = float(os.environ.get("MONKEYLLM_STATION_IMPORT_MAX_MB") or 0)
+        # A ceiling by default, because an unbounded upload is a way to fill
+        # the volume that every other forest lives on. `0` still means no
+        # limit, for a deployment that decided so — the difference is that it
+        # is now decided rather than inherited.
+        raw_cap = os.environ.get(IMPORT_MAX_MB_ENV)
+        cap_mb = float(raw_cap) if raw_cap not in (None, "") else DEFAULT_IMPORT_MAX_MB
         incoming = Path(registry_path).resolve().parent / "snapshots" / "_incoming"
         incoming.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(dir=incoming))
@@ -3471,7 +3805,8 @@ def build_app(
         routes.append(Route("/", studio_missing))
         routes.append(Route("/{rest:path}", studio_missing))
 
-    app = Starlette(routes=routes, lifespan=lifespan)
+    app = Starlette(routes=routes, lifespan=lifespan,
+                    middleware=[Middleware(SecurityHeaders, csp=studio_csp())])
     app.state.pool = pool
     app.state.registry = registry
     app.state.ingest_roots = ingest_roots

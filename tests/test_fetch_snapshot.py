@@ -138,3 +138,56 @@ class TestSnapshots:
             restore_snapshot(info["bundle"], target)
         assert e.value.code == E_SCHEMA
         assert (target / "x.txt").read_text(encoding="utf-8") == "precious"
+
+
+class TestSidecarMembers:
+    """What a sidecar unpacks into is a fresh git clone (J.13.2).
+
+    The producer writes payloads only, but an imported bundle is by
+    definition an artifact from somewhere else — that is what importing is —
+    and the consumer is what decides where its bytes land. `..` is stripped
+    by CPython; `.git/config` needs no `..`, and git reads several of its
+    values as commands to run on the next ordinary index operation, which the
+    Station performs inside a forest on every plant, graft and tend.
+    """
+
+    @staticmethod
+    def _sidecar(path, members):
+        import zipfile
+
+        with zipfile.ZipFile(path, "w") as zf:
+            for name, body in members.items():
+                zf.writestr(name, body)
+        return path
+
+    @pytest.mark.parametrize("member", [
+        ".git/config",
+        "nested/.git/hooks/pre-commit",
+        "notes.md",
+        "../escape.db",
+        "payload.db.txt",
+    ])
+    def test_a_sidecar_carries_payloads_and_nothing_else(self, forest_rw, tmp_path, member):
+        from monkeyllm.snapshot import create_snapshot, restore_snapshot
+
+        info = create_snapshot(forest_rw, out=tmp_path / "f.bundle")
+        sidecar = self._sidecar(tmp_path / "evil.payloads.zip",
+                                {member: "[core]\n\tfsmonitor = touch /tmp/pwned\n"})
+        dest = tmp_path / "restored"
+        with pytest.raises(VineError) as e:
+            restore_snapshot(info["bundle"], dest, payload_sidecar=sidecar)
+        assert e.value.code == E_SCHEMA
+
+        config = dest / ".git" / "config"
+        assert "fsmonitor" not in config.read_text(encoding="utf-8")
+
+    def test_a_real_sidecar_still_restores(self, forest_rw, tmp_path):
+        """The refusal must be about the member, not about sidecars."""
+        from monkeyllm.snapshot import create_snapshot, restore_snapshot
+
+        info = create_snapshot(forest_rw, out=tmp_path / "f.bundle", with_payloads=True)
+        assert info["payloads"] >= 1
+        out = restore_snapshot(info["bundle"], tmp_path / "restored",
+                               payload_sidecar=info["payload_sidecar"])
+        assert out["restored_payloads"] == info["payloads"]
+        assert (tmp_path / "restored" / "sales" / "report-q1-2026.db").is_file()

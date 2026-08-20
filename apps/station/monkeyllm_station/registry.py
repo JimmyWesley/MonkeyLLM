@@ -681,21 +681,29 @@ class Registry:
         return row["origin"] if row else None
 
     def put_provider(self, name: str, endpoint: str, api_key: str | None) -> None:
-        """Store a provider. An empty `api_key` keeps the stored one, so the
-        console can edit an endpoint without ever holding the secret."""
+        """Store a provider. An empty `api_key` keeps the stored one *for the
+        same endpoint*, so the console can edit other fields without ever
+        holding the secret. A changed endpoint is a changed destination: the
+        stored credential belongs to the address it was stored against, so it
+        does not follow the endpoint — the key has to be supplied again."""
         if not name or not endpoint:
             raise ValueError("provider needs a name and an endpoint")
         if self._origin(name) == "env":
             raise ValueError(f"'{name}' is declared by the environment; "
                              "edit the variables and restart the Station")
+        endpoint = endpoint.rstrip("/")
         existing = self.conn.execute(
-            "SELECT api_key FROM providers WHERE name = ?", (name,)
+            "SELECT endpoint, api_key FROM providers WHERE name = ?", (name,)
         ).fetchone()
+        if existing and existing["endpoint"] != endpoint and not api_key:
+            raise ValueError(
+                "changing a provider's endpoint requires supplying its key "
+                "again: a credential belongs to the address it was stored against")
         key = api_key if api_key else (existing["api_key"] if existing else None)
         self.conn.execute(
             "INSERT OR REPLACE INTO providers (name, endpoint, api_key, created, origin) "
             "VALUES (?,?,?,?,'console')",
-            (name, endpoint.rstrip("/"), key, _now()),
+            (name, endpoint, key, _now()),
         )
         self.conn.commit()
 

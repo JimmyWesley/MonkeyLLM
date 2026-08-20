@@ -92,16 +92,41 @@ def test_provider_key_never_comes_back(station):
 
 
 def test_blank_key_keeps_the_stored_one(station):
-    """So an operator can fix a typo in the endpoint without re-pasting a
-    secret they may not have anymore."""
+    """So an operator can re-save a provider without re-pasting a secret they
+    may not have anymore — as long as the destination does not change."""
     client, registry = station
     headers = _admin(registry)
     client.post("/v1/admin/providers", headers=headers,
                 json={"name": "p", "endpoint": "https://a/v1", "api_key": "keep-me"})
     client.post("/v1/admin/providers", headers=headers,
-                json={"name": "p", "endpoint": "https://b/v1", "api_key": ""})
+                json={"name": "p", "endpoint": "https://a/v1", "api_key": ""})
     stored = registry.provider_secret("p")
-    assert stored["endpoint"] == "https://b/v1" and stored["api_key"] == "keep-me"
+    assert stored["endpoint"] == "https://a/v1" and stored["api_key"] == "keep-me"
+
+
+def test_a_new_endpoint_needs_the_key_again(station):
+    """A stored credential belongs to the address it was stored against.
+
+    Letting it follow a re-pointed endpoint means whoever can edit the
+    provider redirects every forest's model traffic — prompts and key alike —
+    without ever knowing the secret.
+    """
+    client, registry = station
+    headers = _admin(registry)
+    client.post("/v1/admin/providers", headers=headers,
+                json={"name": "p", "endpoint": "https://a/v1", "api_key": "keep-me"})
+    r = client.post("/v1/admin/providers", headers=headers,
+                    json={"name": "p", "endpoint": "https://elsewhere/v1"})
+    assert r.status_code == 400
+    stored = registry.provider_secret("p")
+    assert stored["endpoint"] == "https://a/v1" and stored["api_key"] == "keep-me"
+
+    # Supplying a key with the new address is the supported way to move one.
+    r = client.post("/v1/admin/providers", headers=headers,
+                    json={"name": "p", "endpoint": "https://elsewhere/v1",
+                          "api_key": "new-key"})
+    assert r.status_code == 200
+    assert registry.provider_secret("p")["endpoint"] == "https://elsewhere/v1"
 
 
 def test_non_admin_cannot_touch_providers(station):

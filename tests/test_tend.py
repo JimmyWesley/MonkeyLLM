@@ -128,6 +128,82 @@ class TestDriftDetection:
         assert drift and drift[0].level == "warning" and drift[0].node_id == DATASET
 
 
+class TestTableScope:
+    """J.3: a grant may narrow which tables of a dataset a principal touches.
+
+    It governs writing as well as reading, and it has to: writing is a way
+    of reading. A statement that writes only where it may can still take its
+    value from a table it may not read, and leave it somewhere readable — so
+    policing the destination while ignoring the source is not a scope.
+    """
+
+    @staticmethod
+    def _with_payroll(forest):
+        """A second table in the same payload, to have something withheld."""
+        conn = sqlite3.connect(db_path(forest))
+        try:
+            conn.execute("CREATE TABLE payroll (id INTEGER, amount REAL)")
+            conn.execute("INSERT INTO payroll VALUES (42, 999999.0)")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_a_write_outside_the_allow_list_is_refused(self, vine_rw, forest_rw):
+        self._with_payroll(forest_rw)
+        before = row_count(forest_rw)
+        with pytest.raises(VineError) as e:
+            vine_rw.tend(DATASET, "DELETE FROM payroll WHERE id = 42",
+                         tables=("sales",))
+        assert e.value.code == E_QUERY_FORBIDDEN
+        assert row_count(forest_rw) == before
+
+    def test_a_permitted_write_still_goes_through(self, vine_rw, forest_rw):
+        """The refusals must be the scope, not the scope breaking `tend`."""
+        self._with_payroll(forest_rw)
+        before = row_count(forest_rw)
+        assert vine_rw.tend(DATASET, GOOD_INSERT, tables=("sales",))["rows_affected"] == 1
+        assert row_count(forest_rw) == before + 1
+
+    def test_a_permitted_write_may_not_read_a_withheld_table(self, vine_rw, forest_rw):
+        """The side channel, and the reason denying the write actions alone is
+        not enough: this statement writes only where it may."""
+        self._with_payroll(forest_rw)
+        with pytest.raises(VineError) as e:
+            vine_rw.tend(
+                DATASET,
+                "UPDATE sales SET value = (SELECT amount FROM payroll WHERE id = 42) "
+                "WHERE rowid = 1",
+                tables=("sales",))
+        assert e.value.code == E_QUERY_FORBIDDEN
+
+        conn = sqlite3.connect(db_path(forest_rw))
+        try:
+            leaked = conn.execute(
+                "SELECT COUNT(*) FROM sales WHERE value = 999999.0").fetchone()[0]
+        finally:
+            conn.close()
+        assert leaked == 0, "the withheld value reached a table the caller may read"
+
+    def test_the_host_hands_the_allow_list_to_the_engine(self, vine_rw, forest_rw):
+        """The engine enforces; the grant is what says so. If `ScopedVine`
+        stops forwarding the list, everything above stays correct and stops
+        being reached, which is a failure no test of the engine alone sees."""
+        import sys
+        from pathlib import Path
+
+        station = Path(__file__).resolve().parents[1] / "apps" / "station"
+        if str(station) not in sys.path:
+            sys.path.insert(0, str(station))
+        from monkeyllm_station.policy import Policy, ScopedVine
+
+        self._with_payroll(forest_rw)
+        scoped = ScopedVine(vine_rw, Policy(
+            forest="f", caps=frozenset({"read", "query", "tend"}),
+            allow=("sales/",), tables={DATASET: ("sales",)}))
+        out = scoped.call("tend", id=DATASET, sql="DELETE FROM payroll WHERE id = 42")
+        assert out["error"]["code"] in ("E_FORBIDDEN", "E_QUERY_FORBIDDEN")
+
+
 class TestMcpExposure:
     def test_tend_is_an_mcp_tool(self, forest_rw):
         from monkeyllm.server import build_server

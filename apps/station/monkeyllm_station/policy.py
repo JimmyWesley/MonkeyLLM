@@ -287,6 +287,13 @@ class ScopedVine:
         self._gate(id)
         allowed = self.policy.tables_for(id)
         if allowed is not None:
+            # A cheap pre-read, kept for the message it can give: it names the
+            # offending table, which the engine's refusal cannot. It is NOT
+            # the control — matching names out of SQL text disagrees with
+            # SQLite wherever the syntax is unusual, and the statements that
+            # slip past it are exactly the ones somebody chose deliberately.
+            # The control is the allow-list handed to the engine below, where
+            # SQLite itself decides what the statement touches.
             referenced = {t.lower() for t in _SQL_TABLES.findall(sql or "")}
             forbidden = referenced - {t.lower() for t in allowed}
             if forbidden:
@@ -295,7 +302,7 @@ class ScopedVine:
                     f"table not permitted: {sorted(forbidden)[0]}",
                     hint=f"This principal may read: {sorted(allowed)}.",
                 )
-        return self._vine.query(id, sql)
+        return self._vine.query(id, sql, tables=allowed)
 
     # -- write surface ------------------------------------------------------
 
@@ -319,7 +326,10 @@ class ScopedVine:
 
     def tend(self, id: str, sql: str) -> dict:
         self._gate(id)
-        return self._vine.tend(id, sql)
+        # The same allow-list as `query`, and it has to be: writing is a way
+        # of reading, so a scope applied to only one of them is a scope that
+        # can be worked around. The engine holds that line for both.
+        return self._vine.tend(id, sql, tables=self.policy.tables_for(id))
 
     # -- dispatcher used by the surfaces ------------------------------------
 

@@ -12,6 +12,7 @@ A.3.1); `--with-payloads` adds a sidecar zip.
 from __future__ import annotations
 
 import datetime as dt
+import re
 import subprocess
 import zipfile
 from pathlib import Path
@@ -19,6 +20,24 @@ from pathlib import Path
 from monkeyllm.errors import E_NOT_FOUND, E_SCHEMA, VineError
 
 PAYLOAD_GLOBS = ("*.db", "*.sqlite")
+
+# What a sidecar is allowed to contain, applied when unpacking one. The
+# producer above writes only payloads, but a bundle arriving from outside was
+# not necessarily produced here — J.13.2 already says an imported bundle
+# "enters as it is: no converter, no curation and no review sees it" — and it
+# is the consumer that decides what lands on disk.
+#
+# The extraction lands in a fresh git clone — a directory whose contents git
+# itself reads and acts on afterwards, since the Station commits inside a
+# forest on every plant, graft and tend. Discarding `..` is not a sufficient
+# rule there, because reaching that directory needs no `..` at all. So the
+# members are named positively — the payload files a sidecar exists to
+# carry — instead of being filtered against known-bad shapes.
+_SAFE_PAYLOAD_MEMBER = re.compile(r"^[\w\-. /]+\.(db|sqlite)$")
+
+# An explicit ceiling on what a sidecar may expand to. Compressed archives
+# expand at ratios a size limit on the upload cannot bound.
+MAX_SIDECAR_UNCOMPRESSED = 2 * 1024 ** 3
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
@@ -53,6 +72,36 @@ def create_snapshot(forest_root: Path, out: Path | None = None,
     return result
 
 
+def _accepted_members(zf: zipfile.ZipFile) -> list[str]:
+    """The sidecar members that may be written, or a refusal naming the first
+    one that may not.
+
+    Refuse rather than skip: a sidecar carrying something else is not a
+    sidecar with a stray file in it, it is an archive built by somebody who
+    expected that file to land — and the operator is entitled to know before
+    the forest is restored, not to discover a quietly incomplete restore.
+    """
+    accepted: list[str] = []
+    total = 0
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        name = info.filename
+        if (name.startswith("/") or ".." in Path(name).parts
+                or "\\" in name or not _SAFE_PAYLOAD_MEMBER.match(name)):
+            raise VineError(
+                E_SCHEMA, f"refused sidecar member: {name}",
+                hint="A payload sidecar carries the forest's own database "
+                     "files and nothing else.")
+        total += info.file_size
+        if total > MAX_SIDECAR_UNCOMPRESSED:
+            raise VineError(
+                E_SCHEMA, "sidecar expands past the uncompressed ceiling "
+                          f"({MAX_SIDECAR_UNCOMPRESSED} bytes)")
+        accepted.append(name)
+    return accepted
+
+
 def restore_snapshot(bundle: Path, dest: Path,
                      payload_sidecar: Path | None = None) -> dict:
     bundle = Path(bundle).resolve()
@@ -67,8 +116,9 @@ def restore_snapshot(bundle: Path, dest: Path,
     restored_payloads = 0
     if payload_sidecar:
         with zipfile.ZipFile(payload_sidecar) as zf:
-            zf.extractall(dest)
-            restored_payloads = len(zf.namelist())
+            members = _accepted_members(zf)
+            zf.extractall(dest, members=members)
+            restored_payloads = len(members)
 
     # the derived layer is disposable — rebuild it fresh (C.6.1)
     from monkeyllm.catalog import Catalog

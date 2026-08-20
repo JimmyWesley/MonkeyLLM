@@ -34,6 +34,25 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   }
 })
 
+/** An image address this console did not resolve itself is dropped.
+ *
+ *  A link is something the reader chooses to follow; an image is fetched the
+ *  moment it renders, by the operator's authenticated browser, with nobody
+ *  deciding anything. Generated text and ingested document bodies both reach
+ *  this renderer, and neither is trusted, so neither gets to pick an address
+ *  the browser then contacts.
+ *
+ *  Nothing legitimate is lost: forest images come through the J.14 route with
+ *  the viewer's credential and render from a blob, because an `<img src>`
+ *  cannot carry the Bearer header in the first place. The server states the
+ *  same rule in its `img-src` policy; this one holds wherever the bundle is
+ *  served by something that does not. */
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName !== 'IMG') return
+  const src = node.getAttribute('src') || ''
+  if (!/^(blob:|data:image\/)/i.test(src)) node.remove()
+})
+
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 

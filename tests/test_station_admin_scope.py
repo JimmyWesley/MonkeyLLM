@@ -234,3 +234,174 @@ def test_grant_and_models_stay_per_forest(station):
                       headers=head).status_code == 403
     assert client.get(f"/v1/admin/models?forest={MINE}",
                       headers=head).status_code == 200
+
+
+# -- (3) whose credentials may they touch (J.2.2 + J.2.4) -------------------
+
+
+def test_the_owner_is_not_administered_by_a_forest_admin(station):
+    """The owner's authority is a bit, not grant rows (J.2.4).
+
+    J.2.2 decides "may I touch this person's credentials?" by comparing the
+    forests they hold against the forests I administer. The owner holds no
+    grants at all, so that comparison has nothing to say about them and the
+    rule has to name them outright: minting a key for the owner, or resetting
+    their password, is the owner's alone.
+    """
+    client, registry, _ = station
+    assert client.post("/v1/auth/setup",
+                       json={"username": "boss",
+                             "password": "correct-horse-battery"}).status_code == 200
+    head = _key(registry, "mallory", MINE, {"read", "admin"})
+
+    r = client.post("/v1/admin/people",
+                    json={"principal": "boss", "issue_key": {"label": "x"}},
+                    headers=head)
+    assert "api_key" not in r.json()
+    assert r.json()["refused"]
+
+    r = client.post("/v1/admin/people",
+                    json={"principal": "boss", "password": "some-other-password"},
+                    headers=head)
+    assert "password" not in r.json()["applied"]
+    # The real owner's password still works, so this was a refusal and not a
+    # silent change.
+    assert client.post("/v1/auth/login",
+                       json={"username": "boss",
+                             "password": "correct-horse-battery"}).status_code == 200
+
+
+def test_a_principal_with_no_grant_is_not_everybody_s_to_credential(station):
+    """The same comparison, for a principal with no grants and no owner bit:
+    sharing no forest with me is not the same as my administering every
+    forest they hold. Onboarding is unaffected — J.2.3 applies the grant
+    first, in the same request, and that ordering is why."""
+    client, registry, _ = station
+    registry.add_principal("orphan", kind="user")
+    head = _key(registry, "boss", MINE, {"read", "admin"})
+
+    r = client.post("/v1/admin/people",
+                    json={"principal": "orphan", "issue_key": {"label": "x"}},
+                    headers=head)
+    assert "api_key" not in r.json()
+    assert r.json()["refused"]
+
+    r = client.post("/v1/admin/people",
+                    json={"principal": "newcomer",
+                          "grant": {"forest": MINE, "caps": ["read"]},
+                          "issue_key": {"label": "x"}}, headers=head)
+    assert r.json()["api_key"], "granting then crediting in one call must still work"
+
+
+# -- (4) deployment-wide configuration (J.10) -------------------------------
+
+
+def test_an_admin_of_one_forest_cannot_edit_a_provider(station):
+    """A provider is one row serving every forest: its endpoint decides where
+    all of their material is sent and its key pays for all of their calls.
+    Administering one forest of several is not authority over that."""
+    client, registry, _ = station
+    registry.put_provider("prod", "https://api.example/v1", "sk-stored")
+    head = _key(registry, "mallory", MINE, {"read", "admin"})
+
+    assert client.post("/v1/admin/providers",
+                       json={"name": "prod", "endpoint": "http://elsewhere/v1"},
+                       headers=head).status_code == 403
+    assert client.post("/v1/admin/providers/test",
+                       json={"name": "prod", "endpoint": "http://elsewhere/v1"},
+                       headers=head).status_code == 403
+    # Reading the list stays open to any administrator: a per-forest model
+    # binding points at these names, and no secret is in the answer.
+    listed = client.get("/v1/admin/providers", headers=head)
+    assert listed.status_code == 200
+    assert "sk-stored" not in listed.text
+
+    secret = registry.provider_secret("prod")
+    assert secret["endpoint"] == "https://api.example/v1"
+
+
+# -- (5) governance leaves a trail (J.4) ------------------------------------
+
+
+GOVERNANCE_CALLS = [
+    ("/v1/admin/grant", {"principal": "newbie", "forest": MINE, "caps": ["read"]}),
+    ("/v1/admin/people", {"principal": "newbie", "issue_key": {"label": "ci"}}),
+    ("/v1/admin/password", {"principal": "newbie", "password": "a-long-enough-one"}),
+    ("/v1/admin/models", {"forest": MINE, "role": "answer",
+                          "provider": "p", "model": "m"}),
+]
+
+
+@pytest.mark.parametrize("path,body", GOVERNANCE_CALLS,
+                         ids=[c[0] for c in GOVERNANCE_CALLS])
+def test_a_governance_change_is_recorded(station, path, body):
+    """Part D audits what was read and written. These are the changes that
+    decide who may do either, and a review after the fact starts from them:
+    when was this key made, this grant widened, this password reset."""
+    client, registry, _ = station
+    key = registry.issue_key("boss")
+    for forest in (MINE, THEIRS):
+        registry.grant("boss", forest, {"read", "admin"})
+    head = {"Authorization": f"Bearer {key}"}
+    client.post("/v1/admin/providers", headers=head,
+                json={"name": "p", "endpoint": "https://api.example/v1",
+                      "api_key": "sk-x"})
+    # The credential steps need a target that already holds a forest (J.2.2),
+    # which the grant case below is what creates in real onboarding.
+    registry.grant("newbie", MINE, {"read"})
+
+    before = len(registry.audit(limit=1000))
+    res = client.post(path, json=body, headers=head)
+    assert res.status_code == 200, res.text
+    after = registry.audit(limit=1000)
+    assert len(after) > before, f"{path} left no trace"
+    assert not any("sk-x" in str(e["args"]) or "a-long-enough-one" in str(e["args"])
+                   for e in after), "a secret reached the log"
+
+
+def test_a_login_is_recorded_whether_or_not_it_works(station):
+    """The limiter counts failures in memory and forgets them on restart, so
+    without this there is no answer to "was anyone trying yesterday?"."""
+    client, registry, _ = station
+    client.post("/v1/auth/setup", json={"username": "boss", "password": "correct-horse"})
+
+    client.post("/v1/auth/login", json={"username": "boss", "password": "wrong"})
+    client.post("/v1/auth/login", json={"username": "boss", "password": "correct-horse"})
+
+    logins = [e for e in registry.audit(limit=1000) if e["primitive"] == "auth.login"]
+    assert {e["result"] for e in logins} == {"ok", "refused"}
+    assert not any("correct-horse" in str(e["args"]) for e in logins)
+
+
+def test_the_governance_trail_is_not_read_by_one_forest_s_admin(station):
+    """Those rows describe the deployment — who holds what, where the
+    provider points. Handing them to an administrator of one forest is the
+    mistake J.3.2 corrected for content."""
+    client, registry, _ = station
+    client.post("/v1/auth/setup", json={"username": "boss", "password": "correct-horse"})
+    owner = client.post("/v1/auth/login",
+                        json={"username": "boss", "password": "correct-horse"}).json()["key"]
+    head = _key(registry, "mallory", MINE, {"read", "admin"})
+
+    seen = client.get("/v1/admin/audit?limit=200", headers=head).json()["entries"]
+    assert not any(e["forest"] == "-" for e in seen)
+    assert not any(e["primitive"].startswith("auth.") for e in seen)
+
+    owner_sees = client.get("/v1/admin/audit?limit=200",
+                            headers={"Authorization": f"Bearer {owner}"}).json()["entries"]
+    assert any(e["forest"] == "-" for e in owner_sees)
+
+
+def test_an_admin_of_every_forest_may_edit_a_provider(station):
+    """The rule is reach, not the owner bit — otherwise the break-glass
+    account (J.2.1) and every single-forest deployment lose provider repair."""
+    client, registry, _ = station
+    key = registry.issue_key("both")
+    for forest in (MINE, THEIRS):
+        registry.grant("both", forest, {"read", "admin"})
+    head = {"Authorization": f"Bearer {key}"}
+
+    assert client.post("/v1/admin/providers",
+                       json={"name": "prod", "endpoint": "https://api.example/v1",
+                             "api_key": "sk-stored"},
+                       headers=head).status_code == 200

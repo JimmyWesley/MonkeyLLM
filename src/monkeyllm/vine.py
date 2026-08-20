@@ -97,16 +97,76 @@ VIEW_MAX_BYTES = 6 * 1024 * 1024
 # loop that carries it forward turn after turn.
 BUDGET_QUERY = 2000
 
+# Both spellings are listed on purpose: the `PRAGMA` keyword and the
+# `pragma_*` table-valued functions are separate syntax and one pattern does
+# not cover the other, so neither entry is redundant. The read-only
+# connection already refuses everything that *changes* state; these describe
+# instead — the schema, and where the payload sits — and J.14 and C.6d are
+# deliberate about never returning either.
 _FORBIDDEN_SQL = re.compile(
-    r"\b(ATTACH|DETACH|PRAGMA|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|VACUUM|REINDEX)\b",
+    r"\b(ATTACH|DETACH|PRAGMA|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|VACUUM|REINDEX)\b"
+    r"|\b(pragma_\w+)",
     re.IGNORECASE,
 )
 # tend (C.10) allows INSERT/UPDATE/DELETE but nothing structural or sneaky
 _TEND_FORBIDDEN = re.compile(
-    r"\b(ATTACH|DETACH|PRAGMA|DROP|ALTER|CREATE|VACUUM|REINDEX|BEGIN|COMMIT|TRANSACTION)\b",
+    r"\b(ATTACH|DETACH|PRAGMA|DROP|ALTER|CREATE|VACUUM|REINDEX|BEGIN|COMMIT|TRANSACTION)\b"
+    r"|\b(pragma_\w+)",
     re.IGNORECASE,
 )
 _LIMIT_RE = re.compile(r"\bLIMIT\s+\d+", re.IGNORECASE)
+
+# A table allow-list is decided by SQLite, never by reading the statement
+# (spec C.5, J.3: "checked against the parsed statement"). Matching table
+# names out of SQL text is a second parser, and two parsers agree only where
+# somebody thought to compare them; for SQL that is not a list worth
+# maintaining, and being wrong about it is silent. The authorizer is asked
+# once per table and column the statement actually touches, so a subquery, a
+# CTE, a view and a table-valued function are all the same question, asked by
+# the component that resolves them.
+_AUTHORIZER_TABLE_ACTIONS = frozenset({
+    sqlite3.SQLITE_READ, sqlite3.SQLITE_INSERT,
+    sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
+})
+
+
+def _table_authorizer(allowed: frozenset[str]):
+    """Deny every table the allow-list does not name.
+
+    `SQLITE_READ` matters as much as the write actions, and on the write
+    path too: a statement that writes only where it may can still read from
+    where it may not, and leave what it read somewhere permitted. Denying
+    the write actions alone would police the destination and ignore the
+    source.
+    """
+    def check(action, arg1, arg2, dbname, source):
+        if action in _AUTHORIZER_TABLE_ACTIONS:
+            name = (arg1 or "").lower()
+            # `sqlite_master` and friends describe every table there is, so
+            # under a table scope the schema is not readable either — it is
+            # the map to what was withheld (and the internal callers that
+            # need it run with no authorizer set).
+            if name.startswith("sqlite_") or name not in allowed:
+                return sqlite3.SQLITE_DENY
+        elif action == sqlite3.SQLITE_PRAGMA:
+            # `PRAGMA` is already refused as a keyword, but `pragma_table_info`
+            # and `pragma_database_list` are table-valued functions that never
+            # match it — and the second returns the file's path on disk.
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    return check
+
+
+def _not_authorized(error: Exception) -> bool:
+    """Whether SQLite refused this statement because the authorizer said so.
+
+    Two phrasings, both from the same refusal: naming the column it stopped
+    at ("access to salaries.amount is prohibited") when it knows one, and
+    "not authorized" when the denial lands somewhere without a column to
+    name — a scalar subquery, for instance.
+    """
+    text = str(error).lower()
+    return "not authorized" in text or "is prohibited" in text
 _HEADER_LINE_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 
 
@@ -868,25 +928,37 @@ class Vine:
         return {"tables": tables, "example_queries": example_queries}
 
     @staticmethod
-    def _name_hint(conn, error: str) -> str | None:
+    def _name_hint(conn, error: str, allowed: frozenset[str] | None = None) -> str | None:
         """What exists, for a query that named something that does not.
 
         Only for the two errors where a list is the answer — anything else
         gets no hint rather than an irrelevant one. Best effort by
         construction: this runs while an exception is already being raised,
         so a failure here must not replace the error the caller needs.
+
+        `allowed` narrows it to what the caller may read. The hint runs after
+        the statement failed and therefore after the authorizer was cleared,
+        so without this it would answer "no such table" by naming every table
+        in the file — handing a scoped principal the list of what is being
+        kept from them, for the price of one misspelling.
         """
         text = error.lower()
+
+        def permitted(names: list[str]) -> list[str]:
+            if allowed is None:
+                return names
+            return [n for n in names if str(n).lower() in allowed]
+
         try:
             if text.startswith("no such table"):
-                names = [r[0] for r in conn.execute(
+                names = permitted([r[0] for r in conn.execute(
                     "SELECT name FROM sqlite_master WHERE type IN ('table','view') "
-                    "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name")])
                 return f"Tables in this dataset: {', '.join(names)}." if names else None
             if text.startswith("no such column"):
-                names = [r[0] for r in conn.execute(
+                names = permitted([r[0] for r in conn.execute(
                     "SELECT name FROM sqlite_master WHERE type = 'table' "
-                    "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name")])
                 columns: list[str] = []
                 for name in names[:4]:
                     quoted = '"' + str(name).replace('"', '""') + '"'
@@ -1153,7 +1225,14 @@ class Vine:
     # =======================================================================
 
     @_traced
-    def query(self, id: str, sql: str) -> dict:
+    def query(self, id: str, sql: str, *, tables: tuple[str, ...] | None = None) -> dict:
+        """Read-only SQL over a dataset (C.5).
+
+        `tables` is the host's table allow-list (J.3) and is keyword-only and
+        unreachable from the wire — `ScopedVine.query(self, id, sql)` forwards
+        the two arguments an agent supplies, and adds this one from the grant.
+        A narrowing an agent could pass is a narrowing an agent could omit.
+        """
         row = self._row_or_raise(id)
         if row["type"] != "dataset" or row["payload_type"] != "sqlite":
             raise VineError(
@@ -1169,7 +1248,7 @@ class Vine:
             raise VineError(E_QUERY_FORBIDDEN, "statement must start with SELECT or WITH")
         m = _FORBIDDEN_SQL.search(sql)
         if m:
-            raise VineError(E_QUERY_FORBIDDEN, f"forbidden keyword: {m.group(1).upper()}")
+            raise VineError(E_QUERY_FORBIDDEN, f"forbidden keyword: {m.group(0).upper()}")
 
         limited_injected = False
         if not _LIMIT_RE.search(sql):
@@ -1181,11 +1260,21 @@ class Vine:
         conn = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
         deadline = time.monotonic() + QUERY_TIMEOUT_S
         conn.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 1000)
+        allowed = (frozenset(t.lower() for t in tables)
+                   if tables is not None else None)
         t0 = time.perf_counter()
         try:
-            cur = conn.execute(sql)
-            rows = cur.fetchall()
-            columns = [d[0] for d in cur.description] if cur.description else []
+            if allowed is not None:
+                conn.set_authorizer(_table_authorizer(allowed))
+            try:
+                cur = conn.execute(sql)
+                rows = cur.fetchall()
+                columns = [d[0] for d in cur.description] if cur.description else []
+            finally:
+                # Only the caller's statement is judged. What follows — the
+                # name hint below — is the engine reading its own schema, and
+                # it filters itself.
+                conn.set_authorizer(None)
         except sqlite3.OperationalError as e:
             if "interrupted" in str(e).lower():
                 raise VineError(E_TIMEOUT, f"query exceeded {QUERY_TIMEOUT_S}s") from e
@@ -1195,7 +1284,18 @@ class Vine:
             # The answer costs one read of sqlite_master on a path that has
             # already failed, so it is free where it matters.
             raise VineError(E_QUERY_INVALID, f"SQL error: {e}",
-                            hint=self._name_hint(conn, str(e))) from e
+                            hint=self._name_hint(conn, str(e), allowed)) from e
+        except sqlite3.DatabaseError as e:
+            if allowed is None or not _not_authorized(e):
+                raise VineError(E_QUERY_INVALID, f"SQL error: {e}") from e
+            # C.5.2: the allow-list is policy, so this is the guard's 403 and
+            # not SQLite's 400 — even though SQLite is what noticed. The
+            # message never repeats the name it stopped at: that would answer
+            # "does this table exist?" for every table the caller may not read.
+            raise VineError(
+                E_QUERY_FORBIDDEN,
+                "this statement reads a table outside this principal's allow-list",
+                hint=f"Readable here: {sorted(allowed)}.") from e
         finally:
             conn.close()
         elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -1434,12 +1534,21 @@ class Vine:
     # =======================================================================
 
     @_traced
-    def tend(self, id: str, sql: str) -> dict:
+    def tend(self, id: str, sql: str, *, tables: tuple[str, ...] | None = None) -> dict:
+        """The one dataset write path (C.10).
+
+        `tables` is the host's allow-list, on the same terms as `query`:
+        keyword-only, supplied by `ScopedVine` from the grant, never by the
+        caller. It governs what the statement reads as well as what it
+        writes, because a scope that holds for only one of those can be
+        worked around through the other.
+        """
         self._require_writable()
         with self._write_mutex:
-            return self._tend(id, sql)
+            return self._tend(id, sql, tables=tables)
 
-    def _tend(self, id: str, sql: str) -> dict:
+    def _tend(self, id: str, sql: str, *,
+              tables: tuple[str, ...] | None = None) -> dict:
         row = self._row_or_raise(id)
         if row["type"] != "dataset" or row["payload_type"] != "sqlite":
             raise VineError(
@@ -1459,7 +1568,7 @@ class Vine:
             )
         m = _TEND_FORBIDDEN.search(sql)
         if m:
-            raise VineError(E_QUERY_FORBIDDEN, f"forbidden keyword: {m.group(1).upper()}")
+            raise VineError(E_QUERY_FORBIDDEN, f"forbidden keyword: {m.group(0).upper()}")
         if first in ("UPDATE", "DELETE") and not re.search(r"\bWHERE\b", sql, re.IGNORECASE):
             raise VineError(
                 E_QUERY_FORBIDDEN,
@@ -1472,11 +1581,18 @@ class Vine:
         conn = sqlite3.connect(db)
         deadline = time.monotonic() + QUERY_TIMEOUT_S
         conn.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 1000)
+        allowed = (frozenset(t.lower() for t in tables)
+                   if tables is not None else None)
         t0 = time.perf_counter()
         try:
-            cur = conn.execute(sql)
-            conn.commit()
-            rows_affected = cur.rowcount
+            if allowed is not None:
+                conn.set_authorizer(_table_authorizer(allowed))
+            try:
+                cur = conn.execute(sql)
+                conn.commit()
+                rows_affected = cur.rowcount
+            finally:
+                conn.set_authorizer(None)
         except sqlite3.OperationalError as e:
             conn.rollback()
             if "interrupted" in str(e).lower():
@@ -1485,10 +1601,15 @@ class Vine:
             # here on it is SQLite saying what is invalid, on a dataset this
             # principal is allowed to write.
             raise VineError(E_QUERY_INVALID, f"SQL error: {e}",
-                            hint=self._name_hint(conn, str(e))) from e
+                            hint=self._name_hint(conn, str(e), allowed)) from e
         except sqlite3.Error as e:
             conn.rollback()
-            raise VineError(E_QUERY_INVALID, f"SQL error: {e}") from e
+            if allowed is None or not _not_authorized(e):
+                raise VineError(E_QUERY_INVALID, f"SQL error: {e}") from e
+            raise VineError(
+                E_QUERY_FORBIDDEN,
+                "this statement touches a table outside this principal's allow-list",
+                hint=f"Writable here: {sorted(allowed)}.") from e
         finally:
             conn.close()
         elapsed_ms = (time.perf_counter() - t0) * 1000
