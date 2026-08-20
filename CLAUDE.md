@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.55.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.56.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -328,6 +328,56 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   the WINDOW was the reason (`matched_window`) and names the nearest
   populated periods otherwise "nothing in that week" reads as "nothing
   anywhere", which is the failure the window was supposed to avoid.
+- **A document is read back whole, in pages (spec C.4.1, v0.56)**: `pick`
+  on an over-budget body answers the FIRST page (paragraph blocks,
+  byte-exact substrings) + `next`/`returned`/`total` — never the old empty
+  body. Pages concatenated in cursor order reproduce the body
+  byte-identically (F.80); a single block wider than the whole budget
+  arrives alone, cut, flagged `cut: true`, cursor still advancing.
+  `section` accepts a list (≤10, one 4000 budget, `sections`/`missing`/
+  `dropped`); `after`+`section` and `after`+id-list are E_SCHEMA. A bare
+  string `section` and a within-budget body keep the old shapes TO THE
+  BYTE.
+- **An unknown graft patch key is refused, never absorbed (spec C.8,
+  v0.56)**: `GraftPatch` is `extra="forbid"` and `Vine.graft` names the
+  key + lists the operations. Before this, an unknown key beside a legal
+  op answered 200 and silently did less than asked.
+- **The metaphor stays in the prose (spec C.1/C.6, v0.56)**: every wire
+  `kind` emits `note`/`branch` (`_wire_kind`); locate scope is `notes`
+  (`bananas` accepted as deprecated alias for one minor version); a `kind`
+  filter matches the emitted spelling. The catalog still stores 'banana'
+  internally — translate at EMISSION, never leak it into a field value.
+  Index-body headings (`## Direct bananas`) are forest format and stay.
+- **`prune` is the write you can take back (spec C.14, v0.56)**: passport
+  removed through git (history keeps it), parent index + coverage
+  refreshed, catalog row deleted, local payload MOVED to
+  `_derived/graveyard/<id>/`. `edges_in` refuse with `E_ANCHORED` (409)
+  carrying `anchors`/`anchor_count` on the envelope (`VineError(data=)`);
+  `force=true` strips backlinks in the same commit but REFUSES when an
+  anchor is out of the caller's scope (count only, never names). A branch
+  with children never prunes, `force` included; root and `_meta/` never.
+  A pruned id is free to replant. Rides the `write` capability (J.2.6's
+  mask ceiling is closed); `visible=` is keyword-only host-passed like
+  scan's; emits `node.pruned` (J.16).
+- **The document is a human surface (spec J.14.1/J.5.14/J.17, v0.56)**:
+  `GET /v1/forests/{f}/export/{node}` is text/markdown, NO token budget
+  (download, not context), inline content byte-identical to the planted
+  file, J.14's discipline (read cap, byte-identical E_NOT_FOUND). The
+  Studio `read` console renders via export — never `pick`. A share
+  (`POST .../share {node, days}` → `/s/<token>`) is a key with one room:
+  token stored HASHED, shown once, expiring (default 7 d, ceiling 90),
+  authority re-read at EVERY serve against the issuer's current reach
+  (a lapsed grant suspends it), every dead state one byte-identical 404.
+- **The skill states its age (spec J.1.2 r6/J.5.12, v0.56)**: `forests()`
+  (MCP and REST) carries `station: "<version>"`; the generated skill
+  stamps the version and teaches the re-download check. The team once
+  filed a feature request for a tool that existed — their skill predated
+  it.
+- **`sync` unions derived aliases, never removes (spec G.2.6, v0.56)**:
+  the fast-path skips the CONVERSION, not the alias check, so an
+  `aliases:` map added to a live forest reaches already-ingested files on
+  the next sync. Hand-added aliases survive; cap overflow is counted in
+  the report (`aliases_clipped`), never silent.
 - **A batch is one call, so it has one budget (spec C.11, v0.52)**: `look`
   takes ≤10 ids, `pick` ≤5, sized by ONE budget (2000 / 4000) never the
   per-item budget times the count. Whole items drop from the tail and are
