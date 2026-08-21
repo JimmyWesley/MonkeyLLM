@@ -274,7 +274,12 @@ def test_reupload_keeps_the_source_line_through_the_sync_flip(station):
     text = (forest_dir / "clips" / "clip-refresh.md").read_text(encoding="utf-8")
     assert "Draft two." in text
     assert text.rstrip("\n").endswith(f"Source: {URL}")
-    assert text.count(URL) == 1
+    # Once in the body, never twice — the refresh rebuilds it, it does not
+    # append to it. (G.2.7, v0.58: the passport ALSO carries the address as
+    # `origin`, which is a field, not a second stamp in the prose.)
+    body = text.split("\n---\n", 2)[-1]
+    assert body.count(URL) == 1
+    assert f"origin: {URL}" in text
 
 
 @pytest.mark.parametrize("bad_url", [

@@ -301,7 +301,7 @@ def test_an_orphan_lock_heals_and_a_live_one_is_named(station, station_root):
     from monkeyllm.forest import WriterLock
 
     client, registry = station
-    headers = _key(registry, caps=("read",))
+    headers = _key(registry, caps=("read", "write"))
 
     # Boot warming (J.6.1) leaves this forest open and holding its own lock,
     # so the pool is emptied first and the leftover written after: a forest
@@ -319,8 +319,20 @@ def test_an_orphan_lock_heals_and_a_live_one_is_named(station, station_root):
     holder = WriterLock(station_root / FOREST)
     holder.acquire()
     try:
+        # J.6.2 (v0.57): a held writer lock stops writes, not reads — the
+        # readers take no lock, so the read keeps serving...
         r = client.post(f"/v1/forests/{FOREST}/look", json={"id": "_index"},
                         headers=headers)
+        assert r.status_code == 200, r.text
+        # ...while the write answers E_LOCKED naming the holder's card.
+        r = client.post(
+            f"/v1/forests/{FOREST}/plant",
+            json={"node": {"id": "locked-probe", "type": "note",
+                           "title": "Locked probe",
+                           "summary": "A write under a live foreign "
+                                      "writer lock must refuse.",
+                           "parent": "_index"}},
+            headers=headers)
         assert r.status_code == 409, r.text
         err = r.json()["error"]
         assert err["code"] == E_LOCKED

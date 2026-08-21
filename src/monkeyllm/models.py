@@ -18,11 +18,31 @@ from monkeyllm.tokens import estimate_tokens
 
 IMMUTABLE_FIELDS = {"id", "type", "created"}
 MUTABLE_FRONTMATTER_FIELDS = {"title", "summary", "tags", "confidence",
-                              "aliases"}
+                              "aliases", "origin"}
 # C.8 (v0.54): aliases are graft-mutable so a curated name can be taught
 # after ingest, bounded like everything else that enters the FTS row.
 MAX_ALIASES = 16
 ALIAS_MAX_CHARS = 80
+# A.3 (v0.57): provenance toward the world outside the forest — one URI,
+# one token. The engine never dereferences it; the bound and the
+# no-whitespace rule are J.8's `source_url` discipline (an origin with a
+# newline is prose wearing a field).
+ORIGIN_MAX_CHARS = 2048
+
+
+def validate_origin(value: object) -> str:
+    """A.3 (v0.57): one address, bounded, never prose."""
+    if not isinstance(value, str) or not value.strip():
+        raise VineError(E_SCHEMA, "origin must be a non-empty string")
+    if len(value) > ORIGIN_MAX_CHARS:
+        raise VineError(
+            E_SCHEMA, f"origin is over {ORIGIN_MAX_CHARS} characters")
+    if any(ord(c) <= 0x20 or ord(c) == 0x7F for c in value):
+        raise VineError(
+            E_SCHEMA,
+            "origin must not contain spaces or control characters",
+            hint="One URI (path, URL, commit ref); percent-encode spaces.")
+    return value
 
 # C.7.1 dataset planting (spec v0.8): the model never writes DDL — the schema
 # is data, validated whole, and the Vine generates the CREATE TABLEs itself.
@@ -73,6 +93,7 @@ class Frontmatter(BaseModel):
     payload_hash: str | None = None
     entity_kind: str | None = None
     aliases: list[str] = Field(default_factory=list)
+    origin: str | None = None
     coverage: str | None = None  # branch only
 
     @field_validator("created", "updated", mode="before")
@@ -430,6 +451,7 @@ class NodeSpec(BaseModel):
     payload_hash: str | None = None
     entity_kind: str | None = None
     aliases: list[str] = Field(default_factory=list)
+    origin: str | None = None
     # C.7.1: declarative dataset schema ("schema" on the wire; aliased because
     # pydantic reserves the bare name). Creation directive, not frontmatter.
     table_schema: dict[str, TableSchema] | None = Field(default=None, alias="schema")
@@ -461,9 +483,18 @@ class NodeSpec(BaseModel):
                 fm[k] = v
         if self.aliases:
             fm["aliases"] = self.aliases
+        if self.origin is not None:
+            fm["origin"] = validate_origin(self.origin)
         # extra="allow": custom frontmatter fields pass through (e.g. the
         # Gardener's source_path/source_hash, spec G.1)
         for k, v in (self.model_extra or {}).items():
+            if k == "moved_from":
+                # C.15: the waymark is written by transplant and nothing
+                # else — a planted one would forge a redirect over an
+                # address the writer never held.
+                raise VineError(
+                    E_SCHEMA, "moved_from is written by transplant",
+                    hint="To move a node, transplant it (C.15).")
             if k not in fm and v is not None:
                 fm[k] = v
         return fm

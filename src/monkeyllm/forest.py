@@ -68,6 +68,7 @@ _SCHEMA_BODY = """# Forest dialect
 | `same-as` | `same-as` | Soft merge of duplicate entities |
 | `discovered-shortcut` | — | The monkey's shout (created by graft) |
 | `succeeds` | `precedes` | Temporal order |
+| `supersedes` | `superseded-by` | Replacement: the successor makes the predecessor history |
 """
 
 # spec A.3.1: binaries never enter the forest git
@@ -92,10 +93,18 @@ def tune_derived(conn) -> None:
     Best effort: a filesystem that cannot do WAL (a network mount, no shared
     memory) keeps the mode it had and keeps working. Failing to open a
     forest because it could not be made faster would be the wrong trade.
+
+    `busy_timeout` (C.9, v0.57): N readers are real now — a host may open
+    read-only Vines beside the writer (J.6.2), and every read deposits
+    pheromone, so N readers are N occasional writers to this store. WAL
+    admits one writer at a time, and SQLite's default answer to a busy
+    writer is an immediate "database is locked"; a contended deposit
+    should wait its milliseconds instead of erroring.
     """
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
     except Exception:                                    # noqa: BLE001
         pass
 

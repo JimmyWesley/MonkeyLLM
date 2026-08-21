@@ -32,6 +32,7 @@ import sys
 import tempfile
 import threading
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
@@ -53,6 +54,7 @@ from monkeyllm.errors import (
     E_FRONTMATTER,
     E_INTERNAL,
     E_LOCKED,
+    E_MOVED,
     E_NOT_FOUND,
     E_QUERY_FORBIDDEN,
     E_QUERY_INVALID,
@@ -75,9 +77,14 @@ READ_PRIMITIVES = frozenset(
     {"locate", "look", "move", "pick", "scan", "sniff", "harvest", "query",
      # C.13.3 (v0.52): the time map. A read like any other — catalog only,
      # no body opened, and scoped by the same policy.
-     "calendar"}
+     "calendar",
+     # C.16 (v0.58): the document's past is a listing — a read.
+     "history"}
 )
-WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend", "prune"})
+WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend", "prune",
+                              # C.15 (v0.58): a move edits every pointing
+                              # node — it is a write, on the writer lane.
+                              "transplant"})
 # Not engine primitives: retrieval composed with the forest's bound model
 # (J.10). `answer` reads, `curate` proposes a summary for a human to apply.
 COMPOSITES = {"answer": ("read", "answer"), "curate": ("write", "ingest")}
@@ -387,6 +394,9 @@ STATUS_BY_CODE = {
     # C.14 (v0.56): the forest's current shape said no — same family as
     # E_LOCKED: the request was fine, the state refuses it.
     E_ANCHORED: 409,
+    # C.15 (v0.58): it is not at this address — and the envelope says
+    # where it went, when the reader's scope may know.
+    E_MOVED: 404,
     E_TIMEOUT: 504,
     # C.12 rule 5 (v0.52): a defect on this side, said in the shape every
     # other refusal uses — so a caller can classify it instead of guessing.
@@ -756,6 +766,104 @@ def build_app(
 
     lanes = ForestLanes()
 
+    # J.6.2 (v0.57): reads scale. K read-only Vines per forest, each
+    # confined to its own thread exactly as the writer is to its lane — a
+    # read never again waits for a plant, a batch, or a model call. Readers
+    # take no lock (C.9: the lock is possession of the WRITE), deposit
+    # pheromone exactly as any read does, and see every write that
+    # committed before their transaction began (WAL). Opened lazily, on
+    # their own lane, on first use: boot warming warms the writer, and
+    # multiplying boot cost by K would move the cold-start problem, not
+    # solve it.
+    class ReaderLanes:
+        def __init__(self, size: int):
+            self.size = max(0, size)
+            self._lanes: dict[tuple[str, int], ThreadPoolExecutor] = {}
+            self._vines: dict[tuple[str, int], object] = {}
+            self._rr: dict[str, int] = {}
+            self._lock = threading.Lock()
+
+        def slot(self, forest: str) -> int:
+            with self._lock:
+                i = self._rr.get(forest, 0)
+                self._rr[forest] = (i + 1) % self.size
+                return i
+
+        def lane(self, forest: str, slot: int) -> ThreadPoolExecutor:
+            key = (forest, slot)
+            with self._lock:
+                ex = self._lanes.get(key)
+                if ex is None:
+                    ex = ThreadPoolExecutor(
+                        max_workers=1,
+                        thread_name_prefix=f"forest-{forest}-r{slot}")
+                    self._lanes[key] = ex
+                return ex
+
+        def vine(self, forest: str, slot: int):
+            """The slot's read-only Vine — called ON the slot's own thread,
+            so the SQLite connections it opens belong where they are used."""
+            key = (forest, slot)
+            v = self._vines.get(key)
+            if v is None:
+                from monkeyllm.vine import Vine
+
+                assert pool.root is not None
+                v = Vine(pool.root / forest, writable=False)
+                self._vines[key] = v
+            return v
+
+        def reset(self, forest: str) -> None:
+            """Drop a forest's readers so they reopen fresh — after a
+            restore replaces the directory, or an admin rebuild replaces
+            what a held-open index points at. Vines close on their own
+            lanes; the lanes stay for reuse."""
+            with self._lock:
+                keys = [k for k in self._vines if k[0] == forest]
+            for key in keys:
+                ex = self._lanes.get(key)
+                v = self._vines.pop(key, None)
+                if v is not None and ex is not None:
+                    ex.submit(v.close)
+
+        def shutdown(self) -> None:
+            with self._lock:
+                pairs = [(self._lanes[k], self._vines.get(k))
+                         for k in self._lanes]
+                self._lanes, self._vines = {}, {}
+            for ex, v in pairs:
+                if v is not None:
+                    ex.submit(v.close)
+                ex.shutdown(wait=True)
+
+    try:
+        reader_count = int(os.environ.get("MONKEYLLM_STATION_READERS", "4"))
+    except ValueError:
+        reader_count = 4
+    readers = ReaderLanes(reader_count)
+
+    # J.10.11 (v0.57): phase 2's stated ceiling. Parallel because the lane
+    # hold is gone — the load report measured 0.3 req/s pinned, one model
+    # call at a time — and bounded because the provider is metered and the
+    # operator pays it. A call over the ceiling waits in the host, and the
+    # wait shows in the `host` clock, never the `model` one.
+    try:
+        model_slots = int(os.environ.get(
+            "MONKEYLLM_STATION_MODEL_CONCURRENCY", "8"))
+    except ValueError:
+        model_slots = 8
+    model_slots = max(0, model_slots)
+    model_gate = asyncio.Semaphore(model_slots) if model_slots else None
+
+    # J.10.7 (v0.58): identical questions in flight share one generation.
+    # The old single lane had an accidental virtue — queued identical
+    # misses hit the entry the first had just stored — and J.10.11's
+    # parallel phase 2 un-made it. Keyed by (forest, store key); a leader
+    # that errors or declines to store releases its followers to their own
+    # calls, because coalescing is an optimisation OVER the store, never a
+    # second source of truth. Host memory, emptied by its own finally.
+    inflight: dict[tuple[str, str], asyncio.Event] = {}
+
     def _servable(forest: str) -> bool:
         """Whether this name earns its own lane — a filesystem stat, safe
         from any thread. Names that are not forests share the host lane,
@@ -771,6 +879,27 @@ def build_app(
     async def in_forest_thread(forest: str | None, fn):
         lane = lanes.lane(forest if forest and _servable(forest) else None)
         return await asyncio.get_running_loop().run_in_executor(lane, fn)
+
+    # J.6.2: which lane a primitive belongs to. Writes, the one composite
+    # that writes, and ingest keep the writer lane; every read — and the
+    # sweep's retrieval — runs on the reader pool when one is configured.
+    WRITER_BOUND = WRITE_PRIMITIVES | {"curate"} | HOST_ACTIONS
+
+    def reader_slot(forest: str, name: str) -> int | None:
+        """The reader slot this call rides, or None for the writer lane."""
+        if (readers.size <= 0 or name in WRITER_BOUND
+                or not forest or not _servable(forest)):
+            return None
+        return readers.slot(forest)
+
+    async def in_reader_thread(forest: str, slot: int, fn):
+        lane = readers.lane(forest, slot)
+        return await asyncio.get_running_loop().run_in_executor(lane, fn)
+
+    async def in_lane(forest: str, slot: int | None, fn):
+        if slot is None:
+            return await in_forest_thread(forest, fn)
+        return await in_reader_thread(forest, slot, fn)
 
     # -- ingest jobs (J.9) ---------------------------------------------------
 
@@ -932,6 +1061,7 @@ def build_app(
                         fid = entry["id"]
                         await in_forest_thread(
                             fid, lambda fid=fid: pool.close_one(fid))
+                readers.shutdown()
                 lanes.shutdown()
                 hooks.stop()
                 registry.close()
@@ -1136,6 +1266,15 @@ def build_app(
                        {"node": node_id,
                         "backlinks_removed": result.get("backlinks_removed"),
                         "commit": commit_sha})
+        elif name == "transplant":
+            # C.15: both ids and how many pointers followed — identity,
+            # never content, like every event.
+            hooks.emit(forest, "node.transplanted", principal,
+                       {"node": result.get("id"),
+                        "moved_from": result.get("moved_from"),
+                        "backlinks_rewritten":
+                            result.get("backlinks_rewritten"),
+                        "commit": commit_sha})
         elif name == "tend":
             hooks.emit(forest, "dataset.changed", principal,
                        {"node": node_id,
@@ -1201,7 +1340,10 @@ def build_app(
 
     def run_primitive(principal: str, forest: str, name: str, payload: dict,
                       clocks: dict | None = None,
-                      caps_mask: frozenset[str] | None = None):
+                      caps_mask: frozenset[str] | None = None,
+                      sample: dict | None = None,
+                      defer_model: bool = False,
+                      get_vine=None):
         """Executed on the forest thread: resolve, scope, call, attribute.
 
         `caps_mask` is J.2.6's narrowing, resolved by the surface BEFORE the
@@ -1218,12 +1360,23 @@ def build_app(
 
         The engine figure is read off the tracer, so it is the same slice
         J.10.4 already reports and not a second instrumentation.
+
+        `get_vine` (J.6.2, v0.57) resolves this lane's own Vine — the
+        reader pool's slot when the call rides one, `pool.get` otherwise.
+        `defer_model` (J.10.11) makes a sweep `answer` stop at the lane
+        boundary instead of holding it through the provider round trip:
+        the miss path returns `{"_deferred": …}` for the loop to finish.
+        `sample` may be handed in so the deferring caller reads what the
+        prepare phase left behind.
         """
         span = time.perf_counter()
-        sample: dict = {}
+        if sample is None:
+            sample = {}
+        if defer_model:
+            sample["defer_model"] = True
         try:
             return dispatch(principal, forest, name, payload, sample,
-                            caps_mask=caps_mask)
+                            caps_mask=caps_mask, get_vine=get_vine)
         except VineError as e:
             return e.to_dict()
         except Exception as e:
@@ -1256,7 +1409,8 @@ def build_app(
                                            - (store_ms or 0.0)), 3)
 
     def dispatch(principal: str, forest: str, name: str, payload: dict,
-                 sample: dict, caps_mask: frozenset[str] | None = None):
+                 sample: dict, caps_mask: frozenset[str] | None = None,
+                 get_vine=None):
         """The call itself. `sample` is where it leaves what it alone knows:
         the tracer to read the engine's clock off, and the provider's."""
         policy = registry.policy_for(principal, forest)
@@ -1267,7 +1421,7 @@ def build_app(
         # primitive, composite and ingest below inherits the narrowing.
         policy = policy.masked(caps_mask)
         try:
-            vine = pool.get(forest)
+            vine = get_vine() if get_vine is not None else pool.get(forest)
         except VineError as e:
             # Past the policy check the forest's existence is no longer a
             # secret from this caller — they hold a grant on it and
@@ -1304,53 +1458,41 @@ def build_app(
                 # finish — the ingest is the fact being recorded, and it has
                 # not happened yet.
                 return result
-            # A sweep hit is explained like any call — the retrieval that
-            # produced its trace is this call's own work (J.10.7 v0.35).
-            # Only a walk hit is a whole record and keeps its stored trace.
-            # Cost is attached only when a provider actually ran: a hit
-            # already carries the original run's cost as the record it is,
-            # and re-billing the recorded usage would spend it twice.
-            hit = isinstance(result, dict) and result.get("cached")
-            if isinstance(result, dict) and not hit:
-                sample["model"] = result.get("model_ms")
-            if name in EXPLAINED and not (hit and sample.get("cache_walk_hit")):
-                result = explain(result, vine, mark)
-                if name in COMPOSITES and isinstance(result, dict) \
-                        and "error" not in result and not hit:
-                    billed = cost_of(result, registry.binding(forest, COMPOSITES[name][1]) or {})
-                    if billed:
-                        result["cost"] = billed
-            if not hit:
-                # The deposit happens after the trace and the cost are
-                # attached, so the entry is the response exactly as served.
-                store_answer(sample, result)
-            digest = sample.get("cache_hit")
-            registry.record(
-                principal=principal, forest=forest, primitive=name,
-                args={**payload, "cache_key": digest} if digest else payload,
-                result="cache" if hit
-                else ("error" if isinstance(result.get("error"), dict) else "ok"),
-                size=len(json.dumps(result, default=str)),
-                commit_sha=result.get("commit"),
-            )
-            # J.16: after the record, before the return. The act is complete
-            # and audited; the announcement is O(1) when nobody subscribes
-            # and a queue push when somebody does, so the caller waits for
-            # neither DNS nor a socket.
-            if name in COMPOSITES:
-                emit_answer(principal, forest, result)
-            emit_refusal(principal, forest, name, result)
-            return result
+            if isinstance(result, dict) and "_deferred" in result:
+                # J.10.11: the sweep's miss path, stopping at the lane
+                # boundary. The trace slice is captured HERE — the lane
+                # serves other calls while the model writes, and a trace
+                # read later would carry a stranger's hops.
+                result["_deferred"].update(
+                    vine=vine, mark=mark,
+                    events=list(vine.tracer.events[mark:]))
+                return result
+            return composite_tail(principal, forest, vine, name, payload,
+                                  sample, result, mark)
 
         root_path = Path(vine.forest.root)
-        before = _git(root_path, "rev-parse", "HEAD") if name in WRITE_PRIMITIVES else None
-        result = ScopedVine(vine, policy).call(name, **payload)
+        # J.4 (v0.57): the principal is stamped at the commit, never amended
+        # after — the engine's `commit_trailers` seam carries it into the
+        # original commit. The amend survives only as the fallback for an
+        # engine without the seam.
+        trailer_seam = (name in WRITE_PRIMITIVES
+                        and hasattr(vine, "commit_trailers"))
+        before = (_git(root_path, "rev-parse", "HEAD")
+                  if name in WRITE_PRIMITIVES and not trailer_seam else None)
+        if trailer_seam:
+            vine.commit_trailers = [f"station-principal: {principal}"]
+        try:
+            result = ScopedVine(vine, policy).call(name, **payload)
+        finally:
+            if trailer_seam:
+                vine.commit_trailers = []
         if name in EXPLAINED:
             result = explain(result, vine, mark)
 
         commit_sha = None
         if name in WRITE_PRIMITIVES and isinstance(result, dict) and "error" not in result:
-            commit_sha = stamp_principal(root_path, principal, before)
+            commit_sha = (result.get("commit") if trailer_seam
+                          else stamp_principal(root_path, principal, before))
             if commit_sha and result.get("commit"):
                 result["commit"] = commit_sha
             if isinstance(result.get("trail"), list):
@@ -1366,6 +1508,180 @@ def build_app(
             emit_write(principal, forest, name, payload, result, commit_sha)
         emit_refusal(principal, forest, name, result)
         return result
+
+    def composite_tail(principal, forest, vine, name, payload, sample,
+                       result, mark, events=None):
+        """The composite's close: trace, cost, store, audit, webhooks —
+        one function because the deferred answer (J.10.11) finishes with
+        exactly the steps the lane-bound path always ran. `events` is the
+        prepare phase's captured trace slice; absent, the live tracer is
+        read as ever.
+
+        A sweep hit is explained like any call — the retrieval that
+        produced its trace is this call's own work (J.10.7 v0.35). Only a
+        walk hit is a whole record and keeps its stored trace. Cost is
+        attached only when a provider actually ran: a hit already carries
+        the original run's cost as the record it is, and re-billing the
+        recorded usage would spend it twice.
+        """
+        hit = isinstance(result, dict) and result.get("cached")
+        if isinstance(result, dict) and not hit:
+            sample["model"] = result.get("model_ms")
+        if name in EXPLAINED and not (hit and sample.get("cache_walk_hit")):
+            result = explain(result, vine, mark, events=events)
+            if name in COMPOSITES and isinstance(result, dict) \
+                    and "error" not in result and not hit:
+                billed = cost_of(result, registry.binding(forest, COMPOSITES[name][1]) or {})
+                if billed:
+                    result["cost"] = billed
+        if not hit:
+            # The deposit happens after the trace and the cost are
+            # attached, so the entry is the response exactly as served.
+            store_answer(sample, result)
+        digest = sample.get("cache_hit")
+        registry.record(
+            principal=principal, forest=forest, primitive=name,
+            args={**payload, "cache_key": digest} if digest else payload,
+            result="cache" if hit
+            else ("error" if isinstance(result.get("error"), dict) else "ok"),
+            size=len(json.dumps(result, default=str)),
+            commit_sha=result.get("commit"),
+        )
+        # J.16: after the record, before the return. The act is complete
+        # and audited; the announcement is O(1) when nobody subscribes
+        # and a queue push when somebody does, so the caller waits for
+        # neither DNS nor a socket.
+        if name in COMPOSITES:
+            emit_answer(principal, forest, result)
+        emit_refusal(principal, forest, name, result)
+        return result
+
+    def settle_answer(principal, forest, payload, sample, deferred, served):
+        """J.10.11 phase 3, on the lane of phase 1: whisper, then the tail.
+
+        The whisper closes the hunt either way (v0.35): a hit and a miss
+        heat identically, because the knowledge was used identically.
+        """
+        whisper(deferred["vine"], served.get("evidence")
+                if isinstance(served, dict) else None)
+        reply = deferred.get("reply")
+        if reply and isinstance(served, dict) and "error" not in served:
+            served.setdefault("reply_tokens", reply)
+        return composite_tail(principal, forest, deferred["vine"], "answer",
+                              payload, sample, served, deferred["mark"],
+                              events=deferred["events"])
+
+    async def run_answer(principal, forest, payload, clocks, mask,
+                         slot: int | None):
+        """J.10.11: prepare on a lane, the model on none, settle back.
+
+        Phase 1 completes hits, refusals, floors and errors on the lane,
+        byte-identical to before. Only the miss path crosses: the bundle,
+        binding and question leave the lane as values, the provider round
+        trip runs on an anonymous executor thread, and the settle is
+        pinned to the lane of phase 1 — the vine whose trails the whisper
+        feeds belongs to that thread.
+        """
+        from monkeyllm_station import inference
+
+        span = time.perf_counter()
+        sample: dict = {}
+        get_vine = ((lambda: readers.vine(forest, slot))
+                    if slot is not None else None)
+        prep = await in_lane(
+            forest, slot,
+            lambda: run_primitive(principal, forest, "answer", payload,
+                                  clocks, mask, sample=sample,
+                                  defer_model=True, get_vine=get_vine))
+        if not (isinstance(prep, dict) and "_deferred" in prep):
+            return prep
+        deferred = prep["_deferred"]
+
+        # J.10.7 (v0.58): identical questions in flight share one
+        # generation. A follower awaits the leader on the loop — no lane
+        # held — then re-consults the store under its OWN reading
+        # fingerprint; the reading check decides, exactly as ever.
+        stash = sample.get("cache_store")
+        flight_key = ((forest, stash["key"])
+                      if stash and payload.get("cache", True) is not False
+                      else None)
+        leading = False
+        if flight_key is not None:
+            waiting = inflight.get(flight_key)
+            if waiting is not None:
+                await waiting.wait()
+                served = recheck_store(forest, sample, deferred["bundle"])
+                if served is not None:
+                    return await in_lane(
+                        forest, slot,
+                        lambda: settle_answer(principal, forest, payload,
+                                              sample, deferred, served))
+            else:
+                inflight[flight_key] = asyncio.Event()
+                leading = True
+        try:
+            if model_gate is not None:
+                # J.10.11: admitted under the deployment's stated ceiling.
+                async with model_gate:
+                    served = await asyncio.to_thread(
+                        inference.answer, deferred["scoped"],
+                        deferred["question"], deferred["binding"],
+                        k=deferred["k"], bundle=deferred["bundle"],
+                        reply_tokens=deferred["reply"])
+            else:
+                served = await asyncio.to_thread(
+                    inference.answer, deferred["scoped"],
+                    deferred["question"], deferred["binding"],
+                    k=deferred["k"], bundle=deferred["bundle"],
+                    reply_tokens=deferred["reply"])
+        except VineError as e:
+            served = e.to_dict()
+        except Exception as e:  # provider outages must not 500 the Station
+            served = VineError(E_SCHEMA, f"answer failed: {e}"[:300]).to_dict()
+        try:
+            result = await in_lane(
+                forest, slot,
+                lambda: settle_answer(principal, forest, payload, sample,
+                                      deferred, served))
+        finally:
+            if leading:
+                # Released after the settle, so a follower waking up finds
+                # the entry already deposited — and released even when the
+                # leader errored or declined to store, because coalescing
+                # is an optimisation over the store, never a second source
+                # of truth: the followers simply run their own calls.
+                inflight.pop(flight_key).set()
+        if clocks is not None:
+            # J.10.6 across the phases: `vine` is phase 1's captured engine
+            # time (already in clocks), `model` is phase 2's round trip,
+            # `host` the remainder of the whole span.
+            model = sample.get("model")
+            store_ms = sample.get("cache")
+            if model is not None:
+                clocks["model"] = round(model, 3)
+            if store_ms is not None:
+                clocks["cache"] = round(store_ms, 3)
+            clocks["host"] = round(max(0.0, (time.perf_counter() - span) * 1000
+                                       - clocks.get("vine", 0.0)
+                                       - (model or 0.0)
+                                       - (store_ms or 0.0)), 3)
+        return result
+
+    async def execute_call(principal, forest, name, payload, clocks, mask):
+        """One door for both surfaces (REST and MCP): route the call to its
+        lane (J.6.2), and take the sweep `answer` through the three phases
+        of J.10.11. The walk (`hops`) stays lane-bound by design — it
+        interleaves reads with model turns, opt-in per call."""
+        slot = reader_slot(forest, name)
+        if name == "answer" and not (payload or {}).get("hops"):
+            return await run_answer(principal, forest, payload, clocks, mask,
+                                    slot)
+        get_vine = ((lambda: readers.vine(forest, slot))
+                    if slot is not None else None)
+        return await in_lane(
+            forest, slot,
+            lambda: run_primitive(principal, forest, name, payload, clocks,
+                                  mask, get_vine=get_vine))
 
     # Per-token prices, as the provider itself states them (J.10). Fetched
     # once per endpoint and kept for the life of the process: a price list is
@@ -1410,7 +1726,7 @@ def build_app(
                        usd=round(prompt_usd + completion_usd, 8))
         return out
 
-    def explain(result: dict, vine, mark: int) -> dict:
+    def explain(result: dict, vine, mark: int, events=None) -> dict:
         """Attach what the call actually did, step by step (J.10.4).
 
         A composite is opaque from outside: `answer` is one request and six
@@ -1418,6 +1734,10 @@ def build_app(
         nothing about which of those to fix. The engine already times every
         primitive it runs (Part D), so this is a slice of that trace — the
         events this call appended — not a second instrumentation.
+
+        `events` (J.10.11, v0.57) is the prepare phase's captured slice: a
+        deferred answer settles after the lane served other calls, so a
+        live read of `tracer.events[mark:]` would carry a stranger's hops.
 
         Only the shape of the work is reported: the primitive, the node when
         the primitive takes one, the milliseconds and the tokens it emitted.
@@ -1429,7 +1749,8 @@ def build_app(
         steps = [
             {"step": e["primitive"], "ms": e["elapsed_ms"], "tokens": e["tokens_out"],
              **({"id": e["id"]} if e["id"] else {})}
-            for e in vine.tracer.events[mark:]
+            for e in (events if events is not None
+                      else vine.tracer.events[mark:])
         ]
         # A forager's forest calls ARE its hops, in the same order, minus the
         # entry `locate` it did not choose and minus the ones the policy
@@ -1569,26 +1890,7 @@ def build_app(
         if payload.get("cache", True) is not False and bundle.get("results"):
             entry = store.get(key, ttl_hours=cfg["ttl_hours"])
             if entry is not None and entry["fingerprint"] == fingerprint:
-                stored = json.loads(entry["response"])
-                # Which half is which (J.10.7 v0.35): retrieval fields are
-                # this call's own; model fields are the record, as bought.
-                # No `model_ms`, so neither the trace nor the clocks claim
-                # a provider ran.
-                served = {
-                    "answer": stored.get("answer"),
-                    "model": stored.get("model"),
-                    "usage": stored.get("usage"),
-                    "cached": True,
-                    "cached_at": entry["created"],
-                    "evidence": [r.get("id") for r in bundle.get("results", [])],
-                    "sources": [{"id": r.get("id"), "title": r.get("title"),
-                                 "summary": r.get("summary"),
-                                 "type": r.get("type")}
-                                for r in bundle.get("results", [])],
-                    "harvest": bundle,
-                }
-                if stored.get("cost"):
-                    served["cost"] = stored["cost"]
+                served = assemble_stored(entry, bundle)
                 store.touch(key, priced=bool(entry["priced"]), usd=entry["usd"])
                 digest = key[:answer_store.DIGEST_CHARS]
                 sample["cache_hit"] = digest
@@ -1596,6 +1898,59 @@ def build_app(
                          forest, digest)
             else:
                 store.count_miss()
+        sample["cache"] = sample.get("cache", 0.0) \
+            + (time.perf_counter() - t0) * 1000
+        return served
+
+    def assemble_stored(entry, bundle: dict) -> dict:
+        """One stored entry, served against THIS call's retrieval.
+
+        Which half is which (J.10.7 v0.35): retrieval fields are this
+        call's own; model fields are the record, as bought. No `model_ms`,
+        so neither the trace nor the clocks claim a provider ran.
+        """
+        stored = json.loads(entry["response"])
+        served = {
+            "answer": stored.get("answer"),
+            "model": stored.get("model"),
+            "usage": stored.get("usage"),
+            "cached": True,
+            "cached_at": entry["created"],
+            "evidence": [r.get("id") for r in bundle.get("results", [])],
+            "sources": [{"id": r.get("id"), "title": r.get("title"),
+                         "summary": r.get("summary"), "type": r.get("type")}
+                        for r in bundle.get("results", [])],
+            "harvest": bundle,
+        }
+        if stored.get("cost"):
+            served["cost"] = stored["cost"]
+        return served
+
+    def recheck_store(forest: str, sample: dict, bundle: dict):
+        """J.10.7 (v0.58): the follower's second look, after the leader.
+
+        Runs on no lane and touches no primitive — the stash from this
+        call's own prepare phase already holds the store, the key and
+        THIS caller's reading fingerprint, so a follower whose reading
+        matches the leader's is served the reply the leader bought, and
+        one whose reading differs falls through to its own model call,
+        exactly as the reading check always ruled.
+        """
+        stash = sample.get("cache_store")
+        if not stash:
+            return None
+        t0 = time.perf_counter()
+        cfg = cache_settings(forest)
+        entry = stash["store"].get(stash["key"], ttl_hours=cfg["ttl_hours"])
+        served = None
+        if entry is not None and entry["fingerprint"] == stash.get("fingerprint"):
+            served = assemble_stored(entry, bundle)
+            stash["store"].touch(stash["key"], priced=bool(entry["priced"]),
+                                 usd=entry["usd"])
+            digest = stash["key"][:answer_store.DIGEST_CHARS]
+            sample["cache_hit"] = digest
+            log.info("answer coalesced onto a leader: forest=%s key=%s",
+                     forest, digest)
         sample["cache"] = sample.get("cache", 0.0) \
             + (time.perf_counter() - t0) * 1000
         return served
@@ -1726,6 +2081,18 @@ def build_app(
                     sample, forest, vine, policy, binding, payload,
                     question, k, bundle, reply, window)
                 if served is None:
+                    if sample is not None and sample.get("defer_model"):
+                        # J.10.11 (v0.57): the provider is not a lane. The
+                        # bundle, the binding and the question leave as
+                        # values; the loop runs the model on no lane and
+                        # settles back on this one. `inference.answer`
+                        # handed a bundle touches no vine — the property
+                        # this hand-off makes load-bearing.
+                        sample.pop("defer_model", None)
+                        return {"_deferred": {
+                            "scoped": scoped, "question": question,
+                            "binding": binding, "k": k, "bundle": bundle,
+                            "reply": reply}}
                     served = inference.answer(scoped, question, binding, k=k,
                                               bundle=bundle,
                                               reply_tokens=reply)
@@ -2183,10 +2550,13 @@ def build_app(
     # -- map projections (J.11) ---------------------------------------------
 
     def run_map(principal: str, forest: str, kind: str, params: dict,
-                caps_mask: frozenset[str] | None = None):
+                caps_mask: frozenset[str] | None = None, get_vine=None):
         """A whole region in one payload, under the caller's own policy.
 
-        Executed on the forest thread like every other forest touch. This is
+        Executed on the forest thread like every other forest touch — a
+        reader lane's when the pool has one (J.6.2): the graph is the
+        console's first read of a forest, and it was the read the incident
+        measured waiting behind a plant. This is
         not a primitive and grants nothing new: every id it returns is one
         the same principal could reach through `look`, and the filtering is
         `policy.in_scope` — the same predicate `ScopedVine` applies node by
@@ -2202,7 +2572,7 @@ def build_app(
                 E_FORBIDDEN, f"'{kind}' requires the 'read' capability",
                 hint=f"This principal holds: {sorted(policy.caps)}.").to_dict()
         try:
-            vine = pool.get(forest)
+            vine = get_vine() if get_vine is not None else pool.get(forest)
         except VineError as e:
             return e.to_dict()   # see run_primitive: not an existence question
 
@@ -2403,6 +2773,11 @@ def build_app(
             "setup_required": setup_open(),
             "password_login": super_admin is not None or registry.has_any_password(),
             "mcp": mcp_status(request),
+            # J.10.11 (v0.57): the deployment states its shape — the team
+            # discovered every ceiling by experiment and asked for this.
+            # Counts of capacity, never per-forest data: health stays the
+            # unauthenticated surface it is.
+            "concurrency": {"readers": readers.size, "model": model_slots},
         })
 
     def effective_grants(principal: str,
@@ -2839,6 +3214,9 @@ def build_app(
         if "error" in status:
             return JSONResponse(status, status_code=400)
         if request.method == "POST":
+            # J.6.2: reader vines hold the canopy they loaded at open; a
+            # rebuilt index reaches them by reopening, not by luck.
+            readers.reset(forest)
             hooks.emit(forest, "canopy.built", principal,
                        {"embedded": status.get("embedded"),
                         "nodes": status.get("nodes"),
@@ -3130,10 +3508,8 @@ def build_app(
         # Read off the request BEFORE the lane, like the MCP surface does:
         # the mask belongs to the credential and the lane never saw one.
         mask = mask_of(request)
-        result = await in_forest_thread(
-            forest, lambda: run_primitive(principal, forest, name, payload,
-                                          clocks, mask)
-        )
+        result = await execute_call(principal, forest, name, payload,
+                                    clocks, mask)
         timing = _server_timing(clocks)
         if result is None:
             response = _unknown_forest(forest)
@@ -3388,8 +3764,15 @@ def build_app(
                 hint=f"Map projections: {sorted(MAP_KINDS)}. "
                      "Primitives are POSTed to this path."))
         params = dict(request.query_params)
-        result = await in_forest_thread(
-            forest, lambda: run_map(principal, forest, kind, params, mask))
+        # J.6.2: the graph is a read — it rides the reader pool, so an open
+        # Explore never waits behind a plant or a batch.
+        slot = reader_slot(forest, "look")
+        get_vine = ((lambda: readers.vine(forest, slot))
+                    if slot is not None else None)
+        result = await in_lane(
+            forest, slot,
+            lambda: run_map(principal, forest, kind, params, mask,
+                            get_vine=get_vine))
         if result is None:
             return _unknown_forest(forest)
         if isinstance(result.get("error"), dict):
@@ -3876,6 +4259,23 @@ def build_app(
             return err
         forest = request.path_params["forest"]
         node_id = request.path_params["node"]
+        # J.14.1 (v0.57): an unknown query parameter is E_SCHEMA, never
+        # silence — `?recursive=true` was accepted with 200 and ignored,
+        # the exact defect C.8 fixed for graft, alive on the route beside
+        # it. A download URL is pasted and hand-edited more than any JSON
+        # body; the silent-parameter failure mode is worse here.
+        unknown = [k for k in request.query_params if k != "recursive"]
+        if unknown:
+            return _envelope(VineError(
+                E_SCHEMA, f"unknown query parameter {unknown[0]!r}",
+                hint="This route accepts: recursive."))
+        raw_recursive = request.query_params.get("recursive")
+        if raw_recursive is not None and raw_recursive.lower() not in (
+                "true", "1", "false", "0"):
+            return _envelope(VineError(
+                E_SCHEMA,
+                f"recursive must be true or false, got {raw_recursive!r}"))
+        recursive = (raw_recursive or "").lower() in ("true", "1")
         policy = registry.policy_for(principal, forest)
         if policy is None:
             return _unknown_forest(forest)
@@ -3885,29 +4285,83 @@ def build_app(
                 E_FORBIDDEN, "'export' requires the 'read' capability",
                 hint=f"This principal holds: {sorted(policy.caps)}."), 403)
 
-        def work():
+        def work(vine=None):
             try:
-                vine = pool.get(forest)
+                if vine is None:
+                    vine = pool.get(forest)
             except VineError as e:
                 return e.to_dict()
             try:
+                scoped = ScopedVine(vine, policy)
                 # ScopedVine._gate answers out-of-scope and absent with one
                 # byte-identical envelope — this surface is no more an
-                # existence oracle than the primitives (J.14 / F.49).
-                return {"text": ScopedVine(vine, policy).export(node_id)}
+                # existence oracle than the primitives (J.14 / F.49). The
+                # gate runs FIRST even for the subtree form, so a leaf vs
+                # branch question is only ever answered about a node the
+                # caller may read.
+                text = scoped.export(node_id)
+                if not recursive:
+                    return {"text": text}
+                row = vine.catalog.get(node_id)
+                if row is None or row["kind"] != "branch":
+                    # J.14.1 (v0.57): a leaf has no subtree, and pretending
+                    # otherwise is the silence this rule removes.
+                    return VineError(
+                        E_SCHEMA,
+                        f"recursive=true needs a branch; '{node_id}' is not one",
+                        hint="Export the node without the flag.").to_dict()
+                # The caller's scope's view, exactly as scan's: out-of-scope
+                # nodes are absent — silently, because a manifest of what a
+                # scope may not see would be the size oracle J.3 prevents.
+                members = [node_id] + sorted(
+                    r["id"] for r in vine.catalog.children(node_id,
+                                                           recursive=True)
+                    if policy.in_scope(r["id"]))
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for mid in members:
+                        # Each member byte-identical to its single export
+                        # (F.93); the id is a path, so the zip unpacks as
+                        # the subtree it is.
+                        zf.writestr(f"{mid}.md",
+                                    text if mid == node_id
+                                    else scoped.export(mid))
+                return {"zip": buf.getvalue(), "members": len(members)}
             except VineError as e:
                 return e.to_dict()
 
-        result = await in_forest_thread(forest, work)
+        slot = reader_slot(forest, "pick")
+        result = await in_lane(
+            forest, slot,
+            lambda: work(readers.vine(forest, slot))
+            if slot is not None else work())
         if result is None:
             return _unknown_forest(forest)
         if isinstance(result.get("error"), dict):
             code = result["error"].get("code", E_SCHEMA)
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        leaf = node_id.rsplit("/", 1)[-1] or "node"
+        if "zip" in result:
+            # The zip is named for the region, not the index file: a
+            # `monkeyllm/_index` subtree downloads as `monkeyllm.zip`. The
+            # single `.md` keeps its v0.56 name to the byte.
+            zip_leaf = (node_id.rsplit("/", 2)[-2]
+                        if leaf == "_index" and "/" in node_id
+                        else (forest if node_id == "_index" else leaf))
+            registry.record(principal=principal, forest=forest,
+                            primitive="export",
+                            args={"node": node_id, "recursive": True},
+                            result="ok", size=len(result["zip"]))
+            return Response(
+                result["zip"], media_type="application/zip",
+                headers={
+                    "Cache-Control": "private",
+                    "Content-Disposition":
+                        f'attachment; filename="{zip_leaf}.zip"',
+                })
         text = result["text"]
         registry.record(principal=principal, forest=forest, primitive="export",
                         args={"node": node_id}, result="ok", size=len(text))
-        leaf = node_id.rsplit("/", 1)[-1] or "node"
         return Response(
             text, media_type="text/markdown; charset=utf-8",
             headers={
@@ -4189,6 +4643,9 @@ def build_app(
         if isinstance(result.get("error"), dict):
             code = result["error"].get("code", E_SCHEMA)
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        # J.6.2: the readers reopen fresh rather than trusting a held-open
+        # view of an index that was just rewritten underneath them.
+        readers.reset(forest)
         registry.record(principal=principal, forest=forest, primitive="reindex",
                         args={}, result="ok", size=result["nodes"])
         hooks.emit(forest, "reindex.finished", principal,
@@ -4746,7 +5203,8 @@ def build_app(
         from monkeyllm_station.mcp_surface import build_mcp_mount
 
         mcp_app, mcp_lifespan = build_mcp_mount(pool, registry, in_forest_thread,
-                                                run_primitive, _launch_ingest)
+                                                run_primitive, _launch_ingest,
+                                                execute=execute_call)
         if mcp_app is not None:
             routes.append(Mount("/mcp", app=mcp_app))
             mcp_state["enabled"] = True

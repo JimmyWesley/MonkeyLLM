@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     body_tokens INTEGER NOT NULL DEFAULT 0,
     outline TEXT NOT NULL DEFAULT '[]',
     stale INTEGER NOT NULL DEFAULT 0,
-    body_hash TEXT NOT NULL DEFAULT ''
+    body_hash TEXT NOT NULL DEFAULT '',
+    origin TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent);
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
@@ -111,6 +112,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     id UNINDEXED, title, aliases, tags, summary,
     tokenize = "unicode61 remove_diacritics 2"
 );
+
+-- C.15 (v0.58): the waymarks. DERIVED from `moved_from` on passports at
+-- upsert time — the files are the truth and a reindex rebuilds this.
+CREATE TABLE IF NOT EXISTS moves (
+    old_id TEXT PRIMARY KEY,
+    new_id TEXT NOT NULL
+);
 """
 
 
@@ -140,6 +148,12 @@ class Catalog:
         }:
             self.conn.execute(
                 "ALTER TABLE nodes ADD COLUMN body_hash TEXT NOT NULL DEFAULT ''")
+        # Same bargain for origin (A.3, v0.57): added in place, filled by
+        # the next write or reindex — a catalog is derived, never migrated.
+        if "origin" not in {
+            r[1] for r in self.conn.execute("PRAGMA table_info(nodes)")
+        }:
+            self.conn.execute("ALTER TABLE nodes ADD COLUMN origin TEXT")
         self.conn.commit()
 
     def close(self) -> None:
@@ -369,12 +383,21 @@ class Catalog:
         self.conn.execute(
             "DELETE FROM sniff_memo WHERE node_id = ? AND body_hash != ?",
             (node.id, body_hash))
+        # C.15: the waymarks this passport declares — and the address this
+        # passport occupies stops being anybody's waymark (a replant over a
+        # moved-away id makes the address live again).
+        self.conn.execute("DELETE FROM moves WHERE old_id = ?", (node.id,))
+        for old in (fm.get("moved_from") or []):
+            if isinstance(old, str) and old and old != node.id:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO moves (old_id, new_id) "
+                    "VALUES (?, ?)", (old, node.id))
         self.conn.execute(
             """INSERT INTO nodes (id, kind, type, title, summary, tags, aliases,
                 created, updated, confidence, source, entity_kind, payload,
                 payload_type, payload_hash, parent, trail, coverage, body_tokens,
-                outline, stale, body_hash)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)""",
+                outline, stale, body_hash, origin)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)""",
             (
                 node.id,
                 kind,
@@ -397,6 +420,7 @@ class Catalog:
                 node.body_tokens,
                 json.dumps(node.outline, ensure_ascii=False),
                 body_hash,
+                fm.get("origin"),
             ),
         )
         self.conn.execute(
@@ -430,9 +454,11 @@ class Catalog:
         self.conn.execute("DELETE FROM nodes_fts WHERE id = ?", (node_id,))
         # Both directions: a deleted row must not keep answering edges_in
         # for its neighbours (C.14) — the catalog is rebuildable, never the
-        # place a ghost lives on.
+        # place a ghost lives on. Waymarks pointing at the deleted node die
+        # with it (C.15): a redirect into a hole is worse than the hole.
         self.conn.execute("DELETE FROM edges WHERE src = ? OR dst = ?",
                           (node_id, node_id))
+        self.conn.execute("DELETE FROM moves WHERE new_id = ?", (node_id,))
         self.conn.commit()
 
     def mark_stale(self, node_id: str) -> None:
@@ -452,6 +478,13 @@ class Catalog:
 
     def get(self, node_id: str) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
+
+    def moved_to(self, old_id: str) -> str | None:
+        """C.15: where a waymark points, or None for an id that never
+        moved (or moved and was replanted — upsert clears the row)."""
+        row = self.conn.execute(
+            "SELECT new_id FROM moves WHERE old_id = ?", (old_id,)).fetchone()
+        return row["new_id"] if row else None
 
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
@@ -499,6 +532,55 @@ class Catalog:
             ).fetchone()
             is not None
         )
+
+    def dates_of(self, ids: list[str]) -> dict[str, tuple[str, str]]:
+        """id -> (created, updated) for a result set (C.6c.3).
+
+        Read off the rows already indexed — never a file open. Empty
+        strings stay empty: an undated node states no time.
+        """
+        if not ids:
+            return {}
+        marks = ",".join("?" for _ in ids)
+        return {
+            r["id"]: (r["created"] or "", r["updated"] or "")
+            for r in self.conn.execute(
+                f"SELECT id, created, updated FROM nodes WHERE id IN ({marks})",
+                ids,
+            )
+        }
+
+    def superseded_by_map(self, ids: list[str]) -> dict[str, list[str]]:
+        """target -> live superseders, for a candidate set (C.6c.4).
+
+        Rows exist only while the superseder lives — `delete_node` removes
+        its edges — so "a LIVE node supersedes" is the table's own
+        invariant, never a second check.
+        """
+        if not ids:
+            return {}
+        marks = ",".join("?" for _ in ids)
+        out: dict[str, list[str]] = {}
+        for r in self.conn.execute(
+                f"SELECT src, dst FROM edges WHERE rel = 'supersedes' "
+                f"AND dst IN ({marks})", ids):
+            out.setdefault(r["dst"], []).append(r["src"])
+        return out
+
+    def edges_among(self, ids: list[str], rel: str) -> list[sqlite3.Row]:
+        """Edges of one rel whose BOTH endpoints are in `ids` (C.6c.3).
+
+        Asked with a result set (k <= 5 items), never the forest: the
+        sweep annotates successions inside what it already selected.
+        """
+        if not ids:
+            return []
+        marks = ",".join("?" for _ in ids)
+        return self.conn.execute(
+            f"SELECT src, dst FROM edges WHERE rel = ? "
+            f"AND src IN ({marks}) AND dst IN ({marks})",
+            (rel, *ids, *ids),
+        ).fetchall()
 
     # bm25() per-column weights, positional over (id, title, aliases, tags,
     # summary). A hit on curated naming (title/aliases) outranks the same hit

@@ -169,7 +169,11 @@ def clamp_k(k: int) -> int:
 
 def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
             since: str | None = None, until: str | None = None,
-            date_field: str | None = None) -> dict:
+            date_field: str | None = None,
+            include_superseded: bool = False, *, visible=None) -> dict:
+    """`visible` (C.6c.4 rule 6) is the host policy's predicate, passed by
+    the scoped wrapper exactly as `scan` receives it: a successor the
+    caller cannot see cannot suppress what they can."""
     k = clamp_k(k)
     # C.13.1: the window rides both legs or neither. A sweep whose lexical
     # half was bounded and whose literal half was not would return material
@@ -182,7 +186,47 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
     loc_ids = [r["id"] for r in loc["results"]]
     sniff_ids = [r["id"] for r in sn["results"]]
     fused = rrf_fuse(loc_ids, sniff_ids)
-    ranked = sorted(fused, key=fused.get, reverse=True)[:k]
+    # C.6c.3 (v0.57): equal relevance prefers the newer. A tie-break, never
+    # a boost — recency decides only where the fusion could not, then
+    # `created`, then id for determinism.
+    dates = vine.catalog.dates_of(list(fused))
+    order = sorted(sorted(fused), reverse=True,
+                   key=lambda nid: (fused[nid], dates.get(nid, ("", ""))[1],
+                                    dates.get(nid, ("", ""))[0]))
+    # C.6c.4 (v0.58): a replacement suppresses what it replaced — excluded
+    # from the selection, the seat refilled, and NOTHING hidden silently.
+    # A successor the caller cannot see cannot suppress what they can.
+    sup_map = vine.catalog.superseded_by_map(order)
+    if visible is not None:
+        sup_map = {t: kept for t, srcs in sup_map.items()
+                   if (kept := [s for s in srcs if visible(s)])}
+    excluded: list[dict] = []
+    if include_superseded or not sup_map:
+        ranked = order[:k]
+    else:
+        ranked = []
+        for nid in order:
+            if len(ranked) == k:
+                break
+            if nid in sup_map:
+                excluded.append({"id": nid, "by": sorted(sup_map[nid])})
+                continue
+            ranked.append(nid)
+    # C.6c.3: a succession inside the result set is annotated, never
+    # suppressed — the older node stays (history is evidence too), but the
+    # model is no longer the only one who could have discovered the order.
+    # The `supersedes` rel (C.6c.4) annotates in the same voice, wherever
+    # its target survived into the set (the history view, or a scoped
+    # suppression that could not apply).
+    succ_of: dict[str, list[str]] = {}
+    pred_of: dict[str, list[str]] = {}
+    for rel in ("succeeds", "supersedes"):
+        for edge in vine.catalog.edges_among(ranked, rel):
+            succ_of.setdefault(edge["src"], []).append(edge["dst"])
+            pred_of.setdefault(edge["dst"], []).append(edge["src"])
+    for nid in ranked:
+        for successor in sup_map.get(nid, []):
+            pred_of.setdefault(nid, []).append(successor)
 
     loc_by = {r["id"]: r for r in loc["results"]}
     sniff_by = {r["id"]: r for r in sn["results"]}
@@ -207,6 +251,17 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
             "matches": matches,
             "content": _content_for(vine, nid, matches),
         }
+        # C.6c.3 (v0.57): every item states its time — read off the catalog
+        # row already in hand, never a file open. Undated stays absent.
+        created, updated = dates.get(nid, ("", ""))
+        if created:
+            item["created"] = created
+        if updated:
+            item["updated"] = updated
+        if nid in succ_of:
+            item["supersedes"] = sorted(set(succ_of[nid]))
+        if nid in pred_of:
+            item["superseded_by"] = sorted(set(pred_of[nid]))
         # C.2.1 (v0.46): a dataset's notes travel with it. The sweep is
         # `locate` + `sniff` + the matched sections — it never calls `look`,
         # so a teaching that only rides in the digest reaches the walk and
@@ -219,6 +274,11 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
                 item["notes"] = notes
         results.append(item)
     payload = {"query": query, "terms": terms, "results": results, "truncated": False}
+    if excluded:
+        # C.6c.4 rule 3: the reader is told what was set aside and by what,
+        # in the same breath — the difference between "nothing matches" and
+        # "what matched has been replaced".
+        payload["superseded_excluded"] = excluded
     if loc.get("window") or sn.get("window"):
         payload["window"] = loc.get("window") or sn.get("window")
     excluded = max(loc.get("undated_excluded", 0), sn.get("undated_excluded", 0))

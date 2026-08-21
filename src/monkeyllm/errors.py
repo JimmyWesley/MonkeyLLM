@@ -21,6 +21,11 @@ E_LOCKED = "E_LOCKED"
 # branch's children). Not E_SCHEMA — the call was well-formed; the forest's
 # current shape is what says no, and the refusal carries that shape.
 E_ANCHORED = "E_ANCHORED"
+# C.15 (v0.58): the node moved and the waymark knows where. "It is not
+# here" would be half the truth; `data.moved_to` is the other half — under
+# a policy the host withholds it when the new address is out of the
+# reader's scope, and the envelope collapses to the canonical not-found.
+E_MOVED = "E_MOVED"
 # C.12 (v0.52): the last resort. An unhandled path is a defect in the
 # server, and served as a bare 500 with no code it becomes the caller's
 # defect too — a model cannot tell it apart from its own bad argument, and

@@ -64,7 +64,12 @@ def test_boot_opens_every_forest(warm_root, tmp_path):
 
 def test_warming_off_goes_back_to_first_touch(warm_root, tmp_path):
     """The switch exists because holding every forest open is memory, and a
-    registry of five hundred is a different deployment from one of ten."""
+    registry of five hundred is a different deployment from one of ten.
+
+    J.6.2 (v0.57): a READ no longer opens the writer — it is served by a
+    reader vine, and `active` describes the writer, which opens on the
+    first write or admin touch.
+    """
     app = _app(warm_root, tmp_path / "off.db", warm=False)
     with _serve(app) as client:
         assert not hasattr(app.state, "warmed")
@@ -72,9 +77,21 @@ def test_warming_off_goes_back_to_first_touch(warm_root, tmp_path):
 
         registry = app.state.registry
         key = registry.issue_key("p")
-        registry.grant("p", FOREST, {"read"})
-        client.post(f"/v1/forests/{FOREST}/look", json={"id": "_index"},
-                    headers={"Authorization": f"Bearer {key}"})
+        registry.grant("p", FOREST, {"read", "write"})
+        r = client.post(f"/v1/forests/{FOREST}/look", json={"id": "_index"},
+                        headers={"Authorization": f"Bearer {key}"})
+        assert r.status_code == 200
+        assert app.state.pool.list()["forests"][0]["active"] is False
+
+        r = client.post(
+            f"/v1/forests/{FOREST}/plant",
+            json={"node": {"id": "warm-probe", "type": "note",
+                           "title": "Warm probe",
+                           "summary": "First-touch probe: the write opens "
+                                      "the writer vine.",
+                           "parent": "_index"}},
+            headers={"Authorization": f"Bearer {key}"})
+        assert r.status_code == 200, r.text
         assert app.state.pool.list()["forests"][0]["active"] is True
 
 

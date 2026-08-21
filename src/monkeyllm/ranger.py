@@ -229,4 +229,9 @@ class Ranger:
         report["links"] = self.tend_links()
         report["landmarks"] = self.tend_landmarks()
         report["health"] = self.health()
+        # H.8 (v0.57): the repo is tended too — one commit per write forever
+        # accumulates loose objects, and on overlay filesystems every git
+        # operation slows with them. Git's own thresholds decide (`--auto`);
+        # touches `.git/` only, never a commit, never a node.
+        report["gc"] = self.vine.git.maintain()
         return report

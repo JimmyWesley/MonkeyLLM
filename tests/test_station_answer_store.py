@@ -63,6 +63,10 @@ def station(store_root, tmp_path, monkeypatch):
     # is served another test's entries.
     shutil.rmtree(store_root / FOREST / "_derived" / "cache", ignore_errors=True)
 
+    # This suite reaches into the pool's own vine (tracer, trails) to
+    # verify the store's mechanics — the single-lane contract F.92 keeps
+    # reachable; the reader pool has its own suite (test_v057_station).
+    monkeypatch.setenv("MONKEYLLM_STATION_READERS", "0")
     app = build_app(root=store_root, registry_path=tmp_path / "station.db", mcp=False)
     registry = app.state.registry
     key = registry.issue_key("root")

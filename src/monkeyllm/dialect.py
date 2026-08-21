@@ -37,6 +37,10 @@ DEFAULT_RELS: dict[str, str | None] = {
     "same-as": "same-as",
     "discovered-shortcut": None,
     "succeeds": "precedes",
+    # A.2 (v0.58): the judgement, distinct from succeeds' timeline — the
+    # successor makes the predecessor history, and the sweep suppresses
+    # the target by default (C.6c.4).
+    "supersedes": "superseded-by",
 }
 
 ENTITY_KINDS = {"person", "organization", "product", "place", "other"}
