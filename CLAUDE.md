@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.57.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.58.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,55 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **A node moves once, and the old address says where (spec C.15,
+  v0.58)**: `transplant(id, new_id)` — leaf only (branches never; move
+  their leaves), passport + backlinks + both indexes + payload in ONE
+  commit (git's rename detection is what keeps `history --follow`
+  whole). The waymark is `moved_from` on the passport — the catalog's
+  `moves` table is DERIVED from it at upsert, so a reindex rebuilds the
+  redirect and nothing lives only in `_derived`; the old id also joins
+  `aliases`. A read of the old id raises `E_MOVED` (404) carrying
+  `moved_to` — and `ScopedVine._translate_moved` collapses it to the
+  byte-identical `E_NOT_FOUND` when the destination is out of scope (a
+  waymark must not be a periscope). `moved_from` in a `plant` is
+  `E_SCHEMA`: only transplant writes it. Heat re-keys via
+  `Trails.rekey`, best effort.
+- **The document's past is readable (spec C.16, v0.58)**: `history(id,
+  limit≤50)` over `GitRepo.file_history` (`--follow`, `%aI` so the
+  timestamp finally has time of day, unit/record separators so a commit
+  MESSAGE with newlines cannot fake a boundary), `action` parsed off the
+  subject prefix, `by` from the `station-principal:` trailer. A listing,
+  never time travel — reading a body AT a commit stays Part I's.
+- **A batch is one plant (spec C.7.4, v0.58)**: `plant([...])` ≤20 —
+  every node rehearsed through `_plant(dry_run=True, pending=…)` BEFORE
+  any write (so a branch and its children share a batch, in order), then
+  one commit for the lot or nothing at all. `existing` is `if_absent`'s
+  per-node answer; in-batch duplicates and `schema` nodes refuse (a
+  payload birth mid-batch has no rollback story). `ScopedVine.plant`
+  gates EVERY node before the engine sees the list.
+- **A replacement suppresses, `succeeds` does not (spec C.6c.4, v0.58)**:
+  new rel `supersedes`/`superseded-by` — the sweep drops a candidate a
+  LIVE node supersedes, refills the seat, and NAMES what it hid
+  (`superseded_excluded`); `include_superseded: true` restores the
+  history view and keys differently. Navigation (`locate`/`sniff`/
+  `scan`/`move`) never suppresses. Under a policy the superseder must be
+  visible to suppress (`visible=` rides from `ScopedVine.harvest`).
+  Existing forests opt in by declaring the rel in their `_meta/schema`
+  (A.2's rule) — the fixture generator declares it.
+- **Identical questions in flight share one generation (spec J.10.7,
+  v0.58)**: the `inflight` table in `app.py` keyed by (forest, store
+  key) — a follower awaits the leader's `asyncio.Event` on the loop (no
+  lane held), then `recheck_store` re-consults under its OWN reading
+  fingerprint; a differing reading still buys its own call. The leader
+  releases in a `finally` AFTER the settle, so an errored leader frees
+  its followers instead of stranding them. `cache: false` never
+  coalesces.
+- **Ingest fills `origin` (spec G.2.7, v0.58)**: source file's `file://`
+  URI on adopt and refresh, the upload's declared `source_url` when
+  there is one, nothing for a staging path under `_derived/` — and only
+  when ABSENT (a hand-written origin outranks a derived one, G.2.6's
+  union rule for one scalar). The sync fast-path backfills it, so a
+  forest ingested before the rule gains origins without re-conversion.
 - **Reads scale on a reader pool (spec J.6.2, v0.57)**: each open forest
   has K read-only Vines (`MONKEYLLM_STATION_READERS`, default 4; `0`
   restores the single lane), each confined to its own thread; reads, the
