@@ -260,8 +260,12 @@ def build_server(
     def look(id: str | list[str], fields: list[str] | None = None,
              forest: str | None = None) -> dict:
         """Digest of a node (<=500 tokens): summary, outline/children, edges,
+        provenance (created/updated/source, aliases and origin when set),
         stats. `id` may be a list of up to 10 — one call, one budget
-        (spec C.11)."""
+        (spec C.11). `fields` names the fields you want (e.g.
+        ["summary"], ["edges_out","edges_in"]) and is the cost lever: a
+        digest asked to carry less rarely clips at all. A budget-clipped
+        field is named in `truncated_fields` (spec C.2 v0.57)."""
         return guarded("look", forest, id, fields=fields)
 
     @mcp.tool()
@@ -275,7 +279,8 @@ def build_server(
              after: str | None = None, forest: str | None = None) -> dict:
         """Harvest the body (or sections) of a node. `id` may be a list of
         up to 5, `section` a list of up to 10 — one call, one 4000-token
-        budget (spec C.11/C.4.1). A body over the budget arrives in pages:
+        budget (spec C.11/C.4.1); each section item echoes the `header`
+        that actually matched. A body over the budget arrives in pages:
         the response carries `next`; pass it back as `after` to continue,
         and the concatenated pages reproduce the body byte-identically."""
         return guarded("pick", forest, id, section=section, after=after)
@@ -312,20 +317,40 @@ def build_server(
     @mcp.tool()
     def scan(parent_id: str, filter: dict | None = None, fields: list[str] | None = None,
              recursive: bool = False, limit: int = 50, forest: str | None = None) -> dict:
-        """Metadata query over a branch's children via the Catalog (no file opens)."""
+        """Metadata query over a branch's children via the Catalog (no file
+        opens). `fields` is also the page lever: the ~800-token budget cuts
+        the page, so fewer fields per item means more items per page
+        (fields=["id"] enumerates fastest)."""
         return guarded("scan", forest, parent_id, filter=filter, fields=fields,
                        recursive=recursive, limit=limit)
 
     @mcp.tool()
-    def plant(node: dict, if_absent: bool = False,
+    def plant(node: dict, if_absent: bool = False, dry_run: bool = False,
               forest: str | None = None) -> dict:
-        """Create a node: frontmatter + body + parent (atomic: file+index+git commit).
-        For type:dataset, pass schema={table: {columns: {name: TEXT|INTEGER|REAL|BLOB},
-        primary_key?: [...]}} and Vine births the SQLite payload + query manual
-        (spec C.7.1); rows then enter via tend().
+        """Create a node (atomic: file + parent index + git commit).
+
+        `node` (spec A.3/C.7): required `id` (path under its parent — the id
+        IS the address and it is forever; every intermediate level must
+        already exist as a branch), `type` (declared in this forest's
+        _meta/schema — pick("_meta/schema") before your first write),
+        `title`, `summary` (1-3 sentences, <= 60 tokens — it is how every
+        search finds this node), `parent` (the branch _index id). Optional:
+        `body` (markdown), `tags`, `aliases` (the findability lever — the
+        names people will actually type: a code, a short name; locate reads
+        curated metadata, never bodies), `links` ([{rel, target}], rels from
+        _meta/schema), `origin` (one URI: where this document came from),
+        `source`, `confidence`.
+        For type:dataset, pass schema={table: {columns: {name:
+        TEXT|INTEGER|REAL|BLOB}, primary_key?: [...]}} and Vine births the
+        SQLite payload + query manual (spec C.7.1); rows then enter via
+        tend().
         if_absent=True makes the write repeatable: an id already taken
-        answers created:false and writes nothing (spec C.7.2)."""
-        return guarded("plant", forest, node, if_absent=if_absent)
+        answers created:false and writes nothing (spec C.7.2).
+        dry_run=True rehearses: every validation, no write, no commit —
+        answers {valid: true} or the exact error the real call would raise
+        (spec C.7.3)."""
+        return guarded("plant", forest, node, if_absent=if_absent,
+                       dry_run=dry_run)
 
     @mcp.tool()
     def graft(id: str, patch: dict, forest: str | None = None) -> dict:

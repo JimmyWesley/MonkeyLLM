@@ -74,7 +74,8 @@ documents, data), recall first and reason after:
   body over its 4000-token budget arrives in PAGES: pass the response's
   \`next\` back as \`after\` until none comes, and the concatenated pages are
   the body, byte for byte. \`look\` also says who and when: \`source\`,
-  \`created\`, \`updated\`, and the node's \`aliases\` when it has any.
+  \`created\`, \`updated\`, the node's \`aliases\` when it has any, and its
+  \`origin\` (where the document came from) when one was recorded.
 - \`sniff(terms)\` — literal text search inside bodies (substring, not regex).
 - \`scan(parent_id)\`, \`move(id)\` — list a branch's nodes by metadata; follow
   a node's typed edges. \`scan("_index", recursive: true)\` is the cheapest
@@ -122,6 +123,14 @@ Two things that save round trips, both worth using by default:
   headers, which is exactly what \`pick(id, section)\` takes — so you can go
   from search to passage without the \`look\` in between. Every result also
   carries \`body_tokens\`, so you know the size of what you are about to open.
+- \`fields\` is the cost lever on \`look\` AND the page lever on \`scan\`:
+  \`look(id, fields: ["summary"])\` costs a fraction of the full digest, and
+  a \`scan\` page holds more items the fewer fields each carries —
+  \`fields: ["id"]\` enumerates a large forest in a fraction of the calls.
+  When a \`look\` digest is over budget it clips fields in a declared order
+  and NAMES them in \`truncated_fields\`; an \`edges_out: []\` without that
+  flag really is an isolated node, and \`stats.degree\` is the arithmetic
+  truth either way.
 
 Cite node ids for anything you assert from the forest — and cite them the
 way a person can read: the title first, the id in brackets, as in
@@ -155,9 +164,57 @@ use the write it actually allows:
   a mistake without hiding that it happened. Clean up after yourself: a
   probe node left behind is somebody else's search result.
 
+### The anatomy of a node (read this before your first \`plant\`)
+
+The \`node\` you hand to \`plant\` is the most important input this surface
+takes, so here is its whole shape:
+
+- **Required:** \`id\` (a path under its parent — the id IS the address and
+  it is FOREVER: there is no rename, so choose it as carefully as a URL),
+  \`type\`, \`title\`, \`summary\`, \`parent\`.
+- **The id determines the parent.** \`notes/my-report\` must have
+  \`parent: "notes/_index"\`, and every intermediate level must already
+  exist as a branch — the refusal names the parent it expected.
+- **Types and rels are per forest.** They are declared in
+  \`_meta/schema\`, and an undeclared one is refused. In an unfamiliar
+  forest, \`pick("_meta/schema")\` once before your first write — it is one
+  cheap call and it is the dialect you must write in.
+- **The summary has a ceiling: 60 tokens** (1–3 sentences). It is how
+  every search finds the node — \`locate\` sees nothing else — so state
+  WHAT it is, the key facts, and what is NOT here.
+- **\`aliases\` is the findability lever.** \`locate\` never reads bodies,
+  so give the node the names people will actually type: the ticket code,
+  the short name, the number ("BE-291", "R4"). One line of aliases does
+  more for recall than any body edit.
+- **\`links\` place it in the graph:** \`[{rel, target}]\`, rels from
+  \`_meta/schema\`. When a document supersedes an earlier one, say so with
+  \`succeeds\` — retrieval reads that order, and an \`answer\` will treat
+  the older node as history instead of mixing two moments into one
+  present.
+- **\`origin\` says where it came from:** one URI (a path, a URL, a commit
+  ref) when the document exists outside the forest too — it is how the
+  copy can ever be reconciled with its source.
+- **Rehearse the expensive ones:** \`plant(node, dry_run: true)\` runs
+  every validation — parent chain, types, the summary ceiling — and
+  writes nothing. One cheap call instead of shipping a 30 KB body to
+  learn your summary is 61 tokens.
+
 Write in English, keep the summary honest (it is how the note will be
 found, and \`locate\` sees nothing else), and never invent structure the
 forest does not have.
+
+### Handing a document to a person
+
+Two REST surfaces exist for the moment your work must leave the forest —
+both under the same origin and key discipline as everything else:
+
+- \`GET ${origin}/v1/forests/${forest}/export/<node id>\` downloads the
+  document as markdown, byte-identical to what was planted;
+  \`?recursive=true\` on a branch downloads the subtree as a zip.
+- \`POST ${origin}/v1/forests/${forest}/share\` with \`{"node": "<id>"}\`
+  mints an expiring share link (\`/s/<token>\`) a person can open with no
+  account — the URL comes back once, in that reply. Offer this when the
+  user asks to "send" a document to somebody.
 
 ## Respect the contract
 

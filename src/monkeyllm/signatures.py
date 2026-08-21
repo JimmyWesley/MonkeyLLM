@@ -132,6 +132,7 @@ SIGNATURES: dict[str, dict[str, dict]] = {
     "plant": {
         "node": _param("object", required=True),
         "if_absent": _param("boolean"),
+        "dry_run": _param("boolean"),
     },
     "graft": {
         "id": _param("string", required=True),

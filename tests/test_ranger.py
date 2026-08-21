@@ -222,5 +222,7 @@ class TestFullCycle:
     def test_run_returns_all_sections(self, ranger):
         r, _ = ranger
         report = r.run()
+        # H.8 (v0.57): the repo is tended too — reported, never a commit.
         assert set(report) == {"evaporation", "payload_cache", "links",
-                               "landmarks", "health"}
+                               "landmarks", "health", "gc"}
+        assert report["gc"] in ("ran", "skipped", "unavailable")

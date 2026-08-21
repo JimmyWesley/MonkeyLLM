@@ -57,6 +57,7 @@ from monkeyllm.models import (
     validate_dataset_rows,
     validate_dataset_schema,
     validate_frontmatter,
+    validate_origin,
     validate_summary,
 )
 from monkeyllm.parser import (
@@ -157,6 +158,7 @@ SCAN_FIELDS = frozenset({
     "id", "kind", "type", "title", "summary", "tags", "aliases", "created",
     "updated", "confidence", "source", "entity_kind", "payload_type",
     "parent", "trail", "coverage", "body_tokens", "outline", "heat",
+    "origin",
 })
 NEIGHBOR_SUMMARY_TOKENS = 25
 MAX_EDGES_SHOWN = 12
@@ -581,6 +583,19 @@ class Vine:
         self.hybrid_locate = hybrid_locate
         self._goal: list[float] | None = None
         self._goal_text: str | None = None
+
+    @property
+    def commit_trailers(self) -> list[str]:
+        """J.4 (v0.57): lines the next commit appends after a blank line —
+        a public, host-writable seam in the J.0 pattern (`embedder`,
+        `hybrid_locate`). The host sets it around each scoped write to
+        stamp the acting principal in the commit itself, retiring the
+        amend; the engine appends what it is handed and never reads it."""
+        return self.git.trailers
+
+    @commit_trailers.setter
+    def commit_trailers(self, value: list[str] | None) -> None:
+        self.git.trailers = list(value or [])
 
     @property
     def dense_ready(self) -> bool:
@@ -1074,6 +1089,9 @@ class Vine:
         aliases = json.loads(row["aliases"]) if row["aliases"] else []
         if aliases:
             digest["aliases"] = aliases
+        if "origin" in row.keys() and row["origin"]:
+            # A.3 (v0.57): provenance toward the world outside the forest.
+            digest["origin"] = row["origin"]
 
         edges_out = []
         for e in self.catalog.edges_out(id):
@@ -1169,12 +1187,40 @@ class Vine:
             keep = set(fields) | {"id"}
             digest = {k: v for k, v in digest.items() if k in keep}
 
-        for key in ("edges_in", "edges_out", "children"):
-            if key in digest:
-                shrink_list_to_budget(digest, key, BUDGET_LOOK)
+        # C.2 (v0.57): the budget clips in declared order — the outline
+        # first (big, and re-derivable through pick's first page), edges
+        # after it, a dataset's sample rows only as the last resort (its
+        # digest exists to feed `query`) — and every field the budget
+        # touched is NAMED. The old shrink took the edges while a 28-item
+        # outline stayed: `edges_out: []` beside `stats.degree: 2`, and the
+        # caller concluded the node was isolated.
+        clipped: list[str] = []
+        was_truncated = digest.get("truncated")
         if estimate_payload_tokens(digest) > BUDGET_LOOK:
-            digest.pop("sample_rows", None)
+            # C.6.2's pattern: the meta fields sit INSIDE the budget at
+            # their largest possible size while the lists are cut, and only
+            # their values are fixed up afterwards — the 500 stays a
+            # ceiling.
             digest["truncated"] = True
+            digest["truncated_fields"] = ["outline", "children",
+                                          "edges_in", "edges_out",
+                                          "sample_rows"]
+        for key in ("outline", "children", "edges_in", "edges_out"):
+            if key in digest and estimate_payload_tokens(digest) > BUDGET_LOOK:
+                before = len(digest[key])
+                shrink_list_to_budget(digest, key, BUDGET_LOOK)
+                if len(digest[key]) < before:
+                    clipped.append(key)
+        if estimate_payload_tokens(digest) > BUDGET_LOOK:
+            if digest.pop("sample_rows", None) is not None:
+                clipped.append("sample_rows")
+        if clipped:
+            digest["truncated"] = True
+            digest["truncated_fields"] = clipped
+        else:
+            digest.pop("truncated_fields", None)
+            if not was_truncated and estimate_payload_tokens(digest) <= BUDGET_LOOK:
+                digest.pop("truncated", None)
         return digest
 
     def _dataset_db(self, node: ParsedNode, *, for_write: bool = False) -> Path:
@@ -1522,7 +1568,13 @@ class Vine:
             if content is None:
                 missing.append(str(name))
                 continue
-            found.append({"section": str(name), "body": content,
+            # C.4.1 (v0.57): the header line that actually matched — the
+            # match is by prefix, so the section served is not always the
+            # string asked, and a list identified only by order is a list
+            # the caller re-derives.
+            header = content.splitlines()[0].lstrip("#").strip()
+            found.append({"section": str(name), "header": header,
+                          "body": content,
                           "body_tokens": estimate_tokens(content)})
         # Whole sections drop from the tail, in request order, and are
         # named — C.11's rule at section grain.
@@ -2263,7 +2315,7 @@ class Vine:
 
     @_traced
     def plant(self, node: dict | NodeSpec, *, if_absent: bool = False,
-              adopted: bool = False) -> dict:
+              dry_run: bool = False, adopted: bool = False) -> dict:
         """`adopted` (G.2.5, v0.45) says the schema was READ off a source the
         operator already owns, not declared by a model: the C.7.1 count
         limits are guards against hallucinated DDL and do not apply to it.
@@ -2280,11 +2332,18 @@ class Vine:
         TypeError, and that is the property the G.2.5 suite checks. Keeping
         it keyword-only keeps `plant(node, True)` refused, which is what
         stops a positional call from ever landing on `adopted`.
+
+        `dry_run` (C.7.3, v0.57) rehearses the write: every validation the
+        real plant runs, in the real order, on the same code path — then
+        returns before the first byte is written. Nothing is created,
+        committed or indexed; the failure is the exact envelope the real
+        call would raise.
         """
         self._require_writable()
         spec = node if isinstance(node, NodeSpec) else NodeSpec.model_validate(node)
         with self._write_mutex:
-            return self._plant(spec, adopted=adopted, if_absent=bool(if_absent))
+            return self._plant(spec, adopted=adopted, if_absent=bool(if_absent),
+                               dry_run=bool(dry_run))
 
     def _prepare_dataset_spec(self, spec: NodeSpec, *, adopted: bool = False) -> None:
         """C.7.1: the schema is data, never DDL — validate it whole and
@@ -2310,7 +2369,7 @@ class Vine:
             raise VineError(E_SCHEMA, "schema requires payload_type: sqlite")
 
     def _plant(self, spec: NodeSpec, *, adopted: bool = False,
-               if_absent: bool = False) -> dict:
+               if_absent: bool = False, dry_run: bool = False) -> dict:
         if spec.rows and spec.table_schema is None:
             raise VineError(E_SCHEMA, "rows require a schema (C.7.1 rule 7)")
         if spec.table_schema is not None:
@@ -2322,8 +2381,11 @@ class Vine:
                 # C.7.2 (v0.52): "make sure this exists". Nothing is written,
                 # nothing is committed, and the submitted content is not
                 # compared to what is there — changing it is graft's job.
-                return {"id": spec.id, "created": False,
-                        "trail": self.forest.trail(spec.id)}
+                out = {"id": spec.id, "created": False,
+                       "trail": self.forest.trail(spec.id)}
+                if dry_run:
+                    out["dry_run"] = True
+                return out
             raise VineError(E_SCHEMA, f"id already exists: {spec.id}", hint="ids are immutable and unique.")
         parent_row = self.catalog.get(spec.parent)
         if parent_row is None or parent_row["kind"] != "branch":
@@ -2335,6 +2397,20 @@ class Vine:
                 f"id '{spec.id}' does not live under parent '{spec.parent}' "
                 f"(expected parent: {expected_parent})",
             )
+        if dry_run and spec.table_schema is not None:
+            # The one refusal left between here and the first write: rehearse
+            # it read-only, in the real path's own order.
+            assert spec.payload is not None
+            if (self.forest.path_for(spec.id).parent / spec.payload).exists():
+                raise VineError(
+                    E_SCHEMA,
+                    f"payload already exists: {spec.payload}",
+                    hint="A newborn dataset never overwrites an existing payload.",
+                )
+        if dry_run:
+            # C.7.3 (v0.57): every validation ran; nothing was written, so
+            # `created` is absent — nothing was.
+            return {"id": spec.id, "valid": True, "dry_run": True}
 
         # C.7.1 payload birth: create the SQLite BEFORE the .md so the hash
         # lands in the frontmatter; the binary itself never enters git (A.3.1)
@@ -2491,6 +2567,10 @@ class Vine:
                     hint="Aliases are curated names locate indexes beside "
                          "the title (C.8, G.2.6).",
                 )
+        if "origin" in patch.set_frontmatter:
+            # A.3 (v0.57): one bounded URI, never prose; `None` clears it.
+            if patch.set_frontmatter["origin"] is not None:
+                validate_origin(patch.set_frontmatter["origin"])
 
         fm = dict(node.frontmatter)
         body = node.body
@@ -2499,6 +2579,9 @@ class Vine:
 
         if patch.set_frontmatter:
             fm.update(patch.set_frontmatter)
+            if fm.get("origin") is None:
+                # `origin: null` is a clearing, not a value (A.3, v0.57).
+                fm.pop("origin", None)
             file_changed = True
 
         links = [Link.model_validate(l) for l in (fm.get("links") or [])]

@@ -143,11 +143,18 @@ def reading_fingerprint(bundle: dict) -> str:
     `notes` is in the list (v0.48) because it is in the bundle (C.2.1 rule
     6): the teaching is handed to the model, so a teaching edited is a
     reading changed — without it, an operator writing notes could not
-    invalidate an answer built before them.
+    invalidate an answer built before them. The dates and the
+    supersession annotations join for the same reason (C.6c.3, v0.57).
     """
     material = sorted(
         [[r.get("id"), r.get("type"), r.get("title"), r.get("summary"),
-          r.get("matches"), r.get("content"), r.get("notes")]
+          r.get("matches"), r.get("content"), r.get("notes"),
+          # C.6c.3 (v0.57): the material's stated time and order are handed
+          # to the model, so material re-dated or re-ordered is material
+          # re-read — a stored answer built before a succession was
+          # declared must not be served after it.
+          r.get("created"), r.get("updated"),
+          r.get("supersedes"), r.get("superseded_by")]
          for r in (bundle.get("results") or [])],
         key=lambda item: str(item[0]))
     payload = json.dumps(

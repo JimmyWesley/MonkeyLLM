@@ -47,6 +47,9 @@ def station(explain_root, tmp_path, monkeypatch):
 
     monkeypatch.setattr(inference, "chat_from_binding", fake)
 
+    # These tests reach into the pool's own vine to compare its tracer
+    # against the wire — the single-lane contract F.92 keeps reachable.
+    monkeypatch.setenv("MONKEYLLM_STATION_READERS", "0")
     app = build_app(root=explain_root, registry_path=tmp_path / "station.db", mcp=False)
     registry = app.state.registry
     key = registry.issue_key("root")

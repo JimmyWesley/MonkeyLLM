@@ -14,6 +14,14 @@ GIT_IDENTITY = ["-c", "user.name=vine", "-c", "user.email=vine@monkeyllm.local"]
 class GitRepo:
     def __init__(self, root: Path):
         self.root = Path(root)
+        # J.4 (v0.57): lines the next commit appends after a blank line, in
+        # git's trailer convention. A host attributing writes sets them
+        # around the call (`Vine.commit_trailers`); the engine appends what
+        # it is handed and never reads it — it stays principal-blind. Before
+        # this seam the host amended the commit it had just been given:
+        # two commits and a log read per write, on the one thread every
+        # write already queues for.
+        self.trailers: list[str] = []
 
     def _run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -56,9 +64,22 @@ class GitRepo:
         ]
         if not rels:
             raise ValueError("nothing to commit: only .md files are versioned (spec A.3.1)")
+        if self.trailers:
+            message = message.rstrip() + "\n\n" + "\n".join(self.trailers)
         self._run("add", "--", *rels)
         self._run("commit", "--quiet", "-m", message)
         return self._run("rev-parse", "HEAD").stdout.strip()
+
+    def maintain(self) -> str:
+        """H.8 (v0.57): ask git to tend the repo — `gc --auto`, git's own
+        thresholds deciding. Touches `.git/` only: no history, no working
+        tree, no catalog row. Returns 'ran' | 'unavailable'; best effort,
+        because maintenance must never fail the work it maintains."""
+        try:
+            out = self._run("gc", "--auto", "--quiet", check=False)
+            return "ran" if out.returncode == 0 else "unavailable"
+        except (FileNotFoundError, OSError):
+            return "unavailable"
 
     def head(self) -> str | None:
         out = self._run("rev-parse", "HEAD", check=False)

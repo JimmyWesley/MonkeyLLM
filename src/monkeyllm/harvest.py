@@ -182,7 +182,21 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
     loc_ids = [r["id"] for r in loc["results"]]
     sniff_ids = [r["id"] for r in sn["results"]]
     fused = rrf_fuse(loc_ids, sniff_ids)
-    ranked = sorted(fused, key=fused.get, reverse=True)[:k]
+    # C.6c.3 (v0.57): equal relevance prefers the newer. A tie-break, never
+    # a boost — recency decides only where the fusion could not, then
+    # `created`, then id for determinism.
+    dates = vine.catalog.dates_of(list(fused))
+    ranked = sorted(sorted(fused), reverse=True,
+                    key=lambda nid: (fused[nid], dates.get(nid, ("", ""))[1],
+                                     dates.get(nid, ("", ""))[0]))[:k]
+    # C.6c.3: a succession inside the result set is annotated, never
+    # suppressed — the older node stays (history is evidence too), but the
+    # model is no longer the only one who could have discovered the order.
+    succ_of: dict[str, list[str]] = {}
+    pred_of: dict[str, list[str]] = {}
+    for edge in vine.catalog.edges_among(ranked, "succeeds"):
+        succ_of.setdefault(edge["src"], []).append(edge["dst"])
+        pred_of.setdefault(edge["dst"], []).append(edge["src"])
 
     loc_by = {r["id"]: r for r in loc["results"]}
     sniff_by = {r["id"]: r for r in sn["results"]}
@@ -207,6 +221,17 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
             "matches": matches,
             "content": _content_for(vine, nid, matches),
         }
+        # C.6c.3 (v0.57): every item states its time — read off the catalog
+        # row already in hand, never a file open. Undated stays absent.
+        created, updated = dates.get(nid, ("", ""))
+        if created:
+            item["created"] = created
+        if updated:
+            item["updated"] = updated
+        if nid in succ_of:
+            item["supersedes"] = sorted(succ_of[nid])
+        if nid in pred_of:
+            item["superseded_by"] = sorted(pred_of[nid])
         # C.2.1 (v0.46): a dataset's notes travel with it. The sweep is
         # `locate` + `sniff` + the matched sections — it never calls `look`,
         # so a teaching that only rides in the digest reaches the walk and

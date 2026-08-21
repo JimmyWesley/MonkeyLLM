@@ -183,6 +183,18 @@ class ScopedVine:
         self._vine = vine
         self.policy = policy
 
+    @property
+    def catalog(self):
+        """The engine's catalog, read-through (C.6c.3, v0.57).
+
+        `harvest` dates its items and annotates successions off the rows
+        its own scoped selection already produced — every id it asks about
+        came through this policy's `locate`/`sniff`. Not dispatchable:
+        `call()` resolves primitive NAMES against REQUIRED_CAP, and no
+        wire surface reaches attributes.
+        """
+        return self._vine.catalog
+
     # -- scope helpers ------------------------------------------------------
 
     def _visible(self, node_id: str | None) -> bool:
@@ -464,21 +476,26 @@ class ScopedVine:
 
     # -- write surface ------------------------------------------------------
 
-    def plant(self, node, if_absent: bool = False) -> dict:
+    def plant(self, node, if_absent: bool = False,
+              dry_run: bool = False) -> dict:
         node_id = node.get("id") if isinstance(node, dict) else getattr(node, "id", None)
         if not node_id:
             raise VineError(E_SCHEMA, "plant requires an 'id'")
         if not self._visible(node_id):
             # A write outside the grant is refused as forbidden, not as
             # not-found: the caller supplied the id, so nothing is disclosed.
+            # C.7.3: the rehearsal gates identically — a dry run a scoped
+            # principal could aim outside its grant would be an oracle for
+            # what a write would say.
             raise VineError(
                 E_FORBIDDEN,
                 f"'{node_id}' is outside this principal's grant",
                 hint=f"Writable subtrees: {list(self.policy.allow)}.",
             )
-        # C.7.2 (v0.52): a caller-facing option, unlike `adopted` — which
-        # stays keyword-only and unreachable from the wire (G.2.5).
-        return self._vine.plant(node, if_absent=bool(if_absent))
+        # C.7.2/C.7.3 (v0.52/v0.57): caller-facing options, unlike `adopted`
+        # — which stays keyword-only and unreachable from the wire (G.2.5).
+        return self._vine.plant(node, if_absent=bool(if_absent),
+                                dry_run=bool(dry_run))
 
     def graft(self, id: str, patch) -> dict:
         self._gate(id)
