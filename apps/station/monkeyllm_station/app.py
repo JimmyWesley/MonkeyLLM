@@ -54,6 +54,7 @@ from monkeyllm.errors import (
     E_FRONTMATTER,
     E_INTERNAL,
     E_LOCKED,
+    E_MOVED,
     E_NOT_FOUND,
     E_QUERY_FORBIDDEN,
     E_QUERY_INVALID,
@@ -76,9 +77,14 @@ READ_PRIMITIVES = frozenset(
     {"locate", "look", "move", "pick", "scan", "sniff", "harvest", "query",
      # C.13.3 (v0.52): the time map. A read like any other — catalog only,
      # no body opened, and scoped by the same policy.
-     "calendar"}
+     "calendar",
+     # C.16 (v0.58): the document's past is a listing — a read.
+     "history"}
 )
-WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend", "prune"})
+WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend", "prune",
+                              # C.15 (v0.58): a move edits every pointing
+                              # node — it is a write, on the writer lane.
+                              "transplant"})
 # Not engine primitives: retrieval composed with the forest's bound model
 # (J.10). `answer` reads, `curate` proposes a summary for a human to apply.
 COMPOSITES = {"answer": ("read", "answer"), "curate": ("write", "ingest")}
@@ -388,6 +394,9 @@ STATUS_BY_CODE = {
     # C.14 (v0.56): the forest's current shape said no — same family as
     # E_LOCKED: the request was fine, the state refuses it.
     E_ANCHORED: 409,
+    # C.15 (v0.58): it is not at this address — and the envelope says
+    # where it went, when the reader's scope may know.
+    E_MOVED: 404,
     E_TIMEOUT: 504,
     # C.12 rule 5 (v0.52): a defect on this side, said in the shape every
     # other refusal uses — so a caller can classify it instead of guessing.
@@ -846,6 +855,15 @@ def build_app(
     model_slots = max(0, model_slots)
     model_gate = asyncio.Semaphore(model_slots) if model_slots else None
 
+    # J.10.7 (v0.58): identical questions in flight share one generation.
+    # The old single lane had an accidental virtue — queued identical
+    # misses hit the entry the first had just stored — and J.10.11's
+    # parallel phase 2 un-made it. Keyed by (forest, store key); a leader
+    # that errors or declines to store releases its followers to their own
+    # calls, because coalescing is an optimisation OVER the store, never a
+    # second source of truth. Host memory, emptied by its own finally.
+    inflight: dict[tuple[str, str], asyncio.Event] = {}
+
     def _servable(forest: str) -> bool:
         """Whether this name earns its own lane — a filesystem stat, safe
         from any thread. Names that are not forests share the host lane,
@@ -1248,6 +1266,15 @@ def build_app(
                        {"node": node_id,
                         "backlinks_removed": result.get("backlinks_removed"),
                         "commit": commit_sha})
+        elif name == "transplant":
+            # C.15: both ids and how many pointers followed — identity,
+            # never content, like every event.
+            hooks.emit(forest, "node.transplanted", principal,
+                       {"node": result.get("id"),
+                        "moved_from": result.get("moved_from"),
+                        "backlinks_rewritten":
+                            result.get("backlinks_rewritten"),
+                        "commit": commit_sha})
         elif name == "tend":
             hooks.emit(forest, "dataset.changed", principal,
                        {"node": node_id,
@@ -1569,6 +1596,29 @@ def build_app(
         if not (isinstance(prep, dict) and "_deferred" in prep):
             return prep
         deferred = prep["_deferred"]
+
+        # J.10.7 (v0.58): identical questions in flight share one
+        # generation. A follower awaits the leader on the loop — no lane
+        # held — then re-consults the store under its OWN reading
+        # fingerprint; the reading check decides, exactly as ever.
+        stash = sample.get("cache_store")
+        flight_key = ((forest, stash["key"])
+                      if stash and payload.get("cache", True) is not False
+                      else None)
+        leading = False
+        if flight_key is not None:
+            waiting = inflight.get(flight_key)
+            if waiting is not None:
+                await waiting.wait()
+                served = recheck_store(forest, sample, deferred["bundle"])
+                if served is not None:
+                    return await in_lane(
+                        forest, slot,
+                        lambda: settle_answer(principal, forest, payload,
+                                              sample, deferred, served))
+            else:
+                inflight[flight_key] = asyncio.Event()
+                leading = True
         try:
             if model_gate is not None:
                 # J.10.11: admitted under the deployment's stated ceiling.
@@ -1588,10 +1638,19 @@ def build_app(
             served = e.to_dict()
         except Exception as e:  # provider outages must not 500 the Station
             served = VineError(E_SCHEMA, f"answer failed: {e}"[:300]).to_dict()
-        result = await in_lane(
-            forest, slot,
-            lambda: settle_answer(principal, forest, payload, sample,
-                                  deferred, served))
+        try:
+            result = await in_lane(
+                forest, slot,
+                lambda: settle_answer(principal, forest, payload, sample,
+                                      deferred, served))
+        finally:
+            if leading:
+                # Released after the settle, so a follower waking up finds
+                # the entry already deposited — and released even when the
+                # leader errored or declined to store, because coalescing
+                # is an optimisation over the store, never a second source
+                # of truth: the followers simply run their own calls.
+                inflight.pop(flight_key).set()
         if clocks is not None:
             # J.10.6 across the phases: `vine` is phase 1's captured engine
             # time (already in clocks), `model` is phase 2's round trip,
@@ -1831,26 +1890,7 @@ def build_app(
         if payload.get("cache", True) is not False and bundle.get("results"):
             entry = store.get(key, ttl_hours=cfg["ttl_hours"])
             if entry is not None and entry["fingerprint"] == fingerprint:
-                stored = json.loads(entry["response"])
-                # Which half is which (J.10.7 v0.35): retrieval fields are
-                # this call's own; model fields are the record, as bought.
-                # No `model_ms`, so neither the trace nor the clocks claim
-                # a provider ran.
-                served = {
-                    "answer": stored.get("answer"),
-                    "model": stored.get("model"),
-                    "usage": stored.get("usage"),
-                    "cached": True,
-                    "cached_at": entry["created"],
-                    "evidence": [r.get("id") for r in bundle.get("results", [])],
-                    "sources": [{"id": r.get("id"), "title": r.get("title"),
-                                 "summary": r.get("summary"),
-                                 "type": r.get("type")}
-                                for r in bundle.get("results", [])],
-                    "harvest": bundle,
-                }
-                if stored.get("cost"):
-                    served["cost"] = stored["cost"]
+                served = assemble_stored(entry, bundle)
                 store.touch(key, priced=bool(entry["priced"]), usd=entry["usd"])
                 digest = key[:answer_store.DIGEST_CHARS]
                 sample["cache_hit"] = digest
@@ -1858,6 +1898,59 @@ def build_app(
                          forest, digest)
             else:
                 store.count_miss()
+        sample["cache"] = sample.get("cache", 0.0) \
+            + (time.perf_counter() - t0) * 1000
+        return served
+
+    def assemble_stored(entry, bundle: dict) -> dict:
+        """One stored entry, served against THIS call's retrieval.
+
+        Which half is which (J.10.7 v0.35): retrieval fields are this
+        call's own; model fields are the record, as bought. No `model_ms`,
+        so neither the trace nor the clocks claim a provider ran.
+        """
+        stored = json.loads(entry["response"])
+        served = {
+            "answer": stored.get("answer"),
+            "model": stored.get("model"),
+            "usage": stored.get("usage"),
+            "cached": True,
+            "cached_at": entry["created"],
+            "evidence": [r.get("id") for r in bundle.get("results", [])],
+            "sources": [{"id": r.get("id"), "title": r.get("title"),
+                         "summary": r.get("summary"), "type": r.get("type")}
+                        for r in bundle.get("results", [])],
+            "harvest": bundle,
+        }
+        if stored.get("cost"):
+            served["cost"] = stored["cost"]
+        return served
+
+    def recheck_store(forest: str, sample: dict, bundle: dict):
+        """J.10.7 (v0.58): the follower's second look, after the leader.
+
+        Runs on no lane and touches no primitive — the stash from this
+        call's own prepare phase already holds the store, the key and
+        THIS caller's reading fingerprint, so a follower whose reading
+        matches the leader's is served the reply the leader bought, and
+        one whose reading differs falls through to its own model call,
+        exactly as the reading check always ruled.
+        """
+        stash = sample.get("cache_store")
+        if not stash:
+            return None
+        t0 = time.perf_counter()
+        cfg = cache_settings(forest)
+        entry = stash["store"].get(stash["key"], ttl_hours=cfg["ttl_hours"])
+        served = None
+        if entry is not None and entry["fingerprint"] == stash.get("fingerprint"):
+            served = assemble_stored(entry, bundle)
+            stash["store"].touch(stash["key"], priced=bool(entry["priced"]),
+                                 usd=entry["usd"])
+            digest = stash["key"][:answer_store.DIGEST_CHARS]
+            sample["cache_hit"] = digest
+            log.info("answer coalesced onto a leader: forest=%s key=%s",
+                     forest, digest)
         sample["cache"] = sample.get("cache", 0.0) \
             + (time.perf_counter() - t0) * 1000
         return served

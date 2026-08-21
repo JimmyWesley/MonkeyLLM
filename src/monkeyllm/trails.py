@@ -62,6 +62,28 @@ class Trails:
             )
         self.conn.commit()
 
+    def rekey(self, old_id: str, new_id: str) -> None:
+        """C.15 rule 5: heat follows a transplanted node, best effort.
+
+        The pheromone was earned by the content, which did not change;
+        `_derived` is disposable and evaporation heals whatever a crash
+        loses, so this is an UPDATE, never a ceremony. An existing row at
+        the new id keeps the hotter value.
+        """
+        rows = self.conn.execute(
+            "SELECT scope, heat, updated FROM heat WHERE node_id = ?",
+            (old_id,)).fetchall()
+        for scope, heat, updated in rows:
+            self.conn.execute(
+                """INSERT INTO heat (scope, node_id, heat, updated)
+                   VALUES (?,?,?,?)
+                   ON CONFLICT(scope, node_id)
+                   DO UPDATE SET heat = MAX(heat, excluded.heat),
+                                 updated = excluded.updated""",
+                (scope, new_id, heat, updated))
+        self.conn.execute("DELETE FROM heat WHERE node_id = ?", (old_id,))
+        self.conn.commit()
+
     def get_heat(self, node_id: str, session: str | None = None, beta: float = 0.5) -> float:
         row = self.conn.execute(
             "SELECT heat FROM heat WHERE scope = '' AND node_id = ?", (node_id,)

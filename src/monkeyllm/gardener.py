@@ -946,6 +946,21 @@ class Gardener:
                 return conv
         return None
 
+    def _origin_for(self, f: Path, rel: str) -> str | None:
+        """G.2.7 (v0.58): where this document came from, as one URI.
+
+        The source file's own address — except for uploads staged under
+        the forest's `_derived/`, where the entry's declared `source_url`
+        speaks (J.8) and a staging path would be a fact about plumbing.
+        """
+        url = self.provenance.get(rel)
+        if url:
+            return url
+        resolved = f.resolve()
+        if resolved.is_relative_to(self.forest.root.resolve() / "_derived"):
+            return None
+        return resolved.as_uri()
+
     def _with_provenance(self, markdown: str, rel: str) -> str:
         """J.8 (v0.48): a converted body whose source has an address ends
         with the same `Source:` line a composed clip carries.
@@ -1166,6 +1181,7 @@ class Gardener:
 
         st = f.stat()
         source_hash = hashlib.sha256(f.read_bytes()).hexdigest()
+        origin = self._origin_for(f, rel.as_posix())
         is_text_source = ext in MarkdownConverter.extensions
         # G.5.1: media is typed off the SOURCE, not off what the converter
         # returned — a describer and the stub both hand back markdown, and
@@ -1188,6 +1204,9 @@ class Gardener:
         aliases = derive_aliases(rel, self.config.get("aliases") or {})
         if aliases:
             draft["aliases"] = aliases
+        # G.2.7 (v0.58): the one writer who always KNOWS the origin.
+        if origin:
+            draft["origin"] = origin
         if conversion.kind == "dataset":
             # The map goes in here rather than being left to C.7.1's auto
             # manual, because curation runs BEFORE the plant and G.4.6 reads
@@ -1474,34 +1493,47 @@ class Gardener:
         # G.8 fast-path (rsync's trick): same size + mtime -> skip hashing
         if (info.get("size") == st.st_size
                 and info.get("mtime") == round(st.st_mtime, 3)):
-            self._settle_unchanged(info["id"], rel, report)
+            self._settle_unchanged(info["id"], rel, report, f)
             return
         new_hash = hashlib.sha256(f.read_bytes()).hexdigest()
         if new_hash == info["hash"]:
-            self._settle_unchanged(info["id"], rel, report)
+            self._settle_unchanged(info["id"], rel, report, f)
             return
         self._update_passport(info["id"], f, new_hash, report, rel)
 
     def _settle_unchanged(self, node_id: str, rel: str,
-                          report: IngestReport) -> None:
+                          report: IngestReport,
+                          f: Path | None = None) -> None:
         """G.2.6 rule 3 (v0.56): the fast-path skips the CONVERSION, not the
         alias check — an `aliases:` map added to the config was invisible to
         every already-ingested file, which is exactly where it was aimed.
-        The union adds missing derived forms and removes nothing."""
+        The union adds missing derived forms and removes nothing.
+
+        G.2.7 (v0.58): the same `setdefault` for `origin` — a forest
+        ingested before the rule gains origins on its next sync without
+        re-conversion."""
         merged = self._merge_aliases(node_id, rel, report)
-        if merged is None:
+        node = self.forest.read(node_id)
+        settle_origin = None
+        if f is not None and not node.frontmatter.get("origin"):
+            settle_origin = self._origin_for(f, rel)
+        if merged is None and settle_origin is None:
             report.unchanged.append(node_id)
             return
         if self.dry_run:
             report.updated.append(node_id)
             return
-        node = self.forest.read(node_id)
         fm = dict(node.frontmatter)
-        fm["aliases"] = merged
+        if merged is not None:
+            fm["aliases"] = merged
+        if settle_origin is not None:
+            fm["origin"] = settle_origin
         assert node.path is not None
         node.path.write_text(serialize_node(fm, node.body),
                              encoding="utf-8", newline="\n")
-        self.vine.git.commit([node.path], f"gardener(sync): aliases {node_id}")
+        what = "aliases" if merged is not None else "origin"
+        self.vine.git.commit([node.path],
+                             f"gardener(sync): {what} {node_id}")
         self.vine.catalog.upsert_node(self.forest.read(node_id))
         report.updated.append(node_id)
 
@@ -1594,6 +1626,12 @@ class Gardener:
             merged = self._merge_aliases(node_id, rel, report)
             if merged is not None:
                 fm["aliases"] = merged
+        if not fm.get("origin"):
+            # G.2.7 rule 2: only when absent — a hand-written origin
+            # outranks a derived one and survives every sync.
+            derived_origin = self._origin_for(f, rel or node_id)
+            if derived_origin:
+                fm["origin"] = derived_origin
         body = node.body
 
         if conversion.kind == "dataset":

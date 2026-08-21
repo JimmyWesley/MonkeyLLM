@@ -488,6 +488,13 @@ class NodeSpec(BaseModel):
         # extra="allow": custom frontmatter fields pass through (e.g. the
         # Gardener's source_path/source_hash, spec G.1)
         for k, v in (self.model_extra or {}).items():
+            if k == "moved_from":
+                # C.15: the waymark is written by transplant and nothing
+                # else — a planted one would forge a redirect over an
+                # address the writer never held.
+                raise VineError(
+                    E_SCHEMA, "moved_from is written by transplant",
+                    hint="To move a node, transplant it (C.15).")
             if k not in fm and v is not None:
                 fm[k] = v
         return fm

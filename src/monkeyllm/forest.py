@@ -68,6 +68,7 @@ _SCHEMA_BODY = """# Forest dialect
 | `same-as` | `same-as` | Soft merge of duplicate entities |
 | `discovered-shortcut` | — | The monkey's shout (created by graft) |
 | `succeeds` | `precedes` | Temporal order |
+| `supersedes` | `superseded-by` | Replacement: the successor makes the predecessor history |
 """
 
 # spec A.3.1: binaries never enter the forest git

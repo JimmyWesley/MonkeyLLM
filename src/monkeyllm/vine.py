@@ -33,6 +33,7 @@ from monkeyllm.catalog import Catalog
 from monkeyllm.dialect import MAX_LINKS_PER_NODE
 from monkeyllm.errors import (
     E_ANCHORED,
+    E_MOVED,
     E_NOT_FOUND,
     E_QUERY_FORBIDDEN,
     E_QUERY_INVALID,
@@ -106,6 +107,12 @@ MAX_PICK_SECTIONS = 10
 # C.14 (v0.56): how many anchors an E_ANCHORED refusal names; the exact
 # total always rides beside them as `anchor_count`.
 MAX_PRUNE_ANCHORS_SHOWN = 20
+# C.7.4 (v0.58): a batch is one plant — everything validated before
+# anything is written, the whole batch in one commit.
+MAX_BATCH_PLANT = 20
+# C.16 (v0.58): the document's past — listing budget and the hard cap.
+BUDGET_HISTORY = 800
+MAX_HISTORY = 50
 # C.4.1: paragraph blocks — the page unit. Each block keeps its trailing
 # blank run, so `"".join(blocks) == body` holds by construction and pages
 # reassemble byte-identically (F.80).
@@ -810,6 +817,17 @@ class Vine:
             if self.forest.exists(node_id):
                 self.catalog.upsert_node(self.forest.read(node_id))
                 return self.catalog.get(node_id)
+            moved = self.catalog.moved_to(node_id)
+            if moved:
+                # C.15 rule 4: "it is not here" is half the truth when the
+                # other half is known. The host withholds `moved_to` when
+                # the destination is out of the reader's scope (J.3).
+                raise VineError(
+                    E_MOVED,
+                    f"node moved: {node_id}",
+                    hint=f"It now lives at '{moved}'; update your reference.",
+                    data={"moved_to": moved},
+                )
             raise VineError(
                 E_NOT_FOUND,
                 f"node not found: {node_id}",
@@ -2338,8 +2356,17 @@ class Vine:
         returns before the first byte is written. Nothing is created,
         committed or indexed; the failure is the exact envelope the real
         call would raise.
+
+        `node` MAY be a list (C.7.4, v0.58): everything validated before
+        anything is written — in order, so a branch and its children may
+        share one batch — and the whole batch lands in ONE commit or none
+        of it lands.
         """
         self._require_writable()
+        if isinstance(node, (list, tuple)):
+            with self._write_mutex:
+                return self._plant_batch(list(node), if_absent=bool(if_absent),
+                                         dry_run=bool(dry_run))
         spec = node if isinstance(node, NodeSpec) else NodeSpec.model_validate(node)
         with self._write_mutex:
             return self._plant(spec, adopted=adopted, if_absent=bool(if_absent),
@@ -2369,14 +2396,17 @@ class Vine:
             raise VineError(E_SCHEMA, "schema requires payload_type: sqlite")
 
     def _plant(self, spec: NodeSpec, *, adopted: bool = False,
-               if_absent: bool = False, dry_run: bool = False) -> dict:
+               if_absent: bool = False, dry_run: bool = False,
+               pending: dict[str, str] | None = None) -> dict:
+        # `pending` (C.7.4): the batch's own earlier nodes, so a branch and
+        # its children rehearse in one list. Keyword-only, engine-internal.
         if spec.rows and spec.table_schema is None:
             raise VineError(E_SCHEMA, "rows require a schema (C.7.1 rule 7)")
         if spec.table_schema is not None:
             self._prepare_dataset_spec(spec, adopted=adopted)
         fm = spec.frontmatter_dict()
         validate_frontmatter(fm, self.forest.dialect)
-        if self.forest.exists(spec.id):
+        if self.forest.exists(spec.id) or (pending and spec.id in pending):
             if if_absent:
                 # C.7.2 (v0.52): "make sure this exists". Nothing is written,
                 # nothing is committed, and the submitted content is not
@@ -2388,7 +2418,10 @@ class Vine:
                 return out
             raise VineError(E_SCHEMA, f"id already exists: {spec.id}", hint="ids are immutable and unique.")
         parent_row = self.catalog.get(spec.parent)
-        if parent_row is None or parent_row["kind"] != "branch":
+        parent_pending = bool(pending
+                              and pending.get(spec.parent) == "branch")
+        if not parent_pending and (parent_row is None
+                                   or parent_row["kind"] != "branch"):
             raise VineError(E_NOT_FOUND, f"parent branch not found: {spec.parent}")
         expected_parent = self.forest.parent_index_id(spec.id)
         if spec.parent != expected_parent:
@@ -2493,6 +2526,122 @@ class Vine:
         self.catalog.mark_stale(spec.id)
         return {"id": spec.id, "created": True, "commit": commit,
                 "trail": self.forest.trail(spec.id)}
+
+    def _plant_batch(self, nodes: list, *, if_absent: bool,
+                     dry_run: bool) -> dict:
+        """C.7.4: a batch is one plant — everything validated before
+        anything is written, the whole batch in ONE commit or none of it.
+        """
+        if not nodes:
+            raise VineError(E_SCHEMA, "plant batch must not be empty",
+                            hint="Pass one node, or a list of up to "
+                                 f"{MAX_BATCH_PLANT}.")
+        if len(nodes) > MAX_BATCH_PLANT:
+            raise VineError(
+                E_SCHEMA,
+                f"plant accepts at most {MAX_BATCH_PLANT} nodes per batch, "
+                f"got {len(nodes)}")
+        specs: list[NodeSpec] = []
+        for entry in nodes:
+            spec = (entry if isinstance(entry, NodeSpec)
+                    else NodeSpec.model_validate(entry))
+            if spec.table_schema is not None or spec.rows:
+                # C.7.4 rule 6: a payload birth mid-batch has no rollback
+                # story yet; refusing is honest where restoring is not.
+                raise VineError(
+                    E_SCHEMA,
+                    f"'{spec.id}': datasets are planted one at a time",
+                    hint="A batch is .md-only; plant the dataset in its "
+                         "own call (C.7.1).")
+            specs.append(spec)
+        seen: set[str] = set()
+        for spec in specs:
+            if spec.id in seen:
+                raise VineError(
+                    E_SCHEMA, f"duplicate id in batch: {spec.id}",
+                    hint="Two nodes cannot claim one address, even "
+                         "transiently.")
+            seen.add(spec.id)
+
+        # Rehearsal pass: C.7.3's own code path, per node, in order —
+        # earlier batch nodes count as existing for later ones.
+        pending: dict[str, str] = {}
+        existing: list[str] = []
+        would_create: list[NodeSpec] = []
+        for spec in specs:
+            try:
+                verdict = self._plant(spec, if_absent=if_absent,
+                                      dry_run=True, pending=pending)
+            except VineError as e:
+                raise VineError(e.code, f"{spec.id}: {e.message}",
+                                hint=e.hint, data=e.data) from e
+            if verdict.get("created") is False:
+                existing.append(spec.id)
+                continue
+            pending[spec.id] = ("branch" if spec.type == "branch"
+                                else "leaf")
+            would_create.append(spec)
+        if dry_run:
+            out = {"valid": True, "count": len(would_create),
+                   "dry_run": True}
+            if existing:
+                out["existing"] = existing
+            return out
+        if not would_create:
+            # C.7.2's answer at batch grain: everything already existed,
+            # nothing written, nothing committed.
+            return {"created": [], "count": 0, "existing": existing}
+
+        # Write pass: every file and every parent-index refresh, then ONE
+        # commit. Any failure restores everything — all-or-nothing is the
+        # whole point (C.7.4 rule 1).
+        written: list[tuple[Path, str | None]] = []
+        paths: list[Path] = []
+        created: list[str] = []
+        try:
+            for spec in would_create:
+                fm = spec.frontmatter_dict()
+                body = spec.body.strip() or f"# {spec.title}"
+                if not body.lstrip().startswith("#"):
+                    body = f"# {spec.title}\n\n{body}"
+                node_path = self.forest.path_for(spec.id)
+                written.append((node_path, None))
+                self.forest.write(spec.id, serialize_node(fm, body))
+                paths.append(node_path)
+                parent_node = self.forest.read(spec.parent)
+                assert parent_node.path is not None
+                new_body = indexer.add_entry(
+                    parent_node, spec.id, spec.summary,
+                    is_branch=(spec.type == "branch"))
+                if parent_node.path not in paths:
+                    written.append((parent_node.path,
+                                    parent_node.path.read_text(
+                                        encoding="utf-8")))
+                    paths.append(parent_node.path)
+                parent_node.path.write_text(
+                    indexer.render_index(parent_node, new_body),
+                    encoding="utf-8", newline="\n")
+                created.append(spec.id)
+            commit = self.git.commit(
+                paths, f"plant(batch): {len(created)} nodes")
+        except Exception:
+            for path, original in reversed(written):
+                if original is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_text(original, encoding="utf-8", newline="\n")
+            raise
+
+        for spec in would_create:
+            self.catalog.upsert_node(self.forest.read(spec.id))
+            self.catalog.mark_stale(spec.id)
+        for parent in dict.fromkeys(s.parent for s in would_create):
+            if self.forest.exists(parent):
+                self.catalog.upsert_node(self.forest.read(parent))
+        out = {"created": created, "commit": commit, "count": len(created)}
+        if existing:
+            out["existing"] = existing
+        return out
 
     # =======================================================================
     # C.8 graft — atomic edit with reinforce-before-create
@@ -2874,6 +3023,217 @@ class Vine:
         return {"id": id, "pruned": True,
                 "backlinks_removed": backlinks_removed,
                 "payload_moved": payload_moved, "commit": commit}
+
+    # =======================================================================
+    # C.15 transplant — the move that leaves a waymark (v0.58)
+    # =======================================================================
+
+    @_traced
+    def transplant(self, id: str, new_id: str, *, visible=None) -> dict:
+        """Move one leaf node to a new address in one commit: passport
+        rewritten under `new_id`, every backlink following, both parent
+        indexes refreshed, the old id left as a waymark (`moved_from` +
+        alias). `visible` is the host policy's predicate, keyword-only and
+        unreachable from the wire — `prune`'s construction."""
+        self._require_writable()
+        with self._write_mutex:
+            return self._transplant(id, new_id, visible)
+
+    def _transplant(self, id: str, new_id: str, visible) -> dict:
+        row = self._row_or_raise(id)
+        new_id = (new_id or "").strip().strip("/")
+        if not new_id:
+            raise VineError(E_SCHEMA, "new_id must not be empty")
+        if new_id == id:
+            raise VineError(E_SCHEMA, "new_id equals the current id",
+                            hint="A move that goes nowhere is not a move.")
+        if row["kind"] == "branch" or id == "_index":
+            raise VineError(
+                E_SCHEMA,
+                f"'{id}' is a branch: branches do not transplant",
+                hint="Move the leaves, one audited decision at a time "
+                     "(C.15 rule 1).")
+        if _is_system(id) or _is_system(new_id):
+            raise VineError(
+                E_SCHEMA, "'_meta/' is the dialect, not content",
+                hint="System nodes neither move nor receive moves.")
+        if new_id.endswith("/_index"):
+            raise VineError(
+                E_SCHEMA, f"'{new_id}' is an index address",
+                hint="A leaf cannot become a branch's index by moving.")
+        if self.forest.exists(new_id):
+            raise VineError(E_SCHEMA, f"id already exists: {new_id}",
+                            hint="ids are immutable and unique.")
+        new_parent = self.forest.parent_index_id(new_id)
+        parent_row = self.catalog.get(new_parent)
+        if parent_row is None or parent_row["kind"] != "branch":
+            raise VineError(E_NOT_FOUND,
+                            f"parent branch not found: {new_parent}")
+
+        # C.15 rule 2: every backlink follows, or the call refuses — an
+        # anchor outside the caller's scope is C.14 rule 6's refusal.
+        anchors = [e["src"] for e in self.catalog.edges_in(id)]
+        if visible is not None:
+            hidden = [a for a in anchors if not visible(a)]
+            if hidden:
+                raise VineError(
+                    E_ANCHORED,
+                    f"{len(hidden)} pointing node(s) lie outside your scope",
+                    hint="A move rewrites every pointing node, so every "
+                         "pointing node must be the caller's to edit.")
+
+        node = self.forest.read(id)
+        assert node.path is not None
+        old_path = node.path
+        fm = dict(node.frontmatter)
+        fm["id"] = new_id
+        fm["updated"] = dt.date.today().isoformat()
+        moved_from = [m for m in (fm.get("moved_from") or [])
+                      if isinstance(m, str)]
+        if id not in moved_from:
+            moved_from.append(id)
+        fm["moved_from"] = moved_from
+        aliases = [a for a in (fm.get("aliases") or []) if isinstance(a, str)]
+        alias_clipped = False
+        if id not in aliases:
+            if len(aliases) < MAX_ALIASES:
+                aliases.append(id)
+            else:
+                alias_clipped = True
+        if aliases:
+            fm["aliases"] = aliases
+
+        old_parent = self.forest.parent_index_id(id)
+        touched: list[tuple[Path, str]] = []
+        paths: list[Path] = []
+        removed_original = old_path.read_text(encoding="utf-8")
+        moved_pair = None
+        backlinks = 0
+        try:
+            new_path = self.forest.path_for(new_id)
+            paths.append(new_path)
+            self.forest.write(new_id, serialize_node(fm, node.body))
+            old_path.unlink()
+            paths.append(old_path)
+
+            for src in dict.fromkeys(anchors):
+                src_node = self.forest.read(src)
+                sfm = dict(src_node.frontmatter)
+                links = [Link.model_validate(l)
+                         for l in (sfm.get("links") or [])]
+                changed = False
+                for link in links:
+                    if link.target == id:
+                        link.target = new_id
+                        changed = True
+                        backlinks += 1
+                if not changed:
+                    continue
+                sfm["links"] = [l.model_dump(exclude_none=True)
+                                for l in links]
+                sfm["updated"] = dt.date.today().isoformat()
+                assert src_node.path is not None
+                touched.append((src_node.path,
+                                src_node.path.read_text(encoding="utf-8")))
+                src_node.path.write_text(
+                    serialize_node(sfm, src_node.body),
+                    encoding="utf-8", newline="\n")
+                paths.append(src_node.path)
+
+            for idx_id, mutate in ((old_parent, "remove"),
+                                   (new_parent, "add")):
+                idx = self.forest.read(idx_id)
+                assert idx.path is not None
+                if mutate == "remove":
+                    body = indexer.remove_entry_from_body(idx.body, id)
+                    if body == idx.body:
+                        continue
+                else:
+                    body = indexer.add_entry(idx, new_id, fm["summary"],
+                                             is_branch=False)
+                if idx.path not in paths:
+                    touched.append((idx.path,
+                                    idx.path.read_text(encoding="utf-8")))
+                    paths.append(idx.path)
+                idx.path.write_text(indexer.render_index(idx, body),
+                                    encoding="utf-8", newline="\n")
+
+            payload = node.frontmatter.get("payload")
+            if payload and not is_remote(payload):
+                src_file = old_path.parent / payload
+                if src_file.is_file():
+                    dest = new_path.parent / payload
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(src_file), str(dest))
+                    moved_pair = (src_file, dest)
+
+            commit = self.git.commit(paths, f"transplant({id} -> {new_id})")
+        except Exception:
+            for path, original in reversed(touched):
+                path.write_text(original, encoding="utf-8", newline="\n")
+            self.forest.path_for(new_id).unlink(missing_ok=True)
+            if not old_path.exists():
+                old_path.write_text(removed_original,
+                                    encoding="utf-8", newline="\n")
+            if moved_pair is not None and moved_pair[1].exists():
+                shutil.move(str(moved_pair[1]), str(moved_pair[0]))
+            raise
+
+        self.catalog.delete_node(id)
+        self.catalog.upsert_node(self.forest.read(new_id))
+        for idx_id in dict.fromkeys((old_parent, new_parent)):
+            if self.forest.exists(idx_id):
+                self.catalog.upsert_node(self.forest.read(idx_id))
+        for src in dict.fromkeys(anchors):
+            if self.forest.exists(src):
+                self.catalog.upsert_node(self.forest.read(src))
+        # C.15 rule 5: heat follows the node, best effort — the pheromone
+        # was earned by the content, which did not change.
+        try:
+            self.trails.rekey(id, new_id)
+        except Exception:                                    # noqa: BLE001
+            pass
+        out = {"id": new_id, "moved_from": id,
+               "backlinks_rewritten": backlinks, "commit": commit,
+               "trail": self.forest.trail(new_id)}
+        if alias_clipped:
+            out["alias_clipped"] = True
+        return out
+
+    # =======================================================================
+    # C.16 history — the document's past (v0.58)
+    # =======================================================================
+
+    @_traced
+    def history(self, id: str, limit: int = 20) -> dict:
+        """The node's commits, newest first, through renames — what
+        happened, when (with time of day), and by whom when the commit
+        carries the attribution trailer."""
+        self._row_or_raise(id)
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            raise VineError(E_SCHEMA, "limit must be an integer") from None
+        limit = min(max(1, limit), MAX_HISTORY)
+        rel = (self.forest.path_for(id).resolve()
+               .relative_to(self.forest.root.resolve())).as_posix()
+        # One extra row answers "is there more past than this page".
+        entries = self.git.file_history(rel, limit=limit + 1)
+        more = len(entries) > limit
+        entries = entries[:limit]
+        for entry in entries:
+            subject = entry.get("message") or ""
+            # The commit subject's own convention: `plant(id): …`,
+            # `gardener(sync): …` — the prefix before the parenthesis.
+            head = subject.split("(", 1)[0].strip()
+            entry["action"] = head if head and " " not in head else subject
+        payload = {"id": id, "entries": entries,
+                   "returned": len(entries), "truncated": more}
+        payload = shrink_list_to_budget(payload, "entries", BUDGET_HISTORY)
+        payload["returned"] = len(payload["entries"])
+        if payload["entries"]:
+            payload["oldest"] = payload["entries"][-1]["commit"]
+        return payload
 
     def _require_writable(self) -> None:
         if not self.writable:

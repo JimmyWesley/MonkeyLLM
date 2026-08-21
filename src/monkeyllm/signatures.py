@@ -42,6 +42,10 @@ _CHECKS = {
     "string|string[]": lambda v: isinstance(v, str) or (
         isinstance(v, list) and all(isinstance(i, str) for i in v)
     ),
+    # C.7.4: one node, or a batch of them.
+    "object|object[]": lambda v: isinstance(v, dict) or (
+        isinstance(v, list) and all(isinstance(i, dict) for i in v)
+    ),
 }
 
 
@@ -130,7 +134,9 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "sql": _param("string", required=True),
     },
     "plant": {
-        "node": _param("object", required=True),
+        # C.7.4 (v0.58): one node, or a batch of up to 20 — everything
+        # validated before anything is written, one commit for the lot.
+        "node": _param("object|object[]", required=True),
         "if_absent": _param("boolean"),
         "dry_run": _param("boolean"),
     },
@@ -149,6 +155,16 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "id": _param("string", required=True),
         "force": _param("boolean"),
     },
+    # C.15 (v0.58): the move that leaves a waymark.
+    "transplant": {
+        "id": _param("string", required=True),
+        "new_id": _param("string", required=True),
+    },
+    # C.16 (v0.58): the document's past.
+    "history": {
+        "id": _param("string", required=True),
+        "limit": _param("integer"),
+    },
     # Composites (C.6c, J.10.5): not primitives, same wire, same rule.
     "harvest": {
         "query": _param("string", required=True),
@@ -157,6 +173,9 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "since": _param("string"),
         "until": _param("string"),
         "date_field": _param("string"),
+        # C.6c.4 (v0.58): the history view — restores what a live
+        # `supersedes` edge excludes by default.
+        "include_superseded": _param("boolean"),
     },
     "answer": {
         # `query` is the older spelling of `question` and still accepted, so
@@ -168,6 +187,7 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "cache": _param("boolean"),
         "reply_tokens": _param("integer"),
         "min_evidence": _param("integer"),
+        "include_superseded": _param("boolean"),
         "hops": _param("boolean|integer"),
         "since": _param("string"),
         "until": _param("string"),

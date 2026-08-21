@@ -198,16 +198,22 @@ def build_server(
 
     @mcp.tool()
     def harvest(query: str, terms: list[str] | None = None, k: int = 3,
+                include_superseded: bool = False,
                 forest: str | None = None) -> dict:
         """One-shot retrieval (zero LLM server-side): ranked notes with body or
         matched sections + exact snippets. Use it when you want evidence in a
         single call and will reason over it yourself; use the primitives below
-        when you want to navigate step by step."""
+        when you want to navigate step by step.
+
+        A result that a live node `supersedes` is left out and the seat
+        refilled — `superseded_excluded` says which and by what;
+        `include_superseded=True` brings the history back (spec C.6c.4)."""
         from monkeyllm.harvest import harvest as _harvest
 
         try:
             return in_vine_thread(
-                lambda: _harvest(pool.get(forest), query, terms=terms, k=k)
+                lambda: _harvest(pool.get(forest), query, terms=terms, k=k,
+                                 include_superseded=include_superseded)
             )
         except VineError as e:
             return e.to_dict()
@@ -325,8 +331,8 @@ def build_server(
                        recursive=recursive, limit=limit)
 
     @mcp.tool()
-    def plant(node: dict, if_absent: bool = False, dry_run: bool = False,
-              forest: str | None = None) -> dict:
+    def plant(node: dict | list[dict], if_absent: bool = False,
+              dry_run: bool = False, forest: str | None = None) -> dict:
         """Create a node (atomic: file + parent index + git commit).
 
         `node` (spec A.3/C.7): required `id` (path under its parent — the id
@@ -348,7 +354,11 @@ def build_server(
         answers created:false and writes nothing (spec C.7.2).
         dry_run=True rehearses: every validation, no write, no commit —
         answers {valid: true} or the exact error the real call would raise
-        (spec C.7.3)."""
+        (spec C.7.3).
+        `node` may be a LIST of up to 20 (spec C.7.4): every node is
+        validated before any is written and the whole batch lands in one
+        commit, or none of it does — `{created, existing, commit, count}`.
+        Datasets are planted one at a time."""
         return guarded("plant", forest, node, if_absent=if_absent,
                        dry_run=dry_run)
 
@@ -365,6 +375,23 @@ def build_server(
         E_ANCHORED naming them; force=true also strips those backlinks in
         the same commit. A branch with children never prunes."""
         return guarded("prune", forest, id, force=force)
+
+    @mcp.tool()
+    def transplant(id: str, new_id: str, forest: str | None = None) -> dict:
+        """Move one leaf node to a new address (spec C.15): the passport,
+        every backlink pointing at it, both parent indexes and a local
+        payload, all in one commit. The old id becomes a waymark — it
+        stays findable by locate and a read of it answers E_MOVED naming
+        the new address. Branches do not transplant: move their leaves."""
+        return guarded("transplant", forest, id, new_id)
+
+    @mcp.tool()
+    def history(id: str, limit: int = 20, forest: str | None = None) -> dict:
+        """What happened to this node and who did it (spec C.16): its
+        commits, newest first, across renames — each with the full
+        timestamp, the action (plant/graft/tend/transplant/gardener/…) and
+        the acting principal when the commit carries one."""
+        return guarded("history", forest, id, limit=limit)
 
     @mcp.tool()
     def close_session(success: bool, answer_nodes: list[str],

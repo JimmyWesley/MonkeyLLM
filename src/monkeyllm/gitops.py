@@ -10,6 +10,18 @@ from pathlib import Path
 
 GIT_IDENTITY = ["-c", "user.name=vine", "-c", "user.email=vine@monkeyllm.local"]
 
+# J.4/C.16 (v0.58): the standard attribution trailer. The engine never
+# WRITES a value into it (the host decides who acted — the engine stays
+# principal-blind), but the KEY is engine vocabulary so `history` can read
+# it back as `by` without the host teaching it a spelling.
+ATTRIBUTION_TRAILER = "station-principal"
+
+# C.16: record separators for one-shot log parsing — unit separator between
+# fields, record separator between commits, so a commit MESSAGE containing
+# newlines cannot be mistaken for a boundary.
+_FIELD_SEP = "\x1f"
+_RECORD_SEP = "\x1e"
+
 
 class GitRepo:
     def __init__(self, root: Path):
@@ -69,6 +81,37 @@ class GitRepo:
         self._run("add", "--", *rels)
         self._run("commit", "--quiet", "-m", message)
         return self._run("rev-parse", "HEAD").stdout.strip()
+
+    def file_history(self, rel_path: str, limit: int = 20) -> list[dict]:
+        """C.16 (v0.58): one file's commits, newest first, through renames.
+
+        Each entry: `commit`, `at` (ISO 8601 with time of day — the strict
+        author date), `message` (the subject line), and `by` when the
+        commit carries the attribution trailer. `--follow` keeps a
+        transplanted document's past whole across its move (C.15 relies on
+        git's rename detection for this).
+        """
+        out = self._run(
+            "log", "--follow", f"-n{max(1, int(limit))}",
+            f"--format=%H{_FIELD_SEP}%aI{_FIELD_SEP}%B{_RECORD_SEP}",
+            "--", rel_path, check=False)
+        entries: list[dict] = []
+        if out.returncode != 0:
+            return entries
+        for record in out.stdout.split(_RECORD_SEP):
+            record = record.strip("\n")
+            if not record:
+                continue
+            sha, _, rest = record.partition(_FIELD_SEP)
+            at, _, body = rest.partition(_FIELD_SEP)
+            lines = body.splitlines()
+            entry = {"commit": sha.strip(), "at": at.strip(),
+                     "message": lines[0].strip() if lines else ""}
+            for line in lines[1:]:
+                if line.lower().startswith(f"{ATTRIBUTION_TRAILER}:"):
+                    entry["by"] = line.split(":", 1)[1].strip()
+            entries.append(entry)
+        return entries
 
     def maintain(self) -> str:
         """H.8 (v0.57): ask git to tend the repo — `gc --auto`, git's own

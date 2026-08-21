@@ -173,6 +173,9 @@ REQUIRED_CAP = {
     # J.2.6's mask ceiling is a closed set, and a fourth token would
     # invalidate every issued key.
     "prune": "write",
+    # v0.58: the move rides write (it edits every pointing node), the
+    # past rides read (it is a listing).
+    "transplant": "write", "history": "read",
 }
 
 
@@ -428,12 +431,18 @@ class ScopedVine:
 
     def harvest(self, query: str, terms: list[str] | None = None, k: int = 3,
                 since: str | None = None, until: str | None = None,
-                date_field: str | None = None) -> dict:
+                date_field: str | None = None,
+                include_superseded: bool = False) -> dict:
         from monkeyllm.harvest import harvest as _harvest
 
-        # `self`, not `self._vine`: the composite runs on the scoped surface.
+        # `self`, not `self._vine`: the composite runs on the scoped
+        # surface. `visible` is C.6c.4 rule 6 — a successor the caller
+        # cannot see cannot suppress what they can (scan's construction).
         return _harvest(self, query, terms=terms, k=k, since=since,
-                        until=until, date_field=date_field)
+                        until=until, date_field=date_field,
+                        include_superseded=bool(include_superseded),
+                        visible=(None if self.policy.unrestricted
+                                 else self.policy.in_scope))
 
     def calendar(self, scope: str | None = None, date_field: str | None = None,
                  granularity: str = "month", since: str | None = None,
@@ -478,20 +487,22 @@ class ScopedVine:
 
     def plant(self, node, if_absent: bool = False,
               dry_run: bool = False) -> dict:
-        node_id = node.get("id") if isinstance(node, dict) else getattr(node, "id", None)
-        if not node_id:
-            raise VineError(E_SCHEMA, "plant requires an 'id'")
-        if not self._visible(node_id):
-            # A write outside the grant is refused as forbidden, not as
-            # not-found: the caller supplied the id, so nothing is disclosed.
-            # C.7.3: the rehearsal gates identically — a dry run a scoped
-            # principal could aim outside its grant would be an oracle for
-            # what a write would say.
-            raise VineError(
-                E_FORBIDDEN,
-                f"'{node_id}' is outside this principal's grant",
-                hint=f"Writable subtrees: {list(self.policy.allow)}.",
-            )
+        entries = node if isinstance(node, (list, tuple)) else [node]
+        for entry in entries:
+            node_id = (entry.get("id") if isinstance(entry, dict)
+                       else getattr(entry, "id", None))
+            if not node_id:
+                raise VineError(E_SCHEMA, "plant requires an 'id'")
+            if not self._visible(node_id):
+                # A write outside the grant is refused as forbidden, not as
+                # not-found: the caller supplied the id, so nothing is
+                # disclosed. C.7.3: the rehearsal gates identically — and
+                # C.7.4: EVERY node of a batch, before anything is written.
+                raise VineError(
+                    E_FORBIDDEN,
+                    f"'{node_id}' is outside this principal's grant",
+                    hint=f"Writable subtrees: {list(self.policy.allow)}.",
+                )
         # C.7.2/C.7.3 (v0.52/v0.57): caller-facing options, unlike `adopted`
         # — which stays keyword-only and unreachable from the wire (G.2.5).
         return self._vine.plant(node, if_absent=bool(if_absent),
@@ -521,8 +532,36 @@ class ScopedVine:
     def export(self, id: str) -> str:
         # J.14.1: J.14's discipline verbatim — the gate answers
         # byte-identical E_NOT_FOUND for out-of-scope and absent alike.
+        # This surface bypasses `call()`, so the C.15 periscope rule is
+        # applied here as well.
         self._gate(id)
-        return self._vine.export(id)
+        try:
+            return self._vine.export(id)
+        except VineError as e:
+            raise self._translate_moved(e) from None
+
+    def transplant(self, id: str, new_id: str) -> dict:
+        """C.15 rule 6: gated on BOTH addresses — reading rule on the
+        source (out of scope answers as absent), writing rule on the
+        destination (E_FORBIDDEN naming the grant, C.7's own asymmetry).
+        The anchor predicate rides keyword-only, prune's construction."""
+        self._gate(id)
+        target = (new_id or "").strip().strip("/")
+        if target and not self._visible(target):
+            raise VineError(
+                E_FORBIDDEN,
+                f"'{target}' is outside this principal's grant",
+                hint=f"Writable subtrees: {list(self.policy.allow)}.",
+            )
+        if self.policy.unrestricted:
+            return self._vine.transplant(id, new_id)
+        return self._vine.transplant(id, new_id,
+                                     visible=self.policy.in_scope)
+
+    def history(self, id: str, limit: int = 20) -> dict:
+        # C.16 rule 3: read semantics throughout — the same gate as look.
+        self._gate(id)
+        return self._vine.history(id, limit=limit)
 
     # -- dispatcher used by the surfaces ------------------------------------
 
@@ -545,6 +584,24 @@ class ScopedVine:
             # the table is a defect, and it must not become a bare 500.
             return getattr(self, primitive)(**validate_args(primitive, kwargs))
         except VineError as e:
-            return e.to_dict()
+            return self._translate_moved(e).to_dict()
         except TypeError as e:  # bad/missing arguments from an API client
             return VineError(E_SCHEMA, str(e)).to_dict()
+
+    def _translate_moved(self, e: VineError) -> VineError:
+        """C.15 rule 4: a waymark must not be a periscope. `E_MOVED` names
+        `moved_to` only when the destination lies in the reader's own
+        scope; otherwise the envelope collapses to the canonical not-found
+        of a node that never existed (the `_gate` text, verbatim)."""
+        from monkeyllm.errors import E_MOVED
+
+        if e.code != E_MOVED:
+            return e
+        moved_to = (e.data or {}).get("moved_to")
+        if moved_to and self._visible(moved_to):
+            return e
+        return VineError(
+            E_NOT_FOUND,
+            e.message.replace("node moved: ", "node not found: ", 1),
+            hint="Use locate() to find entry points.",
+        )

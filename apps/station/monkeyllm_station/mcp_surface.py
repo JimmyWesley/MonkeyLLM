@@ -157,10 +157,14 @@ INSTRUCTIONS = (
     "forest; sniff(forest, terms) greps exact terms inside bodies; "
     "calendar(forest) maps where material sits in time; "
     "view(forest, id) shows the image behind a type:media node; "
+    "history(forest, id) says what happened to a node and who did it; "
     "query(forest, id, sql) runs read-only SQL on type:dataset nodes. "
-    "Write, per capability: plant(forest, node) creates, "
+    "Write, per capability: plant(forest, node) creates (a LIST of nodes "
+    "lands in one commit or not at all), "
     "graft(forest, id, patch) edits, prune(forest, id) removes one node "
-    "(force=true also strips its backlinks), tend(forest, id, sql) is "
+    "(force=true also strips its backlinks), "
+    "transplant(forest, id, new_id) moves one to a new address and leaves "
+    "the old id as a waymark, tend(forest, id, sql) is "
     "single-statement dataset DML, ingest(forest, ...) sends documents "
     "through the Gardener. Anything outside your scope reports "
     "E_NOT_FOUND, exactly as a missing node does."
@@ -438,11 +442,20 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
     async def harvest(forest: str, query: str, terms: list[str] | None = None,
                       k: int = 3, since: str | None = None,
                       until: str | None = None,
-                      date_field: str | None = None):
+                      date_field: str | None = None,
+                      include_superseded: bool = False):
         """One-shot retrieval: ranked evidence with exact snippets, no hops.
-        `since`/`until` bound both of its legs to a period."""
+        `since`/`until` bound both of its legs to a period.
+
+        Every item states its time (`created`/`updated`), and a document
+        that a live node `supersedes` is left OUT with its seat refilled —
+        `superseded_excluded` names what was set aside and by what, so a
+        replaced policy never answers for the current one.
+        `include_superseded=true` brings the history back."""
         return await call(forest, "harvest", query=query, terms=terms, k=k,
-                          since=since, until=until, date_field=date_field)
+                          since=since, until=until, date_field=date_field,
+                          **({"include_superseded": True}
+                             if include_superseded else {}))
 
     @mcp.tool()
     async def calendar(forest: str, scope: str | None = None,
@@ -472,7 +485,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                      min_evidence: int = 0,
                      since: str | None = None,
                      until: str | None = None,
-                     date_field: str | None = None):
+                     date_field: str | None = None,
+                     include_superseded: bool = False):
         """Ask the forest directly: scoped retrieval read by the model bound
         to this forest, returning a grounded answer with its evidence. The
         one call that replaces a knowledge-base lookup plus a summarisation
@@ -488,14 +502,19 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         would rather see the evidence than a confident paragraph over two
         weak snippets.
         `since`/`until` bound the retrieval to a period, exactly as they do
-        on `locate` — ask `calendar` which periods hold anything first."""
+        on `locate` — ask `calendar` which periods hold anything first.
+        A document a live node `supersedes` is left out of the material by
+        default and named in `superseded_excluded`;
+        `include_superseded: true` answers from the history too."""
         return await call(forest, "answer", question=question, k=k,
                           cache=cache, since=since, until=until,
                           date_field=date_field,
                           **({"reply_tokens": reply_tokens}
                              if reply_tokens is not None else {}),
                           **({"min_evidence": min_evidence}
-                             if min_evidence else {}))
+                             if min_evidence else {}),
+                          **({"include_superseded": True}
+                             if include_superseded else {}))
 
     @mcp.tool()
     async def query(forest: str, id: str, sql: str):
@@ -503,8 +522,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         return await call(forest, "query", id=id, sql=sql)
 
     @mcp.tool()
-    async def plant(forest: str, node: dict, if_absent: bool = False,
-                    dry_run: bool = False):
+    async def plant(forest: str, node: dict | list[dict],
+                    if_absent: bool = False, dry_run: bool = False):
         """Create a node (needs the 'write' capability).
 
         `node` (spec A.3/C.7): required `id` (a path under its parent —
@@ -528,7 +547,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         nothing and comparing nothing. Changing what is there is `graft`.
         `dry_run=true` rehearses: every validation, no write, no commit —
         answers `{valid: true}` or the exact error the real call would
-        raise (spec C.7.3); use it before shipping a large body."""
+        raise (spec C.7.3); use it before shipping a large body.
+        `node` may be a LIST of up to 20 nodes (spec C.7.4): every one is
+        validated BEFORE any is written and the whole batch lands in one
+        commit or none of it does — so a set of related documents and the
+        links between them never exists half-built. The answer is
+        `{created, existing, commit, count}`. Plant datasets (`schema`)
+        one at a time."""
         return await call(forest, "plant", node=node, if_absent=if_absent,
                           dry_run=dry_run)
 
@@ -556,6 +581,33 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         the same commit. A branch with children never prunes — remove
         the children first. A pruned id is free to plant again."""
         return await call(forest, "prune", id=id, force=force)
+
+    @mcp.tool()
+    async def transplant(forest: str, id: str, new_id: str):
+        """Move one leaf node to a new address (needs 'write', spec C.15).
+
+        The repair for a misplaced document: the passport moves, every
+        node pointing at it follows, both parent indexes are refreshed and
+        a local payload travels along — one commit for the lot. The old id
+        becomes a WAYMARK: `locate` still finds the node by it, and a read
+        of the old id answers E_MOVED naming where it went. Branches do
+        not transplant — move their leaves. A pointing node outside your
+        scope refuses the whole move rather than silently dropping the
+        link."""
+        return await call(forest, "transplant", id=id, new_id=new_id)
+
+    @mcp.tool()
+    async def history(forest: str, id: str, limit: int = 20):
+        """What happened to this node, and who did it (spec C.16).
+
+        The node's commits, newest first, across renames: each carries the
+        full timestamp (`at`, with time of day — frontmatter dates are
+        day-precision), the `action` (plant, graft, tend, transplant,
+        gardener(sync), ranger(promote)…), the commit subject, and `by`
+        when the write went through a Station that stamped its principal.
+        A listing, not time travel: it says what happened, not what the
+        body said at the time."""
+        return await call(forest, "history", id=id, limit=limit)
 
     @mcp.tool()
     async def tend(forest: str, id: str, sql: str):

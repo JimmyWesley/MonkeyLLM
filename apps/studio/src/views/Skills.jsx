@@ -163,6 +163,30 @@ use the write it actually allows:
   those backlinks in one commit. History keeps everything, so this undoes
   a mistake without hiding that it happened. Clean up after yourself: a
   probe node left behind is somebody else's search result.
+- \`transplant(id, new_id)\` (also \`write\`): the node is in the wrong
+  branch, or its id says the wrong thing. Do NOT rebuild it — transplant
+  moves the document, every link pointing at it, and its payload in one
+  commit, and leaves the old id as a **waymark**: \`locate\` still finds
+  the node by the old name, and anyone reading the old id is told where
+  it went. Branches do not move: transplant their leaves.
+- \`history(id)\`: what happened to a node and who did it — every commit,
+  newest first, with the full timestamp and the acting principal. Read it
+  before you edit somebody else's document, and when you need to say
+  "this changed on the 14th" instead of guessing from \`updated\`.
+
+**Planting several related nodes? Send them as a list.** \`plant\` takes
+up to 20 nodes in one call: all of them are validated before any is
+written, and they land in one commit or none of them do. A set of
+documents that link to each other never exists half-built, and one call
+costs the forest one commit instead of twenty.
+
+**Replacing a document rather than continuing it?** Say which you mean:
+\`succeeds\` orders two moments (round 4 came after round 3 — both remain
+true of their moment), \`supersedes\` retires one (this policy replaces
+that one). A node something supersedes is left OUT of retrieval by
+default and named in \`superseded_excluded\`, so an outdated document
+stops answering for the current one — while \`history\` and the graph
+still show it.
 
 ### The anatomy of a node (read this before your first \`plant\`)
 
@@ -187,10 +211,11 @@ takes, so here is its whole shape:
   the short name, the number ("BE-291", "R4"). One line of aliases does
   more for recall than any body edit.
 - **\`links\` place it in the graph:** \`[{rel, target}]\`, rels from
-  \`_meta/schema\`. When a document supersedes an earlier one, say so with
+  \`_meta/schema\`. When a document follows an earlier one, say so with
   \`succeeds\` — retrieval reads that order, and an \`answer\` will treat
   the older node as history instead of mixing two moments into one
-  present.
+  present. When it REPLACES the earlier one, say \`supersedes\` instead:
+  the predecessor stops being offered as evidence.
 - **\`origin\` says where it came from:** one URI (a path, a URL, a commit
   ref) when the document exists outside the forest too — it is how the
   copy can ever be reconciled with its source.

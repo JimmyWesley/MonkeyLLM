@@ -170,6 +170,8 @@ _JSON_TYPES = {
     "string": {"string"}, "integer": {"integer"}, "boolean": {"boolean"},
     "object": {"object"}, "string[]": {"array"}, "object[]": {"array"},
     "string|string[]": {"string", "array"},
+    # C.7.4 (v0.58): one node, or a batch of them.
+    "object|object[]": {"object", "array"},
     "boolean|integer": {"boolean", "integer"},
 }
 
