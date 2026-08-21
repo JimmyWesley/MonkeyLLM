@@ -104,7 +104,7 @@ export default function Explore({ forest, grant, node, setNode, goto }) {
 
       {mode === 'tree' && (
         <BrowseAndSearch forest={forest} grant={grant} current={current}
-                         setNode={setNode} />
+                         setNode={setNode} goto={goto} />
       )}
     </div>
   )
@@ -114,7 +114,7 @@ export default function Explore({ forest, grant, node, setNode, goto }) {
  *  this live" — so they are one console now: the tree on the left, what you
  *  found on the right, and a search box that fills the tree's place when it
  *  has something to say. */
-function BrowseAndSearch({ forest, grant, current, setNode }) {
+function BrowseAndSearch({ forest, grant, current, setNode, goto }) {
   const { t } = useI18n()
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState(null)
