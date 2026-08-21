@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.56.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.57.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,64 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **Reads scale on a reader pool (spec J.6.2, v0.57)**: each open forest
+  has K read-only Vines (`MONKEYLLM_STATION_READERS`, default 4; `0`
+  restores the single lane), each confined to its own thread; reads, the
+  sweep's retrieval and the J.11 map projections ride them, while writes,
+  ingest steps and admin repairs keep the writer lane. Readers take no
+  lock — so a held writer lock (or a running batch, or another agent's
+  plant) **stops writes, not reads**, and with warming off a read no
+  longer opens the writer (`active` in the forest list describes the
+  WRITER). `tune_derived` gained `busy_timeout=5000` because N readers
+  are N occasional pheromone writers. After `reindex`/canopy build the
+  handlers call `readers.reset(forest)` — a held-open view of a rebuilt
+  index is not trusted.
+- **The provider is not a lane (spec J.10.11, v0.57)**: the sweep
+  `answer` runs prepare (reader lane) → model (no lane, `asyncio.to_thread`)
+  → settle (SAME reader lane). The trace slice is CAPTURED at the end of
+  prepare (`_deferred.events`) because the lane serves other calls while
+  the model writes — `explain(..., events=)` must never read the live
+  tracer for a deferred call. Concurrent model calls are admitted under
+  `MONKEYLLM_STATION_MODEL_CONCURRENCY` (default 8, `0` unbounded) —
+  parallel because the hold is gone, bounded because the provider is
+  metered — and `/v1/health` publishes `concurrency: {readers, model}`
+  (the team discovered every ceiling by experiment; P-03). The walk
+  (`hops`) and `recurate` stay lane-bound by design. Both surfaces route
+  through `execute_call`.
+- **`look` never drops a field in silence (spec C.2, v0.57)**: the budget
+  clips `outline` → `children` → `edges_in`/`edges_out` → `sample_rows`
+  last (a dataset's digest exists to feed `query`), and every clipped
+  field is named in `truncated_fields`. The flags are pre-sized inside
+  the budget (C.6.2's pattern) — adding them after the shrink pushed the
+  digest back over 500.
+- **The sweep knows what time it is (spec C.6c.3, v0.57)**: harvest items
+  carry `created`/`updated` (off the catalog row, never a file open);
+  equal RRF scores order newer-first (tie-break, NEVER a boost); a
+  `succeeds` edge inside the selected set annotates both ends
+  (`supersedes`/`superseded_by`) — annotated, never suppressed. Dates and
+  annotations enter the J.10.7 reading fingerprint. `ScopedVine.catalog`
+  is a read-through property that exists for exactly this (not
+  dispatchable from the wire).
+- **`plant(dry_run=true)` rehearses (spec C.7.3, v0.57)**: same code path
+  up to the first write — never a parallel validator — then
+  `{valid: true, dry_run: true}` with `created` absent. Composes with
+  `if_absent`; gated by `write` like the real call.
+- **`origin` is one URI, never prose (spec A.3, v0.57)**: ≤2048 chars, no
+  whitespace/control (J.8's `source_url` rule); mutable via graft
+  (`None` clears it); in `look` when present, filterable in `scan`; the
+  engine NEVER dereferences it. Catalog column added in place, filled by
+  the next write or reindex.
+- **The principal is stamped, never amended (spec J.4, v0.57)**:
+  `Vine.commit_trailers` (backed by `GitRepo.trailers`) rides the
+  original commit; dispatch sets/clears it around scoped writes and
+  `stamp_principal`'s amend survives only as the no-seam fallback.
+  Gardener/Ranger commits stay unstamped as before.
+- **`export?recursive=true` zips a branch's in-scope subtree (spec
+  J.14.1, v0.57)**: each member byte-identical to its single export,
+  named `<id>.md`; out-of-scope members silently absent (scan's rule);
+  a leaf with the flag and ANY unknown query parameter are `E_SCHEMA`.
+  The Ranger's `run()` now ends with `git gc --auto` (H.8), reported as
+  `gc:` in the report.
 - **Token budgets** with always-explicit truncation (`truncated: true`):
   look 500, move 600, locate/scan/sniff 800. Never cut silently.
   `harvest`'s item cap is `MONKEYLLM_HARVEST_MAX_K` (default 5, garbage
