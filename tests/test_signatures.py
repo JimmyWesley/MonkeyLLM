@@ -173,6 +173,8 @@ _JSON_TYPES = {
     # C.7.4 (v0.58): one node, or a batch of them.
     "object|object[]": {"object", "array"},
     "boolean|integer": {"boolean", "integer"},
+    # J.10.10 (v0.59): min_score is a threshold, not a count.
+    "number": {"number"},
 }
 
 

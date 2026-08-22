@@ -16,6 +16,7 @@
   "playground.move": "move the trails from a node",
   "playground.node": "Node id",
   "playground.nodes": "{n} nodes",
+  "playground.one_call": "One engine call: the Forest figure is its own clock — the same one the Ask console prints per step.",
   "playground.op": "Call",
   "playground.query": "Query",
   "playground.rate": "At this rate the engine does ~{n} requests per second on one thread.",
@@ -25,5 +26,6 @@
   "playground.sub": "The same calls an agent makes, with the same budgets. Nothing here is a simulation.",
   "playground.terms": "Terms",
   "playground.terms_hint": "Literal words, comma separated. No regular expressions.",
-  "playground.title": "Playground"
+  "playground.title": "Playground",
+  "playground.trace_sub": "The Forest figure above is the sum of these calls."
 }

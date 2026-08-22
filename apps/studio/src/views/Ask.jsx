@@ -16,7 +16,9 @@ import {
   Ask as AskIcon, Clock, Collapse, Download, Expand, Printer, Sparkle, Trash,
 } from '../design/icons.jsx'
 import { PayloadImage } from './files.jsx'
-import { Metric, NeedsCapability, fmtMs, has, nodeLink, useAsync } from './shared.jsx'
+import {
+  Metric, NeedsCapability, Row, TraceSteps, fmtMs, has, nodeLink, useAsync,
+} from './shared.jsx'
 
 /* J.10.8: the reply size is the person's own preference — like language and
  * theme (J.5.3), it lives in the browser and never in the address. 0 is
@@ -861,7 +863,6 @@ function Explain({ trace, wall, hybrid, cost, timing }) {
   const { t } = useI18n()
   if (!trace?.steps?.length) return null
 
-  const worst = Math.max(...trace.steps.map((s) => s.ms), 1)
   // The gap between the client's stopwatch and the host's own span: TLS, the
   // network, HTTP framing, JSON, this render. Named rather than hidden, so
   // the columns add up. J.10.6's header makes the host's share a measured
@@ -881,36 +882,9 @@ function Explain({ trace, wall, hybrid, cost, timing }) {
                   ? `${trace.steps.find((s) => s.step === 'model').ms} ms` : '—'} />
       </div>
 
-      <ol className="mt-4 space-y-2.5">
-        {trace.steps.map((s, i) => (
-          <li key={i}>
-            <div className="flex items-baseline gap-2">
-              {/* Which decision caused this step. Without it the panel is a
-                  list of primitives and the walk is somewhere else. */}
-              {s.hop != null && (
-                <span className="shrink-0 rounded bg-accent-soft px-1 font-mono
-                                 text-[10px] font-semibold text-accent">
-                  {t('explain.hop_n', { n: s.hop })}
-                </span>
-              )}
-              <span className="font-mono text-[12px] font-medium text-text">{s.step}</span>
-              {s.id && <span className="min-w-0 flex-1 truncate font-mono text-[11px]
-                                        text-text-3">{s.id}</span>}
-              <span className="ml-auto shrink-0 font-mono text-[11.5px] text-text-2">
-                {s.ms} ms
-              </span>
-            </div>
-            {/* Proportional to the slowest step, not to the total: the model
-                dwarfs everything, and a bar chart scaled to it would render
-                every retrieval step as the same invisible sliver. */}
-            <div className="mt-1 h-1 overflow-hidden rounded-full bg-surface-2">
-              <div className={`h-full rounded-full ${s.step === 'model' ? 'bg-text-3' : 'bg-accent'}`}
-                   style={{ width: `${Math.max(2, (s.ms / worst) * 100)}%` }} />
-            </div>
-            {s.detail && <p className="mt-1 truncate text-[11px] text-text-3">{s.detail}</p>}
-          </li>
-        ))}
-      </ol>
+      <div className="mt-4">
+        <TraceSteps steps={trace.steps} />
+      </div>
 
       <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[11.5px]">
         <Row label={t('explain.steps')} value={trace.steps.length} />
@@ -944,9 +918,3 @@ function Explain({ trace, wall, hybrid, cost, timing }) {
   )
 }
 
-const Row = ({ label, value }) => (
-  <div className="flex items-baseline justify-between gap-3">
-    <dt className="text-text-3">{label}</dt>
-    <dd className="font-mono text-text-2">{value}</dd>
-  </div>
-)

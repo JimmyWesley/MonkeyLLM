@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS heat (
 """
 
 
+# Parameter ceiling for an `IN (...)` list; SQLite's own limit is higher.
+_IN_CHUNK = 400
+
+
 class Trails:
     def __init__(self, derived_dir: Path):
         derived_dir.mkdir(parents=True, exist_ok=True)
@@ -97,8 +101,36 @@ class Trails:
                 heat += beta * row[0]
         return round(min(heat, 1.0), 4)
 
-    def heat_map(self, node_ids: list[str], session: str | None = None) -> dict[str, float]:
-        return {nid: self.get_heat(nid, session) for nid in node_ids}
+    def heat_map(self, node_ids: list[str], session: str | None = None,
+                 beta: float = 0.5) -> dict[str, float]:
+        """Heat for a set of nodes, in one statement per scope (C.6b.1).
+
+        This used to call `get_heat` in a loop, which is two SQLite round
+        trips per node — invisible for the handful a primitive returns, and
+        the dominant cost of a `sniff` whose terms match most of the forest
+        (measured: 1,945 queries in one call). Ranking is still recomputed
+        on every call, exactly as C.6b.1 requires; what changes is that
+        recomputing it asks the database once instead of once per node.
+        """
+        ids = list(dict.fromkeys(node_ids))
+        if not ids:
+            return {}
+        totals = {nid: 0.0 for nid in ids}
+        # SQLite bounds the number of bound parameters, so the set is asked
+        # for in chunks; the answer is the same one query per chunk.
+        for i in range(0, len(ids), _IN_CHUNK):
+            chunk = ids[i:i + _IN_CHUNK]
+            marks = ",".join("?" * len(chunk))
+            for nid, heat in self.conn.execute(
+                    "SELECT node_id, heat FROM heat WHERE scope = '' "
+                    f"AND node_id IN ({marks})", chunk):
+                totals[nid] = heat
+            if session:
+                for nid, heat in self.conn.execute(
+                        "SELECT node_id, heat FROM heat WHERE scope = ? "
+                        f"AND node_id IN ({marks})", [session, *chunk]):
+                    totals[nid] += beta * heat
+        return {nid: round(min(h, 1.0), 4) for nid, h in totals.items()}
 
     def heat_all(self) -> dict[str, float]:
         """Every warm node in the persistent scope, in one read.

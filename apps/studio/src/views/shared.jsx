@@ -5,6 +5,7 @@
  * into nine subtly different ideas of "loading" or "you may not do this". */
 import { useCallback, useEffect, useState } from 'react'
 import { hrefFor, linkTo } from '../router.js'
+import { useI18n } from '../i18n.jsx'
 import { Card, Empty, ErrorNote, Field, Modal, Select, TextArea } from '../design/ui.jsx'
 import { Access, Plus } from '../design/icons.jsx'
 
@@ -92,6 +93,64 @@ export const fmtMs = (n) =>
     : n < 1 ? `${Number(n.toFixed(3))} ms`
     : n < 10 ? `${Number(n.toFixed(2))} ms`
     : `${Math.round(n)} ms`
+
+/** The engine's own clock, step by step (J.10.4).
+ *
+ *  Lives here rather than in the Ask console because two panels report the
+ *  same trace and a second rendering of it would drift: `answer` explains a
+ *  reply, the Playground explains a call, and both are reading the identical
+ *  `trace.steps` the host attached. The milliseconds are printed as the
+ *  engine rounded them — three decimals, never re-rounded — because the
+ *  whole point of the list is that a call the panel above sums as one
+ *  number was several, and most of them were under a millisecond.
+ */
+export function TraceSteps({ steps }) {
+  const { t } = useI18n()
+  if (!steps?.length) return null
+  // Proportional to the slowest step, not to the total: the model dwarfs
+  // everything, and a bar chart scaled to it would render every retrieval
+  // step as the same invisible sliver.
+  const worst = Math.max(...steps.map((s) => s.ms), 1)
+  return (
+    <ol className="space-y-2.5">
+      {steps.map((s, i) => (
+        <li key={i}>
+          <div className="flex items-baseline gap-2">
+            {/* Which decision caused this step. Without it the panel is a
+                list of primitives and the walk is somewhere else. */}
+            {s.hop != null && (
+              <span className="shrink-0 rounded bg-accent-soft px-1 font-mono
+                               text-[10px] font-semibold text-accent">
+                {t('explain.hop_n', { n: s.hop })}
+              </span>
+            )}
+            <span className="font-mono text-[12px] font-medium text-text">{s.step}</span>
+            {s.id && <span className="min-w-0 flex-1 truncate font-mono text-[11px]
+                                      text-text-3">{s.id}</span>}
+            <span className="ml-auto shrink-0 font-mono text-[11.5px] text-text-2">
+              {s.ms} ms
+            </span>
+          </div>
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-surface-2">
+            <div className={`h-full rounded-full ${s.step === 'model' ? 'bg-text-3' : 'bg-accent'}`}
+                 style={{ width: `${Math.max(2, (s.ms / worst) * 100)}%` }} />
+          </div>
+          {s.detail && <p className="mt-1 truncate text-[11px] text-text-3">{s.detail}</p>}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+/** A label and its number, on one line. Shared because the Ask console and
+ *  the Playground both close a panel with the same little table, and two
+ *  spellings of it would drift in the padding. */
+export const Row = ({ label, value }) => (
+  <div className="flex items-baseline justify-between gap-3">
+    <dt className="text-text-3">{label}</dt>
+    <dd className="font-mono text-text-2">{value}</dd>
+  </div>
+)
 
 export function Metric({ label, value, tone }) {
   return (

@@ -113,6 +113,10 @@ MAX_BATCH_PLANT = 20
 # C.16 (v0.58): the document's past — listing budget and the hard cap.
 BUDGET_HISTORY = 800
 MAX_HISTORY = 50
+# C.17 (v0.59): what the forest holds. Roots drop from the tail; the totals
+# never do — a coverage report whose total was clipped would be the failure
+# it exists to prevent.
+BUDGET_COVERAGE = 800
 # C.4.1: paragraph blocks — the page unit. Each block keeps its trailing
 # blank run, so `"".join(blocks) == body` holds by construction and pages
 # reassemble byte-identically (F.80).
@@ -347,6 +351,12 @@ def _raw_body(text: str) -> str:
     return text[nl + 1:].lstrip("\n") if nl != -1 else ""
 
 
+# The memo's 'scanned, matched nothing' row (C.6b.1): compared as text,
+# because deserializing it to discover it is empty is the cost the rule
+# exists to remove.
+_EMPTY_MEMO = json.dumps([])
+
+
 def _sniff_snippet(line: str, pos: int) -> str:
     """Window of the line centered near the first occurrence (~25 tokens)."""
     line = line.rstrip()
@@ -403,13 +413,19 @@ def _sniff_lines(body: str, folded_term: str) -> list[list]:
     return _scan_lines(body, [folded_term])[0]
 
 
-def _combine_lines(per_term: list[list[list]]) -> tuple[list[dict], set[int]]:
+def _combine_lines(per_term: list[list[list]]) -> tuple[list[list], set[int]]:
     """Rebuild `_sniff_body`'s answer from per-term line records.
 
-    Same output, by construction: one match per line, ordered by line
+    Same answer, by construction: one match per line, ordered by line
     number, its snippet centred on the smallest position among the terms
     that hit that line — which is what `first_pos` means in the direct
     scan.
+
+    Returns the LINE RECORDS, not the rendered matches (C.6b.1, v0.59):
+    the caller keeps at most three per node and answers at most `k` nodes,
+    so windowing every matching line here rendered thousands of snippets
+    per call to throw nearly all of them away. `_render_matches` is the
+    other half, called once the ranking has decided who is answered.
     """
     best: dict[int, list] = {}
     terms_hit: set[int] = set()
@@ -422,21 +438,28 @@ def _combine_lines(per_term: list[list[list]]) -> tuple[list[dict], set[int]]:
                 best[line_no] = [section, pos, line]
             elif pos < prev[1]:
                 prev[1] = pos
-    matches = [
-        {"section": section, "line": line_no,
-         "snippet": _sniff_snippet(line, pos)}
-        for line_no, (section, pos, line) in sorted(best.items())
-    ]
-    return matches, terms_hit
+    return ([[line_no, section, pos, line]
+             for line_no, (section, pos, line) in sorted(best.items())],
+            terms_hit)
 
 
-def _sniff_body(body: str, folded_terms: list[str]) -> tuple[list[dict], set[int]]:
+def _render_matches(records: list[list]) -> list[dict]:
+    """Line records as the wire's matches — C.6b's window, applied last."""
+    return [{"section": section, "line": line_no,
+             "snippet": _sniff_snippet(line, pos)}
+            for line_no, section, pos, line in records]
+
+
+def _sniff_body(body: str, folded_terms: list[str]) -> tuple[list[list], set[int]]:
     """All matching lines of a body, each attributed to its H2/H3 section.
-    Returns (matches, indexes of the terms that hit anywhere in the body)."""
+
+    Returns (line records, indexes of the terms that hit anywhere in the
+    body) — the same shape `_combine_lines` produces, so the memoized and
+    the direct path stay one answer with one renderer (C.6b.1)."""
     folded_body = _fold(body)
     if not any(t in folded_body for t in folded_terms):
         return [], set()
-    matches: list[dict] = []
+    matches: list[list] = []
     terms_hit: set[int] = set()
     section: str | None = None
     # _fold preserves length and never produces line breaks, so the folded
@@ -456,10 +479,58 @@ def _sniff_body(body: str, folded_terms: list[str]) -> tuple[list[dict], set[int
                     first_pos = pos
         if first_pos is None:
             continue
-        matches.append(
-            {"section": section, "line": line_no, "snippet": _sniff_snippet(line, first_pos)}
-        )
+        matches.append([line_no, section, first_pos, line])
     return matches, terms_hit
+
+
+def _common_prefix(lo: str | None, hi: str | None) -> str | None:
+    """The origin prefix `scan` takes, from the two extremes (C.17 rule 4).
+
+    The longest common prefix of a set of strings is the longest common
+    prefix of its lexicographic minimum and maximum, so one aggregate
+    answers "where did this material come from" without reading a single
+    origin into Python. Cut back to a URI path boundary: half a filename is
+    a prefix that matches, and a caller pasting it into `origin_prefix`
+    would be filtering on an accident of spelling.
+    """
+    if not lo or not hi:
+        return None
+    n = 0
+    for a, b in zip(lo, hi):
+        if a != b:
+            break
+        n += 1
+    common = lo[:n]
+    if n == len(lo) == len(hi):
+        return common
+    cut = common.rfind("/")
+    return common[: cut + 1] if cut > 0 else None
+
+
+def _rehearsal_error(problems: list[VineError]) -> VineError:
+    """Every problem a dry run could determine, in one envelope (C.7.3 r6).
+
+    The envelope's own `code`, `message` and `hint` stay those of the FIRST
+    problem in the real path's order, byte-identical to what v0.58 raised,
+    so a client that reads the code and every test written against it see
+    exactly what they saw before. The complete list rides in the data
+    carrier C.14 already uses for `anchors`.
+    """
+    first = problems[0]
+    errors = []
+    for e in problems:
+        item: dict = {}
+        for key in ("id", "index"):
+            if key in e.data:
+                item[key] = e.data[key]
+        item["code"] = e.code
+        item["message"] = e.message
+        if e.hint:
+            item["hint"] = e.hint
+        errors.append(item)
+    data = {k: v for k, v in first.data.items() if k not in ("id", "index")}
+    data["errors"] = errors
+    return VineError(first.code, first.message, hint=first.hint, data=data)
 
 
 def _is_index(node_id: str) -> bool:
@@ -1922,7 +1993,10 @@ class Vine:
                     # C.6 (v0.56): the wire's spelling, never the catalog's.
                     item[f] = _wire_kind(r["kind"])
                 elif f == "heat":
-                    item[f] = self._heat(r["id"])
+                    # Filled below, in one statement for the whole listing
+                    # (C.6b.1's rule, v0.59) — assigning here keeps the
+                    # field in the caller's requested position.
+                    item[f] = 0.0
                 elif f == "coverage":
                     cov = indexer.parse_coverage(r["coverage"])
                     if cov or r["coverage"]:
@@ -1934,10 +2008,21 @@ class Vine:
                 # it shows up here and in no `look` — the marker is the
                 # explanation for the differing counts.
                 item["system"] = True
-            item["_heat"] = self._heat(r["id"])
+            item["_heat"] = 0.0
             out.append(item)
         # C.6.2 (v0.54): `total` is what the requested scope holds, counted
         # before any cut — the size of what was NOT received.
+        # C.6b.1 (v0.59): a listing asked SQLite for heat once per row —
+        # twice, when `heat` was among the requested fields — which on a
+        # recursive scan is one round trip per node in the branch. The
+        # ordering below is the same ordering; it just knows the numbers
+        # before it starts.
+        heat_of = self.trails.heat_map([x["id"] for x in out],
+                                       self.tracer.session)
+        for item in out:
+            item["_heat"] = heat_of.get(item["id"], 0.0)
+            if "heat" in item:
+                item["heat"] = item["_heat"]
         total = len(out)
         goal = None
         if after is not None:
@@ -1998,6 +2083,12 @@ class Vine:
                     return False
             elif key == "min_confidence":
                 if row["confidence"] < float(want):
+                    return False
+            elif key == "origin_prefix":
+                # C.6 (v0.59): "what came out of that tree?", beside the
+                # exact match's "which node is this file?". A node with no
+                # origin answers neither.
+                if not row["origin"] or not str(row["origin"]).startswith(str(want)):
                     return False
             elif key == "kind":
                 # C.6 (v0.56): the filter MUST match what the field emits —
@@ -2069,25 +2160,45 @@ class Vine:
         win_where, win_params = window_sql(window)
         where.extend(win_where)
         params.extend(win_params)
-        clauses = [c.format(n="") for c in where]
-        rows = self.catalog.conn.execute(
-            "SELECT * FROM nodes"
-            + (" WHERE " + " AND ".join(clauses) if clauses else "")
-            + " ORDER BY id", params).fetchall()
-        # C.6b.1: what the scan already knows, per term, still valid by hash.
-        memo = [self.catalog.sniff_memo(t, where, params) for t in folded_terms]
+        # C.6b.1 (v0.59): what the memo already knows, asked for in the shape
+        # the answer needs. The matching lines are a handful; the nodes it
+        # has NOT covered are usually none. Everything else in scope was
+        # scanned before and matched nothing — a fact worth exactly one
+        # count, never two thousand rows of text carried into Python to be
+        # discovered empty one at a time.
+        memo = [self.catalog.sniff_memo_matches(term, where, params)
+                for term in folded_terms]
+        uncovered = [self.catalog.sniff_memo_uncovered(term, where, params)
+                     for term in folded_terms]
+        in_scope = self.catalog.count_nodes(where, params)
+        to_process: set[str] = set()
+        for m, u in zip(memo, uncovered):
+            to_process |= set(m)
+            to_process |= u
+        # The nodes NOT in that set were covered by the memo for every term
+        # and matched none of them: scanned, and settled.
+        scanned = in_scope - len(to_process)
+        rows = self.catalog.rows_by_id(sorted(to_process), where, params)
         learned: list[tuple[str, str, str, str]] = []
-        scanned = 0
-        hits = []
+        candidates: list[tuple[sqlite3.Row, list, set[int]]] = []
         for r in rows:
             nid = r["id"]
             body_hash = r["body_hash"]
-            remembered = [m.get(nid) for m in memo]
+            # A node the memo covers for a term and did not return is the
+            # empty record — the negative C.6b.1 requires, inferred from
+            # coverage instead of transferred as text.
+            remembered = [None if nid in u else m.get(nid, _EMPTY_MEMO)
+                          for m, u in zip(memo, uncovered)]
             if body_hash and all(lines is not None for lines in remembered):
                 # Not one file opened for this node: the terms were all
                 # scanned against this exact body before.
                 scanned += 1
-                matches, terms_hit = _combine_lines(
+                if all(lines == _EMPTY_MEMO for lines in remembered):
+                    # Only reachable when another term put this node in the
+                    # set; recombining empty line lists yields the empty
+                    # match list, which is the `continue` below.
+                    continue
+                records, terms_hit = _combine_lines(
                     [json.loads(lines) for lines in remembered])
             else:
                 try:
@@ -2111,18 +2222,32 @@ class Vine:
                         (t, nid, body_hash, json.dumps(per_term[i]))
                         for i, t in enumerate(folded_terms)
                         if remembered[i] is None)
-                    matches, terms_hit = _combine_lines(per_term)
+                    records, terms_hit = _combine_lines(per_term)
                 else:
-                    matches, terms_hit = _sniff_body(body, folded_terms)
-            if not matches:
+                    records, terms_hit = _sniff_body(body, folded_terms)
+            if not records:
                 continue
+            candidates.append((r, records, terms_hit))
+        # After the answer is decided, never before it: what the scan learned
+        # is latency for the next caller, and it must not be able to change
+        # this one's result.
+        self.catalog.sniff_memo_store(learned)
+        # C.6b.1 (v0.59): ranking is never memoized — and recomputing it is
+        # ONE statement, not one per candidate. A term that matches most of
+        # the forest used to ask SQLite for heat a couple of thousand times
+        # in a single call.
+        heat_of = self.trails.heat_map([r["id"] for r, _, _ in candidates],
+                                       self.tracer.session)
+        hits = []
+        for r, records, terms_hit in candidates:
+            nid = r["id"]
             strength = len(terms_hit) / len(folded_terms)
-            heat = self._heat(nid)
+            heat = heat_of.get(nid, 0.0)
             # C.6b (v0.52): occurrences are part of the score. `strength` is
             # frequently constant across literal hits, which left `heat` —
             # the traversal that came before — as the only thing separating
             # a note holding ten occurrences from an index holding one.
-            density = 1 + SNIFF_DENSITY_BETA * math.log2(len(matches))
+            density = 1 + SNIFF_DENSITY_BETA * math.log2(len(records))
             hit = {
                 "id": nid,
                 "type": r["type"],
@@ -2133,9 +2258,11 @@ class Vine:
                 # C.6b (v0.54): the row is already in hand, and the caller
                 # is choosing what to open (C.1.1's rule).
                 "body_tokens": r["body_tokens"],
-                "match_count": len(matches),
-                "truncated_matches": len(matches) > SNIFF_MATCHES_PER_NODE,
-                "matches": matches[:SNIFF_MATCHES_PER_NODE],
+                "match_count": len(records),
+                "truncated_matches": len(records) > SNIFF_MATCHES_PER_NODE,
+                # Line records for now — rendered below, in place, so the
+                # field keeps its position on the wire (C.6b.1, v0.59).
+                "matches": records[:SNIFF_MATCHES_PER_NODE],
             }
             if _is_index(nid):
                 # C.6b (v0.54): the sort below is deliberate and invisible
@@ -2144,10 +2271,6 @@ class Vine:
                 # truth.
                 hit["demoted"] = True
             hits.append(hit)
-        # After the answer is decided, never before it: what the scan learned
-        # is latency for the next caller, and it must not be able to change
-        # this one's result.
-        self.catalog.sniff_memo_store(learned)
         # C.6b (v0.52): a pointer never outranks what it points at. An index
         # carries the summary of every child, so it matches nearly any term
         # and gathers heat by being the way through; a term found inside it
@@ -2156,8 +2279,13 @@ class Vine:
         # lies, and the order is what this contract publishes.
         hits.sort(key=lambda h: (not _is_index(h["id"]), h["score"],
                                  h["match_count"]), reverse=True)
+        answered = hits[:k]
+        # C.6b.1 (v0.59): the snippet window is computed for a result that is
+        # answered, never for every matching line of every matching node.
+        for hit in answered:
+            hit["matches"] = _render_matches(hit["matches"])
         payload = {
-            "results": hits[:k],
+            "results": answered,
             "scanned_nodes": scanned,
             "truncated": len(hits) > k,
         }
@@ -2369,8 +2497,16 @@ class Vine:
                                          dry_run=bool(dry_run))
         spec = node if isinstance(node, NodeSpec) else NodeSpec.model_validate(node)
         with self._write_mutex:
+            if dry_run:
+                problems: list[VineError] = []
+                out = self._plant(spec, adopted=adopted,
+                                  if_absent=bool(if_absent), dry_run=True,
+                                  problems=problems)
+                if problems:
+                    raise _rehearsal_error(problems)
+                return out
             return self._plant(spec, adopted=adopted, if_absent=bool(if_absent),
-                               dry_run=bool(dry_run))
+                               dry_run=False)
 
     def _prepare_dataset_spec(self, spec: NodeSpec, *, adopted: bool = False) -> None:
         """C.7.1: the schema is data, never DDL — validate it whole and
@@ -2397,15 +2533,41 @@ class Vine:
 
     def _plant(self, spec: NodeSpec, *, adopted: bool = False,
                if_absent: bool = False, dry_run: bool = False,
-               pending: dict[str, str] | None = None) -> dict:
+               pending: dict[str, str] | None = None,
+               problems: list | None = None) -> dict:
         # `pending` (C.7.4): the batch's own earlier nodes, so a branch and
         # its children rehearse in one list. Keyword-only, engine-internal.
+        #
+        # `problems` (C.7.3 rule 6, v0.59): a rehearsal names every problem
+        # it can determine rather than the first. Passed ONLY on the dry-run
+        # path — with it absent, `refuse` raises exactly where the previous
+        # version raised, so the real write path is unchanged. This is not a
+        # second validator (C.7.3 rule 1 forbids one): it is the same
+        # checks, in the same order, deciding whether to stop.
+        def refuse(err: VineError) -> None:
+            if problems is None:
+                raise err
+            problems.append(err)
+
         if spec.rows and spec.table_schema is None:
-            raise VineError(E_SCHEMA, "rows require a schema (C.7.1 rule 7)")
-        if spec.table_schema is not None:
-            self._prepare_dataset_spec(spec, adopted=adopted)
-        fm = spec.frontmatter_dict()
-        validate_frontmatter(fm, self.forest.dialect)
+            refuse(VineError(E_SCHEMA, "rows require a schema (C.7.1 rule 7)"))
+        elif spec.table_schema is not None:
+            try:
+                self._prepare_dataset_spec(spec, adopted=adopted)
+            except VineError as e:
+                refuse(e)
+        try:
+            fm = spec.frontmatter_dict()
+        except VineError as e:
+            # Nothing after this is computable from a spec that cannot even
+            # be rendered: a check whose precondition failed is skipped,
+            # never guessed.
+            refuse(e)
+            return {"id": spec.id, "valid": False, "dry_run": True}
+        try:
+            validate_frontmatter(fm, self.forest.dialect)
+        except VineError as e:
+            refuse(e)
         if self.forest.exists(spec.id) or (pending and spec.id in pending):
             if if_absent:
                 # C.7.2 (v0.52): "make sure this exists". Nothing is written,
@@ -2416,33 +2578,36 @@ class Vine:
                 if dry_run:
                     out["dry_run"] = True
                 return out
-            raise VineError(E_SCHEMA, f"id already exists: {spec.id}", hint="ids are immutable and unique.")
+            refuse(VineError(E_SCHEMA, f"id already exists: {spec.id}",
+                             hint="ids are immutable and unique."))
         parent_row = self.catalog.get(spec.parent)
         parent_pending = bool(pending
                               and pending.get(spec.parent) == "branch")
         if not parent_pending and (parent_row is None
                                    or parent_row["kind"] != "branch"):
-            raise VineError(E_NOT_FOUND, f"parent branch not found: {spec.parent}")
+            refuse(VineError(E_NOT_FOUND,
+                             f"parent branch not found: {spec.parent}"))
         expected_parent = self.forest.parent_index_id(spec.id)
         if spec.parent != expected_parent:
-            raise VineError(
+            refuse(VineError(
                 E_SCHEMA,
                 f"id '{spec.id}' does not live under parent '{spec.parent}' "
                 f"(expected parent: {expected_parent})",
-            )
-        if dry_run and spec.table_schema is not None:
+            ))
+        if dry_run and spec.table_schema is not None and spec.payload:
             # The one refusal left between here and the first write: rehearse
             # it read-only, in the real path's own order.
-            assert spec.payload is not None
             if (self.forest.path_for(spec.id).parent / spec.payload).exists():
-                raise VineError(
+                refuse(VineError(
                     E_SCHEMA,
                     f"payload already exists: {spec.payload}",
                     hint="A newborn dataset never overwrites an existing payload.",
-                )
+                ))
         if dry_run:
             # C.7.3 (v0.57): every validation ran; nothing was written, so
             # `created` is absent — nothing was.
+            if problems:
+                return {"id": spec.id, "valid": False, "dry_run": True}
             return {"id": spec.id, "valid": True, "dry_run": True}
 
         # C.7.1 payload birth: create the SQLite BEFORE the .md so the hash
@@ -2568,20 +2733,37 @@ class Vine:
         pending: dict[str, str] = {}
         existing: list[str] = []
         would_create: list[NodeSpec] = []
-        for spec in specs:
+        # C.7.3 rule 6 (v0.59): a batch rehearsal collects across EVERY node.
+        # Twenty nodes with twenty problems is one correction, which is the
+        # whole reason the list form exists.
+        problems: list[VineError] | None = [] if dry_run else None
+        for index, spec in enumerate(specs):
+            mark = len(problems) if problems is not None else 0
             try:
                 verdict = self._plant(spec, if_absent=if_absent,
-                                      dry_run=True, pending=pending)
+                                      dry_run=True, pending=pending,
+                                      problems=problems)
             except VineError as e:
                 raise VineError(e.code, f"{spec.id}: {e.message}",
                                 hint=e.hint, data=e.data) from e
+            if problems is not None:
+                for e in problems[mark:]:
+                    e.data.setdefault("id", spec.id)
+                    e.data.setdefault("index", index)
+                    e.message = f"{spec.id}: {e.message}"
             if verdict.get("created") is False:
                 existing.append(spec.id)
                 continue
+            # A node that failed a check still has an id and a type, so it
+            # stays in `pending`: otherwise a bad branch would make each of
+            # its children report a missing parent, and the list of problems
+            # would be mostly the first problem's echo.
             pending[spec.id] = ("branch" if spec.type == "branch"
                                 else "leaf")
             would_create.append(spec)
         if dry_run:
+            if problems:
+                raise _rehearsal_error(problems)
             out = {"valid": True, "count": len(would_create),
                    "dry_run": True}
             if existing:
@@ -3234,6 +3416,116 @@ class Vine:
         if payload["entries"]:
             payload["oldest"] = payload["entries"][-1]["commit"]
         return payload
+
+    # =======================================================================
+    # C.17 coverage — what the forest holds (v0.59)
+    # =======================================================================
+
+    @_traced
+    def coverage(self, scope: str | None = None, date_field: str | None = None,
+                 *, policy_where: tuple[list[str], list] | None = None,
+                 roots: list[str] | None = None) -> dict:
+        """What this forest holds, from the catalog alone (C.17).
+
+        Every other read says what it did not do; none of them could answer
+        the question that comes before all of them — *what is in here at
+        all?* A consumer agent asked a faithful question, got a faithful
+        answer from a real document, and was wrong about the subject,
+        because the branch holding the material had never been ingested and
+        nothing on the surface could say so. A partial corpus answers in
+        the exact shape of a complete one.
+
+        No file is opened and no count is computed one node at a time: one
+        aggregate per root and one GROUP BY per total, which is C.13.3's
+        rule about where counting belongs.
+        """
+        field = parse_field(date_field)
+        base, base_params = self._scope_where(scope)
+        # J.3 / C.17 rule 7: under a policy every number is the policy's own.
+        # Keyword-only and host-supplied, unreachable from the wire (G.2.5's
+        # construction) — a global count here describes the size and shape
+        # of a region nobody granted.
+        pol_where, pol_params = policy_where or ([], [])
+        scoped = base + pol_where
+        scoped_params = base_params + pol_params
+
+        listing = (scope or "_index").strip().strip("/")
+        listing = (listing if listing == "_index" or listing.endswith("/_index")
+                   else f"{listing}/_index")
+        if roots is None:
+            # C.17 rule 2: the roots are where a caller starts — every child
+            # of the listing index, branch or leaf, so the accounting closes.
+            roots = [r["id"] for r in self.catalog.children(listing)]
+
+        out = []
+        for root_id in roots:
+            row = self.catalog.get(root_id)
+            if row is None:
+                continue
+            where, params = self._root_where(root_id)
+            stats = self.catalog.subtree_stats(
+                field, where + scoped, params + scoped_params)
+            if not stats["nodes"]:
+                continue
+            entry = {
+                "id": root_id,
+                "title": row["title"],
+                "kind": _wire_kind(row["kind"]),
+                "nodes": stats["nodes"],
+                "branches": stats["branches"],
+            }
+            if stats["first"]:
+                entry["first"] = stats["first"]
+                entry["last"] = stats["last"]
+            origin = _common_prefix(stats["origin_min"], stats["origin_max"])
+            if origin:
+                entry["origin"] = origin
+            if stats["without_origin"]:
+                # C.17 rule 5: a root where nine nodes in ten know their
+                # source is not a root with an origin.
+                entry["without_origin"] = stats["without_origin"]
+            out.append(entry)
+        # Biggest first, so what the budget drops from the tail is the
+        # smallest root rather than the one the caller most needed.
+        out.sort(key=lambda e: (e["nodes"], e["id"]), reverse=True)
+
+        undated = ["({n}" + field + " IS NULL OR {n}" + field + " = '')"]
+        system = ["(substr({n}id, 1, 6) = '_meta/' OR {n}id = '_meta')"]
+        payload = {
+            "date_field": field,
+            "roots": out,
+            "total": self.catalog.count_nodes(scoped, scoped_params),
+            "types": self.catalog.group_counts("type", scoped, scoped_params),
+            "sources": self.catalog.group_counts("source", scoped, scoped_params),
+            "undated": self.catalog.count_nodes(
+                scoped + undated, scoped_params),
+            "system": self.catalog.count_nodes(scoped + system, scoped_params),
+        }
+        if scope:
+            payload["scope"] = scope
+        # C.6.2's pattern: the flag is sized inside the budget, so adding it
+        # afterwards cannot push the answer back over the ceiling.
+        payload["truncated"] = False
+        # `shrink_list_to_budget` pops from the list in place, so the count
+        # to compare against is taken before it runs.
+        found = len(out)
+        payload = shrink_list_to_budget(payload, "roots", BUDGET_COVERAGE)
+        payload["truncated"] = len(payload["roots"]) < found
+        return payload
+
+    def _root_where(self, root_id: str) -> tuple[list[str], list]:
+        """A root as a predicate over the catalog (C.17 rule 3).
+
+        `_index` is the whole forest, `X/_index` is everything under `X/`,
+        and a leaf root is itself alone — equality, never a prefix, or
+        `readme` would count `readme-archive` as part of its subtree.
+        """
+        if root_id == "_index":
+            return [], []
+        if root_id.endswith("/_index"):
+            prefix = root_id[: -len("_index")]
+            return ["substr({n}id, 1, ?) = ?"], [len(prefix), prefix]
+        return ["{n}id = ?"], [root_id]
 
     def _require_writable(self) -> None:
         if not self.writable:

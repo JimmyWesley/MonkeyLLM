@@ -79,7 +79,9 @@ READ_PRIMITIVES = frozenset(
      # no body opened, and scoped by the same policy.
      "calendar",
      # C.16 (v0.58): the document's past is a listing — a read.
-     "history"}
+     "history",
+     # C.17 (v0.59): what the forest holds — catalog only, scoped, budgeted.
+     "coverage"}
 )
 WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend", "prune",
                               # C.15 (v0.58): a move edits every pointing
@@ -1987,19 +1989,41 @@ def build_app(
         count is of items that carry content: a result with a title and no
         body is a pointer, and a floor that counted pointers would be
         satisfied by exactly the material it exists to refuse.
+
+        `min_score` (v0.59) is the other half. Counting items alone made
+        the guard fire only on a nearly empty forest: the sweep returns `k`
+        items whatever their scores, so a question with no answer in the
+        corpus came back with three items scoring 0.0164, 0.0164 and 0.0161
+        and passed a floor of two. The threshold is applied BEFORE the
+        count, so the two compose into one floor — n items that clear s —
+        and it shares every property of `min_evidence`: outside the key,
+        never billed, never stored.
         """
         from monkeyllm.harvest import clamp_k
 
         raw = payload.get("min_evidence") or 0
         floor = max(0, min(int(raw), clamp_k(k)))
+        try:
+            threshold = max(0.0, float(payload.get("min_score") or 0))
+        except (TypeError, ValueError):
+            raise VineError(
+                E_SCHEMA, "min_score must be a number",
+                hint="It is a retrieval score threshold, e.g. 0.02.")
         if not floor:
             return None
-        items = [r for r in bundle.get("results") or [] if r.get("content")]
+        items = [r for r in bundle.get("results") or []
+                 if r.get("content")
+                 and (not threshold or (r.get("score") or 0) >= threshold)]
         if len(items) >= floor:
             return None
-        return {"answer": None, "reason": "insufficient_evidence",
-                "evidence_count": len(items), "min_evidence": floor,
-                "harvest": bundle}
+        out = {"answer": None, "reason": "insufficient_evidence",
+               "evidence_count": len(items), "min_evidence": floor}
+        if threshold:
+            # A refusal that hides which knob fired is a knob nobody can
+            # tune.
+            out["min_score"] = threshold
+        out["harvest"] = bundle
+        return out
 
     def run_composite(principal, forest, vine, policy, name, payload,
                       sample: dict | None = None) -> dict:
@@ -4542,6 +4566,28 @@ def build_app(
                              "outline": result["outline"],
                              "expires": row["expires"]})
 
+    async def share_page(request: Request):
+        """`GET /s/{token}`: one address, two representations (J.17 r8).
+
+        This was a console route, so the SPA fallback served it only to a
+        request that accepts HTML — and the first thing anybody does to
+        debug a share is curl it, which answered 404 while the browser
+        worked. A link that works for people and 404s for machines reads as
+        a broken feature.
+
+        A document request gets the reading page; everything else gets
+        exactly what `/v1/share/{token}` returns, from that same handler,
+        so authority, rate limit, audit row and the byte-identical
+        `E_NOT_FOUND` of every dead state are one implementation and not
+        two.
+        """
+        if "text/html" in request.headers.get("accept", ""):
+            if studio_app is not None:
+                return await studio_app.get_response("index.html",
+                                                     request.scope)
+            return await studio_missing(request)
+        return await share_serve(request)
+
     # -- maintenance (J.13) -------------------------------------------------
 
     def snapshot_dir(forest: str) -> Path:
@@ -5061,6 +5107,11 @@ def build_app(
                              "payloads": result.get("restored_payloads"),
                              "grants": registry.grants_of(principal)})
 
+    # One instance: `/s/{token}` renders the same shell without going
+    # through the mount, which its own Route would otherwise shadow.
+    studio_app = (StudioFiles(directory=STUDIO_DIST, html=True)
+                  if (STUDIO_DIST / "index.html").is_file() else None)
+
     async def studio_missing(request: Request):
         return JSONResponse(
             {"error": {"code": E_NOT_FOUND, "message": "the Studio build is not present",
@@ -5182,6 +5233,8 @@ def build_app(
         Route("/v1/forests/{forest}/shares/{share}", forest_share_revoke,
               methods=["DELETE"]),
         Route("/v1/share/{token}", share_serve, methods=["GET"]),
+        # J.17 rule 8 (v0.59): the human spelling of the same resource.
+        Route("/s/{token}", share_page, methods=["GET"]),
         Route("/v1/forests/{forest}/jobs/{job}", job_get, methods=["GET"]),
         Route("/v1/forests/{forest}/jobs/{job}/cancel", job_cancel,
               methods=["POST"]),
@@ -5225,8 +5278,8 @@ def build_app(
     routes.append(Route("/clipper.zip", clipper_zip, methods=["GET"]))
 
     # Last: the SPA catch-all must not shadow the API routes above it.
-    if (STUDIO_DIST / "index.html").is_file():
-        routes.append(Mount("/", app=StudioFiles(directory=STUDIO_DIST, html=True)))
+    if studio_app is not None:
+        routes.append(Mount("/", app=studio_app))
     else:
         # Every console address, not just the root: a Station with no build
         # should answer a deep link with the reason it has nothing to serve

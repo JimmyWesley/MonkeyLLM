@@ -639,27 +639,64 @@ _MD_NOISE = re.compile(r"^#+\s+.*$|^[-*>|`].*$|!\[[^\]]*\]\([^)]*\)", re.MULTILI
 _MD_INLINE = re.compile(r"\[([^\]]*)\]\([^)]*\)|[*_`]{1,3}")
 
 
-def derive_aliases(rel: Path, alias_map: dict) -> list[str]:
-    """G.2.6 (v0.54): the team's own name for a document.
+# A code a document states about ITSELF: two to six capitals, a hyphen, a
+# number. Matched in the title (which G.2.1 takes from the H1), never in
+# the body — a code inside prose is usually a reference to a different
+# document, which is the neighbour-instead-of-target failure this rule
+# exists to end.
+_SELF_CODE_RE = re.compile(r"\b([A-Z]{2,6})-(\d{1,6})\b")
 
-    Mechanical and declared, never guessed: a source file whose stem starts
-    with digits, sitting in a folder the operator's `aliases:` map names,
-    gains the conversational form (`BE-291`) and the path form
-    (`back-end/291`) — the two spellings integrators were observed to try.
-    No map, no aliases: the convention is content vocabulary, and content
-    vocabulary lives in the forest's own config, never in the engine.
+
+def _folder_initials(folder: str) -> str | None:
+    """`back-end` -> `BE`. A single-word folder derives nothing: one letter
+    is not a name, and `T-291` out of `tasks` would put noise in the field
+    the forest is most often searched by."""
+    parts = [part for part in re.split(r"[-_]", folder) if part]
+    if len(parts) < 2:
+        return None
+    return "".join(part[0] for part in parts).upper()
+
+
+def derive_aliases(rel: Path, alias_map: dict,
+                   title: str | None = None) -> list[str]:
+    """G.2.6: the team's own name for a document (v0.54, widened v0.59).
+
+    The first version required the operator's `aliases:` map for anything
+    at all, and the field showed what that costs: in a forest where every
+    document has a canonical code, 1,877 of 1,877 ingested nodes carried no
+    aliases, and the most frequent access in that forest fell through to
+    `sniff` — measured ~100x slower than the `locate` that should have
+    answered it.
+
+    The boundary is not "no map, no aliases"; it is **who knows the name**.
+    A code the document prints in its own title is provenance, and reading
+    it back is not the engine acquiring content vocabulary — no word is
+    invented here and no table of conventions ships with the engine. What
+    only an operator knows — that `back-end` is spelled `BE` — still lives
+    in the forest's own `gardener.yaml`.
     """
-    if not isinstance(alias_map, dict) or not alias_map:
-        return []
-    m = re.match(r"(\d+)", rel.stem)
-    if m is None:
-        return []
+    out: list[str] = []
     folder = rel.parent.name
-    prefix = alias_map.get(folder)
-    if not prefix or not isinstance(prefix, str):
-        return []
-    num = m.group(1)
-    return [f"{prefix}-{num}", f"{folder}/{num}"]
+    m = re.match(r"(\d+)", rel.stem)
+    if m is not None:
+        num = m.group(1)
+        prefix = (alias_map or {}).get(folder) if isinstance(alias_map, dict) else None
+        if isinstance(prefix, str) and prefix:
+            # The operator's declaration wins AND suppresses the derived
+            # initials: a convention stated is not one to be guessed beside.
+            out.append(f"{prefix}-{num}")
+        else:
+            initials = _folder_initials(folder)
+            if initials:
+                out.append(f"{initials}-{num}")
+        if folder:
+            out.append(f"{folder}/{num}")
+        out.append(num)
+    for letters, digits in _SELF_CODE_RE.findall(title or ""):
+        out.append(f"{letters}-{digits}")
+    seen: set[str] = set()
+    ordered = [a for a in out if not (a in seen or seen.add(a))]
+    return ordered[:MAX_ALIASES]
 
 
 def derive_summary(markdown: str, title: str) -> str:
@@ -1201,7 +1238,8 @@ class Gardener:
         }
         # G.2.6 (v0.54): part of the draft build, so adopt derives them and
         # sync recomputes rather than erases. Curation never touches them.
-        aliases = derive_aliases(rel, self.config.get("aliases") or {})
+        aliases = derive_aliases(rel, self.config.get("aliases") or {},
+                                 title=conversion.title)
         if aliases:
             draft["aliases"] = aliases
         # G.2.7 (v0.58): the one writer who always KNOWS the origin.
@@ -1542,10 +1580,11 @@ class Gardener:
         """Union of the node's aliases with the derived forms; None when
         nothing is missing. Existing aliases are never displaced by the cap
         — derived forms that no longer fit are counted, never silent."""
-        derived = derive_aliases(Path(rel), self.config.get("aliases") or {})
+        node = self.forest.read(node_id)
+        derived = derive_aliases(Path(rel), self.config.get("aliases") or {},
+                                 title=node.frontmatter.get("title"))
         if not derived:
             return None
-        node = self.forest.read(node_id)
         have = [str(a) for a in (node.frontmatter.get("aliases") or [])]
         missing = [a for a in derived if a not in have]
         if not missing:
