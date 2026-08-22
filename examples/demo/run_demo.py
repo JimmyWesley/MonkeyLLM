@@ -387,8 +387,10 @@ def _audit_answer(nodes: list, text: str, proof: str, ground: dict,
 
 
 def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=None,
-                 use_sniff: bool = True, learn: bool = False) -> dict:
-    vine = Vine(forest, writable=learn, session=f"demo-{q['id']}", embedder=embedder)
+                 use_sniff: bool = True, learn: bool = False,
+                 hybrid: bool = False) -> dict:
+    vine = Vine(forest, writable=learn, session=f"demo-{q['id']}", embedder=embedder,
+                hybrid_locate=hybrid)
     try:
         master = vine.look("_index")
         messages = [
@@ -770,7 +772,8 @@ def run_question(forest: Path, chat, q: dict, verbose: bool = True, embedder=Non
 
 
 def run_troop(forest: Path, chat, q: dict, troop: int, embedder=None,
-              use_sniff: bool = True, learn: bool = False) -> dict:
+              use_sniff: bool = True, learn: bool = False,
+              hybrid: bool = False) -> dict:
     """Launch `troop` concurrent hunts for a single question; return the best result.
 
     Selection is confidence-first (self-reported x harness audit — no ground
@@ -781,7 +784,7 @@ def run_troop(forest: Path, chat, q: dict, troop: int, embedder=None,
 
     def hunt(monkey_idx: int) -> dict:
         return run_question(forest, chat, q, verbose=False, embedder=embedder,
-                            use_sniff=use_sniff, learn=learn)
+                            use_sniff=use_sniff, learn=learn, hybrid=hybrid)
 
     with _cf.ThreadPoolExecutor(max_workers=troop) as pool:
         futures = [pool.submit(hunt, i) for i in range(troop)]
@@ -843,6 +846,10 @@ def main() -> int:
     ap.add_argument("--troop", type=int, default=1, metavar="N",
                     help="run N monkeys per question in parallel and keep the best answer "
                          "(requires the llama-server to have been started with --parallel N)")
+    ap.add_argument("--hybrid", action="store_true",
+                    help="fuse vector search into locate (RRF) — needs an embedder "
+                         "(MONKEYLLM_EMBED_ENDPOINT) and a built Canopy index; the "
+                         "engine default is BM25-only (hybrid_locate=False)")
     ap.add_argument("--out", help="report path (default: <forest>/_derived/demo-report.json)")
     args = ap.parse_args()
 
@@ -856,7 +863,13 @@ def main() -> int:
     from monkeyllm.canopy import embedder_from_env
 
     embedder = embedder_from_env()
-    print(f"locate: {'hybrid (vector+BM25)' if embedder else 'BM25-only'}")
+    if args.hybrid and embedder is None:
+        raise SystemExit("--hybrid needs an embedder (set MONKEYLLM_EMBED_ENDPOINT).")
+    if args.hybrid:
+        locate_mode = "hybrid (vector+BM25; falls back to BM25 without a built Canopy index)"
+    else:
+        locate_mode = "BM25-only (pass --hybrid to fuse vectors)"
+    print(f"locate: {locate_mode}")
     print(f"sniff: {'off (baseline)' if args.no_sniff else 'on'}")
     print(f"learn: {'on (shortcuts grafted via shout)' if args.learn else 'off'}")
     print(f"troop: {args.troop} monkey{'s' if args.troop > 1 else ''} per question")
@@ -869,10 +882,12 @@ def main() -> int:
         t0 = _time.perf_counter()
         if args.troop > 1:
             r = run_troop(Path(args.forest), chat, q, troop=args.troop,
-                          embedder=embedder, use_sniff=not args.no_sniff, learn=args.learn)
+                          embedder=embedder, use_sniff=not args.no_sniff, learn=args.learn,
+                          hybrid=args.hybrid)
         else:
             r = run_question(Path(args.forest), chat, q, embedder=embedder,
-                             use_sniff=not args.no_sniff, learn=args.learn)
+                             use_sniff=not args.no_sniff, learn=args.learn,
+                             hybrid=args.hybrid)
         r["wall_s"] = round(_time.perf_counter() - t0, 1)
         results.append(r)
         m = r["metrics"]
