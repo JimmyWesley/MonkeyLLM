@@ -74,8 +74,9 @@ may do here. Everything it counts is reachable by any agent you connect
 Read [Connecting your AI](./connecting-ai.md). The console can ask, browse
 and ingest on its own, but the forest is built to be read and fed by your
 own agents a forest only ever touched through the window is a brain
-nobody is growing. That page takes you the whole way in three steps: pair
+nobody is growing. That page takes you the whole way in four steps: pair
 a key that is yours (it can only narrow your access, never add to it),
-register the Station as an MCP server, and hand your agent the skill file
-the Studio generates for this exact deployment. Every other page deepens
+register the Station as an MCP server, size the skill to the agent you are
+building, and hand it the files the Studio generates for this exact
+deployment. Every other page deepens
 what that one starts.
