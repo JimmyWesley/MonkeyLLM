@@ -1,4 +1,4 @@
-# MonkeyLLM: Stigmergic Navigation of Knowledge Forests Replacing Retrieval-Augmented Generation with Agentic Foraging by Small Language Models
+# MonkeyLLM: Stigmergic Navigation of Knowledge Forests by Small Language Models
 
 **Author:** Jimmy Wesley Maciel Soares
 **Affiliation:** Independent Researcher
@@ -19,7 +19,7 @@
 
 ## Authorship Declaration
 
-I, **Jimmy Wesley Maciel Soares**, declare that the conceptual framework presented in this paper including but not limited to: (a) the **knowledge forest** as a hierarchical, git-versioned, agent-navigable substrate for grounding language models, with its full ecological vocabulary (forest, branch, banana, monkey, vine, scent, pheromone, shout, whisper, troop, gardener, ranger, canopy); (b) the **scent contract**: hard-budgeted, machine-validated curated summaries (≤60 tokens) as the load-bearing signal enabling zero-read navigation decisions by small language models; (c) the **ten token-budgeted navigation primitives** with explicit-truncation contracts and the normative locate/sniff metadata–body separation; (d) the **stigmergic learning layer** for retrieval pheromone heat with exponential half-life evaporation, agent-minted `discovered-shortcut` links, and the confidence lifecycle (0.3 → 0.5 → 0.8 → prune) managed by an autonomous Ranger; (e) the **SCENT/FLESH/BONE tiered-storage model** ("the map is not the territory") making terabyte-scale corpora navigable from a laptop; (f) the **troop-with-judge accuracy amplifier** and its patience stop policy; and (g) the **Forest Principle** *spend intelligence on the environment so you can spend less on the model* as a generalized design rule for grounded AI systems was originated, designed and authored by me, and is first publicly disclosed in this document on the date stamped above.
+I, **Jimmy Wesley Maciel Soares**, declare that the system design and synthesis presented in this paper — (a) the **knowledge forest** design as specified here: a hierarchical, git-versioned, agent-navigable substrate for grounding language models, with its ecological vocabulary (forest, branch, banana, monkey, vine, scent, pheromone, shout, whisper, troop, gardener, ranger, canopy); (b) the **scent contract**: hard-budgeted, machine-validated curated summaries (≤60 tokens) as the load-bearing signal enabling zero-read navigation decisions by small language models; (c) the **ten token-budgeted navigation primitives** with explicit-truncation contracts and the normative locate/sniff metadata–body separation; (d) the **stigmergic learning layer** as composed here — retrieval pheromone heat with exponential half-life evaporation, agent-minted `discovered-shortcut` links, and the confidence lifecycle (0.3 → 0.5 → 0.8 → prune) managed by an autonomous Ranger — adapted from ant-colony optimization and the usage-adaptive hypertext line credited in §2; (e) the **SCENT/FLESH/BONE tiered-storage model** ("the map is not the territory") making terabyte-scale corpora navigable from a laptop; (f) the **troop-with-judge accuracy amplifier** and its patience stop policy; and (g) the **Forest Principle** — *spend intelligence on the environment so you can spend less on the model* — as formulated here as a generalized design rule for grounded AI systems — was designed and authored by me, and is first publicly disclosed in this document on the date stamped above. The claim covers this synthesis, its contracts, and their normative specification; component mechanisms drawn from prior art — ant-colony dynamics, field-weighted ranking, candidate-constrained selection, agentic tool loops, hierarchical summarization — are credited to their sources in §2.
 
 This paper is published as **prior art** for the purposes of establishing authorship, and constitutes an open invitation for collaboration, replication, and derivative work under the terms of the CC BY 4.0 license, with the sole requirement that this authorship be attributed in any subsequent use, publication, or commercial application.
 
@@ -29,9 +29,9 @@ This paper is published as **prior art** for the purposes of establishing author
 
 Retrieval-Augmented Generation (RAG) grounds language models by embedding text chunks and stuffing the top-*k* nearest neighbors into the prompt. This design is stateless, structure-blind, and brittle exactly where grounding matters most: on questions whose answer must be *assembled* from facts scattered across documents. On our benchmark of strictly multi-hop questions (every question requiring ≥3 chained hops), classic top-*k* RAG scores **0 out of 11**. Zero.
 
-We present **MonkeyLLM**, an architecture that replaces one-shot retrieval with **navigation**. Knowledge lives in a **forest** a hierarchical, git-versioned graph of Markdown nodes carrying curated, hard-budgeted metadata ("scent") and a **small language model** traverses it as a foraging agent through ten typed, token-budgeted tool primitives exposed over the Model Context Protocol. Successful hunts deposit **pheromone** on the trail and mint permanent **shortcut links**, so the corpus itself learns from use: a direct transposition of stigmergy and ant-colony optimization to knowledge retrieval, and a computational realization of information-foraging theory.
+We present **MonkeyLLM**, an architecture that turns grounding from a one-shot retrieval act into **navigation**. Knowledge lives in a **forest** a hierarchical, git-versioned graph of Markdown nodes carrying curated, hard-budgeted metadata ("scent") and a **small language model** traverses it as a foraging agent through ten typed, token-budgeted tool primitives exposed over the Model Context Protocol. Successful hunts deposit **pheromone** on the trail and mint permanent **shortcut links**, so the corpus itself learns from use: a direct transposition of stigmergy and ant-colony optimization to knowledge retrieval, and a computational realization of information-foraging theory.
 
-The same 12B local model that scores 0/11 as a RAG reader scores **11/11 (100%)** as a forest navigator, at **0.58×** the token cost per correct answer of an iterative-RAG baseline, on a single consumer GPU. Hybrid lexical–vector entry search (BM25 + embeddings under Reciprocal Rank Fusion) achieves recall@5 = 1.0 at p95 = 61.5 ms. A 12B curator ingests 100 heterogeneous real-world documents with 100% summary-contract compliance and zero broken links, at 1.7 s/document. We further report three findings of independent scientific interest: parallel foragers with a judge act as an **accuracy amplifier** rather than a speed amplifier; the first documented case of **pheromone cross-talk** in an LLM retrieval system; and a **floor effect** proving that curation quality and trail learning are economic substitutes. Every number in this paper is reproducible from committed scripts in the reference implementation.
+The same 12B local model that scores 0/11 as a RAG reader scores **11/11 (100%)** as a forest navigator, at **0.66×** the token cost per correct answer of an iterative-RAG baseline, on a single consumer GPU. Hybrid lexical–vector entry search (BM25 + embeddings under Reciprocal Rank Fusion) achieves recall@5 = 1.0 at p95 = 61.5 ms; contract-weighted BM25 alone reaches recall@5 = 1.0 at 1.3 ms with no embedder. A 12B curator ingests 100 heterogeneous real-world documents with 100% summary-contract compliance and zero broken links, at 1.7 s/document. We further report four findings of independent scientific interest: parallel foragers with a judge act as an **accuracy amplifier** rather than a speed amplifier; the first documented case of **pheromone cross-talk** in an LLM retrieval system — a stigmergic instance of the degenerate-feedback-loop class known from recommender systems; a **floor effect** showing that curation quality and trail learning are economic substitutes; and a **scent-calibration result** — BM25F-style field weights ordered by the curation contract, not by tuning. Every number in this paper is reproducible from committed scripts in the reference implementation.
 
 **Keywords:** retrieval-augmented generation · agentic retrieval · stigmergy · ant colony optimization · small language models · information foraging · knowledge graphs · Model Context Protocol · Forest Principle
 
@@ -83,8 +83,8 @@ The central design bet: **a small model reading ~200–500 tokens of curated met
 
 1. **The forest architecture (§3)** a complete, normatively specified system: ten token-budgeted primitives with explicit-truncation contracts, the scent contract, a three-tier storage model separating map from territory, a safety-constrained dataset read/write layer, and full ingest (Gardener) and maintenance (Ranger) pipelines. Everything runs locally; nothing requires a frontier model.
 2. **A stigmergic learning layer for retrieval (§3.4)** pheromone heat with exponential evaporation, agent-minted shortcuts, and a confidence lifecycle managed autonomously adapted directly from ant-colony optimization [24, 28]. The corpus becomes a medium through which agents teach each other, across sessions, without communicating.
-3. **Empirical results (§5)** 100% vs. 0% (top-*k*) and 64% (iterative) on strictly multi-hop QA; 0.58× tokens per correct answer; perfect entry recall at 61.5 ms p95; 100% ingest contract compliance on real heterogeneous documents all with 12B-class local models on one consumer GPU.
-4. **Three research findings (§6)** the troop accuracy amplifier, pheromone cross-talk (first documented interference case of its kind), and the convergence floor effect each with a traced mechanism, not just a number.
+3. **Empirical results (§5)** 100% vs. 0% (top-*k*) and 64% (iterative) on strictly multi-hop QA; 0.66× tokens per correct answer; perfect entry recall at 61.5 ms p95 (hybrid) and at 1.3 ms (contract-weighted BM25, recall@5); 100% ingest contract compliance on real heterogeneous documents all with 12B-class local models on one consumer GPU.
+4. **Four research findings (§6)** the troop accuracy amplifier, pheromone cross-talk (the degenerate-feedback-loop class surfacing in a stigmergic retrieval layer, with a complete causal trace), the convergence floor effect, and the scent-calibration result each with a traced mechanism, not just a number.
 5. **The Forest Principle (§7)** *spend intelligence on the environment so you can spend less on the model* as a generalized design rule, with its relationship to RAG, GraphRAG, and agentic memory made explicit.
 
 ---
@@ -95,11 +95,17 @@ The central design bet: **a small model reading ~200–500 tokens of curated met
 
 **Documented RAG failure modes.** Liu et al. [7] show the lost-in-the-middle effect; Barnett et al. [8] catalog seven engineering failure points, several rooted in chunking; surveys [9, 10] connect retrieval noise to hallucination. These are precisely the pressures the scent-first, read-lazily design answers.
 
-**Structured and hierarchical retrieval.** GraphRAG [11] builds entity graphs and community summaries; RAPTOR [12] builds recursive summary trees; HippoRAG [13] applies hippocampal indexing over knowledge graphs; Pan et al. [14] survey LLM–KG unification. All of these *pre-compute* structure that a retriever then queries in one or few shots. MonkeyLLM shares the structural premise but differs on two axes with no precedent we are aware of: the structure is **walked by the model itself**, hop by hop, and the structure is **alive** mutable by the agent (planted nodes, grafted links) and adaptive to usage (pheromone). GraphRAG's graph never learns which of its edges are worth anything. MonkeyLLM's forest does.
+**Structured and hierarchical retrieval.** GraphRAG [11] builds entity graphs and community summaries; RAPTOR [12] builds recursive summary trees; HippoRAG [13] applies hippocampal indexing over knowledge graphs; Pan et al. [14] survey LLM–KG unification. All of these *pre-compute* structure that a retriever then queries in one or few shots. MonkeyLLM shares the structural premise but differs on two axes: the structure is **walked by the model itself**, hop by hop — a pattern that ships in framework form as recursive retrieval and document agents over summary indexes [42], but here under normative, budgeted contracts — and the structure is **alive** mutable by the agent (planted nodes, grafted links) and adaptive to usage (pheromone). GraphRAG's graph never learns which of its edges are worth anything. MonkeyLLM's forest does.
 
-**Agentic retrieval and tool use.** WebGPT [15] and WebArena [22] navigate the open web; ReAct [16], Toolformer [18], and Reflexion [17] establish the reason–act loop; LATS [21] adds tree search; MemGPT [19] pages memory hierarchically; agentic-RAG surveys [23] map the emerging space. MonkeyLLM's distinguishing choices: (a) a *closed, contract-typed* action space with hard token budgets per observation engineered so a 7–12B model suffices where web agents need frontier models; (b) MCP [20] as the transport, making the forest a server any agent can mount; (c) the environment itself, not the agent, is the locus of learning.
+**Agentic retrieval and tool use.** WebGPT [15] and WebArena [22] navigate the open web; ReAct [16], Toolformer [18], and Reflexion [17] establish the reason–act loop; LATS [21] adds tree search; MemGPT [19] pages memory hierarchically; agentic-RAG surveys [23] map the emerging space. Observation budgeting itself is established harness practice: SWE-agent made truncated, structured observations an explicit agent-computer-interface design principle [41], and production tool-design guidance recommends pagination and truncation with steering text [63]. MonkeyLLM's distinguishing choices: (a) a *closed, contract-typed* action space where the budget and the truncation semantics are the primitive's own specified properties — every clip flagged, its dropped fields named — rather than a harness-side mitigation, engineered so a 7–12B model suffices where web agents need frontier models; (b) MCP [20] as the transport, making the forest a server any agent can mount; (c) the environment itself, not the agent, is the locus of learning.
 
-**Stigmergy and swarm intelligence.** Grassé [25] coined stigmergy for coordination through environment modification; Dorigo et al. [28, 24] formalized pheromone optimization with the evaporation update τ ← (1−ρ)τ + Δτ; Bonabeau, Dorigo & Theraulaz [26, 27] generalized the paradigm. MonkeyLLM is, to our knowledge, **the first system to use literal pheromone dynamics deposit, evaporate, promote, prune as the learning layer of an LLM retrieval system**, and §6.2 reports the first documented pheromone-interference failure in this setting.
+**Stigmergy and swarm intelligence.** Grassé [25] coined stigmergy for coordination through environment modification; Dorigo et al. [28, 24] formalized pheromone optimization with the evaporation update τ ← (1−ρ)τ + Δτ; Bonabeau, Dorigo & Theraulaz [26, 27] generalized the paradigm. We are not aware of a prior system that composes literal pheromone dynamics deposit, evaporate, promote, prune into the learning layer of an LLM retrieval corpus; the ingredients, taken individually, are classical (the usage-adaptive hypertext line below; time-decayed usage priors in ranking; access-refreshed recency in agent memory [43, 38]), and §6.2 reports a pheromone-interference failure in this setting, with its causal trace.
+
+**Usage-adaptive navigation structures.** The idea that a document network should learn from its own traversal predates LLMs by decades. Bollen & Heylighen built hypertext networks whose links strengthen with use, weaken and drop without it, and mint new candidate links from the transitivity of navigation paths explicitly framed as ant-trail reinforcement [50, 51]; Perkowitz & Etzioni's adaptive web sites synthesize new index pages from access logs [52]; Brusilovsky's adaptive navigation support adapts link sorting and annotation to the user [53], and information-foraging systems adapt link emphasis to a goal [40]. MonkeyLLM revives this line on an agent-navigated corpus and makes it governable: typed shortcut edges under an explicit confidence lifecycle, evaporation with a stated half-life, and an autonomous daemon whose promote/prune actions are audited commits.
+
+**Agent memory systems.** A parallel line gives LLM agents mutable memory substrates. Generative Agents score memories with access-refreshed exponential recency [43]; MemoryBank strengthens memories on recall and decays them on a forgetting curve [38]; A-MEM has an LLM link each new memory note to retrieved neighbors at write time [44]; Zep's temporal knowledge graph invalidates edges on contradiction [47]; Mem0 resolves new facts against existing graph nodes [48]; MemOS promotes frequently-used memories across storage tiers [46]; Agent Workflow Memory mints reusable workflows from successful trajectories [45]. MonkeyLLM differs in what mutates and why: the *corpus itself* not a conversation memory gains typed, permanent edges minted from **successful traversal**, under a confidence lifecycle none of these systems has. The substrate is deliberately boring Markdown files in a git repository, a choice with a live ecosystem (Basic Memory [62], git-backed vault servers, DiffMem's per-write commits [61], git-semantics agent memory [49]). We claim no novelty for the substrate; what we claim is the depth of the contract on top of it: every primitive's write is one atomic commit, a batch is one commit or nothing, and history is itself a primitive.
+
+**Constrained selection.** Closing a model's output space over a catalog, so that invalid references are unproducible rather than detectable, is established mechanism: GENRE decodes entity names through a prefix trie of the KB [54]; BLINK ranks only retrieved candidates [55]; KC-GenRe constrains generative re-ranking to the supplied candidate set in KG completion [56]; Graph-Constrained Reasoning restricts decoding to paths that exist in the graph [57]. MonkeyLLM applies the discipline at a different point the ingest write path of a living corpus (§3.5), where the KG-construction pipelines we know of validate after extraction instead.
 
 **Small language models.** SLM surveys [30] and the phi line [31] show curated data lets small models punch above their weight; Qwen [32], Gemma [33], and Llama [34] provide capable open checkpoints; Belcak et al. [29] argue on economic grounds that SLMs are the future of agentic AI. MonkeyLLM is an existence proof in the retrieval domain: every headline result in this paper was produced by a 12B model on a single RTX 3090.
 
@@ -110,14 +116,15 @@ The central design bet: **a small model reading ~200–500 tokens of curated met
 | Component | Novel? | Most-similar prior work |
 |---|---|---|
 | Hierarchical summaries over a corpus | No | RAPTOR, GraphRAG |
-| Agentic tool loop for retrieval | No | ReAct, WebGPT, agentic RAG |
-| Hard token budgets with explicit-truncation contracts per primitive | **Yes** | (no precedent found) |
-| The scent contract: machine-validated ≤60-token summaries as the navigation signal | **Yes** | Information scent [39] (theory, not a contract) |
-| Normative metadata/body search split (locate vs. sniff) | **Yes** | (no precedent found) |
-| Pheromone heat + evaporation as retrieval re-ranking | **Yes** | ACO [24, 28] (non-LLM domain) |
-| Agent-minted permanent shortcut links with confidence lifecycle | **Yes** | (no precedent found) |
-| Autonomous promote/prune daemon over uncertain links (Ranger) | **Yes** | (no precedent found) |
-| Corpus as git repository, every agent write a commit | **Yes** | (no precedent found in retrieval systems) |
+| Agentic tool loop for retrieval | No | ReAct, WebGPT, agentic RAG; recursive retrieval over summary indexes [42] |
+| Corpus as git repository, agent writes as commits | No | DiffMem [61], git-backed vault servers, Git Context Controller [49]. Claimed here: the commit as the *product semantics* of every primitive (batch = one commit or nothing, history as a primitive) |
+| Hard token budgets with explicit-truncation contracts per primitive | Partially | Observation truncation as harness practice (SWE-agent's ACI [41]; tool-design guidance [63]); machine-readable truncation flags in classic APIs. Novel: budget and truncation semantics as normative per-primitive contract terms every clip flagged, its dropped fields named |
+| The scent contract: machine-validated ≤60-token summaries as the navigation signal | **Yes** | Information scent [39] (theory, not a contract); summary indexes [42] (an index, not a validated write-time contract) |
+| Normative metadata/body search split (locate vs. sniff) | Partially | Fielded metadata vs. full-text search is classical IR; summary-first-then-fetch ships in frameworks [42]. Novel: the split as a mutually exclusive contract with failure semantics (an empty `locate` says what it searched and points at `sniff`) |
+| Pheromone heat + evaporation as retrieval re-ranking | Partially | ACO [24, 28]; time-decayed usage priors in ranking; access-refreshed recency in agent memory [43, 38]. Novel: as the composed learning layer of a navigable corpus |
+| Agent-minted permanent shortcut links with confidence lifecycle | **Yes** (as a composition) | A-MEM's write-time links [44] (content-driven, no lifecycle); AWM's success-minted workflows [45] (procedures, not corpus edges); usage-adaptive hypertext [50, 52] (pre-LLM) |
+| Closed-catalog edge proposal enforced at the write boundary (§3.5) | **Yes** (as a composition) | GENRE [54], BLINK [55], KC-GenRe [56], GCR [57] (constrained selection in other settings); A-MEM [44] (prompt-level neighbor restriction, unenforced) |
+| Autonomous promote/prune daemon over uncertain links (Ranger) | **Yes** | MemOS usage-driven tier promotion [46] (storage placement, not topology); link strengthening/decay in adaptive hypertext [50] |
 | SCENT/FLESH/BONE tiered storage for navigable TB-scale corpora | **Yes** | MemGPT [19] (context paging, not corpus tiering) |
 | Troop + judge over shared session pheromone | **Yes** | Multi-agent debate (no stigmergic medium) |
 
@@ -155,7 +162,7 @@ A typical hop costs 200–500 tokens of observation. A five-hop answer costs ~1.
 
 ### 3.3 Entry search: BM25 + vectors under RRF, re-ranked by heat
 
-Phase 0 requires zero embeddings: `locate` is BM25 [35] over FTS5 [37] a corpus becomes navigable with no GPU, no embedding pass, no vector database. The BM25 signal is *scent-weighted*: FTS5's per-column ranking weights the curated fields title : aliases : tags : summary at 4 : 3 : 2 : 1, so a term hit on a curator-controlled name outranks the same hit inside summary prose. The ordering is a consequence of the scent contract the more deliberate the field, the more the ranking trusts it (measured in §5.1, mechanism discussed in §6.4). When a vector index (the *Canopy*) and an embedder are present, `locate` becomes hybrid via Reciprocal Rank Fusion [36]:
+Phase 0 requires zero embeddings: `locate` is BM25 [35] over FTS5 [37] a corpus becomes navigable with no GPU, no embedding pass, no vector database. The BM25 signal is *scent-weighted*: FTS5's per-column ranking (BM25F-style field weighting [58, 35]) weights the curated fields title : aliases : tags : summary at 4 : 3 : 2 : 1, so a term hit on a curator-controlled name outranks the same hit inside summary prose. The ordering is a consequence of the scent contract the more deliberate the field, the more the ranking trusts it (measured in §5.1, mechanism discussed in §6.4). When a vector index (the *Canopy*) and an embedder are present, `locate` becomes hybrid via Reciprocal Rank Fusion [36]:
 
 $$
 s_{\mathrm{RRF}}(d) \;=\; \sum_{r \,\in\, \{\mathrm{BM25},\ \mathrm{vec}\}} \frac{1}{k + \mathrm{rank}_r(d) + 1}, \qquad k = 60
@@ -194,11 +201,11 @@ Beyond scalar heat, agents make discoveries **structural**. When a hunt reaches 
 | 0.5 | Shout (agent-discovered shortcut) | Promote or prune |
 | 0.3 | Curator edge proposal at ingest | Promote or prune |
 
-Promotion fires when both endpoints are hot ($h \ge 0.2$ → confidence 0.8, audited commit); pruning removes stone-cold uncertain links. The Ranger never deletes nodes. The net effect satisfies Grassé's strict definition of stigmergy [25]: **agents coordinate across sessions through modifications of the shared environment, never through direct communication.** The thousandth question asked of a forest is answered by a measurably different better forest than the first.
+Promotion fires when both endpoints are hot ($h \ge 0.2$ → confidence 0.8, audited commit); pruning removes stone-cold uncertain links. The Ranger never deletes nodes. The net effect satisfies Grassé's strict definition of stigmergy [25]: **agents coordinate across sessions through modifications of the shared environment, never through direct communication.** The thousandth question asked of a forest is answered by a *different* forest than the first; whether different is better is measured, not assumed §6.2 traces one case where it was worse, and §6.3 bounds the layer's headroom on a shallow, well-curated corpus.
 
 ### 3.5 The living corpus: Gardener, Curator, and tiered storage
 
-Forests are not hand-built shrines. The **Gardener** mirrors external sources into the forest (`adopt`/`sync`, hash-diff reconciliation) through pluggable converters, and an optional LLM **Curator** writes contract-compliant summaries (validate-and-retry against the 60-token rule) and proposes `related-to` edges at confidence 0.3 chosen only from a **closed, catalog-supplied candidate list, making hallucinated link targets structurally impossible**, not merely unlikely. The Gardener never deletes nodes; vanished sources are flagged stale for the Ranger.
+Forests are not hand-built shrines. The **Gardener** mirrors external sources into the forest (`adopt`/`sync`, hash-diff reconciliation) through pluggable converters, and an optional LLM **Curator** writes contract-compliant summaries (validate-and-retry against the 60-token rule) and proposes `related-to` edges at confidence 0.3. Proposals follow entity linking's candidate-generation-and-selection discipline [55, 54] and candidate-constrained ranking from KG completion [56], moved to the ingest write path: targets are chosen only from a **closed, catalog-supplied candidate list** (existing leaf nodes only branches are never candidates at most 3 per document), and the list is **enforced at the write boundary: an id outside it is dropped, never repaired, making hallucinated link targets structurally impossible**, not merely unlikely. Where A-MEM restricts linking by prompt convention [44] and KG-construction pipelines verify after extraction, here the closed list is an invariant of the only edge-write path the model has and every accepted proposal is stamped as a distinct low-confidence population (0.3) for the Ranger's lifecycle (§3.4), so machine-proposed edges stay permanently distinguishable from human-curated structure. The Gardener never deletes nodes; vanished sources are flagged stale for the Ranger.
 
 Storage is tiered *the map is not the territory*:
 
@@ -226,7 +233,7 @@ For hard questions, N monkeys (N = 3–5) hunt in parallel from distinct entry p
 - **iter** iterative RAG: retrieve → read → reformulate → retrieve, until answered or budget exhausted;
 - **troop** N = 3 monkeys + judge (quorum / coverage / patience variants).
 
-**Models.** Navigation, generation, and curation: **Gemma-4 12B served locally** (llama.cpp, one RTX 3090); the 2026-07-02 fork-tier runs and the 2026-08-08 ranking-validation runs (§6.4) used `qwen3.5-flash` via OpenRouter to remove GPU contention. Embeddings (hybrid locate only): bge-m3. *No frontier-scale model appears anywhere in this paper.*
+**Models.** Navigation, generation, and curation: **Gemma-4 12B served locally** (llama.cpp, one RTX 3090); the 2026-07-02 fork-tier runs and the 2026-08-08 ranking-validation runs (§6.4) used `qwen3.5-flash` via OpenRouter to remove GPU contention. Embeddings (hybrid locate only): bge-m3. The v2/v3 navigation runs were executed with the Canopy index built and the embedder loaded; at that engine revision `locate` fused BM25 with vectors automatically whenever both were present, so the headline navigation numbers ride **hybrid entry search** (the current engine makes hybrid opt-in; a reproduction must enable it explicitly Appendix B). *No frontier-scale model appears anywhere in this paper.*
 
 **Metrics.** *hops-to-banana* and *trail length* (read-primitive calls before first harvest of an answer node); *tokens-to-banana* (total observation tokens per question); *banana precision* $|H \cap E|/|H|$ for harvested set $H$ against expected nodes $E$; correctness; wall-clock (median, p95). {{OPTIONAL: statistical treatment seeds/repeats per cell, CIs add if the bench is rerun with repeats}}.
 
@@ -242,9 +249,9 @@ For hard questions, N monkeys (N = 3–5) hunt in parallel from distinct entry p
 |---|---|---|---|---|---|---|
 | BM25 flat | 0.667 | 0.833 | 0.889 | 0.752 | 1.1 ms | 1.3 ms |
 | **BM25 scent-weighted** | 0.778 | 0.944 | **1.00** | 0.866 | 1.1 ms | 1.3 ms |
-| **Hybrid (RRF)** | **1.00** | **1.00** | **1.00** | **0.88** | 48 ms | **61.5 ms** |
+| Hybrid (RRF) | — | **1.00** | **1.00** | 0.88 | 48 ms | 61.5 ms |
 
-Scent-weighting five constants in the ranking call, zero embeddings, no measurable latency cost recovers exactly one third of the flat-to-hybrid gap at R@1 and closes it entirely at R@5: even in the GPU-free Phase 0 configuration, every hunt now opens on or adjacent to the answer region within the k = 5 frontier. The residual R@1 misses are anti-leakage paraphrases whose vocabulary deliberately avoids the answer's naming fields. Hybrid retains perfect R@1 at ~47× the latency (embedding the query dominates); its row predates the weighting RRF consumes ranks, so the weighted BM25 list can only help it {{TODO: hybrid re-run with scent-weighted BM25 under RRF}}. (The rare p99 spike of 2.1 s is first-call embedder warm-up. The previously published flat-BM25 row 0.556 / 0.583 / 0.611 predates the English translation of the corpus generators; the rows above regenerate from the committed scripts at head.)
+Scent-weighting five constants in the ranking call, zero embeddings, no measurable latency cost lifts R@1 by +0.111 and closes the R@5 gap to perfect: even in the GPU-free Phase 0 configuration, every hunt now opens on or adjacent to the answer region within the k = 5 frontier. The residual R@1 misses are anti-leakage paraphrases whose vocabulary deliberately avoids the answer's naming fields. Two caveats keep the hybrid row honest. First, its recorded metrics are R@3/R@5/MRR per-query first-hit ranks were not retained, so R@1 is unknown; MRR 0.88 with R@3 = 1.00 bounds it between 0.76 and 0.82, i.e. comparable to scent-weighted BM25's 0.778 at ~47× the latency (embedding the query dominates). Second, the hybrid row predates both the English translation of the corpus generators and the scent weighting (the two BM25 rows regenerate from committed scripts at head; the previously published flat-BM25 row 0.556 / 0.583 / 0.611 is the pre-translation corpus), so the rows are not a controlled comparison. {{TODO: hybrid re-run at head same corpus, scent-weighted BM25 inside the fusion, per-query ranks retained}}. (The rare p99 spike of 2.1 s is first-call embedder warm-up.)
 
 ### 5.2 Multi-hop question answering: the cliff
 
@@ -257,7 +264,7 @@ Scent-weighting five constants in the ranking call, zero embeddings, no measurab
 
 Read the topk row left to right. On mixed questions it looks respectable 12/18, the number a demo shows you. The moment every question requires chaining, it falls off a cliff to **zero**. This is not a strawman configuration; chunk + embed + top-k + generate is the default architecture of most deployed RAG systems in 2026. The failure is structural and therefore *invisible to sampling*: any evaluation containing single-hop questions averages the cliff away.
 
-Iterative RAG partially recovers (7/11) but pays in latency variance (p95 = 17.5 s/q vs. the monkey's 8.4 s) and still misses a third of the questions. And the token economics invert on inspection: the monkey's raw median (1433) is comparable to iter's (1384), but tokens *per correct answer* are 1433 × 11⁄11 = **1,433** vs. 1384 × 11⁄7 ≈ **2,175** a **0.58× ratio**. *Failing cheaply is not economy.*
+Iterative RAG partially recovers (7/11) but pays in latency variance (p95 = 17.5 s/q vs. the monkey's 8.4 s) and still misses a third of the questions. And the token economics invert on inspection: the monkey's raw median (1433) is comparable to iter's (1384), but tokens *per correct answer* are 1433 × 11⁄11 = **1,433** vs. 1384 × 11⁄7 ≈ **2,175** a **0.66× ratio**. *Failing cheaply is not economy.*
 
 A complete hop-by-hop hunt, with primitives, observations, and token accounting, is worked in **Appendix A**.
 
@@ -285,11 +292,11 @@ which degenerates below 1 exactly when $\max_i c_i$ approaches $\sum_i c_i$ the 
 
 ### 6.2 Pheromone cross-talk: when a good trail lies
 
-This is, to our knowledge, the first documented case of pheromone interference in an LLM retrieval system, and we present it as a phenomenon, not a patched bug.
+This is, to our knowledge, the first documented case of pheromone interference in an LLM retrieval system necessarily so, since we know of no prior stigmergic LLM retrieval layer (§2) and we present it as a phenomenon, not a patched bug. The failure class itself is older than this setting: it is a stigmergic instance of the degenerate feedback loops and popularity-bias amplification documented in recommender systems [59, 60].
 
 Across five convergence passes with accumulating trails, question v3-01 was answered **correctly on pass 1 and wrongly on every pass thereafter**. The forest *learned itself into a mistake*. Full trace: the winning trail of an unrelated question (v3-11) deposited heat on a node semantically adjacent to v3-01's decoy; the re-ranking term $(1+\alpha h)$ with $\alpha = 0.3$ then lifted the decoy above the true answer in `locate`. Heat is query-*unconditioned* relevance to one hunt leaks into all hunts.
 
-The failure has a classical flavor: ACO fights premature trail concentration with evaporation and pheromone bounds [24]; our 30-day half-life is far too slow to help within a session cluster. Candidate mitigations, each a deliberate spec change rather than a hot-fix: lower $\alpha$; query-conditioned heat $h(d \mid \mathrm{topic})$; per-*link* rather than per-node heat; context metadata on shortcuts. For any system that lets usage feed back into ranking including every "learning" retrieval product now shipping this failure class is waiting. We name it so it can be looked for.
+The failure has a classical flavor: ACO fights premature trail concentration with evaporation and pheromone bounds [24]; our 30-day half-life is far too slow to help within a session cluster. Candidate mitigations, each a deliberate spec change rather than a hot-fix: lower $\alpha$; query-conditioned heat $h(d \mid \mathrm{topic})$; per-*link* rather than per-node heat; context metadata on shortcuts. For any system that lets usage feed back into ranking including every "learning" retrieval product now shipping this class is live [59, 60]. What the stigmergic setting adds is visibility: because heat is an explicit, inspectable quantity, the interference carries a complete causal trace which hunt deposited, on which node, and which re-ranking term flipped which answer where a learned ranker offers only aggregate drift.
 
 ### 6.3 The floor effect: curation and learning are substitutes
 
@@ -299,11 +306,11 @@ The resolution of this paradox is the finding: **hybrid locate plus disciplined 
 
 ### 6.4 Curated naming is the strongest scent
 
-This finding started as an engineering observation, not a hypothesis: FTS5's `bm25()` accepts per-column weights, and MonkeyLLM was calling it flat a term hit in a title counted no more than the same hit in summary prose. But *which* columns deserve weight is not an engineering question; it is the scent contract again. The fields `locate` searches are exactly the ones the Curator disciplines, and they are not equally deliberate: a title is an act of naming, an alias is an act of anticipating the asker, a summary is compressed prose. Weighting them 4 : 3 : 2 : 1 (§3.3) merely pays each field attention proportional to the discipline the contract already imposes on it.
+Per-field weighting of BM25 is not ours: it is BM25F [58] covered at length in the survey we already cite for BM25 [35, §"Multiple Streams and BM25F"] and weighting a title above body prose is among the oldest levers in fielded retrieval; FTS5's per-column `bm25()` weights implement exactly that scheme. MonkeyLLM was nonetheless calling it flat: a term hit in a title counted no more than the same hit in summary prose. What we report is therefore not the mechanism but a **calibration principle and its measurement**. *Which* columns deserve weight is not an engineering question; it is the scent contract again. The fields `locate` searches are exactly the ones the Curator disciplines, and they are not equally deliberate: a title is an act of naming, an alias is an act of anticipating the asker, a summary is compressed prose. Weighting them 4 : 3 : 2 : 1 (§3.3) pays each field attention proportional to the discipline the contract already imposes on it and the weight order falls out of the contract, not out of a grid search.
 
-The effect (§5.1): R@1 +0.111, MRR +0.114, R@5 0.889 → 1.00, latency unchanged at ~1.3 ms p95 one third of the gap between flat BM25 and hybrid entry search closed by five constants, with no embedder, no GPU, and no new dependency. End-to-end, nothing regressed: `qwen3.5-flash` navigating the Phase-0 fixture with the new ranking scores 10/10 on the demo set and 4/4 on the buried-answers set (answers reachable only through body-level `sniff`), and the full suite stays green.
+The effect (§5.1): R@1 +0.111, MRR +0.114, R@5 0.889 → 1.00, latency unchanged at ~1.3 ms p95 five constants, no embedder, no GPU, no new dependency. End-to-end, nothing regressed: `qwen3.5-flash` navigating the Phase-0 fixture with the new ranking scores 10/10 on the demo set and 4/4 on the buried-answers set (answers reachable only through body-level `sniff`), and the full suite stays green.
 
-The reading we defend: this is §6.3's substitution economics operating *inside* entry search. Curation spend raises the signal quality of the curated fields; a ranking that trusts them proportionally buys back part of what embeddings would otherwise be needed for the Forest Principle at the smallest scale we have measured, intelligence in the environment (disciplined naming) substituting for intelligence at query time (an embedding pass three orders of magnitude slower). The episode also argues concretely for in-process search: because the ranking function lives inside the database (SQLite FTS5), the full loop hypothesis, five-constant change, corpus-level measurement, end-to-end validation fit in a single working session with no cluster, no external index, and no deployment. {{TODO: sensitivity sweep over the weight vector; per-corpus tuning may recover part of the residual R@1 gap}}
+The reading we defend: this is §6.3's substitution economics operating *inside* entry search. Classic BM25F deployments weight author-native document structure (title, anchor text); here the weighted fields are written by an LLM curator under a machine-validated contract, so curation spend directly raises the signal quality the ranking trusts buying back part of what embeddings would otherwise be needed for: the Forest Principle at the smallest scale we have measured, intelligence in the environment (disciplined naming) substituting for intelligence at query time (an embedding pass three orders of magnitude slower). The episode also argues concretely for in-process search: because the ranking function lives inside the database (SQLite FTS5), the full loop hypothesis, five-constant change, corpus-level measurement, end-to-end validation fit in a single working session with no cluster, no external index, and no deployment. {{TODO: sensitivity sweep over the weight vector; per-corpus tuning may recover part of the residual R@1 gap}}
 
 ---
 
@@ -325,9 +332,9 @@ The principle is modality-independent: any system with (a) a decomposable knowle
 
 **The auditability dividend.** Because every write is a git commit and every read is a typed, budgeted call with a recorded trace, a MonkeyLLM answer is **replayable**: the exact trail, every observation, and the harvested evidence are inspectable after the fact. Ask a RAG pipeline *why* it retrieved what it retrieved and you get cosine similarities; ask a forest and you get a trail you can walk yourself. For regulated and high-stakes domains this is not a nicety it is the difference between an answer and an account.
 
-**Costs and honest trade-offs.** Navigation pays per hop: on shallow questions, top-k is faster and adequate (v2: 12/18 at lower latency) which is why `harvest` exists as a zero-LLM single-shot path for the easy case. We measured that path directly (Phase-0 fixture, `qwen3.5-flash`, 2026-08-08): harvest retrieval is pure machine time (p50 ≈ 50 ms, bundle ≈ 1.3k tokens), and one external completion over the bundle answers in ≈ 3.0 s/question versus the navigating agent's 4.9 s scoring 12/14. Retrieval and reading never both failed: whenever the bundle contained the answer the one-shot model extracted it (12/12), and the two structural misses are exactly the cases navigation exists for a fact that lives only inside a SQLite dataset (the agent answers it via `query`; no amount of text retrieval can) and numeric needles buried in 4k-token bodies whose discriminating literals ("73%", "127") are too short for derived sniff terms (the agent finds them by choosing its own literal probes mid-hunt). The deployment rule that falls out: route through one-shot harvest first, escalate to the agent when the answer smells aggregate or the bundle comes back dry. The forest requires curation human or a 12B curator (§5.3) and the scent contract is load-bearing: bad summaries would poison every hop, which is exactly why the contract is machine-enforced rather than aspirational. Pheromone introduces a genuinely new failure class (§6.2). Our corpora are small (10²–10³ nodes); behavior at 10⁵–10⁶ nodes, where hierarchy depth interacts with entry-search quality, is untested. {{TODO: scale study}}.
+**Costs and honest trade-offs.** Navigation pays per hop: on shallow questions, top-k is faster and adequate (v2: 12/18 at lower latency) which is why `harvest` exists as a zero-LLM single-shot path for the easy case. We measured that path directly (Phase-0 fixture, `qwen3.5-flash`, 2026-08-08): harvest retrieval is pure machine time (p50 ≈ 50 ms, bundle ≈ 1.3k tokens), and one external completion over the bundle answers in ≈ 3.0 s/question versus the navigating agent's 4.9 s scoring 12/14. Retrieval and reading never both failed: whenever the bundle contained the answer the one-shot model extracted it (12/12), and the two structural misses are exactly the cases navigation exists for a fact that lives only inside a SQLite dataset (the agent answers it via `query`; no amount of text retrieval can) and numeric needles buried in 4k-token bodies whose discriminating literals ("73%", "127") are too short for derived sniff terms (the agent finds them by choosing its own literal probes mid-hunt). The deployment rule that falls out: route through one-shot harvest first, escalate to the agent when the answer smells aggregate or the bundle comes back dry. Read beside §6.3, that rule is also this paper's attribution statement, and we make it explicit: the curated substrate plus fused lexical retrieval delivers most of the lift over chunk-based RAG; hop-by-hop navigation covers the structural residuals (dataset-internal facts, sub-derived-term literals); and the stigmergic layer, on corpora this shallow, is headroom rather than measured gain. The forest requires curation human or a 12B curator (§5.3) and the scent contract is load-bearing: bad summaries would poison every hop, which is exactly why the contract is machine-enforced rather than aspirational. Pheromone introduces a genuinely new failure class (§6.2). Our corpora are small (10²–10³ nodes); behavior at 10⁵–10⁶ nodes, where hierarchy depth interacts with entry-search quality, is untested. {{TODO: scale study}}.
 
-**Limitations.** (i) A single benchmark family, generated by the authors external multi-hop suites are needed; (ii) correctness scored by substring matching; (iii) no statistical repeats on the headline table yet; (iv) entity extraction and `same-as` deduplication are specified but deferred; (v) the cross-talk mitigation is proposed, not implemented.
+**Limitations.** (i) A single benchmark family, generated by the authors and the entry-search results (§5.1, §6.4) reward exactly the naming fields our own pipeline curates, so external multi-hop suites are needed before those numbers generalize; (ii) correctness scored by substring matching; (iii) no statistical repeats on the headline table yet; (iv) entity extraction and `same-as` deduplication are specified but deferred; (v) the cross-talk mitigation is proposed, not implemented; (vi) the §5.1 hybrid row is from an earlier corpus generation and lacks per-query ranks (§5.1's caveats), so the lexical-vs-hybrid comparison is indicative, not controlled.
 
 **Reproducing this paper.** Clone the repository, build the fixture forest, point the demo at any OpenAI-compatible endpoint a local llama.cpp server is enough and run the bench (Appendix B gives the exact commands). Every table above regenerates from committed scripts. If the 0/11 cliff sounds implausible, we encourage you to reproduce *that number first*: it takes one command and it is the whole argument.
 
@@ -345,7 +352,7 @@ If the path to cheap, private, grounded AI runs anywhere, it does not run throug
 
 ## Reproducibility
 
-All code, the normative specification (`docs/monkeyllm-spec-v0.15.md`), corpus generators, question sets, and measurement scripts ship in the reference implementation. Key entry points: `bench/run_bench.py` (all arms), `scripts/bench_locate.py` (§5.1), `scripts/measure_curation.py` (§5.3), `scripts/convergence.py` (§6.2–6.3). Forests rebuild deterministically; the full test suite (352 tests, including SQL-injection suites for `query` and `tend`) passes green. See Appendix B for a five-minute quickstart.
+All code, the normative specification (`docs/monkeyllm-spec-v0.60.md` at the time of writing; the spec is versioned and later revisions supersede it), corpus generators, question sets, and measurement scripts ship in the reference implementation. Key entry points: `bench/run_bench.py` (all arms), `scripts/bench_locate.py` (§5.1), `scripts/measure_curation.py` (§5.3), `scripts/convergence.py` (§6.2–6.3). Forests rebuild deterministically; the full test suite (1,241 tests at the time of writing, including SQL-injection suites for `query` and `tend`) passes green. See Appendix B for a five-minute quickstart.
 
 ## Acknowledgements
 
@@ -439,6 +446,52 @@ Conceptual development by **Jimmy Wesley Maciel Soares**, São Paulo, Brazil, 20
 
 [40] Pirolli, P. (2007). *Information Foraging Theory: Adaptive Interaction with Information*. Oxford University Press. doi:10.1093/acprof:oso/9780195173321.001.0001
 
+[41] Yang, J., Jimenez, C. E., Wettig, A., Lieret, K., Yao, S., Narasimhan, K., Press, O. (2024). SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering. *NeurIPS 2024*. [arXiv:2405.15793](https://arxiv.org/abs/2405.15793)
+
+[42] Liu, J. (2023). A New Document Summary Index for LLM-Powered QA Systems. LlamaIndex. [llamaindex.ai/blog/a-new-document-summary-index-for-llm-powered-qa-systems](https://www.llamaindex.ai/blog/a-new-document-summary-index-for-llm-powered-qa-systems-9a32ece2f9ec)
+
+[43] Park, J. S., O'Brien, J. C., Cai, C. J., Morris, M. R., Liang, P., Bernstein, M. S. (2023). Generative Agents: Interactive Simulacra of Human Behavior. *UIST 2023*. [arXiv:2304.03442](https://arxiv.org/abs/2304.03442)
+
+[44] Xu, W., Liang, Z., Mei, K., Gao, H., Tan, J., Zhang, Y. (2025). A-MEM: Agentic Memory for LLM Agents. *NeurIPS 2025*. [arXiv:2502.12110](https://arxiv.org/abs/2502.12110)
+
+[45] Wang, Z. Z., Mao, J., Fried, D., Neubig, G. (2024). Agent Workflow Memory. [arXiv:2409.07429](https://arxiv.org/abs/2409.07429)
+
+[46] Li, Z., Xi, C., Li, C., et al. (2025). MemOS: A Memory OS for AI System. [arXiv:2507.03724](https://arxiv.org/abs/2507.03724)
+
+[47] Rasmussen, P., et al. (2025). Zep: A Temporal Knowledge Graph Architecture for Agent Memory. [arXiv:2501.13956](https://arxiv.org/abs/2501.13956)
+
+[48] Chhikara, P., et al. (2025). Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory. [arXiv:2504.19413](https://arxiv.org/abs/2504.19413)
+
+[49] Wu, J., Hu, M., Zhu, J., Pan, J., Liu, Y., Xu, M., Jin, Y. (2025). Git Context Controller: Manage the Context of LLM-based Agents like Git. [arXiv:2508.00031](https://arxiv.org/abs/2508.00031)
+
+[50] Bollen, J., Heylighen, F. (1998). A System to Restructure Hypertext Networks into Valid User Models. *New Review of Hypermedia and Multimedia* 4:189–213. doi:10.1080/13614569808914702
+
+[51] Heylighen, F. (1999). Collective Intelligence and its Implementation on the Web: Algorithms to Develop a Collective Mental Map. *Computational and Mathematical Organization Theory* 5(3):253–280. doi:10.1023/A:1009690407292
+
+[52] Perkowitz, M., Etzioni, O. (2000). Towards Adaptive Web Sites: Conceptual Framework and Case Study. *Artificial Intelligence* 118(1–2):245–275. doi:10.1016/S0004-3702(99)00098-3
+
+[53] Brusilovsky, P. (2007). Adaptive Navigation Support. In *The Adaptive Web*, LNCS 4321, 263–290. Springer. doi:10.1007/978-3-540-72079-9_8
+
+[54] De Cao, N., Izacard, G., Riedel, S., Petroni, F. (2021). Autoregressive Entity Retrieval. *ICLR 2021*. [arXiv:2010.00904](https://arxiv.org/abs/2010.00904)
+
+[55] Wu, L., Petroni, F., Josifoski, M., Riedel, S., Zettlemoyer, L. (2020). Scalable Zero-shot Entity Linking with Dense Entity Retrieval. *EMNLP 2020*. [arXiv:1911.03814](https://arxiv.org/abs/1911.03814)
+
+[56] Wang, Y., Hu, M., Huang, Z., Li, D., Yang, D., Lu, X. (2024). KC-GenRe: A Knowledge-constrained Generative Re-ranking Method Based on Large Language Models for Knowledge Graph Completion. *LREC-COLING 2024*. [arXiv:2403.17532](https://arxiv.org/abs/2403.17532)
+
+[57] Luo, L., Zhao, Z., Haffari, G., Li, Y.-F., Gong, C., Pan, S. (2025). Graph-constrained Reasoning: Faithful Reasoning on Knowledge Graphs with Large Language Models. *ICML 2025*. [arXiv:2410.13080](https://arxiv.org/abs/2410.13080)
+
+[58] Robertson, S., Zaragoza, H., Taylor, M. (2004). Simple BM25 Extension to Multiple Weighted Fields. *CIKM 2004*, 42–49. doi:10.1145/1031171.1031181
+
+[59] Jiang, R., Chiappa, S., Lattimore, T., György, A., Kohli, P. (2019). Degenerate Feedback Loops in Recommender Systems. *AIES 2019*. [arXiv:1902.10730](https://arxiv.org/abs/1902.10730)
+
+[60] Mansoury, M., Abdollahpouri, H., Pechenizkiy, M., Mobasher, B., Burke, R. (2020). Feedback Loop and Bias Amplification in Recommender Systems. *CIKM 2020*. [arXiv:2007.13019](https://arxiv.org/abs/2007.13019)
+
+[61] Growth Kinetics (2025). DiffMem: Git-Based Memory for Conversational AI Agents. [github.com/Growth-Kinetics/DiffMem](https://github.com/Growth-Kinetics/DiffMem)
+
+[62] Basic Machines (2025). Basic Memory: Local-First Knowledge Management with AI Assistants. [github.com/basicmachines-co/basic-memory](https://github.com/basicmachines-co/basic-memory)
+
+[63] Anthropic (2025). Writing Effective Tools for Agents. [anthropic.com/engineering/writing-tools-for-agents](https://www.anthropic.com/engineering/writing-tools-for-agents)
+
 ---
 
 ## Appendix A A Worked Hunt
@@ -466,7 +519,7 @@ hop 5  query(data/readings-t4, "SELECT MAX(ts) ...")      ~90 tok
 
 **Answer:** *"Platform **tambor**; readings recorded in dataset **readings-t4**"* with the full trail as its receipt. Total: **~1,490 observation tokens across 5 hops**, every one of them relevant. Because the winning trail was ≥4 hops, the agent grafts a shout `events/april-incident —discovered-shortcut→ platforms/tambor` (confidence 0.5) and the *next* monkey asking anything similar gets there in 2 hops. The corpus just got better because someone used it.
 
-The failure trace is as instructive as the success: this hunt is structurally impossible for top-k RAG at any k, because no similarity function maps "April incident" onto a dataset passport that never mentions April only the *walk* connects them.
+The failure trace is as instructive as the success: this hunt is structurally out of reach for single-shot similarity retrieval at any practical k, because no similarity function maps "April incident" onto a dataset passport that never mentions April only the *walk* connects them (a reformulating retriever like the iter arm recovers some such chains, at twice the latency and missing a third of them, §5.2).
 
 ---
 
@@ -475,7 +528,7 @@ The failure trace is as instructive as the success: this hunt is structurally im
 ```bash
 git clone {{REPO_URL}} && cd monkeyllm
 python -m venv .venv && . .venv/bin/activate && pip install -e .
-python -m pytest -q                          # 272 tests, green
+python -m pytest -q                          # 1,241 tests, green
 python forests/scripts/build_fixture.py      # build the demo forest (82 nodes)
 python -m monkeyllm.cli validate --forest forests/forest-fixture
 
@@ -483,8 +536,11 @@ python -m monkeyllm.cli validate --forest forests/forest-fixture
 python scripts/serve_llm.py --model <your-local-12B>     # or set MONKEYLLM_LLM_ENDPOINT
 python examples/demo/run_demo.py             # watch a monkey hunt, hop by hop
 
-# reproduce the headline table (§5.2), including topk's 0/11:
-python bench/run_bench.py --arms monkey,topk,iter --questions bench/questions-v3.json
+# reproduce the headline table (§5.2), including topk's 0/11 — the §5.2 navigation
+# runs used hybrid entry search (§4): build the Canopy first and pass --hybrid
+# (omitting both reproduces the GPU-free Phase 0 configuration instead):
+python -m monkeyllm.cli canopy build --forest forests/forest-fixture
+python bench/run_bench.py --arms monkey,topk,iter --questions bench/questions-v3.json --hybrid
 ```
 
 The forest is just Markdown in a git repo open it in any editor, `git log` it, and watch `graft(...)` commits appear as agents learn.
@@ -574,8 +630,7 @@ A public announcement is made on at least one timestamped platform immediately a
 
 ```
 Soares, J. W. M. (2026). MonkeyLLM: Stigmergic Navigation of Knowledge
-Forests Replacing Retrieval-Augmented Generation with Agentic Foraging
-by Small Language Models. Paper v1.0.0, {{PUBLICATION_DATE_SHORT}}.
+Forests by Small Language Models. Paper v1.0.0, {{PUBLICATION_DATE_SHORT}}.
 ORCID: 0009-0007-1022-9510. {{CANONICAL_URL}}
 ```
 
@@ -584,9 +639,8 @@ ORCID: 0009-0007-1022-9510. {{CANONICAL_URL}}
 ```bibtex
 @misc{soares2026monkeyllm,
   author       = {Soares, Jimmy Wesley Maciel},
-  title        = {{MonkeyLLM}: Stigmergic Navigation of Knowledge Forests ---
-                   Replacing Retrieval-Augmented Generation with Agentic
-                   Foraging by Small Language Models},
+  title        = {{MonkeyLLM}: Stigmergic Navigation of Knowledge Forests
+                   by Small Language Models},
   year         = {2026},
   version      = {1.0.0},
   howpublished = {Preprint},
@@ -600,16 +654,15 @@ ORCID: 0009-0007-1022-9510. {{CANONICAL_URL}}
 
 ```
 Soares, J. W. M. (2026). MonkeyLLM: Stigmergic navigation of knowledge
-forests replacing retrieval-augmented generation with agentic foraging
-by small language models (Version 1.0.0). {{CANONICAL_URL}}
+forests by small language models (Version 1.0.0). {{CANONICAL_URL}}
 ```
 
 **IEEE:**
 
 ```
-J. W. M. Soares, "MonkeyLLM: Stigmergic Navigation of Knowledge Forests —
-Replacing Retrieval-Augmented Generation with Agentic Foraging by Small
-Language Models," Preprint v1.0.0, 2026. [Online]. Available: {{CANONICAL_URL}}
+J. W. M. Soares, "MonkeyLLM: Stigmergic Navigation of Knowledge Forests
+by Small Language Models," Preprint v1.0.0, 2026. [Online].
+Available: {{CANONICAL_URL}}
 ```
 
 ---
@@ -624,5 +677,5 @@ Language Models," Preprint v1.0.0, 2026. [Online]. Available: {{CANONICAL_URL}}
 | `{{CODE_LICENSE}}` | Header | T05 suggests Apache-2.0 |
 | `{{PUBLIC_KEY_URL}}` | App. D.4 | Where the GPG public key will live |
 | `{{ADDITIONAL_ACKNOWLEDGMENTS}}` | Acknowledgements | Optional |
-| `{{TODO: ...}}` (×3) | §6.1, §6.3, §8 | Future experiments run or delete |
+| `{{TODO: ...}}` (×5) | §5.1, §6.1, §6.3, §6.4, §8 | Future experiments run or delete |
 | `{{OPTIONAL: statistical treatment}}` | §4 | Add if bench rerun with repeats |

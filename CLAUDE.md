@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.59.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.60.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,27 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **A skill is the size of the agent (spec J.5.12, v0.60)**: the Skills
+  console hands out a FOLDER — `SKILL.md` (the core: recall, `locate` vs
+  `sniff`, coverage-before-a-silence, citation, refusals) plus
+  `references/{saving,writing,time,datasets,sharing}.md`, each named in the
+  core with the trigger that sends an agent to read it. Blocks default to the
+  key's own caps, so a `{read, ingest}` paired key stops paying ~1,400 tokens
+  of `plant` anatomy it may not execute; a block chosen beyond the key names
+  the capability in its own first line. Several INSTALLED skills is NOT the
+  split — each costs its `description` every session and the runtime, not the
+  core, decides which loads. Every example carries the `forest` argument (the
+  v0.59 file had 23 call examples and passed it in none). Forests are
+  selected and baked as INTENT: `forests()` is the authority, >1 forest bakes
+  a routing table from C.17 `coverage`, one forest teaches the live call
+  instead (a copy of a shape can only drift). Blocks/forests/assembly ride
+  the ADDRESS (J.5.8), because the address is what rebuilds this exact skill
+  later — the core names that link as the repair for its own staleness. The
+  agent never installs it: a skill outlives the connection that delivered
+  it, so no endpoint and no `skill()` tool (a tool description is charged to
+  every client every session, forever). Text in `apps/studio/src/skill.js`;
+  `apps/studio/check-skill.mjs` IS F.111-F.116 and runs from
+  `tests/test_skill_console.py`.
 - **A node moves once, and the old address says where (spec C.15,
   v0.58)**: `transplant(id, new_id)` — leaf only (branches never; move
   their leaves), passport + backlinks + both indexes + payload in ONE

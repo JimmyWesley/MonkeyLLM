@@ -79,8 +79,8 @@ Leia [Conectando a sua IA](./connecting-ai.md). O console consegue
 perguntar, navegar e ingerir sozinho, mas a floresta foi feita para ser
 lida e alimentada pelos seus próprios agentes uma floresta só tocada
 através da janela é um cérebro que ninguém está cultivando. Aquela página
-leva você até o fim em três passos: pareie uma chave que seja sua (ela só
-pode estreitar o seu acesso, nunca acrescentar), registre a Station como
-um servidor MCP e entregue ao seu agente o arquivo de skill que o Studio
-gera para esta implantação exata. Todas as outras páginas aprofundam o que
+leva você até o fim em quatro passos: pareie uma chave que seja sua (ela só
+pode estreitar o seu acesso, nunca acrescentar), registre a Station como um
+servidor MCP, dimensione a skill para o agente que você está montando e
+entregue a ele os arquivos que o Studio gera para esta implantação exata. Todas as outras páginas aprofundam o que
 aquela começa.

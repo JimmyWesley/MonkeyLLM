@@ -116,64 +116,105 @@ vale la pena saber en la primera llamada:
 
 ## La consola de Skills
 
-Un agente conectado sabe que las tools existen; todavía no tiene el *hábito*
-de usarlas. La consola de Skills cierra esa brecha. Una skill es un pequeño
-archivo de instrucciones que un runtime de agente carga, y esta le enseña a
-tu agente a tratar el bosque abierto como su memoria: recordar a partir de
-él antes de responder, guardar lo que vale la pena conservar, citar los ids
-de los nodos que leyó.
+Un agente conectado sabe que las tools existen; todavía no tiene el *hábito* de
+usarlas. La consola de Skills cierra esa brecha. Una skill es un pequeño
+archivo de instrucciones que el runtime del agente carga, y esta le enseña a
+tratar los bosques que elijas como su memoria: consultar antes de responder,
+guardar lo que vale la pena, citar los ids de los nodos que leyó.
 
-![La consola de Skills, generando la skill de memoria para esta Station y este bosque](../assets/skills.png)
+![La consola de Skills, generando la skill de memoria para esta Station y bosque](../assets/skills.png)
 
-*(Las capturas de pantalla muestran la consola en inglés.)*
+La consola recorre los mismos pasos que esta página — emparejar una clave,
+apuntar Claude Code a la Station, dimensionar la skill, entregar los archivos —
+y cada fragmento en ella ya lleva la dirección de la Station y los bosques que
+elegiste. La skill se genera en tu navegador, para ese despliegue exacto; la
+Station no gana ningún endpoint para ello. Está disponible para cualquiera cuya
+clave pueda `read` en el bosque — nunca restringida a administradores, porque
+el emparejamiento hizo la credencial self-service y aprender a conectarse debe
+serlo también.
 
-La consola te guía por los mismos tres pasos que esta página empareja una
-clave, apunta Claude Code a la Station, entrégale el archivo y cada
-snippet en ella ya lleva la dirección de la Station y el nombre del bosque
-abierto. La skill se genera en tu navegador, para exactamente ese
-despliegue; la Station no gana ningún endpoint por ella. Está disponible
-para cualquiera cuya clave pueda hacer `read` sobre el bosque nunca detrás
-de una puerta de admin, porque el emparejamiento hizo de la credencial un
-autoservicio y aprender a conectarse también debe serlo.
+### La skill es una carpeta, y tú eliges cuánto de ella viaja
 
-Para Claude Code, el archivo se instala en:
+Un agente carga la skill entera, así que la consola la divide: un núcleo que
+todo agente necesita, y archivos de referencia que lee solo cuando los
+necesita.
 
 ```
-~/.claude/skills/monkeyllm-memory/SKILL.md
+~/.claude/skills/monkeyllm-memory/
+├── SKILL.md              consulta, citación, rechazos — el núcleo
+└── references/
+    ├── saving.md         ingest de un documento (la escritura por defecto de una clave emparejada)
+    ├── writing.md        plant, graft, prune, transplant, la anatomía de un nodo
+    ├── time.md           calendar y ventanas de fecha
+    ├── datasets.md       notes, SQL de solo lectura, DML de una sentencia
+    └── sharing.md        export y enlaces para compartir
 ```
 
-Vale la pena previsualizar las palabras del propio archivo, porque son el
-contrato que tu agente seguirá. Bajo el título **"This forest is your
-memory"** (este bosque es tu memoria), enseña tres secciones:
+Los bloques vienen marcados según lo que tu clave puede hacer en los bosques
+elegidos. Una clave emparejada con el `read` + `ingest` por defecto recibe
+`saving.md` y no `writing.md`, y se ahorra unos 1.400 tokens de instrucciones
+de escritura que de todos modos no podría ejecutar. Amplía la selección si
+preparas la skill para alguien con una clave más amplia — el bloque entonces
+nombra, en su propia primera línea, la capacidad que requiere. La consola
+muestra lo que cuesta el núcleo mientras eliges, porque ese es el número que
+paga cada sesión cuando la skill se activa.
 
-- **"Recall before you answer"** (recuerda antes de responder) para
-  cualquier pregunta que el bosque pudiera responder, primero recordar y
-  después razonar: `answer` cuando la respuesta del bosque *es* la
-  respuesta; `harvest` cuando el agente va a razonar él mismo sobre el
-  material; `locate` → `look` → `pick` para navegar; `sniff` para texto
-  literal dentro de los cuerpos; `query` para datasets, si la clave lleva
-  `query` después de un `look`, porque las `notes` de un dataset dicen
-  qué significan las columnas. Y: citar ids de nodo para todo lo afirmado a
-  partir del bosque.
-- **"Save what is worth keeping"** (guarda lo que vale la pena conservar) —
-  cuando el usuario dice algo durable (una decisión, un hecho, una
-  preferencia, una corrección), ofrecerse a guardarlo, con la escritura que
-  la clave realmente permite: `ingest` un documento markdown a través del
-  Gardener es la escritura que una clave emparejada lleva por defecto;
-  `plant` y `graft` se enseñan solo para claves que llevan `write`.
-  Escribir en inglés y mantener honesto el resumen el resumen es cómo se
-  encontrará la nota.
-- **"Respect the contract"** (respeta el contrato) la clave decide lo que
-  el agente ve y lo que puede escribir; nunca rodear un rechazo decir qué
-  fue rechazado y qué capacidad necesita. Toda lectura tiene presupuesto, y
-  `truncated: true` significa preguntar más estrecho, no reintentar más
-  fuerte. Los datasets cambian a través de `tend` solo donde la clave lo
-  lleva, una sentencia a la vez, nunca DDL.
+Si tu runtime no acepta carpetas, **Un archivo** incorpora los mismos bloques
+en un solo `SKILL.md`. Las instrucciones son las mismas; lo que cambia es que
+todas se cargan cada vez.
 
-> **Nota** el cuerpo del archivo de la skill está en inglés sin importar
-> el idioma de la consola, a propósito: le habla al modelo, no a ti. El
-> recorrido a su alrededor se traduce como cualquier otra parte de la
-> consola.
+### Para qué bosques sirve
+
+Elige uno o varios. Una skill para dos bosques es mejor que instalar dos que
+saben cada una la mitad de lo que el agente necesita — y cuando eliges más de
+uno, el archivo lleva una tabla de enrutamiento (qué bosque tiene qué, leída de
+`coverage` al generarlo) para que el agente no tenga que buscar en todos para
+averiguarlo.
+
+Lo que el archivo graba es *intención*, no permiso. Enseña `forests()` como la
+primerísima llamada, porque es el único lugar donde tus capacidades, tus raíces
+y la versión de esta Station son verdad en el momento en que el agente las usa.
+Un bosque cuyo permiso caduca simplemente deja de aparecer, y la skill dice con
+todas las letras que eso es una clave estrechada — no algo que reportar o
+sortear.
+
+### Mantenerla al día
+
+La Station estampa su propia versión en el archivo, y la skill enseña al
+agente a compararla con lo que responde `forests()`. Cuando la Station es más
+nueva, el agente lo dice y te entrega el enlace que reconstruye *esta* skill:
+mismos bosques, mismos bloques, mismo formato. Ese enlace es sencillamente la
+dirección de esta consola, y por eso las decisiones que tomas aquí aparecen en
+la URL: guárdalo en marcadores y toda la actualización es una visita y un
+pegado.
+
+El agente nunca instala la skill por su cuenta, y es deliberado. Lo que recibe
+por MCP — las tools, las instrucciones — solo le llega mientras está conectado
+a esta Station. Un archivo en su carpeta de skills sigue instruyéndolo en cada
+sesión posterior, incluidas aquellas en las que esta Station no participa. Lo
+que sobrevive a la conexión lo decides tú.
+
+### Lo que enseña el núcleo
+
+- **Toda llamada nombra el bosque** — el bosque es el primer argumento de toda
+  tool de este servidor, y el archivo lo escribe así en cada ejemplo.
+- **Consulta antes de responder** — `answer` cuando la respuesta del bosque
+  *es* la respuesta; `harvest` cuando el agente razonará sobre el material;
+  `locate` → `look` → `pick` para navegar; `sniff` para texto literal dentro de
+  los cuerpos; `coverage` para lo que el bosque realmente tiene. Y: cita los
+  ids de los nodos para todo lo que afirmes desde el bosque.
+- **Un resultado vacío no es un bosque vacío** — `locate` lee metadatos
+  curados y nunca cuerpos, así que un término que nadie llevó a un resumen lo
+  encuentra `sniff` y nada más; y antes de confiar en cualquier silencio,
+  pregúntale a `coverage` qué material hay.
+- **Respeta el contrato** — la clave decide qué ve el agente y qué puede
+  escribir; nunca sortees un rechazo — di qué fue rechazado y qué capacidad
+  hace falta. Toda lectura tiene presupuesto, y `truncated: true` significa
+  preguntar más estrecho, no reintentar con más fuerza.
+
+> **Nota** — el cuerpo de la skill está en inglés independientemente del idioma
+> de la consola, a propósito: se dirige al modelo, no a ti. El recorrido a su
+> alrededor se traduce como cualquier otra parte de la consola.
 
 ## Las tools MCP
 

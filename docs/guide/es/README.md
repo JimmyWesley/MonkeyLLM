@@ -79,8 +79,8 @@ Lee [Conectar tu IA](./connecting-ai.md). La consola puede preguntar,
 navegar e ingerir por sí sola, pero el bosque está hecho para ser leído y
 alimentado por tus propios agentes un bosque tocado únicamente a través
 de la ventana es un cerebro que nadie está cultivando. Esa página te lleva
-hasta el final en tres pasos: empareja una clave que sea tuya (solo puede
+hasta el final en cuatro pasos: empareja una clave que sea tuya (solo puede
 estrechar tu acceso, nunca ampliarlo), registra la Station como servidor
-MCP y entrega a tu agente el archivo de skill que el Studio genera para
-este despliegue exacto. Todas las demás páginas profundizan lo que esa
+MCP, dimensiona la skill para el agente que estás montando y entrégale los
+archivos que el Studio genera para este despliegue exacto. Todas las demás páginas profundizan lo que esa
 empieza.

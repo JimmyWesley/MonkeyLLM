@@ -110,52 +110,98 @@ knowing on the first call:
 
 A connected agent knows the tools exist; it does not yet have the *habit* of
 using them. The Skills console closes that gap. A skill is a small instruction
-file an agent runtime loads, and this one teaches your agent to treat the open
-forest as its memory: recall from it before answering, save what is worth
-keeping, cite the node ids it read.
+file an agent runtime loads, and this one teaches your agent to treat the
+forests you choose as its memory: recall from them before answering, save what
+is worth keeping, cite the node ids it read.
 
 ![The Skills console, generating the memory skill for this Station and forest](../assets/skills.png)
 
-The console walks you through the same three steps as this page pair a key,
-point Claude Code at the Station, hand it the file and every snippet on it
-already carries the Station's address and the open forest's name. The skill is
-generated in your browser, for that exact deployment; the Station gains no
-endpoint for it. It is available to anyone whose key can `read` the forest —
-never admin-gated, because pairing made the credential self-service and
-learning to connect must be too.
+The console walks you through the same steps as this page — pair a key, point
+Claude Code at the Station, size the skill, hand it the files — and every
+snippet on it already carries the Station's address and the forests you picked.
+The skill is generated in your browser, for that exact deployment; the Station
+gains no endpoint for it. It is available to anyone whose key can `read` the
+forest — never admin-gated, because pairing made the credential self-service
+and learning to connect must be too.
 
-For Claude Code, the file installs at:
+### The skill is a folder, and you choose how much of it ships
+
+An agent loads a skill whole, so the console splits it: a core every agent
+needs, and reference files it reads only when it needs them.
 
 ```
-~/.claude/skills/monkeyllm-memory/SKILL.md
+~/.claude/skills/monkeyllm-memory/
+├── SKILL.md              recall, citation, refusals — the core
+└── references/
+    ├── saving.md         ingest one document (a paired key's default write)
+    ├── writing.md        plant, graft, prune, transplant, the anatomy of a node
+    ├── time.md           calendar and date windows
+    ├── datasets.md       notes, read-only SQL, single-statement DML
+    └── sharing.md        export and share links
 ```
 
-The file's own words are worth previewing, because they are the contract your
-agent will follow. Under the title **"This forest is your memory"**, it
-teaches three sections:
+The blocks start selected to match what your key can do in the forests you
+picked. A key paired with the default `read` + `ingest` gets `saving.md` and
+not `writing.md`, and is spared some 1,400 tokens of writing instructions it
+could not have executed anyway. Widen the selection if you are preparing the
+skill for somebody whose key is wider — the block then names the capability it
+requires in its own first line. The console prints what the core costs as you
+choose, because that is the number every session pays when the skill fires.
 
-- **Recall before you answer** for any question the forest could answer,
-  recall first and reason after: `answer` when the forest's answer *is* the
+If your runtime takes no folder, **One file** inlines the same blocks into a
+single `SKILL.md`. The instructions are the same ones; what changes is that
+all of them load every time.
+
+### Which forests it is for
+
+Pick one forest or several. One skill for two forests beats installing two
+that each know half of what the agent needs — and when you pick more than one,
+the file carries a routing table (which forest holds what, read from
+`coverage` as the file is generated) so the agent does not have to search all
+of them to find out.
+
+What the file bakes in is *intent*, not permission. It teaches `forests()` as
+the very first call, because that is the only place your capabilities, your
+roots and this Station's version are true at the moment the agent uses them. A
+forest whose grant later lapses simply stops being listed, and the skill says
+plainly that this is a narrowed key — not something to report or work around.
+
+### Keeping it current
+
+The Station stamps its version into the file, and the skill teaches the agent
+to compare it against what `forests()` reports. When the Station is newer, the
+agent says so and hands you the link that rebuilds *this* skill — same forests,
+same blocks, same assembly. That link is simply this console's address, which
+is why the choices you make here appear in the URL: bookmark it, and the whole
+update is one visit and one paste.
+
+The agent never installs the skill itself, and that is deliberate. What it gets
+over MCP — the tools, the instructions — reaches it only while it is connected
+to this Station. A file in its skills folder keeps instructing it in every
+session afterwards, including sessions this Station is not part of. What
+outlives the connection is yours to decide.
+
+### What the core teaches
+
+- **Every call names the forest** — the forest is the first argument of every
+  tool on this server, and the file writes it that way in every example.
+- **Recall before you answer** — `answer` when the forest's answer *is* the
   answer; `harvest` when the agent will reason over the material itself;
   `locate` → `look` → `pick` to navigate; `sniff` for literal text inside
-  bodies; `query` for datasets, if the key carries `query` after a `look`,
-  because a dataset's `notes` say what the columns mean. And: cite node ids
+  bodies; `coverage` for what the forest actually holds. And: cite node ids
   for anything asserted from the forest.
-- **Save what is worth keeping** when the user states something durable (a
-  decision, a fact, a preference, a correction), offer to keep it, with the
-  write the key actually allows: `ingest` one markdown document through
-  the Gardener is the write a paired key carries by default; `plant` and
-  `graft` are taught only for keys that carry `write`. Write in English and
-  keep the summary honest the summary is how the note will be found.
-- **Respect the contract** the key decides what the agent sees and what it
-  may write; never work around a refusal say what was refused and which
+- **An empty result is not an empty forest** — `locate` reads curated
+  metadata and never bodies, so a term nobody lifted into a summary is found
+  by `sniff` and by nothing else; and before trusting any silence, ask
+  `coverage` what the material even is.
+- **Respect the contract** — the key decides what the agent sees and what it
+  may write; never work around a refusal — say what was refused and which
   capability it needs. Every read is budgeted, and `truncated: true` means
-  ask narrower, not retry harder. Datasets change through `tend` only where
-  the key carries it, one statement at a time, never DDL.
+  ask narrower, not retry harder.
 
-> **Note** the skill file's body is English regardless of the console
-> language, on purpose: it addresses the model, not you. The walkthrough
-> around it is translated like any other part of the console.
+> **Note** — the skill's body is English regardless of the console language,
+> on purpose: it addresses the model, not you. The walkthrough around it is
+> translated like any other part of the console.
 
 ## The MCP tools
 

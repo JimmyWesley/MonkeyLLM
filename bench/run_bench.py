@@ -45,20 +45,21 @@ def get_store(forest: Path, embedder) -> ChunkStore:
     out_dir = REPO / "bench" / "_artifacts" / forest.name
     store = ChunkStore.load(out_dir, embedder)
     if store is None:
-        print(f"construindo chunk store em {out_dir} ...")
+        print(f"building chunk store at {out_dir} ...")
         store = ChunkStore.build(forest, embedder, out_dir)
-        print(f"  {len(store)} chunks embedados com {embedder.model}")
+        print(f"  {len(store)} chunks embedded with {embedder.model}")
     return store
 
 
 def run_arm(arm: str, questions: list[dict], *, forest: Path, chat, store, embedder,
-            troop_n: int = 3, stop_policy: str = "first") -> list[dict]:
+            troop_n: int = 3, stop_policy: str = "first",
+            hybrid: bool = False) -> list[dict]:
     results = []
     for q in questions:
         print(f"\n== [{arm}] {q['id']}: {q['question'][:90]}")
         t0 = time.perf_counter()
         if arm == "monkey":
-            r = run_question(forest, chat, q, embedder=embedder)
+            r = run_question(forest, chat, q, embedder=embedder, hybrid=hybrid)
         elif arm == "troop":
             from troop import hunt_troop
 
@@ -106,6 +107,9 @@ def main() -> int:
                          "bound (uses fork_width metadata); patience = deployable "
                          "equivalent (stop when harvests dry up)")
     ap.add_argument("--only", help="run a single question id")
+    ap.add_argument("--hybrid", action="store_true",
+                    help="fuse vector search into the monkey arm's locate (RRF) — "
+                         "needs a built Canopy index; the engine default is BM25-only")
     args = ap.parse_args()
 
     forest = Path(args.forest).resolve()
@@ -116,7 +120,7 @@ def main() -> int:
 
     embedder = embedder_from_env()
     if embedder is None and ({"topk", "iter"} & set(arms)):
-        raise SystemExit("os baselines precisam de MONKEYLLM_EMBED_ENDPOINT (mesmo embedder do MonkeyLLM).")
+        raise SystemExit("the RAG baselines need MONKEYLLM_EMBED_ENDPOINT (the same embedder MonkeyLLM uses).")
     chat, model = make_llm()
     print(f"model: {model}  |  arms: {arms}  |  {len(questions)} questions")
 
@@ -133,7 +137,7 @@ def main() -> int:
     for arm in arms:
         all_results[arm] = run_arm(arm, questions, forest=forest, chat=chat,
                                    store=store, embedder=embedder, troop_n=args.troop_n,
-                                   stop_policy=args.stop_policy)
+                                   stop_policy=args.stop_policy, hybrid=args.hybrid)
         # incremental save: a crash in a later arm never loses finished arms
         out.write_text(json.dumps({"results": all_results}, ensure_ascii=False, indent=2),
                        encoding="utf-8")
