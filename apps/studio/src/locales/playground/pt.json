@@ -16,6 +16,7 @@
   "playground.move": "move as trilhas de um nó",
   "playground.node": "Id do nó",
   "playground.nodes": "{n} nós",
+  "playground.one_call": "Uma chamada ao motor: o número de Floresta é o relógio dela — o mesmo que o console de perguntas mostra por etapa.",
   "playground.op": "Chamada",
   "playground.query": "Consulta",
   "playground.rate": "Neste ritmo o motor faz ~{n} requests por segundo numa thread.",
@@ -25,5 +26,6 @@
   "playground.sub": "As mesmas chamadas que um agente faz, com os mesmos orçamentos. Nada aqui é simulação.",
   "playground.terms": "Termos",
   "playground.terms_hint": "Palavras literais separadas por vírgula. Sem expressões regulares.",
-  "playground.title": "Playground"
+  "playground.title": "Playground",
+  "playground.trace_sub": "O número de Floresta acima é a soma destas chamadas."
 }

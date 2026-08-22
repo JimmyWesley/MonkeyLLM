@@ -13,7 +13,7 @@ import {
   Ask, Compass, Download, Eye, Files, Play, Playground as Beaker, Search,
 } from '../design/icons.jsx'
 import {
-  Metric, NeedsCapability, fmtMs, has, rootsOf, useForestTree,
+  Metric, NeedsCapability, Row, TraceSteps, fmtMs, has, rootsOf, useForestTree,
 } from './shared.jsx'
 
 /* The budgets are the engine's, restated here only so the number an operator
@@ -224,48 +224,76 @@ export default function Playground({ forest, grant }) {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-        <Card title={t('common.response')}
-              /* No round-trip badge once the host reports its own clock: it
-                 was the largest number on the panel and the one that says
-                 least about the product. It moves to the aside, named. */
-              actions={state.ms != null && !state.timing
-                && <Badge>{t('common.elapsed', { ms: Math.round(state.ms) })}</Badge>}>
-          {state.busy ? <Spinner label={t('common.working')} />
-            : state.error ? <ErrorNote error={state.error} />
-            : state.data ? (
-            <>
-              {/* The headline is the engine, never the round trip (J.10.6).
-                  A Station reached over the internet answers a 0.2 ms
-                  `locate` in ~30 ms of wall clock, and a panel that printed
-                  the 30 was describing somebody's network while claiming to
-                  describe the call. Without the header there is no engine
-                  figure to lead with, so the old number stays — under its
-                  own, honest name. */}
-              <div className={`mb-3 grid grid-cols-2 gap-2 ${
-                haystack ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
-                <Metric tone="accent"
-                        label={t(state.timing ? 'playground.engine' : 'playground.latency')}
-                        value={fmtMs(state.timing ? state.timing.vine : state.ms)} />
-                {/* Not a rate: a rate off one sample swung twentyfold
-                    between clicks, and it was read as seconds. This is the
-                    haystack, it is the same number every time, and it is
-                    what the reader is actually judging. `look`/`move` are
-                    handed their node, so there is no haystack to report and
-                    the tile is not there rather than empty. */}
-                {haystack && <Metric label={t('playground.corpus')}
-                                     value={t('playground.nodes', { n: haystack })} />}
-                <Metric label={t('playground.returned')} value={rows ?? '—'} />
-                <Metric label={t('playground.budget')} value={spec.budget ?? '—'} />
-              </div>
-              {state.timing && <Aside timing={state.timing} wall={state.ms}
-                                      bytes={bytes} rate={rate} />}
-              {state.data.truncated && <Note tone="warn">{t('common.truncated')}</Note>}
-              <div className="mt-3">
-                <Code max="26rem" lang="json">{JSON.stringify(state.data, null, 2)}</Code>
-              </div>
-            </>
-          ) : <Empty icon={Beaker}>{t('playground.empty')}</Empty>}
-        </Card>
+        <div className="min-w-0 space-y-4">
+          <Card title={t('common.response')}
+                /* No round-trip badge once the host reports its own clock: it
+                   was the largest number on the panel and the one that says
+                   least about the product. It moves to the aside, named. */
+                actions={state.ms != null && !state.timing
+                  && <Badge>{t('common.elapsed', { ms: Math.round(state.ms) })}</Badge>}>
+            {state.busy ? <Spinner label={t('common.working')} />
+              : state.error ? <ErrorNote error={state.error} />
+              : state.data ? (
+              <>
+                {/* The headline is the engine, never the round trip (J.10.6).
+                    A Station reached over the internet answers a 0.2 ms
+                    `locate` in ~30 ms of wall clock, and a panel that printed
+                    the 30 was describing somebody's network while claiming to
+                    describe the call. Without the header there is no engine
+                    figure to lead with, so the old number stays — under its
+                    own, honest name. */}
+                <div className={`mb-3 grid grid-cols-2 gap-2 ${
+                  haystack ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+                  <Metric tone="accent"
+                          label={t(state.timing ? 'playground.engine' : 'playground.latency')}
+                          value={fmtMs(state.timing ? state.timing.vine : state.ms)} />
+                  {/* Not a rate: a rate off one sample swung twentyfold
+                      between clicks, and it was read as seconds. This is the
+                      haystack, it is the same number every time, and it is
+                      what the reader is actually judging. `look`/`move` are
+                      handed their node, so there is no haystack to report and
+                      the tile is not there rather than empty. */}
+                  {haystack && <Metric label={t('playground.corpus')}
+                                       value={t('playground.nodes', { n: haystack })} />}
+                  <Metric label={t('playground.returned')} value={rows ?? '—'} />
+                  <Metric label={t('playground.budget')} value={spec.budget ?? '—'} />
+                </div>
+                {state.timing && <Aside timing={state.timing} wall={state.ms}
+                                        bytes={bytes} rate={rate} />}
+                {/* J.10.4/J.10.6: the tile above is one number, and for a
+                    composite it is a SUM. Said here rather than left to be
+                    inferred — a `harvest` reads as a slow `locate` until
+                    somebody sees that it was a locate, four sniffs and a
+                    pick, most of them under a millisecond. A single primitive
+                    has no trace to show, so it gets the other half of the
+                    same sentence: that figure IS its own clock. */}
+                {state.timing && !state.data.trace?.steps?.length && (
+                  <p className="mb-3 text-[11px] leading-relaxed text-text-3">
+                    {t('playground.one_call')}
+                  </p>
+                )}
+                {state.data.truncated && <Note tone="warn">{t('common.truncated')}</Note>}
+                <div className="mt-3">
+                  <Code max="26rem" lang="json">{JSON.stringify(state.data, null, 2)}</Code>
+                </div>
+              </>
+            ) : <Empty icon={Beaker}>{t('playground.empty')}</Empty>}
+          </Card>
+
+          {/* The same trace the Ask console renders (J.10.4), read from the
+              same field — not a Playground rendering of it, or the two panels
+              would drift into two accounts of one measurement. It appears
+              only where the host attaches one: `harvest` and `answer` are
+              several forest calls, the other primitives are exactly one. */}
+          {state.data?.trace?.steps?.length > 0 && (
+            <Card title={t('explain.title')} subtitle={t('playground.trace_sub')}>
+              <TraceSteps steps={state.data.trace.steps} />
+              <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[11.5px]">
+                <Row label={t('explain.steps')} value={state.data.trace.steps.length} />
+              </dl>
+            </Card>
+          )}
+        </div>
 
         <div className="min-w-0 space-y-4">
           <Card title={t('common.request')}>

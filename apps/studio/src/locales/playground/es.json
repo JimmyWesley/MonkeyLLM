@@ -16,6 +16,7 @@
   "playground.move": "move los senderos de un nodo",
   "playground.node": "Id del nodo",
   "playground.nodes": "{n} nodos",
+  "playground.one_call": "Una llamada al motor: la cifra de Bosque es su propio reloj — el mismo que la consola de preguntas muestra por paso.",
   "playground.op": "Llamada",
   "playground.query": "Consulta",
   "playground.rate": "A este ritmo el motor hace ~{n} peticiones por segundo en un hilo.",
@@ -25,5 +26,6 @@
   "playground.sub": "Las mismas llamadas que hace un agente, con los mismos presupuestos. Nada aquí es una simulación.",
   "playground.terms": "Términos",
   "playground.terms_hint": "Palabras literales separadas por comas. Sin expresiones regulares.",
-  "playground.title": "Playground"
+  "playground.title": "Playground",
+  "playground.trace_sub": "La cifra de Bosque de arriba es la suma de estas llamadas."
 }
