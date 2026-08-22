@@ -212,15 +212,23 @@ class TestIngestAliases:
     def test_the_declared_map_derives_both_spellings(self, tmp_path):
         vine = _adopted(tmp_path, with_map=True)
         node = vine.forest.read("targets/291-budget")
-        assert node.frontmatter["aliases"] == ["BE-291", "targets/291"]
+        # v0.59 (G.2.6 rule 2) added the bare number: it is how a document
+        # is referred to inside its own folder, and it is free.
+        assert node.frontmatter["aliases"] == ["BE-291", "targets/291", "291"]
         hits = vine.locate("BE-291", k=3)["results"]
         assert hits and hits[0]["id"] == "targets/291-budget"
         vine.close()
 
-    def test_no_map_no_aliases(self, tmp_path):
+    def test_without_a_map_the_source_still_names_itself(self, tmp_path):
+        """G.2.6 rule 1 (v0.59): the boundary is not "no map, no aliases" —
+        it is who knows the name. `targets` is a single word, so no letter
+        prefix is invented from it; the number and the path form are what
+        the source itself states."""
         vine = _adopted(tmp_path, with_map=False)
         node = vine.forest.read("targets/291-budget")
-        assert "aliases" not in node.frontmatter
+        assert node.frontmatter["aliases"] == ["targets/291", "291"]
+        assert vine.locate("targets/291", k=3)["results"]
+        # The convention `targets` means `BE` is the operator's to declare.
         assert not vine.locate("BE-291", k=3)["results"]
         vine.close()
 
@@ -235,7 +243,9 @@ class TestIngestAliases:
         report = Gardener(vine, hooks=[]).sync()
         assert "targets/291-budget" in report["updated"]
         node = vine.forest.read("targets/291-budget")
-        assert node.frontmatter["aliases"] == ["BE-291", "targets/291"]
+        # Union, in the order the two passes ran: the derived forms landed
+        # at adopt, the declared prefix joins them now.
+        assert node.frontmatter["aliases"] == ["targets/291", "291", "BE-291"]
         assert vine.locate("BE-291", k=3)["results"]
         # A second sync has nothing to add: unchanged again, not rewritten.
         again = Gardener(vine, hooks=[]).sync()
@@ -246,13 +256,13 @@ class TestIngestAliases:
         vine = _adopted(tmp_path, with_map=True)
         # Somebody curated their own name onto the node…
         vine.graft("targets/291-budget", {
-            "set_frontmatter": {"aliases": ["BE-291", "targets/291",
+            "set_frontmatter": {"aliases": ["BE-291", "targets/291", "291",
                                             "the-budget-task"]}})
         report = Gardener(vine, hooks=[]).sync()
         assert report["aliases_clipped"] == 0
         node = vine.forest.read("targets/291-budget")
         # …and the refresh left it exactly where they put it.
-        assert node.frontmatter["aliases"] == ["BE-291", "targets/291",
+        assert node.frontmatter["aliases"] == ["BE-291", "targets/291", "291",
                                                "the-budget-task"]
         vine.close()
 

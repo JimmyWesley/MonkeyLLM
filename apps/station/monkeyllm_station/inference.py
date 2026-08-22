@@ -293,8 +293,14 @@ def answer(scoped_vine, question: str, binding: dict, k: int = 3,
         "usage": _usage_of(chat),
         **reply_flags(chat),
         "evidence": [r.get("id") for r in bundle.get("results", [])],
+        # J.10.4 (v0.59): a citation carries its scope. The sweep already
+        # computed each item's trail; the block a console renders and an
+        # agent summarises was the one place it did not reach, so an answer
+        # about the wrong product of a multi-product forest cited a real
+        # document, correctly, and read as authoritative.
         "sources": [{"id": r.get("id"), "title": r.get("title"),
-                     "summary": r.get("summary"), "type": r.get("type")}
+                     "summary": r.get("summary"), "type": r.get("type"),
+                     **({"trail": r["trail"]} if r.get("trail") else {})}
                     for r in bundle.get("results", [])],
         "harvest": bundle,
     }
@@ -446,7 +452,12 @@ def _identify(known: dict, result) -> None:
         if isinstance(node_id, str) and (result.get("title") or result.get("summary")):
             known.setdefault(node_id, {
                 "id": node_id, "title": result.get("title"),
-                "summary": result.get("summary"), "type": result.get("type")})
+                "summary": result.get("summary"), "type": result.get("type"),
+                # J.10.5 (v0.59): the walk assembles the same citation block
+                # hop by hop, so the trail rides here too — from material
+                # already fetched, never with an extra call. Absent rather
+                # than invented when a hop produced a node without one.
+                **({"trail": result["trail"]} if result.get("trail") else {})})
         for value in result.values():
             if isinstance(value, (dict, list)):
                 _identify(known, value)

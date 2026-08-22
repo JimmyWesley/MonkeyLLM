@@ -190,12 +190,16 @@ o resto é guardado como mostrado.
 | `scan` | `read` | Filtra os nós de um galho por metadados. |
 | `sniff` | `read` | Busca literal dentro dos corpos os fatos que os resumos não carregam. |
 | `calendar` | `read` | Onde o material da floresta está no tempo: quantos nós cada período guarda, do mais recente para trás. |
+| `coverage` | `read` | O que a floresta guarda: suas raízes, o tamanho de cada uma, de onde veio aquele material e quando. |
+| `history` | `read` | O que aconteceu com um nó e quem fez cada commit, do mais recente para trás. |
 | `harvest` | `read` | Recuperação de um golpe só: evidência ordenada com trechos exatos, sem saltos. |
 | `answer` | `read` | Uma resposta fundamentada escrita pelo modelo ligado à floresta, com a sua evidência. |
 | `view` | `read` | O payload de imagem de um nó media, como conteúdo de imagem que um cliente multimodal lê para o próprio contexto. |
 | `query` | `query` | SQL somente leitura contra um nó de dataset. |
 | `plant` | `write` | Cria um nó. |
 | `graft` | `write` | Edita um nó. |
+| `prune` | `write` | Remove um nó; com `force` também tira os links que apontam para ele. |
+| `transplant` | `write` | Move um nó para um novo endereço e deixa o id antigo como marco. |
 | `tend` | `tend` | Escrita de dataset em uma instrução única. |
 | `ingest` | `ingest` | Coloca documentos dentro da floresta através do Gardener. |
 
@@ -323,7 +327,7 @@ orçamento de tokens declarado, e um resultado cortado sempre diz
 |---|---|
 | `look` | 500 |
 | `move` | 600 |
-| `locate`, `scan`, `sniff`, `calendar` | 800 cada |
+| `locate`, `scan`, `sniff`, `calendar`, `coverage`, `history` | 800 cada |
 | `query` | 2000 |
 | `pick`, `harvest` | 4000 |
 

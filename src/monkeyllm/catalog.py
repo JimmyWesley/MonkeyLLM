@@ -216,6 +216,55 @@ class Catalog:
             sql += " WHERE " + " AND ".join(c.format(n="") for c in where)
         return [r[0] for r in self.conn.execute(sql, params or []).fetchall()]
 
+    def group_counts(self, column: str, where: list[str] | None = None,
+                     params: list | None = None) -> dict[str, int]:
+        """`{value: count}` over one column, grouped by SQLite (C.17 rule 1).
+
+        The counting happens in C, so a forest of forty thousand nodes
+        answers with as many rows as it has distinct values. Empty and NULL
+        are omitted rather than bucketed under a made-up name: a column with
+        no value is not a category.
+        """
+        if column not in ("type", "source", "kind", "entity_kind", "payload_type"):
+            raise ValueError(f"not a groupable column: {column}")
+        clauses = [f"{column} IS NOT NULL", f"{column} != ''"]
+        clauses += [c.format(n="") for c in (where or [])]
+        return {row[0]: int(row[1]) for row in self.conn.execute(
+            f"SELECT {column}, count(*) FROM nodes WHERE "
+            + " AND ".join(clauses) + f" GROUP BY {column} ORDER BY count(*) DESC",
+            params or []).fetchall()}
+
+    def subtree_stats(self, field: str, where: list[str],
+                      params: list | None = None) -> dict:
+        """One root's shape, in ONE statement (C.17 rules 1, 3 and 4).
+
+        Everything `coverage` reports about a root comes back from a single
+        aggregate: how many nodes, how many of them branches, the dates it
+        spans, and — the interesting one — the two extremes of `origin`.
+
+        The longest common prefix of a set of strings is the longest common
+        prefix of its lexicographic minimum and maximum, so `min`/`max`
+        answer "where did this material come from" without reading a single
+        origin into Python. `without_origin` is counted in the same pass,
+        because a root where one node in ten knows its source is not a root
+        with an origin (rule 5).
+        """
+        if field not in ("created", "updated"):
+            raise ValueError(f"not a date column: {field}")
+        clauses = [c.format(n="") for c in where]
+        row = self.conn.execute(
+            "SELECT count(*), "
+            "sum(CASE WHEN kind = 'branch' THEN 1 ELSE 0 END), "
+            f"min(NULLIF({field}, '')), max(NULLIF({field}, '')), "
+            "min(NULLIF(origin, '')), max(NULLIF(origin, '')), "
+            "sum(CASE WHEN origin IS NULL OR origin = '' THEN 1 ELSE 0 END) "
+            "FROM nodes WHERE " + " AND ".join(clauses),
+            params or []).fetchone()
+        return {"nodes": int(row[0] or 0), "branches": int(row[1] or 0),
+                "first": row[2], "last": row[3],
+                "origin_min": row[4], "origin_max": row[5],
+                "without_origin": int(row[6] or 0)}
+
     def date_buckets(self, field: str, granularity: str,
                      where: list[str] | None = None,
                      params: list | None = None) -> list[tuple]:
@@ -253,24 +302,68 @@ class Catalog:
 
     # -- the memoized scan (C.6b.1) -----------------------------------------
 
-    def sniff_memo(self, term: str, where: list[str],
-                   params: list) -> dict[str, str]:
-        """Valid entries for one folded term: `{node_id: lines_json}`.
+    def sniff_memo_matches(self, term: str, where: list[str],
+                           params: list) -> dict[str, str]:
+        """The memo's MATCHING lines for one folded term (C.6b.1, v0.59).
 
-        Validity is the join condition, not a later check: an entry whose
-        `body_hash` no longer equals the node's simply does not come back,
-        and neither does one for a node the caller's scope excludes. An
-        empty hash matches nothing on either side (C.6.1).
+        Until v0.59 the memo handed back a row per node in scope — on a
+        two-thousand node forest that is two thousand rows of text out of
+        SQLite on every read, to discover that ~95% of them are the empty
+        marker. The empty
+        rows still have to exist (the negative is what stops the rescan),
+        but nothing has to carry them into Python: what the caller needs
+        from them is the FACT of coverage, which `sniff_memo_uncovered`
+        answers by naming the handful that lack it instead.
         """
         sql = ("SELECT m.node_id, m.lines FROM sniff_memo m "
                "JOIN nodes n ON n.id = m.node_id "
                "AND n.body_hash = m.body_hash AND n.body_hash != '' "
-               "WHERE m.term = ?")
+               "WHERE m.term = ? AND m.lines != '[]'")
         clauses = [c.format(n="n.") for c in where]
         if clauses:
             sql += " AND " + " AND ".join(clauses)
-        rows = self.conn.execute(sql, [term, *params]).fetchall()
-        return {r["node_id"]: r["lines"] for r in rows}
+        return {r["node_id"]: r["lines"]
+                for r in self.conn.execute(sql, [term, *params]).fetchall()}
+
+    def sniff_memo_uncovered(self, term: str, where: list[str],
+                             params: list) -> set[str]:
+        """Nodes in scope this term was never scanned against, or was
+        scanned against under a body that has since changed (C.6b.1).
+
+        The complement of coverage, which is the cheap half to ask for: on
+        a warm forest it is empty, and an empty answer is what makes the
+        rest of the read proportional to the matches instead of to the
+        corpus. Nodes with no `body_hash` are here too — the memo cannot
+        cover them (C.6b.1's last rule), so they are scanned every time.
+        """
+        sql = ("SELECT n.id FROM nodes n WHERE (n.body_hash = '' "
+               "OR n.body_hash IS NULL OR NOT EXISTS ("
+               "SELECT 1 FROM sniff_memo m WHERE m.term = ? "
+               "AND m.node_id = n.id AND m.body_hash = n.body_hash))")
+        clauses = [c.format(n="n.") for c in where]
+        if clauses:
+            sql += " AND " + " AND ".join(clauses)
+        return {r[0] for r in self.conn.execute(sql, [term, *params]).fetchall()}
+
+    def rows_by_id(self, ids: list[str], where: list[str],
+                   params: list) -> list:
+        """The catalog rows for a named set, in id order (C.6b.1, v0.59).
+
+        `SELECT *` over a whole forest to use five rows of it is the other
+        half of the O(corpus) cost the memo was supposed to remove.
+        """
+        if not ids:
+            return []
+        clauses = [c.format(n="") for c in where]
+        out = []
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            marks = ",".join("?" * len(chunk))
+            sql = f"SELECT * FROM nodes WHERE id IN ({marks})"
+            if clauses:
+                sql += " AND " + " AND ".join(clauses)
+            out.extend(self.conn.execute(sql, [*chunk, *params]).fetchall())
+        return sorted(out, key=lambda r: r["id"])
 
     def sniff_memo_store(self, entries: list[tuple[str, str, str, str]]) -> None:
         """Record what a scan just learned: `(term, node_id, body_hash,

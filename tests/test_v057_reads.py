@@ -188,7 +188,14 @@ class TestDryRun:
             vine_rw.plant(fat)
         assert dry.value.code == wet.value.code == E_FRONTMATTER
         assert dry.value.message == wet.value.message
-        assert dry.value.to_dict() == wet.value.to_dict()
+        assert dry.value.hint == wet.value.hint
+        # C.7.3 rule 6 (v0.59): the rehearsal adds the full list and changes
+        # nothing else — a client reading the code sees what it always saw,
+        # and the real call still carries no list, because it stopped.
+        assert dry.value.to_dict()["error"]["errors"] == [
+            {"code": E_FRONTMATTER, "message": wet.value.message,
+             "hint": wet.value.hint}]
+        assert "errors" not in wet.value.to_dict()["error"]
 
     def test_the_parent_chain_is_rehearsed_too(self, vine_rw):
         node = dict(VALID_NODE, id="reports/monkeyllm/one",

@@ -370,7 +370,8 @@ def test_the_mcp_surface_serves_and_names_them(root, tmp_path, monkeypatch):
         assert r.status_code == 200, r.text
         names = {t["name"] for t in r.json()["result"]["tools"]}
         assert {"transplant", "history"} <= names
-        assert len(names) == 19, sorted(names)
+        # C.17 (v0.59) added `coverage`.
+        assert len(names) == 20, sorted(names)
 
         init = client.post("/mcp/", headers={**MCP_HEADERS, **head},
                            json={"jsonrpc": "2.0", "id": 2,

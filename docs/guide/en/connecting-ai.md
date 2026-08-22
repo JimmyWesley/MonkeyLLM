@@ -173,12 +173,16 @@ gated as shown.
 | `scan` | `read` | Filters a branch's nodes by metadata. |
 | `sniff` | `read` | Literal search inside bodies the facts summaries do not carry. |
 | `calendar` | `read` | Where the forest's material sits in time: how many nodes each period holds, most recent first. |
+| `coverage` | `read` | What the forest holds: its roots, how big each is, where that material came from and when. |
+| `history` | `read` | What happened to a node and who did it every commit, newest first. |
 | `harvest` | `read` | One-shot retrieval: ranked evidence with exact snippets, no hops. |
 | `answer` | `read` | A grounded answer written by the model bound to the forest, with its evidence. |
 | `view` | `read` | The image payload of a media node, as image content a multimodal client reads into its own context. |
 | `query` | `query` | Read-only SQL against a dataset node. |
 | `plant` | `write` | Creates a node. |
 | `graft` | `write` | Edits a node. |
+| `prune` | `write` | Removes one node; `force` also strips the links pointing at it. |
+| `transplant` | `write` | Moves one node to a new address and leaves the old id as a waymark. |
 | `tend` | `tend` | Single-statement dataset write. |
 | `ingest` | `ingest` | Puts documents into the forest through the Gardener. |
 
@@ -301,7 +305,7 @@ budget, and a cut result always says `truncated: true` never a silent cut:
 |---|---|
 | `look` | 500 |
 | `move` | 600 |
-| `locate`, `scan`, `sniff`, `calendar` | 800 each |
+| `locate`, `scan`, `sniff`, `calendar`, `coverage`, `history` | 800 each |
 | `query` | 2000 |
 | `pick`, `harvest` | 4000 |
 

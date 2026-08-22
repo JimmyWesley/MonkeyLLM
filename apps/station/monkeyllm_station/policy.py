@@ -168,6 +168,8 @@ REQUIRED_CAP = {
     "locate": "read", "look": "read", "move": "read", "pick": "read",
     "scan": "read", "sniff": "read", "harvest": "read", "view": "read",
     "calendar": "read",
+    # C.17 (v0.59): what the forest holds is a read like any other.
+    "coverage": "read",
     "query": "query", "tend": "tend", "plant": "write", "graft": "write",
     # C.14 (v0.56): prune rides the same write capability as plant/graft —
     # J.2.6's mask ceiling is a closed set, and a fourth token would
@@ -461,6 +463,23 @@ class ScopedVine:
                                    granularity=granularity, since=since,
                                    until=until, limit=limit,
                                    policy_where=self.policy.sql_scope())
+
+    def coverage(self, scope: str | None = None,
+                 date_field: str | None = None) -> dict:
+        if scope is not None:
+            self._gate(scope)
+        if self.policy.unrestricted:
+            return self._vine.coverage(scope=scope, date_field=date_field)
+        # C.17 rule 7 / J.3: under a policy every number is the policy's
+        # own. The roots are the principal's roots (the same list forests()
+        # publishes, so the two surfaces cannot disagree about where a
+        # session begins) and every aggregate carries the policy's prefixes
+        # as SQL — a global count here would describe the size and shape of
+        # a region nobody granted, which is a finer oracle than `locate`.
+        return self._vine.coverage(
+            scope=scope, date_field=date_field,
+            policy_where=self.policy.sql_scope(),
+            roots=(None if scope is not None else self.policy.roots()))
 
     def query(self, id: str, sql: str) -> dict:
         self._gate(id)

@@ -156,6 +156,8 @@ INSTRUCTIONS = (
     "a branch — pass after=\"\" and follow `next` to enumerate a whole "
     "forest; sniff(forest, terms) greps exact terms inside bodies; "
     "calendar(forest) maps where material sits in time; "
+    "coverage(forest) says what the forest holds — the roots, their sizes "
+    "and their sources — so a silence can be told from an absence; "
     "view(forest, id) shows the image behind a type:media node; "
     "history(forest, id) says what happened to a node and who did it; "
     "query(forest, id, sql) runs read-only SQL on type:dataset nodes. "
@@ -479,10 +481,34 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                           since=since, until=until, limit=limit)
 
     @mcp.tool()
+    async def coverage(forest: str, scope: str | None = None,
+                       date_field: str = "created"):
+        """What this forest actually holds: the roots you can start from,
+        how many nodes sit under each, where that material came from and
+        when it arrived. Read from metadata alone — it opens nothing.
+
+        Call it BEFORE trusting a silence. An empty result and a refusal
+        both mean "not in the material I searched", and this is the only
+        call that tells you what that material is. If the subject you were
+        asked about has no root here, say so and look elsewhere — a forest
+        answering faithfully from a partial corpus produces a citation, a
+        source and a wrong answer, which is the one failure that looks
+        exactly like a right one.
+
+        Each root carries `origin` (the source prefix `scan`'s
+        `origin_prefix` filter takes, so you can list what came from it
+        without composing anything) and `without_origin`, the count of its
+        nodes that declare no source at all. `scope` narrows everything to
+        one branch."""
+        return await call(forest, "coverage", scope=scope,
+                          date_field=date_field)
+
+    @mcp.tool()
     async def answer(forest: str, question: str, k: int = 3,
                      cache: bool = True,
                      reply_tokens: int | None = None,
                      min_evidence: int = 0,
+                     min_score: float = 0.0,
                      since: str | None = None,
                      until: str | None = None,
                      date_field: str | None = None,
@@ -500,7 +526,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         the reply is `answer: null` with `reason: "insufficient_evidence"`
         and the retrieval attached — nothing is billed. Use it when you
         would rather see the evidence than a confident paragraph over two
-        weak snippets.
+        weak snippets. `min_score` is the other half of that floor: an item
+        counts as evidence only if its retrieval score reaches it, so a
+        handful of barely-related snippets no longer satisfies
+        `min_evidence`. The score is a rank artifact (~0.016 means "top of
+        one retriever", ~0.033 "top of both"), comparable inside this
+        deployment and meaningless outside it — read a few answers'
+        `harvest` scores before choosing a number.
         `since`/`until` bound the retrieval to a period, exactly as they do
         on `locate` — ask `calendar` which periods hold anything first.
         A document a live node `supersedes` is left out of the material by
@@ -513,6 +545,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                              if reply_tokens is not None else {}),
                           **({"min_evidence": min_evidence}
                              if min_evidence else {}),
+                          **({"min_score": min_score}
+                             if min_score else {}),
                           **({"include_superseded": True}
                              if include_superseded else {}))
 

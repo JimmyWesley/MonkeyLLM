@@ -31,6 +31,9 @@ _CHECKS = {
     "string": lambda v: isinstance(v, str),
     "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
     "boolean": lambda v: isinstance(v, bool),
+    # J.10.10 (v0.59): a score threshold. An int is a number; a bool is not
+    # — the C.12 rule that a value is never coerced applies here too.
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
     # J.10.5: `hops: true` means "the budget you would have picked", a
     # number sets it — one parameter, two spellings, both meant.
     "boolean|integer": lambda v: isinstance(v, bool) or isinstance(v, int),
@@ -129,6 +132,11 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "until": _param("string"),
         "limit": _param("integer"),
     },
+    "coverage": {
+        # C.17 (v0.59): what the forest holds, from the catalog alone.
+        "scope": _param("string"),
+        "date_field": _param("string"),
+    },
     "query": {
         "id": _param("string", required=True),
         "sql": _param("string", required=True),
@@ -187,6 +195,8 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "cache": _param("boolean"),
         "reply_tokens": _param("integer"),
         "min_evidence": _param("integer"),
+        # J.10.10 (v0.59): the floor that counts evidence, not items.
+        "min_score": _param("number"),
         "include_superseded": _param("boolean"),
         "hops": _param("boolean|integer"),
         "since": _param("string"),

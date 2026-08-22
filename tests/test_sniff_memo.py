@@ -124,9 +124,10 @@ def test_scoped_scan_feeds_a_later_global_one(vine_ro):
     assert vine_ro.catalog.conn.execute(
         "SELECT count(*) c FROM sniff_memo WHERE node_id = ?",
         (target,)).fetchone()["c"] == 1
-    # The global call reuses it rather than rescanning that node.
-    stored = vine_ro.catalog.sniff_memo("experiment", [], [])
-    assert target in stored
+    # The global call reuses it rather than rescanning that node: what a
+    # read asks the memo is which nodes it does NOT cover (C.6b.1, v0.59).
+    assert target not in vine_ro.catalog.sniff_memo_uncovered(
+        "experiment", [], [])
 
 
 def test_foreign_bodies_are_never_memoized(vine_rw):

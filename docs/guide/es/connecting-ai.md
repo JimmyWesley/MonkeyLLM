@@ -191,12 +191,16 @@ todo lo demás está detrás de la puerta que se indica.
 | `scan` | `read` | Filtra los nodos de una rama por metadatos. |
 | `sniff` | `read` | Búsqueda literal dentro de los cuerpos los hechos que los resúmenes no llevan. |
 | `calendar` | `read` | Dónde está en el tiempo el material del bosque: cuántos nodos guarda cada período, del más reciente hacia atrás. |
+| `coverage` | `read` | Lo que el bosque guarda: sus raíces, el tamaño de cada una, de dónde vino ese material y cuándo. |
+| `history` | `read` | Qué le pasó a un nodo y quién lo hizo cada commit, del más reciente hacia atrás. |
 | `harvest` | `read` | Recuperación de un solo tiro: evidencia ordenada con fragmentos exactos, sin saltos. |
 | `answer` | `read` | Una respuesta fundamentada escrita por el modelo enlazado al bosque, con su evidencia. |
 | `view` | `read` | El payload de imagen de un nodo media, como contenido de imagen que un cliente multimodal lee en su propio contexto. |
 | `query` | `query` | SQL de solo lectura contra un nodo dataset. |
 | `plant` | `write` | Crea un nodo. |
 | `graft` | `write` | Edita un nodo. |
+| `prune` | `write` | Quita un nodo; con `force` también retira los enlaces que lo apuntan. |
+| `transplant` | `write` | Mueve un nodo a una dirección nueva y deja el id viejo como mojón. |
 | `tend` | `tend` | Escritura de dataset de una sola sentencia. |
 | `ingest` | `ingest` | Mete documentos en el bosque a través del Gardener. |
 
@@ -326,7 +330,7 @@ de un presupuesto de tokens declarado, y un resultado recortado siempre dice
 |---|---|
 | `look` | 500 |
 | `move` | 600 |
-| `locate`, `scan`, `sniff`, `calendar` | 800 cada uno |
+| `locate`, `scan`, `sniff`, `calendar`, `coverage`, `history` | 800 cada uno |
 | `query` | 2000 |
 | `pick`, `harvest` | 4000 |
 

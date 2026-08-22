@@ -65,7 +65,14 @@ documents, data), recall first and reason after:
   sources. Prefer it when the forest's answer is the answer. Pass
   \`min_evidence: 2\` when you would rather see the evidence than a confident
   paragraph over one weak snippet — below the floor it replies
-  \`answer: null\` and hands you the retrieval instead.
+  \`answer: null\` and hands you the retrieval instead. Add
+  \`min_score\` to make that floor count *relevance* and not just items:
+  the sweep returns \`k\` results whatever their scores, so a handful of
+  barely-related snippets satisfies \`min_evidence\` on its own. Read a few
+  answers' \`harvest\` scores first — the number means something inside this
+  deployment and nothing outside it. Every source now carries its
+  \`trail\`, so you can see which part of the forest an answer came from
+  before you trust it.
 - \`harvest(query)\` — retrieval without a model call: top items and matched
   passages. Prefer it when you will reason over the material yourself.
 - \`locate(query)\` → \`look(id)\` → \`pick(id)\` — navigate: rank entry points,
@@ -87,6 +94,9 @@ documents, data), recall first and reason after:
   \`filter: {"kind": "note"}\` leaves the branches out.
 - \`calendar()\` — where the material sits in time: how many nodes each
   period holds, most recent first.
+- \`coverage()\` — what this forest actually holds: the roots you can start
+  from, how many nodes sit under each, where that material came from and
+  when it arrived. Metadata only; it opens nothing.
 - \`view(id)\` — the image behind a \`type: media\` node, if you can see images.
 - \`query(id, sql)\` — read-only SQL over \`type: dataset\` nodes, if your key
   carries the \`query\` capability. \`look\` at the dataset first: its
@@ -101,6 +111,19 @@ into a summary (an error code, an invoice number, a library name) returns
 you at \`sniff\`: an empty result is never evidence that the forest does not
 know. Do not answer from your own knowledge until \`sniff\` has come back
 empty too.
+
+**Before you trust a silence, ask what the forest holds.** An empty
+\`locate\`, an empty \`sniff\` and a refusal all mean the same narrow thing:
+*not in the material I searched*. \`coverage()\` is the only call that tells
+you what that material is. If somebody asks about a subject and no root here
+covers it, say that — the forest has never heard of it — rather than
+answering from whatever came closest. A partial corpus answers with a
+citation, a source and a trace, which is exactly the shape of a trustworthy
+answer, so the wrong one is indistinguishable from the right one unless you
+check. Each root also carries an \`origin\` prefix; pass it straight to
+\`scan(root, filter: {"origin_prefix": …}, recursive: true)\` to list
+everything that came from that source, and read \`without_origin\` to see how
+much of it does not say where it came from.
 
 **When the question is about a period** — "last week", "since the contract",
 "what changed in June" — do not sweep the forest hoping something recent
