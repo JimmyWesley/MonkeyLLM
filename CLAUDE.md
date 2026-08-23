@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.60.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.61.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,95 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **An upload is a courier, not a mirror (spec J.8.3, v0.61)**: the bug
+  reported was a `prune` that undid itself on somebody else's next upload;
+  the cause was that the whole upload path treated `_derived/uploads` as a
+  source tree the forest MIRRORS. `adopt_iter` records its source as
+  `source_root`, so **one upload repointed a forest that really did mirror
+  a folder** (and J.8 makes a console show that root beside the refresh
+  control); the refresh then walked the whole DIRECTORY, so a file whose
+  node had been pruned was read as new and replanted. Now ONE path for
+  every upload — `sync_iter(paths=[...], consume=True)`: plants what has no
+  passport, refreshes what has one, records NOTHING, and **removes each
+  file as it becomes a node** (`report.consumed`; `_LANDED` = planted/
+  updated/unchanged). A file that FAILED stays — nothing landed and it is
+  the evidence. `consume` is keyword-only and host-supplied (G.2.5's
+  construction): the engine never decides a source may be deleted, and a
+  host directory is never touched (G.3). `_apply_content_policy(staged=)`
+  degrades `reference` → `cached` for a staged source, because a body
+  addressed to a courier vanishes. `prune` (C.14 r2) still takes a staged
+  file to `_derived/graveyard/<id>/source/` via `Vine._staged_source` —
+  that path is the repair for forests ingested by an OLDER Station, which
+  is all of them.
+- **What never landed is countable and clearable (spec J.13.7, v0.61)**:
+  `GET|POST /v1/admin/staging`. Unrecorded = a staged file no passport
+  records as its `source_path` (`Gardener.unrecorded_sources`) — never a
+  heuristic on age or name, which would eventually delete a document
+  somebody was about to ingest. POST **moves** them to
+  `_derived/graveyard/_staging/`; refuses `E_LOCKED` while a batch runs;
+  `admin` + unrestricted scope, GET served read-only, POST not. Fourth card
+  in Studio's Optimize, hidden at zero. Invisible accumulation is what made
+  the resurrection possible, so the answer is not a shell.
+- **A missing payload is a fact about the payload (spec C.2.2, v0.61)**:
+  `look` on a `type: dataset` node whose LOCAL payload is gone returns the
+  passport with `payload_missing: true` and without `query_manual`/
+  `sample_rows` — it used to raise `E_NOT_FOUND` for the whole digest, so a
+  node `scan` listed was unreadable through the primitive that reads
+  passports. The flag survives the `fields=` filter (it is the answer to
+  "why is the field I asked for absent"); `notes` is unaffected (body, not
+  file); `query`/`tend` still refuse; remote payloads (G.9) are not this
+  case. `coverage` counts the same condition per root and in the totals
+  (C.17 rule 11) — a stat, never an open, so rule 1 stands.
+- **`dest` names a branch in either spelling (spec G.3, v0.61)**:
+  `normalize_dest` strips a trailing `/_index` and reads bare `_index` as
+  the root, applied in `adopt_iter`/`sync_iter` AND at the Station boundary
+  **before** the scope test, so the test and the write agree. Before this,
+  the canonical form every other surface uses built `x/_index/_index` and
+  was refused with an `expected_parent` naming the exact string the caller
+  sent.
+- **`mode` is the caller's own word (spec J.9, v0.61)**: it used to be
+  rewritten to `"sync"` mid-call by the upload flip, so a caller that said
+  `upload` read `sync` beside an `updated` list of nodes it never named.
+  The flip is gone, so there is one mode and it is the request's. A
+  `strategy` field naming the mechanism was drafted and dropped — it
+  labelled a mechanism that should not have existed.
+- **Every read by id answers the waymark (spec C.15 rule 4, v0.61)**:
+  `Vine._waymark` / `_read_or_waymark` is the one place — `look`, `pick`,
+  `move`, `history`, `view` and `query` alike. v0.58 implemented five of
+  six; `pick` read the file directly, and `pick` is the call an agent
+  holding a written-down id actually makes.
+- **A derived alias is a name, not a leading digit (spec G.2.6 rule 5,
+  v0.61)**: `_LEADING_NUMBER_RE` requires the digits to END (separator or
+  stem end), so `9router-free-ai-router` derives nothing from its `9` while
+  `291-provider-budget` still derives `291`/`back-end/291`/`BE-291`. A
+  single digit in the index searched by curated metadata alone is noise
+  with the power to rank.
+- **An unknown token names the set that would be accepted (spec A.2,
+  v0.61)**: `dialect.declared_hint` on every undeclared `type`/`rel`
+  refusal, in `plant` and `graft`. The forest's `_meta/schema.md` is the
+  runtime authority, so a rel the engine ships may legitimately be absent
+  (a pre-v0.58 forest has no `supersedes`) — that is A.2 working; a refusal
+  with no `hint` is not.
+- **What ingest derives can be re-derived (spec J.13.6, v0.61)**:
+  `Gardener.recurate(derive=["aliases"])` behind `POST /v1/admin/recurate`
+  — from the forest's OWN passports, so no source tree, no converter, no
+  model, no network. Union semantics (G.2.6 rule 3): adds only, never
+  displaces a hand-written alias, twice is once. One `.md` commit per
+  changed node (`recurate(aliases): <id>`), principal stamped; `admin` +
+  unrestricted scope, writer lane, caller waits (reindex's shape) — and
+  unlike reindex it COMMITS, so a read-only Station refuses it. `origin` is
+  deliberately NOT derivable here: inventing provenance from a recorded
+  relative path is the one thing this product may not do. In Studio it is
+  the third card in the ingest console's **Optimize** tab.
+- **The floor says which half refused (spec J.10.10 rule 8, v0.61)**: the
+  `insufficient_evidence` payload carries `below_min_score` — content-
+  carrying items that did not clear the threshold. RRF output is
+  compressed, so a meaningful `min_score` usually admits only the item that
+  ranked top of both retrievers, and `(2, 0.02)` then refuses questions the
+  forest answers well. The useful pair is `(1, min_score)`; the skill says
+  so. An uploaded document's `origin` is its entry's `source_url` and
+  nothing else (G.2.7 rule 1) — the skill's saving block and the console's
+  upload form both name it now, which is the whole of what "A-02" was.
 - **A skill is the size of the agent (spec J.5.12, v0.60)**: the Skills
   console hands out a FOLDER — `SKILL.md` (the core: recall, `locate` vs
   `sniff`, coverage-before-a-silence, citation, refusals) plus
@@ -98,8 +187,14 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   agent never installs it: a skill outlives the connection that delivered
   it, so no endpoint and no `skill()` tool (a tool description is charged to
   every client every session, forever). Text in `apps/studio/src/skill.js`;
-  `apps/studio/check-skill.mjs` IS F.111-F.116 and runs from
-  `tests/test_skill_console.py`.
+  `apps/studio/check-skill.mjs` IS F.111-F.116 + F.127 and runs from
+  `tests/test_skill_console.py`. **The name is derived** (`skillName`,
+  v0.61): it was a constant, so one skill per forest — what the console
+  invites — collided on `name:`. Sorted ids, hashed when they would not
+  fit; the same name is the frontmatter's, the folder's and the archive's.
+  A generated file may never teach a call this deployment refuses (F.127):
+  v0.60 shipped `dest: "decisions/_index"` into the one write example while
+  the server rejected exactly that form.
 - **A node moves once, and the old address says where (spec C.15,
   v0.58)**: `transplant(id, new_id)` — leaf only (branches never; move
   their leaves), passport + backlinks + both indexes + payload in ONE
