@@ -316,22 +316,41 @@ def _fit_query_budget(payload: dict) -> dict:
     return payload
 
 
-_FOLD_CACHE: dict[str, str] = {}
+def _fold_char(o: int) -> int | str:
+    f = unicodedata.normalize("NFD", chr(o))[0].lower()
+    return ord(f) if len(f) == 1 else f
+
+
+# One entry per code point the fold can change, so the fold is a single
+# C-level pass (`str.translate`) instead of a Python loop over every
+# character of every body — which was the largest single cost of a cold
+# `sniff` over a corpus of any size. The limit is not the BMP: cased astral
+# scripts (Deseret, Adlam, Osage, Vithkuqi, Warang Citi, Medefaidrin) live
+# in the SMP, and CJK Compatibility Ideographs decompose as high as
+# U+2FA1D. Above it lie ideographs, tags and private use — no case, no
+# canonical decomposition — so the fold is the identity and
+# `str.translate`'s "IndexError means leave this character alone" is the
+# right answer. A test pins the limit against the Unicode version in use.
+# Built on first use, not at import: a `plant` or a `look` folds nothing.
+_FOLD_LIMIT = 0x30000
+_FOLD_TABLE: list[int | str] | None = None
+
+
+def _fold_table() -> list[int | str]:
+    global _FOLD_TABLE
+    if _FOLD_TABLE is None:
+        _FOLD_TABLE = [_fold_char(o) for o in range(_FOLD_LIMIT)]
+    return _FOLD_TABLE
 
 
 def _fold(text: str) -> str:
     """Length-preserving fold: lowercase + strip diacritics by keeping only
     the base character of each NFD decomposition. Positions found in the
     folded text map 1:1 back to the original (spec C.6b matching)."""
-    cache = _FOLD_CACHE
-    out = []
-    for ch in text:
-        f = cache.get(ch)
-        if f is None:
-            f = unicodedata.normalize("NFD", ch)[0].lower()
-            cache[ch] = f
-        out.append(f)
-    return "".join(out)
+    # ASCII has no decomposition and lowercases one character to one, so
+    # `str.lower()` IS the fold there — and it is the case nearly every
+    # body of a technical corpus falls into.
+    return text.lower() if text.isascii() else text.translate(_fold_table())
 
 
 # G.7: cheap detector for non-inline nodes (frontmatter `content:` marker);
@@ -339,16 +358,28 @@ def _fold(text: str) -> str:
 _CONTENT_MARKER_RE = re.compile(r"^content: (cached|reference)\s*$", re.MULTILINE)
 
 
+def _split_raw(text: str) -> tuple[str, str]:
+    """Frontmatter block and body of a node file, without parsing the YAML
+    (same block boundaries as parser.split_frontmatter).
+
+    Both halves, because sniff needs both and finding the boundary twice
+    over a whole corpus is the corpus read twice.
+    """
+    if not text.startswith("---"):
+        return "", text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text, ""
+    nl = text.find("\n", end + 1)
+    if nl == -1:
+        return text, ""
+    return text[:nl + 1], text[nl + 1:].lstrip("\n")
+
+
 def _raw_body(text: str) -> str:
     """Body of a node file without parsing the YAML frontmatter (same block
     boundaries as parser.split_frontmatter — sniff only needs the body)."""
-    if not text.startswith("---"):
-        return text
-    end = text.find("\n---", 3)
-    if end == -1:
-        return ""
-    nl = text.find("\n", end + 1)
-    return text[nl + 1:].lstrip("\n") if nl != -1 else ""
+    return _split_raw(text)[1]
 
 
 # The memo's 'scanned, matched nothing' row (C.6b.1): compared as text,
@@ -2250,8 +2281,11 @@ class Vine:
                     text = self.forest.path_for(nid).read_text(encoding="utf-8")
                 except (VineError, OSError):
                     continue  # validate() reports broken nodes; sniff skips them
-                body = _raw_body(text)
-                if _CONTENT_MARKER_RE.search(text):
+                head, body = _split_raw(text)
+                # The marker is frontmatter, so only the frontmatter is
+                # searched: a MULTILINE scan of every whole body was ~20%
+                # of a cold sniff over a corpus of any size.
+                if _CONTENT_MARKER_RE.search(head):
                     # G.7: non-inline node — grep the resolved FLESH instead
                     # of the stub; an unreachable body degrades to "no match".
                     # Its hash is empty by construction, so it is never
