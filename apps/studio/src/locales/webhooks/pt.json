@@ -42,6 +42,7 @@
   "webhooks.event.node.planted": "um nó foi criado",
   "webhooks.event.pair.issued": "uma senha virou uma chave pareada",
   "webhooks.event.provider.changed": "um provider foi criado, editado ou removido",
+  "webhooks.event.recurate.finished": "os nomes derivados foram atualizados",
   "webhooks.event.reindex.finished": "o catálogo foi reconstruído",
   "webhooks.event.snapshot.created": "um snapshot foi tirado",
   "webhooks.events": "Eventos",

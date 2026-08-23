@@ -27,7 +27,7 @@ da linha de comando. Ele oferece até quatro abas:
 | **Enviar arquivos** | envia arquivos do seu computador; a Station os prepara e adota | um job que você pode acompanhar |
 | **Escrever** | um documento de sua autoria, curado e mostrado a você *antes* de plantar | no lugar, com revisão |
 | **Espelhar uma pasta** | espelha um diretório que o **host da Station** consegue ler | um job que você pode acompanhar |
-| **Otimizar** | relê a pasta espelhada (sync), reconstrói o índice, atualiza a camada vetorial | a releitura é um job como qualquer lote; as ações de índice e de vetor rodam enquanto você espera |
+| **Otimizar** | relê a pasta espelhada (sync), reconstrói o índice, rederiva os nomes curtos, limpa bytes que nunca viraram documento, atualiza a camada vetorial | a releitura é um job como qualquer lote; as ações de índice e de vetor rodam enquanto você espera |
 
 Todo modo pergunta **onde colocar**: um galho existente, e tudo aterrissa
 abaixo dele. Adicionar documentos exige a capacidade `ingest`.
@@ -40,6 +40,22 @@ datasets consultáveis ([veja abaixo](#datasets)). Arquivos acima de 25 MB
 — ou sem conversor para o seu formato ficam de fora, e o console diz
 isso em vez de pulá-los em silêncio. Nada é interpretado no navegador: os
 bytes viajam até a Station e o Gardener faz a leitura.
+
+Abaixo dos arquivos escolhidos há um campo opcional: **de onde veio**. Se
+estes bytes saíram de uma página uma página de preços, um artigo, um
+wiki coloque o endereço ali e ele vira a **origem** dos documentos, o
+campo que todo leitor posterior segue de volta até a fonte. Vale para o
+lote inteiro. Arquivos enviados sem endereço ficam sem origem alguma: a
+pasta em que foram preparados é um fato sobre a Station, não sobre o
+documento, e o produto se recusa a registrar isso como procedência.
+
+**O que acontece com os bytes que você envia.** Eles são um portador, não
+uma cópia: cada arquivo é removido da área de envio no instante em que
+vira documento. Mandar o mesmo nome de novo é uma atualização daquele
+documento, não um segundo — a floresta o reconhece pelo que registrou, e
+não pelo que ficou largado por lá. Um arquivo que não pôde ser convertido
+fica, de propósito: nada aterrissou, e o arquivo é a única evidência do
+que foi enviado. Se algum acumular, **Otimizar** mostra e limpa.
 
 ### Escrevendo no lugar, com revisão
 
@@ -93,6 +109,17 @@ espelhamento: o botão **Ingerir** dela relê a pasta que você espelhou por
 último mostrada ao lado do botão, para você sempre ver o que será
 relido e atualiza só o que mudou, por diff de hash. Um sync mantém os
 resumos que alguém já aprovou: a curadoria nunca roda nele.
+
+**Rederivar os nomes** conserta um envelhecimento de outro tipo. Quando um
+documento é ingerido, o Jardineiro escreve os nomes curtos dele o código
+do chamado, o número, a forma da pasta a partir do próprio nome do
+arquivo e do título, e são esses os nomes que as pessoas de fato digitam na
+busca. Quando essa derivação melhora numa versão seguinte, os documentos
+que já estão na floresta ficam com os nomes que receberam. Este botão
+aplica a regra de hoje a cada passaporte ingerido, lendo apenas os
+passaportes: nenhuma pasta de origem, nenhum modelo, nada a configurar. Ele
+só acrescenta um nome que você escreveu à mão nunca é substituído e
+rodar duas vezes não muda nada, então é seguro apertar na dúvida.
 
 ### Lotes são jobs
 

@@ -29,7 +29,7 @@ pestañas:
 | **Enviar archivos** | sube archivos desde tu computadora; la Station los deja en preparación y los adopta | un job que puedes seguir |
 | **Escribir** | un documento escrito por ti, curado y mostrado *antes* de plantar | en el lugar, con revisión |
 | **Espejar una carpeta** | espeja un directorio que el **host de la Station** puede leer | un job que puedes seguir |
-| **Optimizar** | relee la carpeta espejada (sync), reconstruye el índice, actualiza la capa vectorial | la relectura es un job como cualquier lote; las acciones de índice y de vectores corren mientras esperas |
+| **Optimizar** | relee la carpeta espejada (sync), reconstruye el índice, rederiva los nombres cortos, limpia bytes que nunca fueron documento, actualiza la capa vectorial | la relectura es un job como cualquier lote; las acciones de índice y de vectores corren mientras esperas |
 
 Cada modo pregunta **dónde ponerlos**: una rama existente, y todo
 aterriza debajo de ella. Añadir documentos exige la capacidad `ingest`.
@@ -43,6 +43,23 @@ archivos de más de 25 MB o sin conversor para su formato quedan
 fuera, y la consola lo dice en vez de omitirlos en silencio. Nada se
 parsea en el navegador: los bytes viajan a la Station y el Gardener hace
 la lectura.
+
+Debajo de los archivos elegidos hay un campo opcional: **de dónde vino**.
+Si estos bytes salieron de una página — una página de precios, un
+artículo, un wiki — pon ahí su dirección y se convierte en el **origen** de
+los documentos, el campo que todo lector posterior sigue de vuelta hasta la
+fuente. Vale para todo el lote. Los archivos enviados sin dirección no
+tienen origen alguno: la carpeta en la que se prepararon es un hecho sobre
+la Station, no sobre el documento, y el producto se niega a registrarlo
+como procedencia.
+
+**Qué pasa con los bytes que envías.** Son un portador, no una copia: cada
+archivo se elimina del área de envío en cuanto se convierte en documento.
+Mandar el mismo nombre otra vez es una actualización de ese documento, no
+un segundo — el bosque lo reconoce por lo que registró, no por lo que quedó
+tirado ahí. Un archivo que no se pudo convertir se queda, a propósito: nada
+aterrizó, y el archivo es la única evidencia de lo que se envió. Si alguno
+se acumula, **Optimizar** los muestra y los limpia.
 
 ### Escribir en el lugar, con revisión
 
@@ -96,6 +113,18 @@ el espejo: su botón **Ingerir** relee la carpeta que espejaste la última
 vez mostrada junto al botón, para que siempre veas qué se va a releer —
 y actualiza solo lo que cambió, por diff de hash. Un sync conserva los
 resúmenes que alguien ya aprobó: la curación nunca corre en uno.
+
+**Rederivar los nombres** repara un envejecimiento de otro tipo. Cuando un
+documento se ingiere, el Jardinero escribe sus nombres cortos el código
+del ticket, el número, la forma de la carpeta a partir del propio nombre
+del archivo y del título, y esos son los nombres que la gente realmente
+escribe al buscar. Cuando esa derivación mejora en una versión posterior,
+los documentos que ya están en el bosque conservan los nombres que
+recibieron. Este botón aplica la regla de hoy a cada pasaporte ingerido,
+leyendo solo los pasaportes: ninguna carpeta de origen, ningún modelo, nada
+que configurar. Solo añade un nombre que escribiste a mano nunca se
+reemplaza y ejecutarlo dos veces no cambia nada, así que es seguro
+pulsarlo ante la duda.
 
 ### Los lotes son jobs
 

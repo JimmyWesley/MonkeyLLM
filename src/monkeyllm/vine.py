@@ -30,7 +30,7 @@ from pathlib import Path
 from monkeyllm import indexer
 from monkeyllm.canopy import CanopyIndex, cosine, rrf_fuse
 from monkeyllm.catalog import Catalog
-from monkeyllm.dialect import MAX_LINKS_PER_NODE
+from monkeyllm.dialect import MAX_LINKS_PER_NODE, declared_hint
 from monkeyllm.errors import (
     E_ANCHORED,
     E_MOVED,
@@ -882,28 +882,47 @@ class Vine:
         row = self.catalog.get(node_id)
         return row["summary"] if row else ""
 
+    def _waymark(self, node_id: str, absent: VineError) -> VineError:
+        """C.15 rule 4: "it is not here" is half the truth when the other
+        half is known.
+
+        One place, because every read by id owes the same answer. v0.58
+        stated the rule generally and five of the six reads implemented it
+        — `pick` read the file directly and answered a bare `E_NOT_FOUND`,
+        which is the call an agent holding a written-down id actually
+        makes. The host withholds `moved_to` when the destination is out of
+        the reader's scope (J.3).
+        """
+        moved = self.catalog.moved_to(node_id)
+        if not moved:
+            return absent
+        return VineError(
+            E_MOVED,
+            f"node moved: {node_id}",
+            hint=f"It now lives at '{moved}'; update your reference.",
+            data={"moved_to": moved},
+        )
+
+    def _read_or_waymark(self, node_id: str) -> ParsedNode:
+        """`forest.read`, with the redirect a moved id earns."""
+        try:
+            return self.forest.read(node_id)
+        except VineError as e:
+            if e.code != E_NOT_FOUND:
+                raise
+            raise self._waymark(node_id, e) from None
+
     def _row_or_raise(self, node_id: str) -> sqlite3.Row:
         row = self.catalog.get(node_id)
         if row is None:
             if self.forest.exists(node_id):
                 self.catalog.upsert_node(self.forest.read(node_id))
                 return self.catalog.get(node_id)
-            moved = self.catalog.moved_to(node_id)
-            if moved:
-                # C.15 rule 4: "it is not here" is half the truth when the
-                # other half is known. The host withholds `moved_to` when
-                # the destination is out of the reader's scope (J.3).
-                raise VineError(
-                    E_MOVED,
-                    f"node moved: {node_id}",
-                    hint=f"It now lives at '{moved}'; update your reference.",
-                    data={"moved_to": moved},
-                )
-            raise VineError(
+            raise self._waymark(node_id, VineError(
                 E_NOT_FOUND,
                 f"node not found: {node_id}",
                 hint="Use locate() to find entry points.",
-            )
+            ))
         return row
 
     # =======================================================================
@@ -1251,9 +1270,21 @@ class Vine:
             # fields does not pay for the ones it did not ask for — the
             # sweep asks for exactly one of them, per result (C.6c).
             wanted = set(fields) if fields else None
-            if wanted is None or "query_manual" in wanted:
+            # C.2.2 (v0.61): the two fields below are the only ones that
+            # need the file. An absent payload used to raise E_NOT_FOUND
+            # for the WHOLE digest, so a node `scan` lists and `locate`
+            # ranks was unreadable through the primitive that reads
+            # passports — and the reader was told the node was missing.
+            # A passport naming no payload at all is the same story from
+            # the digest's side — the file it would have opened is not
+            # there — and it must not take the passport down either.
+            gone = (not node.frontmatter.get("payload")
+                    or self._local_payload_missing(node))
+            if gone:
+                digest["payload_missing"] = True
+            if not gone and (wanted is None or "query_manual" in wanted):
                 digest["query_manual"] = self._dataset_manual(node)
-            if wanted is None or "sample_rows" in wanted:
+            if not gone and (wanted is None or "sample_rows" in wanted):
                 digest["sample_rows"] = self._dataset_sample(node)
             # C.2.1: what a person taught about this data. It rides in the
             # digest because the path an agent takes to a dataset is `look`
@@ -1273,7 +1304,7 @@ class Vine:
         }
 
         if fields:
-            keep = set(fields) | {"id"}
+            keep = set(fields) | {"id", "payload_missing"}
             digest = {k: v for k, v in digest.items() if k in keep}
 
         # C.2 (v0.57): the budget clips in declared order — the outline
@@ -1311,6 +1342,20 @@ class Vine:
             if not was_truncated and estimate_payload_tokens(digest) <= BUDGET_LOOK:
                 digest.pop("truncated", None)
         return digest
+
+    def _local_payload_missing(self, node: ParsedNode) -> bool:
+        """C.2.2 (v0.61): a LOCAL payload the passport names and the
+        filesystem does not have.
+
+        A remote payload (G.9) is not this case: its absence is a fetch
+        away and has its own errors. A stat, never an open — which is why
+        `coverage` may count the same condition (C.17 rule 11) without
+        breaking its own no-file-opened rule.
+        """
+        payload = node.frontmatter.get("payload")
+        if not payload or is_remote(payload):
+            return False
+        return not self.forest.payload_path(node).is_file()
 
     def _dataset_db(self, node: ParsedNode, *, for_write: bool = False) -> Path:
         payload = node.frontmatter.get("payload")
@@ -1594,7 +1639,7 @@ class Vine:
         return self._pick(id, section=section, after=after)
 
     def _pick(self, id: str, section=None, after: str | None = None) -> dict:
-        node = self.forest.read(id)
+        node = self._read_or_waymark(id)
         body, outline = node.body, node.outline
         if node.frontmatter.get("content") in ("cached", "reference"):
             body = self._resolved_body(node)
@@ -2920,7 +2965,10 @@ class Vine:
 
         for link in patch.add_links:
             if link.rel not in self.forest.dialect.rels:
-                raise VineError(E_SCHEMA, f"unknown rel '{link.rel}'")
+                raise VineError(
+                    E_SCHEMA,
+                    f"unknown rel '{link.rel}' (links -> {link.target})",
+                    hint=declared_hint(self.forest.dialect.rels, "rels"))
             if link.key() in existing:
                 # Reinforce-before-create: duplicate link -> fortification
                 # (heat goes up; no new edge, no commit for this op).
@@ -3127,6 +3175,8 @@ class Vine:
         backlinks_removed = 0
         payload_moved = None
         moved_pair = None
+        staged_moved = None
+        staged_pair = None
         try:
             # Backlinks first (force path): the same commit that removes the
             # node leaves nothing pointing at the hole.
@@ -3176,6 +3226,24 @@ class Vine:
                     payload_moved = str(
                         dest.relative_to(Path(self.forest.root)))
 
+            # C.14 rule 2 (v0.61): the staged source goes with it, when the
+            # source was staged inside the forest's OWN `_derived/` — the
+            # tree that is disposable by construction (G.3's one exemption).
+            # Leaving it is what let a later pass over the staging area read
+            # the pruned document as new and plant it again: the removal
+            # said `pruned: true` and the forest disagreed a day later. A
+            # real source tree is never touched; deleting somebody's file
+            # is not a thing this primitive may do.
+            staged = self._staged_source(node.frontmatter.get("source_path"))
+            if staged is not None:
+                grave = (Path(self.forest.root) / "_derived" / "graveyard"
+                         / id / "source")
+                grave.mkdir(parents=True, exist_ok=True)
+                dest = grave / staged.name
+                shutil.move(str(staged), str(dest))
+                staged_pair = (staged, dest)
+                staged_moved = str(dest.relative_to(Path(self.forest.root)))
+
             node_path.unlink()
             commit = self.git.commit(paths, f"prune({id})")
         except Exception:
@@ -3186,6 +3254,8 @@ class Vine:
                                      encoding="utf-8", newline="\n")
             if moved_pair is not None and moved_pair[1].exists():
                 shutil.move(str(moved_pair[1]), str(moved_pair[0]))
+            if staged_pair is not None and staged_pair[1].exists():
+                shutil.move(str(staged_pair[1]), str(staged_pair[0]))
             raise
 
         if row["kind"] == "branch":
@@ -3202,9 +3272,44 @@ class Vine:
                 continue
             src_id = self.forest.id_for(path)
             self.catalog.upsert_node(self.forest.read(src_id))
-        return {"id": id, "pruned": True,
-                "backlinks_removed": backlinks_removed,
-                "payload_moved": payload_moved, "commit": commit}
+        out = {"id": id, "pruned": True,
+               "backlinks_removed": backlinks_removed,
+               "payload_moved": payload_moved, "commit": commit}
+        if staged_moved:
+            out["staged_moved"] = staged_moved
+        return out
+
+    def _staged_source(self, source_path) -> Path | None:
+        """The file a node was ingested from, when it was STAGED inside the
+        forest's own `_derived/` (C.14 rule 2, v0.61).
+
+        `None` for everything else — a mirrored directory on the host is
+        somebody's source tree, and this pipeline never deletes a source
+        (G.3). Contained after resolution, like every other path this
+        engine takes from a passport.
+
+        A v0.61 upload consumes its own bytes as they land (J.8.3), so this
+        usually finds nothing. It is the repair for every forest ingested
+        by an older Station — which recorded the staging area as the
+        forest's source root and left every uploaded file in it — and that
+        is where the resurrected node was found.
+        """
+        if not source_path:
+            return None
+        root = self.forest.gardener_source_root()
+        if root is None:
+            return None
+        derived = (Path(self.forest.root) / "_derived").resolve()
+        try:
+            root = Path(root).resolve()
+            if not root.is_relative_to(derived):
+                return None
+            staged = (root / str(source_path)).resolve()
+            if not staged.is_relative_to(root) or not staged.is_file():
+                return None
+        except (OSError, ValueError):
+            return None
+        return staged
 
     # =======================================================================
     # C.15 transplant — the move that leaves a waymark (v0.58)
@@ -3484,6 +3589,13 @@ class Vine:
                 # C.17 rule 5: a root where nine nodes in ten know their
                 # source is not a root with an origin.
                 entry["without_origin"] = stats["without_origin"]
+            gone = self._count_missing_payloads(
+                where + scoped, params + scoped_params)
+            if gone:
+                # C.17 rule 11 (v0.61): a forest announcing `dataset: 2`
+                # while neither serves a query is announcing capacity it
+                # does not have. Here the forest CAN testify, so it must.
+                entry["payload_missing"] = gone
             out.append(entry)
         # Biggest first, so what the budget drops from the tail is the
         # smallest root rather than the one the caller most needed.
@@ -3501,6 +3613,9 @@ class Vine:
                 scoped + undated, scoped_params),
             "system": self.catalog.count_nodes(scoped + system, scoped_params),
         }
+        gone_total = self._count_missing_payloads(scoped, scoped_params)
+        if gone_total:
+            payload["payload_missing"] = gone_total
         if scope:
             payload["scope"] = scope
         # C.6.2's pattern: the flag is sized inside the budget, so adding it
@@ -3512,6 +3627,23 @@ class Vine:
         payload = shrink_list_to_budget(payload, "roots", BUDGET_COVERAGE)
         payload["truncated"] = len(payload["roots"]) < found
         return payload
+
+    def _count_missing_payloads(self, where: list[str], params: list) -> int:
+        """C.17 rule 11 (v0.61): local payloads the passport names and the
+        filesystem does not have.
+
+        One statement selects the nodes that declare a payload at all — a
+        handful beside the node count — and each is a stat, never an open,
+        so C.17 rule 1 stands. Remote payloads are skipped: their absence
+        is a fetch away and is not a fact the catalog holds.
+        """
+        gone = 0
+        for node_id, payload in self.catalog.local_payloads(where, params):
+            if is_remote(payload):
+                continue
+            if not (self.forest.path_for(node_id).parent / payload).is_file():
+                gone += 1
+        return gone
 
     def _root_where(self, root_id: str) -> tuple[list[str], list]:
         """A root as a predicate over the catalog (C.17 rule 3).

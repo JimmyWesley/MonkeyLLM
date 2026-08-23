@@ -661,6 +661,11 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         A batch runs as a job (spec J.9); by default this call waits for it
         and returns the finished job. Pass wait=false to get the running
         job's id back immediately instead.
+
+        `dest` names an existing branch, in either spelling: "notes" and
+        "notes/_index" are the same destination. An upload entry may carry
+        `source_url` — for an uploaded document that IS its `origin`, and
+        nothing else fills it.
         """
         return await call(forest, "ingest", mode=mode, files=files,
                           path=path, dest=dest, wait=wait)

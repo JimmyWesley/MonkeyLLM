@@ -24,7 +24,7 @@ line uses. It offers up to four tabs:
 | **Send files** | uploads files from your computer; the Station stages and adopts them | a job you can watch |
 | **Write** | one authored document, curated and shown to you *before* planting | in place, with review |
 | **Mirror a folder** | mirrors a directory the **Station host** can read | a job you can watch |
-| **Optimize** | re-reads the mirrored folder (sync), rebuilds the index, refreshes the vector layer | the re-read is a job like any batch; the index and vector actions run while you wait |
+| **Optimize** | re-reads the mirrored folder (sync), rebuilds the index, re-derives the short names, clears bytes that never became a document, refreshes the vector layer | the re-read is a job like any batch; the index and vector actions run while you wait |
 
 Every mode asks **where to put them**: an existing branch, and everything
 lands under it. Adding documents needs the `ingest` capability.
@@ -37,6 +37,22 @@ datasets ([see below](#datasets)). Files over 25 MB or with no converter
 for their format are left out, and the console says so rather than
 skipping them silently. Nothing is parsed in the browser: the bytes travel
 to the Station and the Gardener does the reading.
+
+Under the chosen files there is one optional field: **where it came from**.
+If these bytes came off a page a pricing page, an article, a wiki
+put its address there and it becomes the documents' **origin**, the field
+every later reader follows back to the source. It applies to the whole
+batch. Files sent with no address have no origin at all: the folder they
+were staged in is a fact about the Station, not about the document, and the
+product declines to record it as provenance.
+
+**What happens to the bytes you send.** They are a courier, not a copy:
+each file is removed from the upload area the moment it becomes a
+document. Sending the same filename again is an update to that document,
+not a second one — the forest recognises it by what it recorded, not by
+what is left lying around. A file that could not be converted stays, on
+purpose: nothing landed, and the file is the only evidence of what was
+sent. If any accumulate, **Optimize** shows and clears them.
 
 ### Writing in place, with review
 
@@ -88,6 +104,17 @@ its **Ingest** button re-reads the folder you last mirrored shown beside
 the button, so you always see what will be re-read and updates only what
 changed, by hash diff. A sync keeps the summaries somebody already
 approved: curation never runs on one.
+
+**Re-derive the names** is the repair for a different kind of staleness.
+When a document is ingested, the Gardener writes its short names the
+ticket code, the number, the folder form from the file's own name and
+title, and those are what people actually type into search. When that
+derivation improves in a later version, the documents already in the
+forest keep the names they were given. This button applies today's rule to
+every ingested passport, reading nothing but the passports: no source
+folder, no model, nothing to configure. It only adds a name you wrote by
+hand is never replaced and running it twice changes nothing, so it is
+safe to press when you are not sure.
 
 ### Batches are jobs
 

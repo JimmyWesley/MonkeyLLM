@@ -185,14 +185,14 @@ def validate_frontmatter(fm: dict, dialect: dlt.Dialect, *, strict_summary: bool
         raise VineError(
             E_SCHEMA,
             f"unknown node type '{model.type}'",
-            hint="New types must be added to _meta/schema.md before first use.",
+            hint=dlt.declared_hint(dialect.node_types, "node types"),
         )
     for link in model.links:
         if link.rel not in dialect.rels:
             raise VineError(
                 E_SCHEMA,
                 f"unknown rel '{link.rel}' (links -> {link.target})",
-                hint="The rel table grows by editing _meta/schema.md, never ad-hoc.",
+                hint=dlt.declared_hint(dialect.rels, "rels"),
             )
     if len(model.links) > dlt.MAX_LINKS_PER_NODE:
         raise VineError(

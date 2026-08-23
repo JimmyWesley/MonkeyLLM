@@ -646,6 +646,31 @@ _MD_INLINE = re.compile(r"\[([^\]]*)\]\([^)]*\)|[*_`]{1,3}")
 # exists to end.
 _SELF_CODE_RE = re.compile(r"\b([A-Z]{2,6})-(\d{1,6})\b")
 
+# A file stem that IS numbered, as opposed to one that merely starts with a
+# digit: the number is followed by a separator or by nothing (G.2.6 rule 5).
+_LEADING_NUMBER_RE = re.compile(r"(\d+)(?=[-_.\s]|$)")
+
+
+def normalize_dest(dest: str | None) -> str | None:
+    """G.3 (v0.61): a branch is addressed by its id, in either spelling.
+
+    A branch's id ends in `/_index` and that is how every other surface
+    names it — `scan("tasks/_index")`, `parent: "notes/_index"`,
+    `coverage`'s roots. `dest` accepted only the bare form, so the
+    canonical one built `tasks/_index/_index` and was refused with an
+    `expected_parent` that named the exact string the caller had sent: the
+    advice was to do what had just been done. Both forms mean the same
+    branch here, and `_index` alone means the forest root.
+    """
+    if dest is None:
+        return None
+    d = str(dest).strip().strip("/")
+    if d.endswith("/_index"):
+        d = d[: -len("/_index")]
+    if d == "_index":
+        d = ""
+    return d or None
+
 
 def _folder_initials(folder: str) -> str | None:
     """`back-end` -> `BE`. A single-word folder derives nothing: one letter
@@ -677,7 +702,12 @@ def derive_aliases(rel: Path, alias_map: dict,
     """
     out: list[str] = []
     folder = rel.parent.name
-    m = re.match(r"(\d+)", rel.stem)
+    # G.2.6 rule 5 (v0.61): the leading digits must END — a whole segment,
+    # not a prefix inside a word. `9router-free-ai-router` derived the alias
+    # `9`, and a single digit in the one index searched by curated metadata
+    # alone matches broadly and ranks: noise with authority, in the field
+    # this rule exists to make trustworthy.
+    m = _LEADING_NUMBER_RE.match(rel.stem)
     if m is not None:
         num = m.group(1)
         prefix = (alias_map or {}).get(folder) if isinstance(alias_map, dict) else None
@@ -766,10 +796,20 @@ class IngestReport:
     # G.2.6 (v0.56): derived alias forms that no longer fit the 16-alias
     # cap beside hand-added ones — dropped, and said, never silently.
     aliases_clipped: int = 0
+    # J.8 (v0.61): sources the caller declared disposable and that became a
+    # node, removed after they landed. Empty on every ordinary run.
+    consumed: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {k: (list(v) if isinstance(v, list) else v)
                 for k, v in self.__dict__.items()}
+
+
+# J.8 (v0.61): the outcomes that mean "these bytes are now a node in this
+# forest" — the condition for consuming a disposable source. `unsupported`
+# and `error` are deliberately absent: nothing landed, and the file is the
+# only evidence of what was sent.
+_LANDED = frozenset({"planted", "updated", "unchanged"})
 
 
 # G.10: which report list a step grew names what the step did. Ordered by
@@ -983,6 +1023,20 @@ class Gardener:
                 return conv
         return None
 
+    def _is_staged(self, f: Path) -> bool:
+        """Whether this source sits in the forest's own `_derived/`.
+
+        That tree is disposable by construction, so a path into it is a
+        fact about plumbing and never an address: it cannot be an
+        `origin` (G.2.7), it cannot back a `reference` body (G.7), and it
+        is the one source a caller may declare consumable (J.8).
+        """
+        try:
+            return f.resolve().is_relative_to(
+                self.forest.root.resolve() / "_derived")
+        except (OSError, ValueError):
+            return False
+
     def _origin_for(self, f: Path, rel: str) -> str | None:
         """G.2.7 (v0.58): where this document came from, as one URI.
 
@@ -993,10 +1047,9 @@ class Gardener:
         url = self.provenance.get(rel)
         if url:
             return url
-        resolved = f.resolve()
-        if resolved.is_relative_to(self.forest.root.resolve() / "_derived"):
+        if self._is_staged(f):
             return None
-        return resolved.as_uri()
+        return f.resolve().as_uri()
 
     def _with_provenance(self, markdown: str, rel: str) -> str:
         """J.8 (v0.48): a converted body whose source has an address ends
@@ -1150,6 +1203,7 @@ class Gardener:
         root is what lets `sync` finish the remainder instead of the
         operator starting over.
         """
+        dest = normalize_dest(dest)
         src = self._resolve_source(source)
         if not self.dry_run:
             self.config["source_root"] = src.as_posix()
@@ -1316,7 +1370,8 @@ class Gardener:
         # …and only then the content policy slims the node (G.7)
         if conversion.kind == "markdown":
             draft = self._apply_content_policy(draft, conversion.title,
-                                               is_text_source)
+                                               is_text_source,
+                                               staged=self._is_staged(f))
         if self.dry_run:
             report.drafts.append(draft)
             return
@@ -1378,10 +1433,18 @@ class Gardener:
         return body
 
     def _apply_content_policy(self, draft: dict, title: str,
-                              is_text_source: bool) -> dict:
+                              is_text_source: bool,
+                              staged: bool = False) -> dict:
         policy = self.config.get("content", "inline")
         if policy == "reference" and not is_text_source:
             policy = "cached"  # converted bodies must live SOMEWHERE local
+        if policy == "reference" and staged:
+            # J.8 (v0.61), the same reasoning one step further: a
+            # `reference` body is read back from its source at every
+            # `pick`, and a staged upload's source is a courier the forest
+            # itself may discard. A body addressed to a courier is a body
+            # that vanishes.
+            policy = "cached"
         if policy == "cached":
             self._write_body_cache(draft["id"], draft["body"])
             draft["body"] = f"# {title}"
@@ -1451,19 +1514,137 @@ class Gardener:
                 }
         return out
 
+    # -- J.13.6 re-derivation (v0.61) ---------------------------------------
+
+    DERIVABLE = ("aliases",)
+
+    def recurate(self, derive: list[str] | None = None) -> dict:
+        """J.13.6: re-derive from the forest's own passports.
+
+        `reindex` repairs what FINDS a node; `sync` repairs what a node
+        SAYS by re-reading its source. Between them sits the repair neither
+        performs: a derivation rule that improved after the material was
+        ingested. Every input to alias derivation — the source path, the
+        title — is already in the passport, so this needs no source tree,
+        no converter, no model and no network. Yet the only path to it was
+        `sync`, which resolves a recorded host root and requires `admin`
+        over a directory the Station may no longer be able to read: a
+        forest of 1,877 nodes had the v0.59 feature in the code and not in
+        the corpus, which is the only place it counts.
+
+        Union semantics are `sync`'s (G.2.6 rule 3): missing derived forms
+        are added, hand-written ones are never displaced, the cap never
+        evicts, overflow is counted. A node with nothing to add is not
+        rewritten and not committed, so a second pass reports no change.
+
+        Only nodes carrying `source_path` are visited: alias derivation is
+        the ingest rule (G.2.6), and deriving from a hand-planted node's id
+        would be a different rule wearing this one's name.
+        """
+        wanted = list(derive or ["aliases"])
+        unknown = [d for d in wanted if d not in self.DERIVABLE]
+        if unknown:
+            raise VineError(
+                E_SCHEMA,
+                f"cannot derive '{unknown[0]}' from passports alone",
+                hint=f"`derive` accepts: {', '.join(self.DERIVABLE)}. "
+                     "`origin` is the source file's own address, which this "
+                     "pass does not have and must not guess (G.2.7 rule 2).")
+        report = IngestReport()
+        scanned = 0
+        for rel, info in sorted(self._passports().items()):
+            scanned += 1
+            node_id = info["id"]
+            merged = self._merge_aliases(node_id, rel, report)
+            if merged is None:
+                report.unchanged.append(node_id)
+                continue
+            if self.dry_run:
+                report.updated.append(node_id)
+                continue
+            node = self.forest.read(node_id)
+            fm = dict(node.frontmatter)
+            fm["aliases"] = merged
+            assert node.path is not None
+            node.path.write_text(serialize_node(fm, node.body),
+                                 encoding="utf-8", newline="\n")
+            self.vine.git.commit([node.path], f"recurate(aliases): {node_id}")
+            self.vine.catalog.upsert_node(self.forest.read(node_id))
+            report.updated.append(node_id)
+        out = report.as_dict()
+        out["derived"] = wanted
+        out["scanned"] = scanned
+        out["changed"] = len(report.updated)
+        return out
+
+    def unrecorded_sources(self, root: str | Path) -> list[tuple[str, int]]:
+        """Files under `root` that no live passport records (J.8, v0.61).
+
+        The question an operator cannot otherwise ask: *what is sitting in
+        the staging area that is not a document in this forest?* Every file
+        whose relative path is some node's `source_path` is accounted for;
+        what is left is a batch that failed, a batch that was cancelled, or
+        a document whose node was later pruned — and before this it was
+        invisible, so it accumulated and, once, came back to life.
+
+        Returns `(relative path, size)`, sorted. Reads, never removes: the
+        caller decides, and this engine deletes no source of its own accord
+        (G.3).
+        """
+        base = Path(root)
+        if not base.is_dir():
+            return []
+        base = base.resolve()
+        recorded = set(self._passports())
+        out: list[tuple[str, int]] = []
+        for f in sorted(base.rglob("*")):
+            if not f.is_file():
+                continue
+            try:
+                rel = f.resolve().relative_to(base).as_posix()
+            except ValueError:  # a symlink pointing out of the tree
+                continue
+            if rel in recorded:
+                continue
+            try:
+                out.append((rel, f.stat().st_size))
+            except OSError:
+                continue
+        return out
+
+    def _contained_rel(self, src: Path, path: str) -> tuple[str, Path]:
+        """A source-root-relative name, resolved and proven to stay inside.
+
+        `relative_to` is lexical, so `../../x` survives the join and comes
+        back out as a "relative" path — the file would be read, slugified
+        into a `node/` branch and planted. Resolving first is what makes
+        the containment real: it collapses `..` and follows symlinks.
+        """
+        f = (src / Path(path)).resolve()
+        if Path(path).is_absolute() or not f.is_relative_to(src):
+            raise VineError(
+                E_SCHEMA, f"sync path leaves the source root: {path}",
+                hint="A targeted sync names a path relative to the "
+                     "adopted source root.")
+        return f.relative_to(src).as_posix(), f
+
     def sync(self, source: str | Path | None = None,
-             path: str | None = None, dest: str | None = None) -> dict:
+             path: str | None = None, dest: str | None = None,
+             paths: list[str] | None = None, *, consume: bool = False) -> dict:
         """`dest` overrides the adopted root's destination for files sync
         meets for the FIRST time. Files that already have a passport keep
         the branch they were planted in — sync refreshes content, it never
         moves nodes. Without the override a caller who says where a new
         document goes is silently overruled by whatever the last adopt
         recorded."""
-        return _drain(self.sync_iter(source=source, path=path, dest=dest))
+        return _drain(self.sync_iter(source=source, path=path, dest=dest,
+                                     paths=paths, consume=consume))
 
     def sync_iter(self, source: str | Path | None = None,
                   path: str | None = None,
-                  dest: str | None = None) -> IngestSteps:
+                  dest: str | None = None,
+                  paths: list[str] | None = None,
+                  *, consume: bool = False) -> IngestSteps:
         """One document per step (G.10); `sync` is exactly "drain this".
 
         Resolution and containment are eager — a bad source or an escaping
@@ -1472,36 +1653,58 @@ class Gardener:
         the filesystem.
         """
         src = self._resolve_source(source, recorded=True)
-        dest = dest or self.config.get("dest")
+        dest = normalize_dest(dest) or self.config.get("dest")
         report = IngestReport()
 
-        if path:  # G.8 targeted sync: one file, the event-trigger building block
-            # `path` is source-root-relative and MUST stay there. `relative_to`
-            # is lexical, so `../../x` survives the join and comes back out as
-            # a "relative" path — the file would be read, slugified into a
-            # `node/` branch and planted. Resolving first is what makes the
-            # containment real: it collapses `..` and follows symlinks.
-            f = (src / Path(path)).resolve()
-            if Path(path).is_absolute() or not f.is_relative_to(src):
-                raise VineError(
-                    E_SCHEMA, f"sync path leaves the source root: {path}",
-                    hint="A targeted sync names a path relative to the "
-                         "adopted source root.")
-            rel = f.relative_to(src).as_posix()
+        if path is not None and paths is not None:
+            raise VineError(
+                E_SCHEMA, "path and paths name the subject twice",
+                hint="`path` refreshes one file; `paths` refreshes a named "
+                     "set. Pass one.")
 
-            def one():
+        # G.8 targeted sync: one file, the event-trigger building block.
+        # J.8 (v0.61): `paths` is the same refresh over a NAMED SET — what an
+        # upload sends. The staging area is stable per forest so that
+        # re-sending a filename means "this document changed", and pointing
+        # the refresh at the DIRECTORY made every file every previous batch
+        # ever uploaded a candidate on every upload: a file whose node had
+        # been pruned no longer had a passport, so it was not a refresh, it
+        # was a new document, and it was planted again. A call may only
+        # testify about what it walked.
+        named = ([path] if path is not None
+                 else (list(paths) if paths is not None else None))
+        if named is not None:
+            resolved = [self._contained_rel(src, one) for one in named]
+
+            def some():
                 passports = self._passports()
-                before = _counts(report)
-                if f.is_file():
-                    self._sync_one(src, f, rel, passports, dest, report)
-                elif rel in passports:
-                    report.stale.append(passports[rel]["id"])
-                else:
-                    report.unsupported.append(rel)
-                yield _step(rel, 1, 1, report, before)
+                for i, (rel, f) in enumerate(resolved):
+                    before = _counts(report)
+                    if f.is_file():
+                        self._sync_one(src, f, rel, passports, dest, report)
+                    elif rel in passports:
+                        report.stale.append(passports[rel]["id"])
+                    else:
+                        report.unsupported.append(rel)
+                    step = _step(rel, i + 1, len(resolved), report, before)
+                    # J.8 (v0.61): bytes the CALLER declared disposable, and
+                    # that became a node, are removed once they have. The
+                    # node is the record; the courier does not keep a copy,
+                    # and a copy left behind is what a later pass reads as a
+                    # document nobody sent. `consume` is keyword-only and
+                    # host-supplied (G.2.5's construction): the engine never
+                    # decides on its own that a source may be deleted, and a
+                    # file that FAILED stays, because it is the evidence.
+                    if consume and step["action"] in _LANDED and f.is_file():
+                        try:
+                            f.unlink()
+                            report.consumed.append(rel)
+                        except OSError:
+                            pass
+                    yield step
                 return report.as_dict()
 
-            return IngestSteps(1, one(), report)
+            return IngestSteps(len(resolved), some(), report)
 
         files = self._walk(src)
 

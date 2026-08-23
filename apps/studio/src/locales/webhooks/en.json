@@ -42,6 +42,7 @@
   "webhooks.event.node.planted": "a node was created",
   "webhooks.event.pair.issued": "a password was paired into a key",
   "webhooks.event.provider.changed": "a provider was created, edited or removed",
+  "webhooks.event.recurate.finished": "the derived names were refreshed",
   "webhooks.event.reindex.finished": "the catalog was rebuilt",
   "webhooks.event.snapshot.created": "a snapshot was taken",
   "webhooks.events": "Events",

@@ -102,6 +102,12 @@ export default function Ingest({ forest, grant, goto }) {
   const [title, setTitle] = useState('')
   const [files, setFiles] = useState([])
   const [dest, setDest] = useState('')
+  // J.8 (v0.61): an uploaded document's `origin` is the `source_url` its
+  // entry declares, and nothing else — the staging path it arrived by is a
+  // fact about plumbing. There was nowhere to state it, so every document
+  // saved through this console arrived with no origin, and the gap was
+  // reported from outside as the field not working.
+  const [sourceUrl, setSourceUrl] = useState('')
   const [path, setPath] = useState('')
   const [state, setState] = useState({})
   const [skipped, setSkipped] = useState([])
@@ -242,7 +248,9 @@ export default function Ingest({ forest, grant, goto }) {
   async function submit(e) {
     e.preventDefault()
     // `bytes` is display-only; the wire contract is {name, text|b64}.
-    const payload = files.map(({ bytes, ...rest }) => rest)
+    const url = sourceUrl.trim()
+    const payload = files.map(({ bytes, ...rest }) => (
+      url ? { ...rest, source_url: url } : rest))
     // Composing does NOT publish (J.8.1): it stages, and what comes back
     // is a proposal. The text travels with the review so the accepting
     // call sends the same bytes the Curator read — re-serialising the
@@ -268,7 +276,7 @@ export default function Ingest({ forest, grant, goto }) {
         dest: dest || undefined,
         path: mode === 'adopt' ? path : undefined,
       })
-      if (mode === 'upload') { setFiles([]); setSkipped([]) }
+      if (mode === 'upload') { setFiles([]); setSkipped([]); setSourceUrl('') }
       setState({})
       return
     }
@@ -297,11 +305,11 @@ export default function Ingest({ forest, grant, goto }) {
         noteJob(forest, report.job)
         setState({})
         setJobId(report.job.id)
-        if (mode === 'upload') { setFiles([]); setSkipped([]) }
+        if (mode === 'upload') { setFiles([]); setSkipped([]); setSourceUrl('') }
         return
       }
       setState({ busy: false, report })
-      if (mode === 'upload') { setFiles([]); setSkipped([]) }
+      if (mode === 'upload') { setFiles([]); setSkipped([]); setSourceUrl('') }
     } catch (error) { setState({ busy: false, error }) }
   }
 
@@ -436,6 +444,12 @@ export default function Ingest({ forest, grant, goto }) {
                         </li>
                       ))}
                     </ul>
+                    <div className="mt-3">
+                      <Field label={t('ingest.source_url')} value={sourceUrl}
+                             placeholder="https://example.com/page"
+                             hint={t('ingest.source_url_hint')}
+                             onChange={(e) => setSourceUrl(e.target.value)} />
+                    </div>
                   </div>
                 )}
               </>
@@ -528,6 +542,8 @@ export default function Ingest({ forest, grant, goto }) {
         {mode === 'optimize' && has(grant, 'admin') && (
           <>
             <Rebuild forest={forest} />
+            <Rederive forest={forest} />
+            <Staging forest={forest} />
             <DenseLayer forest={forest} />
           </>
         )}
@@ -1033,6 +1049,103 @@ function Rebuild({ forest }) {
                 onClick={run}>
           <Refresh size={14} />
           {state.busy ? t('ingest.rebuild_running') : t('ingest.rebuild_start')}
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+/** What ingest would derive today, applied to what it derived before
+ *  (J.13.6).
+ *
+ *  The third repair in this tab, and the one whose absence was measured
+ *  from outside: alias derivation improved in v0.59, every input to it
+ *  already sits in the passports, and the only way to apply it was `sync`
+ *  — which needs the recorded host root and admin over it. A forest of
+ *  1,877 nodes therefore had the feature in the code and not in the
+ *  corpus. Union semantics, so running it twice changes nothing and a
+ *  hand-written alias is never displaced. */
+function Rederive({ forest }) {
+  const { t } = useI18n()
+  const [state, setState] = useState({})
+
+  const run = async () => {
+    setState({ busy: true })
+    try {
+      setState({ done: await api.recurate(forest) })
+    } catch (error) {
+      setState({ error })
+    }
+  }
+
+  return (
+    <Card title={t('ingest.rederive_title')} subtitle={t('ingest.rederive_sub')}
+          icon={Refresh}>
+      <Note>{t('ingest.rederive_hint')}</Note>
+      {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
+      {state.done && (
+        <div className="mt-3">
+          <Note>
+            {t('ingest.rederive_done', { n: state.done.changed,
+                                         scanned: state.done.scanned })}
+          </Note>
+        </div>
+      )}
+      <div className="mt-4 flex justify-end">
+        <button type="button" className="btn" disabled={state.busy} onClick={run}>
+          <Refresh size={14} />
+          {state.busy ? t('ingest.rederive_running') : t('ingest.rederive_start')}
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+/** What is in the staging area that is not a document (J.13.7).
+ *
+ *  Since v0.61 an uploaded file is removed as it becomes a node, so what
+ *  shows here is a conversion that failed, a batch that was cancelled, or
+ *  — on a forest ingested by an older Station — a document whose node was
+ *  later pruned. All three are legitimate; what was not is that none of
+ *  them could be seen, and invisible bytes in a staging area are how a
+ *  pruned node once came back. The card hides itself when there is
+ *  nothing: an empty area is the normal state and does not need a panel.
+ */
+function Staging({ forest }) {
+  const { t } = useI18n()
+  const [state, setState] = useState({})
+  const found = useAsync(() => api.staging(forest), [forest])
+  const now = state.done || found.data
+
+  if (found.busy || !now || !now.unrecorded) return null
+
+  const clear = async () => {
+    setState({ busy: true })
+    try {
+      setState({ done: await api.clearStaging(forest) })
+    } catch (error) {
+      setState({ error, done: now })
+    }
+  }
+
+  return (
+    <Card title={t('ingest.staging_title')} subtitle={t('ingest.staging_sub')}
+          icon={Files}>
+      <Note tone="warn">
+        {t('ingest.staging_found', { n: now.unrecorded,
+                                     kb: Math.max(1, Math.round(now.bytes / 1024)) })}
+      </Note>
+      <ul className="mt-3 max-h-32 space-y-0.5 overflow-y-auto">
+        {(now.names || []).map((name) => (
+          <li key={name} className="font-mono text-[11.5px] text-text-3">{name}</li>
+        ))}
+      </ul>
+      <div className="mt-3"><Note>{t('ingest.staging_hint')}</Note></div>
+      {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
+      <div className="mt-4 flex justify-end">
+        <button type="button" className="btn" disabled={state.busy} onClick={clear}>
+          <X size={14} />
+          {state.busy ? t('ingest.staging_running') : t('ingest.staging_start')}
         </button>
       </div>
     </Card>

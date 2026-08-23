@@ -76,6 +76,9 @@ CATALOGUE: tuple[dict, ...] = (
     {"event": "snapshot.created", "scope": "forest", "group": "maintenance"},
     {"event": "canopy.built", "scope": "forest", "group": "maintenance"},
     {"event": "reindex.finished", "scope": "forest", "group": "maintenance"},
+    # J.13.6 (v0.61): the derivation pass. It commits, unlike the two
+    # above it, so a receiver that watches content watches this too.
+    {"event": "recurate.finished", "scope": "forest", "group": "maintenance"},
     # -- deployment: belongs to no forest, so J.4.1 rule 3 decides -------
     {"event": "auth.login.succeeded", "scope": "deployment", "group": "access"},
     {"event": "auth.login.failed", "scope": "deployment", "group": "access"},
