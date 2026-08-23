@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.61.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.62.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,28 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **The cold scan was never the corpus (spec C.6b.1, v0.62)**: a `sniff`
+  for a term no memo entry covers must read every body in scope, and that
+  cost was deferred as "the corpus" until it was measured. On 1,902 nodes /
+  11.9 MB it was **629 ms of CPU of which reading the files was 31**. The
+  fold (C.6b's matching rule: lowercase + strip diacritics, length
+  preserved) was a Python loop over every character of every body — 387 ms,
+  62% — and G.7's `content:` marker was a MULTILINE regex over whole files
+  looking for a line only the frontmatter can hold — 71 ms more. Now
+  `_fold` is one `str.translate` against `_FOLD_TABLE` (ASCII takes
+  `str.lower()`, which for ASCII *is* the fold) and `_split_raw` finds the
+  frontmatter/body boundary once so the marker is searched in the head:
+  **133 ms**, sweep 933 → 448. `_FOLD_LIMIT` is `0x30000` and **not the
+  BMP** — cased scripts live in the SMP (Deseret, Adlam, Osage, Vithkuqi,
+  Warang Citi, Medefaidrin) and CJK Compatibility Ideographs decompose to
+  U+2FA1D; a BMP table stops folding six living scripts in silence, so
+  F.129 pins the limit against the Unicode version in use. The table is
+  built on first use, never at import: a `plant` folds nothing. The
+  trigram-FTS body index (P-03) is NOT here and its case is weaker — it was
+  proposed to remove a corpus read that is 5% of the call. Still open, and
+  bounded by the v0.59 rules: a warm `sniff` stays proportional to its
+  matches, which for a term matching most of a forest means deserializing
+  one memo record per matching node to rank it.
 - **An upload is a courier, not a mirror (spec J.8.3, v0.61)**: the bug
   reported was a `prune` that undid itself on somebody else's next upload;
   the cause was that the whole upload path treated `_derived/uploads` as a
