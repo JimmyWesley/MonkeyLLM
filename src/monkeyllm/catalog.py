@@ -265,6 +265,22 @@ class Catalog:
                 "origin_min": row[4], "origin_max": row[5],
                 "without_origin": int(row[6] or 0)}
 
+    def local_payloads(self, where: list[str],
+                       params: list | None = None) -> list[tuple[str, str]]:
+        """(id, payload) for every node in scope declaring a payload.
+
+        C.17 rule 11 counts the ones the filesystem does not have, and the
+        list is bounded by how many nodes carry payloads at all — a handful
+        beside the node count, which is why the integrity fact is affordable
+        inside a primitive whose rule is that it opens no file.
+        """
+        clauses = [c.format(n="") for c in where]
+        sql = ("SELECT id, payload FROM nodes "
+               "WHERE payload IS NOT NULL AND payload != ''")
+        if clauses:
+            sql += " AND " + " AND ".join(clauses)
+        return [(r[0], r[1]) for r in self.conn.execute(sql, params or [])]
+
     def date_buckets(self, field: str, granularity: str,
                      where: list[str] | None = None,
                      params: list | None = None) -> list[tuple]:

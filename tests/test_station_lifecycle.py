@@ -163,10 +163,14 @@ def test_upload_ingest_creates_nodes_without_any_model(station):
     assert body["errors"] == []
     assert body["commit"] and body["commit"] != body["commit_before"]
 
-    # The staged bytes live outside git, under the disposable _derived tree.
+    # The staged bytes lived outside git, under the disposable _derived
+    # tree — and since v0.61 they do not outlive the batch: an entry that
+    # became a node has its courier removed as it lands (J.8), and the
+    # report names what it consumed.
     staged = root / FOREST / "_derived" / "uploads"
-    assert (staged / "onboarding.md").is_file()
-    assert (staged / "team" / "rituals.md").is_file()
+    assert not (staged / "onboarding.md").exists()
+    assert not (staged / "team" / "rituals.md").exists()
+    assert sorted(body["consumed"]) == ["onboarding.md", "team/rituals.md"]
 
     # And the documents are now reachable as forest, with a real summary.
     node = client.post(f"/v1/forests/{FOREST}/look",

@@ -75,6 +75,34 @@ export const defaultBlocks = (caps) => BLOCKS.filter(
 
 const list = (xs) => xs.map((x) => `\`${x}\``).join(', ')
 
+/** FNV-1a, for the one case a name has to be shortened: two selections that
+ *  share a first forest must still produce two names. */
+const shortHash = (s) => {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(36).slice(0, 6)
+}
+
+/** The skill's `name:` and its folder on disk (J.5.12, v0.61).
+ *
+ *  It was a constant, so a person generating one skill per forest — which
+ *  is what this console invites — installed two files claiming the same
+ *  name. Derived from the selected forests instead: sorted, so the same SET
+ *  reproduces the same name; hashed when it would not fit, so two
+ *  selections sharing a first forest still differ. */
+export const skillName = (forests) => {
+  const ids = (forests || []).map(
+    (f) => String(f.id || f).toLowerCase().replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '')).filter(Boolean).sort()
+  if (!ids.length) return 'monkeyllm-memory'
+  const full = `monkeyllm-${ids.join('-')}`
+  if (full.length <= 64) return full
+  return `monkeyllm-${ids[0].slice(0, 40)}-${shortHash(ids.join(','))}`
+}
+
 /** Re-wrap a paragraph whose length depends on how many forests were picked.
  *  The fixed prose below is wrapped by hand; only the interpolated sentences
  *  need this, and a ragged file is a file somebody edits by hand. */
@@ -159,7 +187,7 @@ const core = ({ origin, forests, station, blocks, caps, inline, reinstall }) => 
   const their = multi ? 'their' : 'its'
 
   return `---
-name: monkeyllm-memory
+name: ${skillName(forests)}
 description: >-
 ${fill(`Use the MonkeyLLM ${multi ? `forests ${ids.map((i) => `"${i}"`).join(', ')}`
     : `forest "${one}"`} at ${origin} as persistent memory. Recall from ${them}
@@ -223,12 +251,17 @@ after:`)}
 
 - \`answer(forest, question)\` — the one-shot: retrieval plus a grounded reply
   with sources. Prefer it when the forest's answer is the answer.
-  \`min_evidence: 2\` refuses to answer over one weak snippet (it replies
+  \`min_evidence: n\` refuses to answer over too little (it replies
   \`answer: null\` and hands you the retrieval instead); \`min_score\` makes
   that floor count *relevance* and not just items, since the sweep returns
-  \`k\` results whatever their scores. Read a few \`harvest\` scores before
-  choosing a number — it means something in this deployment and nothing
-  outside it.
+  \`k\` results whatever their scores. **The two compose, and more sharply
+  than they read:** scores are compressed, so a threshold that means anything
+  usually admits only the one item that ranked top of both retrievers —
+  \`(min_evidence: 1, min_score: 0.02)\` is the useful pair, and 2 is a
+  deliberate demand for corroboration you will pay for in refusals. A refusal
+  says which half fired: \`evidence_count\` beside \`below_min_score\`, the
+  items the threshold dropped. Read a few \`harvest\` scores before choosing
+  a number — it means something in this deployment and nothing outside it.
 - \`harvest(forest, query)\` — retrieval without a model call: top items and
   matched passages, each carrying the \`trail\` it came from. Prefer it when
   you will reason over the material yourself.
@@ -332,15 +365,24 @@ default, and it is the whole path:
 
     ingest(forest, mode: "upload",
            files: [{name: "sso-decision.md", text: "..."}],
-           dest: "decisions/_index")
+           dest: "decisions")
 
 - **One document per fact worth finding on its own.** The Gardener converts,
   curates and commits it: title, summary, tags and aliases are written for
   you from the text you send, so the text has to state its own subject in its
   first lines.
-- **\`dest\` is a branch that exists.** \`locate(forest, ...)\` or
+- **\`dest\` is a branch that exists.** Either spelling of it —
+  \`"decisions"\` or \`"decisions/_index"\`. \`locate(forest, ...)\` or
   \`coverage(forest)\` first; if nothing fits, ask the user rather than
   inventing a place.
+- **If the material came from an address, say so.** An entry may carry
+  \`source_url\`, and for an uploaded document that IS its \`origin\` —
+  the field every later reader uses to go back to the source. Nothing else
+  fills it: an upload that declares no \`source_url\` has no origin at all,
+  because the staging path it arrived by is a fact about plumbing.
+
+      files: [{name: "pricing-page.md", text: "...",
+               source_url: "https://example.com/pricing"}]
 - **The name is part of the document.** A file called \`note.md\` gives the
   curator nothing to work with; \`2026-08-sso-decision.md\` gives it a date and
   a subject.
@@ -473,6 +515,9 @@ You read it with SQL, and you read the passport first.
 4. Two different refusals: \`E_QUERY_INVALID\` is SQLite saying your statement
    is wrong (fix it), \`E_QUERY_FORBIDDEN\` is the grant saying you may not
    read that (do not rephrase it — say what was refused).
+5. \`payload_missing: true\` in the digest means the database file behind
+   this passport is gone. The passport still reads; no query will run. Say
+   that to the user — it is a fact about the forest, not about your SQL.
 
 \`tend(forest, id, sql)\` is the only write path into a dataset, and it needs
 the \`tend\` capability of its own: ONE \`INSERT\`, \`UPDATE\` or
@@ -525,6 +570,8 @@ export function inlineSkill(ctx, selected) {
  *  zip it and gains no endpoint for one (J.5.12); the heredocs are quoted,
  *  so nothing in a skill's text is expanded by the shell on the way in. */
 export function installScript(files, dir = '~/.claude/skills/monkeyllm-memory') {
+  // The caller passes the derived folder (J.5.12 v0.61); the default is
+  // what a skill with no forest selected would be called.
   const nested = files.some((f) => f.path.includes('/'))
   return [`mkdir -p ${dir}${nested ? '/references' : ''}`,
           ...files.map((f) => `cat > ${dir}/${f.path} <<'MONKEYLLM_SKILL'\n`

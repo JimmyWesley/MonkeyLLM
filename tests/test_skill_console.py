@@ -31,4 +31,4 @@ def test_generated_skill_meets_its_criteria():
                        cwd=REPO / "apps" / "studio")
     assert r.returncode == 0, r.stdout + r.stderr
     # Every criterion reported, not just the ones that happened to run.
-    assert r.stdout.count("PASS") >= 17, r.stdout
+    assert r.stdout.count("PASS") >= 20, r.stdout

@@ -324,6 +324,19 @@ export const api = {
   // The repair the derived layer is designed around (J.13.3). Synchronous
   // on purpose: the caller waits, because a rebuild the console could not
   // confirm is a rebuild nobody can rely on.
+  // J.13.6 (v0.61): re-derive what ingest would derive today, from the
+  // passports. Not a job — it runs on the lane and the caller waits, like
+  // the rebuild beside it.
+  recurate: (forest, derive = ['aliases']) =>
+    request('/v1/admin/recurate', { method: 'POST',
+                                    body: JSON.stringify({ forest, derive }) }),
+  // J.13.7 (v0.61): what is in the upload staging area that is not a
+  // document, and the sweep for it. One resource, two verbs — the same
+  // question asked twice.
+  staging: (forest) =>
+    request(`/v1/admin/staging?forest=${encodeURIComponent(forest)}`),
+  clearStaging: (forest) => request('/v1/admin/staging', { method: 'POST',
+                                    body: JSON.stringify({ forest }) }),
   reindex: (forest) => request('/v1/admin/reindex', { method: 'POST',
                                                       body: { forest } }),
 }

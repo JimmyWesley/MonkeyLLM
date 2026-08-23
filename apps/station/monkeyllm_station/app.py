@@ -2011,9 +2011,9 @@ def build_app(
                 hint="It is a retrieval score threshold, e.g. 0.02.")
         if not floor:
             return None
-        items = [r for r in bundle.get("results") or []
-                 if r.get("content")
-                 and (not threshold or (r.get("score") or 0) >= threshold)]
+        carrying = [r for r in bundle.get("results") or [] if r.get("content")]
+        items = [r for r in carrying
+                 if not threshold or (r.get("score") or 0) >= threshold]
         if len(items) >= floor:
             return None
         out = {"answer": None, "reason": "insufficient_evidence",
@@ -2022,6 +2022,15 @@ def build_app(
             # A refusal that hides which knob fired is a knob nobody can
             # tune.
             out["min_score"] = threshold
+        # J.10.10 rule 8 (v0.61): which half refused. RRF output is
+        # compressed, so a threshold that means anything usually admits the
+        # ONE item that is top of both retrievers — and `min_evidence: 2`,
+        # the value a caller picks to mean "I want two sources", then
+        # refuses questions the forest answers correctly. Measured twice on
+        # one live forest. `evidence_count + below_min_score` is the count
+        # with no threshold, which is what tells a caller whether to lower
+        # the floor or the threshold.
+        out["below_min_score"] = len(carrying) - len(items)
         out["harvest"] = bundle
         return out
 
@@ -2244,7 +2253,8 @@ def build_app(
         """The Gardener over REST (J.8), with the host's three additions:
         the `ingest` capability, a scope check on where it may write, and a
         staging area for operators who have a browser and no shell."""
-        from monkeyllm.gardener import Gardener, discover_hooks
+        from monkeyllm.gardener import (Gardener, discover_hooks,
+                                         normalize_dest)
         from monkeyllm_station import compose, inference
 
         if not policy.grants("ingest"):
@@ -2319,7 +2329,13 @@ def build_app(
         # lands under `dest/`. So the prefix is what must be in scope — testing
         # the bare name would reject `projects` for a principal allowed
         # `projects/`, and testing nothing would let it write anywhere.
-        dest = (payload.get("dest") or "").strip("/") or None
+        # G.3 (v0.61): a branch is addressed by its id, and `dest` accepts
+        # either spelling. Normalised HERE, before the scope test, so the
+        # test and the write agree about which branch is meant — the bare
+        # form was the only one accepted and the canonical one built
+        # `x/_index/_index`, refused with an `expected_parent` naming the
+        # exact string the caller had sent.
+        dest = normalize_dest(payload.get("dest"))
         allowed_dests = [a.rstrip("/") for a in policy.allow if a]
         if dest and not policy.in_scope(f"{dest}/"):
             return VineError(E_FORBIDDEN, f"'{dest}' is outside this principal's scope",
@@ -2436,21 +2452,30 @@ def build_app(
                 on_stage=(None if watched is None
                           else lambda f, st: board.note_stage(watched, f, st)))
 
-            if mode == "upload" and gardener.config.get("source_root") == \
-                    Path(source).resolve().as_posix():
-                # The staging area is stable per forest, so re-sending a
-                # filename means "this document changed". `adopt` would plant a
-                # second node beside the first; the Gardener's update path is
-                # the G.8 hash diff, which is exactly what `sync` runs.
+            if mode == "upload":
+                # J.8 (v0.61): ONE path for every upload, first or hundredth.
                 #
-                # `dest` is carried through: this is still an upload, and the
-                # operator picked a destination for THESE files. Letting the
-                # config's dest win would file every later batch wherever the
-                # first one went, without saying so. Comparing resolved paths
-                # keeps the flip working when the forest root reaches the
-                # Station through a symlink — otherwise adopt runs twice and
-                # plants a duplicate of every staged document.
-                mode, steps = "sync", gardener.sync_iter(source, dest=dest)
+                # It used to be `adopt` the first time and a full refresh of
+                # the staging DIRECTORY thereafter, and both halves were
+                # wrong. `adopt` records its source as the forest's mirror
+                # root — so one upload repointed a forest that really did
+                # mirror `/data/handbook` at the upload staging area, and the
+                # operator's Sync button then offered to re-read the courier.
+                # And the refresh walked the whole directory, so every file
+                # any previous batch had ever uploaded was re-examined on
+                # every upload: one whose node had since been pruned had no
+                # passport to diff against, was read as new, and was planted
+                # again — a removal that undid itself on somebody else's
+                # next upload.
+                #
+                # The scoped refresh does both jobs correctly by itself: an
+                # entry with no passport is planted, an entry with one is
+                # refreshed, and nothing else in the directory is touched or
+                # even looked at. Nothing is recorded: an upload is bytes
+                # arriving, not a folder this forest mirrors, and `consume`
+                # says the bytes may go once they are a node.
+                steps = gardener.sync_iter(source, dest=dest, paths=staged,
+                                           consume=True)
             elif mode == "sync":
                 # A targeted path here is relative to the source root a prior
                 # adopt recorded — vetted then, and contained by G.8 now.
@@ -2480,8 +2505,9 @@ def build_app(
                 job.mode, job.total = mode, steps.total
                 return {"_prepared": PreparedIngest(
                     job=job, steps=steps, gardener=gardener, curator=curator,
-                    mode=mode, staged=staged, root=root, before=before or None,
-                    principal=principal, forest=forest, payload=payload)}
+                    mode=mode, staged=staged, root=root,
+                    before=before or None, principal=principal, forest=forest,
+                    payload=payload)}
 
             # compose answers in place (J.9): one document, and the J.8.1
             # review is a conversation, not a batch.
@@ -4698,6 +4724,186 @@ def build_app(
                    {"nodes": result["nodes"], "ms": result["ms"]})
         return JSONResponse(result)
 
+    async def admin_recurate(request: Request) -> JSONResponse:
+        """Re-derive what ingest derives, from the passports (J.13.6).
+
+        `reindex` repairs what FINDS a node; `sync` repairs what a node
+        SAYS by re-reading its source. This is the repair neither performs:
+        a derivation rule that improved after the material was ingested.
+        Every input is already in the passport, so it opens no source file,
+        calls no converter and pays no model — and it was nevertheless
+        reachable only through `sync`, which needs a host root and `admin`
+        over it. A forest of 1,877 nodes therefore had the feature in the
+        code and not in the corpus.
+
+        Unlike `reindex` it COMMITS, so a read-only Station refuses it.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        try:
+            body = await request.json() if await request.body() else {}
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        forest = str(body.get("forest") or request.query_params.get("forest") or "")
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+        if not writable:
+            return _envelope(VineError(
+                E_READONLY, "this Station is read-only",
+                hint="Start it with --writable to accept writes."), 403)
+        policy = registry.policy_for(principal, forest)
+        # J.13.6 rule 4, `reindex`'s rule: it visits every passport and the
+        # count IS the forest's size, so a branch-limited admin grant is not
+        # the authority for it.
+        if policy is None or not policy.unrestricted:
+            return _envelope(VineError(
+                E_FORBIDDEN, "a re-derivation covers the whole forest",
+                hint="It visits every ingested passport and reports how many "
+                     "there are, so it needs an admin grant that is not "
+                     "limited to a branch."), 403)
+        derive = body.get("derive") or ["aliases"]
+        if not isinstance(derive, list) or not all(isinstance(d, str) for d in derive):
+            return _envelope(VineError(
+                E_SCHEMA, "derive must be a list of strings",
+                hint='e.g. {"derive": ["aliases"]}.'))
+
+        def work():
+            from monkeyllm.gardener import Gardener
+
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            t0 = time.perf_counter()
+            try:
+                # J.4: the principal rides the commits this pass writes,
+                # exactly as it rides a scoped write.
+                vine.commit_trailers = [f"station-principal: {principal}"]
+                out = Gardener(vine).recurate(derive)
+            except VineError as e:
+                return e.to_dict()
+            finally:
+                vine.commit_trailers = []
+            out["forest"] = forest
+            out["ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            return out
+
+        # The writer lane: it commits, and the caller waits (J.13.3's shape).
+        result = await in_forest_thread(forest, work)
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        readers.reset(forest)
+        registry.record(principal=principal, forest=forest, primitive="recurate",
+                        args={"derive": derive}, result="ok",
+                        size=result.get("changed", 0))
+        hooks.emit(forest, "recurate.finished", principal,
+                   {"scanned": result.get("scanned", 0),
+                    "changed": result.get("changed", 0),
+                    "derive": derive})
+        return JSONResponse(result)
+
+    # How many unrecorded names a listing spells out. The count is the
+    # number an operator acts on; the names are so they can recognise them.
+    STAGING_NAMES_SHOWN = 50
+
+    async def admin_staging(request: Request) -> JSONResponse:
+        """What is in the upload staging area that is not a document (J.8).
+
+        Uploaded bytes are a courier: since v0.61 an entry that becomes a
+        node has its staged file removed as it lands. What stays is a batch
+        that failed conversion, a batch that was cancelled, or — on a forest
+        ingested by an older Station — a document whose node was later
+        pruned. Before this route none of it was visible, so it accumulated
+        where nobody could see it, and once it came back to life.
+
+        Reporting and clearing are the same resource because they are the
+        same question asked twice: GET says what is there, POST removes what
+        no passport records. Removal is a MOVE into the graveyard, like
+        C.14's: `_derived/` is disposable, and the operator empties it.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        clearing = request.method == "POST"
+        try:
+            body = await request.json() if (clearing and await request.body()) else {}
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        forest = str(body.get("forest") or request.query_params.get("forest") or "")
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+        policy = registry.policy_for(principal, forest)
+        if policy is None or not policy.unrestricted:
+            return _envelope(VineError(
+                E_FORBIDDEN, "the staging area belongs to the whole forest",
+                hint="It holds bytes headed for any branch, so it needs an "
+                     "admin grant that is not limited to one."), 403)
+        if clearing and not writable:
+            return _envelope(VineError(
+                E_READONLY, "this Station is read-only",
+                hint="Start it with --writable to clear the staging area."), 403)
+        if clearing:
+            # A running batch is reading these files right now, and one
+            # cancelled halfway leaves the rest of its bytes here.
+            running = board.running(forest)
+            if running is not None:
+                return _envelope(VineError(
+                    E_LOCKED,
+                    f"an ingest job is running on this forest: {running.id}",
+                    hint="Clearing would remove bytes it has not read yet. "
+                         "Wait for it, or cancel it first."), 409)
+
+        def work():
+            from monkeyllm.gardener import Gardener
+
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            staging = Path(vine.forest.root).joinpath(*UPLOAD_DIR)
+            unrecorded = Gardener(vine, hooks=[]).unrecorded_sources(staging)
+            total = sum(size for _, size in unrecorded)
+            out = {"forest": forest,
+                   "unrecorded": len(unrecorded),
+                   "bytes": total,
+                   "names": [rel for rel, _ in unrecorded[:STAGING_NAMES_SHOWN]],
+                   "truncated": len(unrecorded) > STAGING_NAMES_SHOWN}
+            if not clearing:
+                return out
+            grave = Path(vine.forest.root) / "_derived" / "graveyard" / "_staging"
+            cleared = 0
+            for rel, _size in unrecorded:
+                src_file = staging / rel
+                dest = grave / rel
+                try:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(src_file), str(dest))
+                    cleared += 1
+                except OSError:
+                    # A file that will not move is reported by the count it
+                    # is missing from, never by a half-done answer.
+                    continue
+            out["cleared"] = cleared
+            return out
+
+        result = await in_forest_thread(forest, work)
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        if clearing:
+            registry.record(principal=principal, forest=forest,
+                            primitive="staging.clear", args={}, result="ok",
+                            size=result.get("cleared", 0))
+        return JSONResponse(result)
+
     def _lock_root(forest: str):
         """The forest's directory for a lock probe — containment without
         opening anything (J.13.5: a diagnostic must not need the patient
@@ -5212,6 +5418,8 @@ def build_app(
         Route("/v1/admin/health", admin_health),
         Route("/v1/admin/cache", admin_cache, methods=["GET", "POST"]),
         Route("/v1/admin/reindex", admin_reindex, methods=["POST"]),
+        Route("/v1/admin/recurate", admin_recurate, methods=["POST"]),
+        Route("/v1/admin/staging", admin_staging, methods=["GET", "POST"]),
         Route("/v1/admin/locks", admin_locks),
         Route("/v1/admin/unlock", admin_unlock, methods=["POST"]),
         Route("/v1/admin/snapshots", admin_snapshots, methods=["GET", "POST"]),

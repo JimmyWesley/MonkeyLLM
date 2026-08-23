@@ -105,6 +105,9 @@ def test_the_route_table_is_what_we_think_it_is(station):
         ("/v1/admin/principals", "GET"),
         ("/v1/admin/providers", "GET"), ("/v1/admin/providers", "POST"),
         ("/v1/admin/providers/test", "POST"),
+        # Re-derive what ingest derives (v0.61, J.13.6): the same gate as the
+        # rebuild, plus a write — so a read-only Station refuses it too.
+        ("/v1/admin/recurate", "POST"),
         # The catalog rebuild (v0.41, J.13.3): `admin` on the forest and an
         # unrestricted scope, so the sweeps below cover it as they do health.
         ("/v1/admin/reindex", "POST"),
@@ -113,6 +116,9 @@ def test_the_route_table_is_what_we_think_it_is(station):
         # anonymous sweeps below cover them like every other admin route.
         ("/v1/admin/snapshots/import", "POST"),
         ("/v1/admin/snapshots/{forest}/{file}", "GET"),
+        # The upload staging area, seen and cleared (v0.61, J.8): the same
+        # gate as the rebuild, so the sweeps below cover it.
+        ("/v1/admin/staging", "GET"), ("/v1/admin/staging", "POST"),
         # An orphan lock, released over HTTP (v0.55, J.13.5): admin_gate,
         # audited, and constitutionally unable to break a live writer.
         ("/v1/admin/unlock", "POST"),

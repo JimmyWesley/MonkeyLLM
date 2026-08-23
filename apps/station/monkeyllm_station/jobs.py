@@ -39,6 +39,10 @@ class IngestJob:
     def __init__(self, forest: str, mode: str, total: int, principal: str):
         self.id = f"ing-{secrets.token_hex(4)}"
         self.forest = forest
+        # J.9 (v0.61): `mode` is the caller's own word and stays it. It used
+        # to be rewritten to "sync" mid-call by the upload flip — a mode
+        # that mirrors a host directory, which the caller never asked for.
+        # The flip is gone (J.8), so there is one mode and it is this one.
         self.mode = mode
         self.principal = principal
         self.state = "running"

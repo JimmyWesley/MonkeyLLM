@@ -65,6 +65,7 @@ const SAMPLE = {
   'snapshot.created': { name: 'demo-20260820-1402.bundle', bytes: 1843200, payloads: 4 },
   'canopy.built': { embedded: 82, nodes: 82, stale: 0, model: 'text-embedding-3-large', refresh: false },
   'reindex.finished': { nodes: 82, ms: 143.2 },
+  'recurate.finished': { scanned: 1877, changed: 41, derive: ['aliases'] },
   'auth.login.succeeded': { username: 'maria', host: '203.0.113.9' },
   'auth.login.failed': { username: 'maria', host: '203.0.113.9' },
   'pair.issued': { principal: 'maria', caps: ['ingest', 'read'], prefix: 'mk_7Fq2x', expires_in_days: 90 },

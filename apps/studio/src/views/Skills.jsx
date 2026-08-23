@@ -39,7 +39,13 @@ import { Highlighted } from '../design/highlight.jsx'
 import { Download, Files, Key, Plug, Sparkle } from '../design/icons.jsx'
 import { NeedsCapability, has } from './shared.jsx'
 import { BLOCKS, PRESETS, buildSkill, defaultBlocks, inlineSkill, installScript,
-         presetFor, tokens } from '../skill.js'
+         presetFor, skillName, tokens } from '../skill.js'
+import { zip } from '../zip.js'
+
+/** The folder's name on disk, and therefore inside the archive: extracting
+ *  gives a directory a person can drop straight into ~/.claude/skills/.
+ *  Derived from the selected forests (J.5.12 v0.61) — a constant here made
+ *  one-skill-per-forest, which this console invites, collide on `name:`. */
 
 const P = ({ children }) => (
   <p className="max-w-[72ch] text-[13px] leading-relaxed text-text-2">{children}</p>
@@ -66,14 +72,24 @@ function CodeBlock({ title, code, lang = 'bash', actions }) {
 
 /** The browser saves what the console generated — no server round trip,
  *  exactly like the copy button beside it (J.5.12). */
-function saveFile(name, text) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }))
+function save(name, blob) {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = name
   a.click()
   URL.revokeObjectURL(url)
 }
+
+const saveFile = (name, text) =>
+  save(name, new Blob([text], { type: 'text/markdown' }))
+
+/** The whole folder, as a folder. The install paste is the shortest route on
+ *  a machine with a shell; this is the route for every other machine, and it
+ *  arrives already arranged — `<name>/SKILL.md` beside
+ *  `<name>/references/*.md`, nothing for the reader to place. */
+const saveFolder = (files, folder) =>
+  save(`${folder}.zip`, zip(files.map((f) => ({ ...f, path: `${folder}/${f.path}` }))))
 
 export default function Skills({ forest, grant, me }) {
   const { t } = useI18n()
@@ -150,6 +166,8 @@ export default function Skills({ forest, grant, me }) {
     ? (assembly === 'folder' ? buildSkill(ctx, blocks) : inlineSkill(ctx, blocks))
     : []
   const core = files[0]
+  // The one name: the frontmatter's, the folder's, the archive's.
+  const folder = skillName(ctx.forests)
   const extra = files.slice(1)
   const extraTokens = extra.reduce((n, f) => n + tokens(f.text), 0)
 
@@ -246,11 +264,21 @@ export default function Skills({ forest, grant, me }) {
           <Note tone="warn">{t('skills.shape.no_forests')}</Note>
         ) : (
           <>
-            <CodeBlock title={t('skills.install.script')} code={installScript(files)} />
+            <CodeBlock title={t('skills.install.script')}
+                       code={installScript(files, `~/.claude/skills/${folder}`)} />
+            {files.length > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn btn-primary"
+                        onClick={() => saveFolder(files, folder)}>
+                  <Download size={15} /> {t('skills.install.zip')}
+                </button>
+                <span className="text-[12px] text-text-3">{t('skills.install.zip_hint')}</span>
+              </div>
+            )}
             <P>{t('skills.install.or_files')}</P>
             {files.map((f) => (
               <CodeBlock key={f.path} lang="markdown"
-                         title={`~/.claude/skills/monkeyllm-memory/${f.path}`}
+                         title={`~/.claude/skills/${folder}/${f.path}`}
                          code={f.text}
                          actions={
                            <button className="btn btn-sm"

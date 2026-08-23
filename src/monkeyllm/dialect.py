@@ -43,6 +43,32 @@ DEFAULT_RELS: dict[str, str | None] = {
     "supersedes": "superseded-by",
 }
 
+# How many declared tokens a refusal spells out before it starts counting.
+# A forest may declare more than a hint can carry; a hint that scrolls is
+# not a hint, and the count is what tells the reader to go read the file.
+DECLARED_IN_HINT = 20
+
+
+def declared_hint(names, kind: str) -> str:
+    """A.2 (v0.61): a refusal for an undeclared token names the set.
+
+    The forest's own `_meta/schema.md` is the authority at runtime, so a
+    rel the engine ships may legitimately be absent from a given forest —
+    a forest created before `supersedes` existed declares nine rels and
+    refuses the tenth, which is A.2 working as designed. What was not
+    working is that the refusal said only which token was wrong, in the
+    one case where naming the accepted set answers the question
+    completely (C.12: every refusal carries an actionable hint).
+    """
+    listed = sorted(names)
+    shown = ", ".join(listed[:DECLARED_IN_HINT])
+    more = len(listed) - DECLARED_IN_HINT
+    if more > 0:
+        shown += f" (+{more} more)"
+    return (f"This forest declares these {kind}: {shown}. "
+            f"The table grows by editing _meta/schema.md, never ad-hoc.")
+
+
 ENTITY_KINDS = {"person", "organization", "product", "place", "other"}
 PAYLOAD_TYPES = {"sqlite", "pdf", "docx", "image", "audio"}
 SOURCES = {"manual", "ingest", "agent"}

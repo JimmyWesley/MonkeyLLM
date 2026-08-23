@@ -268,7 +268,9 @@ def test_reupload_keeps_the_source_line_through_the_sync_flip(station):
          "source_url": URL}])
     assert second.status_code == 200, second.text
     report = second.json()["job"]["report"]
-    assert report["mode"] == "sync"
+    # J.9 (v0.61): `mode` is the caller's own word on every call. It used to
+    # be rewritten to "sync" by the upload flip, which is gone.
+    assert report["mode"] == "upload"
     assert "clips/clip-refresh" in report["updated"]
 
     text = (forest_dir / "clips" / "clip-refresh.md").read_text(encoding="utf-8")
