@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.62.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.63.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,32 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **The budget nobody chose is still a budget (spec J.10/J.10.8, v0.63)**:
+  every binding shipped at `max_tokens` **600**, and J.10.8 stated the cap in
+  the prompt only **when a caller set `reply_tokens`**. Both were sized for a
+  reply that is prose, and the `answer` turn is not: it is a JSON object
+  carrying the text AND `answer_nodes`, so the budget pays for the citation
+  apparatus before it pays for a sentence (a client that also wants a verbatim
+  `proof` pays for that too). Measured on the 18-question suite a 12B scored
+  **16/18** at 600 and **neither miss was navigation** one had already run
+  `SUM(...) GROUP BY region` on the right dataset and was cut mid-object, the
+  other reached the right node in ONE hop and lost the right sentence to a
+  truncated `proof`. At 1500 both pass and the wall time falls with them
+  (139 s → 15 s, 149 s → 11 s), because the rejected retries stop. What hid
+  it for so long is the symptom's shape: **a cut answer scores as a wrong
+  answer**, never as a cut, so the console blames the model and the operator
+  tunes a model that was right. Now: the `answer` role binds at **1500**
+  (`ingest`/`vision` keep 600 a scent and a description carry no citations;
+  the curator's 300 is a different client); the runtime fallback and
+  `Registry.bind_model` follow; and the prompt states the cap **whatever chose
+  it**, because the silent case was exactly the one where nobody had chosen.
+  Raising a default reaches nobody who already has a row, so existing
+  bindings move by a **one-time data repair** (`DATA_REPAIRS` in
+  `registry.py`, stamped in `PRAGMA user_version`) the point is not that it
+  runs but that it runs ONCE: a deliberate 600 afterwards is byte-identical to
+  the shipped one, and only the stamp tells them apart. `max_tokens` is in the
+  J.10.7 store key, so the repair **invalidates that forest's answer cache**
+  once, by design.
 - **The cold scan was never the corpus (spec C.6b.1, v0.62)**: a `sniff`
   for a term no memo entry covers must read every body in scope, and that
   cost was deferred as "the corpus" until it was measured. On 1,902 nodes /
