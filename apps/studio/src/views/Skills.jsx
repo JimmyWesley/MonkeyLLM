@@ -40,6 +40,11 @@ import { Download, Files, Key, Plug, Sparkle } from '../design/icons.jsx'
 import { NeedsCapability, has } from './shared.jsx'
 import { BLOCKS, PRESETS, buildSkill, defaultBlocks, inlineSkill, installScript,
          presetFor, tokens } from '../skill.js'
+import { zip } from '../zip.js'
+
+/** The folder's name on disk, and therefore inside the archive: extracting
+ *  gives a directory a person can drop straight into ~/.claude/skills/. */
+const FOLDER = 'monkeyllm-memory'
 
 const P = ({ children }) => (
   <p className="max-w-[72ch] text-[13px] leading-relaxed text-text-2">{children}</p>
@@ -66,14 +71,24 @@ function CodeBlock({ title, code, lang = 'bash', actions }) {
 
 /** The browser saves what the console generated — no server round trip,
  *  exactly like the copy button beside it (J.5.12). */
-function saveFile(name, text) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }))
+function save(name, blob) {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = name
   a.click()
   URL.revokeObjectURL(url)
 }
+
+const saveFile = (name, text) =>
+  save(name, new Blob([text], { type: 'text/markdown' }))
+
+/** The whole folder, as a folder. The install paste is the shortest route on
+ *  a machine with a shell; this is the route for every other machine, and it
+ *  arrives already arranged — `monkeyllm-memory/SKILL.md` beside
+ *  `monkeyllm-memory/references/*.md`, nothing for the reader to place. */
+const saveFolder = (files) =>
+  save(`${FOLDER}.zip`, zip(files.map((f) => ({ ...f, path: `${FOLDER}/${f.path}` }))))
 
 export default function Skills({ forest, grant, me }) {
   const { t } = useI18n()
@@ -247,6 +262,14 @@ export default function Skills({ forest, grant, me }) {
         ) : (
           <>
             <CodeBlock title={t('skills.install.script')} code={installScript(files)} />
+            {files.length > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn btn-primary" onClick={() => saveFolder(files)}>
+                  <Download size={15} /> {t('skills.install.zip')}
+                </button>
+                <span className="text-[12px] text-text-3">{t('skills.install.zip_hint')}</span>
+              </div>
+            )}
             <P>{t('skills.install.or_files')}</P>
             {files.map((f) => (
               <CodeBlock key={f.path} lang="markdown"

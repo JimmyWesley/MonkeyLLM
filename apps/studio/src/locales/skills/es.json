@@ -9,6 +9,8 @@
   "skills.install.script": "Escribir la skill",
   "skills.install.sub": "Generada para esta Station y estos bosques, entregada por tu navegador.",
   "skills.install.title": "Paso 4 — entrega la skill a tu agente",
+  "skills.install.zip": "Descargar la carpeta (.zip)",
+  "skills.install.zip_hint": "Descomprímela en ~/.claude/skills/ — ya ordenada, nada que colocar a mano.",
   "skills.locked": "La consola de Skills enseña a una IA a leer este bosque, y tu clave no puede leer aquí.",
   "skills.other.manual": "La superficie completa — cada tool, cada ruta, cada ajuste de despliegue — está documentada en MCP / API / Integraciones, para quien administra esta Station.",
   "skills.other.p1": "Nada de lo de arriba es particular de Claude Code más allá de la ruta de instalación. Registra el endpoint de abajo donde sea que tu runtime configure servidores MCP, y entrégale las mismas instrucciones.",

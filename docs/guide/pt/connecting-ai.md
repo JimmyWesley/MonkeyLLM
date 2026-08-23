@@ -159,6 +159,11 @@ então nomeia, na própria primeira linha, a capacidade que exige. O console
 mostra quanto o núcleo custa enquanto você escolhe, porque é esse o número que
 toda sessão paga quando a skill dispara.
 
+**Baixar a pasta (.zip)** entrega tudo já organizado —
+`monkeyllm-memory/SKILL.md` ao lado de `monkeyllm-memory/references/*.md`.
+Descompacte em `~/.claude/skills/` e a instalação acabou; a colagem acima só é
+mais rápida se você já estiver num terminal.
+
 Se o seu runtime não aceita pasta, **Arquivo único** embute os mesmos blocos em
 um só `SKILL.md`. As instruções são as mesmas; o que muda é que todas carregam
 toda vez.

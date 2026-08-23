@@ -84,7 +84,9 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   core with the trigger that sends an agent to read it. Blocks default to the
   key's own caps, so a `{read, ingest}` paired key stops paying ~1,400 tokens
   of `plant` anatomy it may not execute; a block chosen beyond the key names
-  the capability in its own first line. Several INSTALLED skills is NOT the
+  the capability in its own first line; the folder also downloads as one
+  arranged `.zip` (`apps/studio/src/zip.js`, stored entries, no dependency)
+  for the machine with no shell to paste into. Several INSTALLED skills is NOT the
   split — each costs its `description` every session and the runtime, not the
   core, decides which loads. Every example carries the `forest` argument (the
   v0.59 file had 23 call examples and passed it in none). Forests are

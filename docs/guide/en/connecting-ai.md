@@ -148,6 +148,11 @@ skill for somebody whose key is wider — the block then names the capability it
 requires in its own first line. The console prints what the core costs as you
 choose, because that is the number every session pays when the skill fires.
 
+**Download the folder (.zip)** hands you the whole thing already arranged —
+`monkeyllm-memory/SKILL.md` beside `monkeyllm-memory/references/*.md`. Unzip
+it into `~/.claude/skills/` and the install is done; the paste above is the
+faster route only if you are already at a terminal.
+
 If your runtime takes no folder, **One file** inlines the same blocks into a
 single `SKILL.md`. The instructions are the same ones; what changes is that
 all of them load every time.

@@ -9,6 +9,7 @@
  * criterion, named on stdout. */
 import { BLOCKS, buildSkill, defaultBlocks, inlineSkill, installScript, tokens }
   from './src/skill.js'
+import { zip } from './src/zip.js'
 
 let failed = 0
 
@@ -92,5 +93,36 @@ ok('F.116 installing is stated as the operator\'s act',
    backCore.includes('cannot install it yourself'))
 ok('F.116 no generated file offers a skill tool or route',
    !buildSkill(back, BLOCKS.map((b) => b.id)).some((f) => /skill\(|\/v1\/skill/.test(f.text)))
+
+// The archive: a corrupt zip is exactly the kind of thing that ships quietly,
+// so the central directory is read back and compared against the source.
+const zipped = buildSkill(ctx(['read', 'ingest', 'write', 'query', 'tend'],
+                              [{ id: 'f', caps: ['read'] }]), BLOCKS.map((b) => b.id))
+  .map((f) => ({ ...f, path: `monkeyllm-memory/${f.path}` }))
+const bytes = new Uint8Array(await zip(zipped).arrayBuffer())
+const view = new DataView(bytes.buffer)
+const dec = new TextDecoder()
+
+// End-of-central-directory is the last 22 bytes when there is no comment.
+const eocd = bytes.length - 22
+const count = view.getUint16(eocd + 8, true)
+let at = view.getUint32(eocd + 16, true)
+const seen = []
+for (let i = 0; i < count; i++) {
+  const nameLen = view.getUint16(at + 28, true)
+  seen.push({ name: dec.decode(bytes.subarray(at + 46, at + 46 + nameLen)),
+              size: view.getUint32(at + 24, true) })
+  at += 46 + nameLen + view.getUint16(at + 30, true) + view.getUint16(at + 32, true)
+}
+ok('zip: end record signed, one entry per file',
+   view.getUint32(eocd, true) === 0x06054b50 && count === zipped.length)
+ok('zip: every path arrives under the folder, arranged',
+   zipped.every((f) => seen.some((e) => e.name === f.path))
+   && seen.every((e) => e.name.startsWith('monkeyllm-memory/')))
+ok('zip: declared sizes match the text they came from',
+   zipped.every((f) => {
+     const e = seen.find((x) => x.name === f.path)
+     return e && e.size === new TextEncoder().encode(f.text).length
+   }))
 
 process.exit(failed ? 1 : 0)
