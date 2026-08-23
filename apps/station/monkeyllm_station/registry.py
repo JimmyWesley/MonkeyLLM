@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS model_bindings (
     role       TEXT NOT NULL,          -- 'ingest' | 'answer'
     provider   TEXT NOT NULL,
     model      TEXT NOT NULL,
-    max_tokens INTEGER NOT NULL DEFAULT 600,
+    max_tokens INTEGER NOT NULL DEFAULT 1500,
     reasoning  TEXT NOT NULL DEFAULT 'off',
     PRIMARY KEY (forest, role)
 );
@@ -197,6 +197,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_single_owner
 # Gauntlet (Part K). Absent, navigation is unchanged.
 ROLES = ("ingest", "answer", "vision", "embed")
 
+# One-time DATA repairs, applied in order and stamped in `PRAGMA
+# user_version`. A repair that ran on every open would fight the operator:
+# somebody who deliberately chooses the old value after the upgrade must keep
+# it, and only a version stamp can tell that apart from a value nobody ever
+# considered. Append a statement and the stamp follows; never edit one that
+# has shipped, because a Station that already ran it will not run it again.
+DATA_REPAIRS = (
+    # v1 — J.10.8, measured. Every role shipped bound at `max_tokens` 600, and
+    # for `answer` that is below the reply it has to carry: the final action of
+    # a walk is a JSON object holding the answer text AND `answer_nodes`, so
+    # the budget pays for the citation apparatus and not only for prose. On the
+    # 18-question suite two answers were lost to it, both AFTER the model had
+    # run the correct query and reached the correct node — and both scored as
+    # WRONG ANSWERS rather than as truncation, which is what made the cause
+    # invisible for so long. Only bindings still sitting on the shipped default
+    # are moved; a deliberate 600 is byte-identical to it, which is exactly why
+    # this runs once and never again.
+    "UPDATE model_bindings SET max_tokens = 1500 "
+    "WHERE role = 'answer' AND max_tokens = 600",
+)
+
 # Columns added after the Phase A schema shipped; a Station upgraded in place
 # must not lose its principals over a migration.
 MIGRATIONS = {
@@ -278,11 +299,25 @@ class Registry:
         self.conn.executescript(SCHEMA_SQL)
         self._migrate()
         self.conn.executescript(POST_MIGRATION_SQL)
+        self._repair()
         self.conn.commit()
         # Keys of environment-declared providers (J.10.1). In memory, for the
         # life of the process, and never written: the registry file is a
         # backup target and the environment is not.
         self._env_secrets: dict[str, str] = {}
+
+    def _repair(self) -> None:
+        """Apply the DATA_REPAIRS this database has not seen (see the tuple).
+
+        A fresh registry runs them against empty tables — no-ops — and is
+        stamped current, so a new Station never carries a repair forward.
+        """
+        done = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        for statement in DATA_REPAIRS[done:]:
+            self.conn.execute(statement)
+        if done < len(DATA_REPAIRS):
+            # PRAGMA takes no parameters; the value is our own constant.
+            self.conn.execute(f"PRAGMA user_version = {len(DATA_REPAIRS)}")
 
     def _migrate(self) -> None:
         for table, columns in MIGRATIONS.items():
@@ -802,7 +837,7 @@ class Registry:
         return out
 
     def bind_model(self, forest: str, role: str, provider: str, model: str,
-                   max_tokens: int = 600, reasoning: str = "off") -> None:
+                   max_tokens: int = 1500, reasoning: str = "off") -> None:
         if role not in ROLES:
             raise ValueError(f"role must be one of {list(ROLES)}")
         if not self.conn.execute("SELECT 1 FROM providers WHERE name = ?",

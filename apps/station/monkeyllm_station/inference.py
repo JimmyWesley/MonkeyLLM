@@ -82,6 +82,27 @@ REPLY_BUDGET_NOTE = (
 )
 
 MIN_REPLY_TOKENS = 64
+
+# What a call is capped at when nobody chose: no per-call `reply_tokens` and a
+# binding with no `max_tokens` of its own. 600 was the shipped value and it is
+# below what an `answer` has to emit — the final action of a walk is a JSON
+# object carrying the answer text AND `answer_nodes`, so the budget pays for
+# the citation apparatus and not only for prose. Measured on the 18-question
+# suite, a 12B lost two answers to it AFTER running the right query and
+# reaching the right node, and both read as wrong answers rather than as cuts.
+DEFAULT_REPLY_TOKENS = 1500
+
+
+def effective_reply_tokens(binding: dict, reply_tokens: int | None = None) -> int:
+    """The cap this call will carry, before the reasoning bump.
+
+    One function because there are two readers of it and they used to
+    disagree: the request computed its own cap while the prompt only spoke
+    when `reply_tokens` was set, so the note fell silent in exactly the case
+    where nobody had chosen a number and the default was deciding alone. A
+    cut the model was never warned about is the failure J.10.8 exists to
+    prevent, and the default is not a smaller kind of choice."""
+    return int(reply_tokens or binding.get("max_tokens") or DEFAULT_REPLY_TOKENS)
 MAX_REPLY_TOKENS = 4000
 
 
@@ -109,7 +130,7 @@ def chat_from_binding(binding: dict, *, timeout: float = 180.0,
     if not endpoint:
         raise VineError(E_SCHEMA, "provider has no endpoint")
     model = binding.get("model") or "local"
-    max_tokens = int(reply_tokens or binding.get("max_tokens") or 600)
+    max_tokens = effective_reply_tokens(binding, reply_tokens)
     reasoning_on = str(binding.get("reasoning", "off")).lower() == "on"
     if reasoning_on:
         max_tokens += 1000
@@ -268,10 +289,12 @@ def answer(scoped_vine, question: str, binding: dict, k: int = 3,
         caveat += MEDIA_CAVEAT.format(ids=", ".join(media))
 
     system = ANSWER_SYSTEM
-    if reply_tokens:
-        system += REPLY_BUDGET_NOTE.format(
-            what="the answer", tokens=reply_tokens,
-            words=int(reply_tokens * 0.75))
+    # J.10.8 (amended v0.63): stated whatever chose the number. Saying it only
+    # when the CALLER chose left the prompt silent in exactly the case where
+    # nobody had and the shipped default was deciding alone.
+    budget = effective_reply_tokens(binding, reply_tokens)
+    system += REPLY_BUDGET_NOTE.format(
+        what="the answer", tokens=budget, words=int(budget * 0.75))
     chat, model = chat_from_binding(binding, reply_tokens=reply_tokens)
     # Timed here rather than around the whole composite: the retrieval half
     # is measured per primitive by the engine's own tracer, and reporting one
@@ -562,12 +585,13 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
     """
     max_hops = max(1, min(int(max_hops or 1), MAX_HOPS))
     system = FORAGE_SYSTEM
-    if reply_tokens:
-        # J.10.8: the cap bounds every turn (a tool call sits far under the
-        # floor); the note aims it at the answer, the only turn a reader sees.
-        system += REPLY_BUDGET_NOTE.format(
-            what="the final answer's text", tokens=reply_tokens,
-            words=int(reply_tokens * 0.75))
+    # J.10.8 (amended v0.63): the cap bounds every turn and the note aims at
+    # the answer, which is the turn it exists for. A navigating turn is short;
+    # the ANSWER turn is an object carrying the text AND `answer_nodes`, and
+    # that is the turn a low cap cuts.
+    budget = effective_reply_tokens(binding, reply_tokens)
+    system += REPLY_BUDGET_NOTE.format(
+        what="the final answer's text", tokens=budget, words=int(budget * 0.75))
     chat, model = chat_from_binding(binding, reply_tokens=reply_tokens)
 
     # C.13.1: a bounded hunt is bounded at every hop, not only at the entry.
