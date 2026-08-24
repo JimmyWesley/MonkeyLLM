@@ -89,10 +89,20 @@ def test_reply_tokens_caps_the_call_and_is_stated(station):
 
 
 def test_absent_means_the_binding_rules_as_before(station):
+    """J.10.8 as amended in v0.63 (F.134). `reply_tokens` is still an
+    override and never a new default, so a call that sent none still reports
+    none. What changed is the PROMPT: the cap is stated whatever chose it.
+    Saying it only when the caller chose left the model unwarned in exactly
+    the case where nobody had chosen and the shipped default was deciding,
+    and a cap a model is never told about can only be found by hitting it."""
     client, seen, prompts, head = station
     _ask(client, head)
-    assert seen[-1].get("reply_tokens") is None
-    assert "tokens (roughly" not in prompts[-1][0]["content"]
+    assert seen[-1].get("reply_tokens") is None  # not a parameter it sent
+    # The fixture binds without naming a budget, so the binding carries the
+    # J.10 default and the prompt says that number.
+    system = prompts[-1][0]["content"]
+    assert "1500 tokens" in system
+    assert "1125 words" in system
 
 
 def test_the_value_is_clamped_to_the_stated_bounds(station):
@@ -116,6 +126,19 @@ def test_the_walk_states_it_for_the_final_answer(station):
     _ask(client, head, hops=2, reply_tokens=300)
     assert seen[-1]["reply_tokens"] == 300
     assert "final answer" in prompts[-1][0]["content"]
+
+
+def test_the_walk_states_the_default_too(station):
+    """F.134: the walk is the half the amendment is really about. Its final
+    turn is not prose but an object carrying the answer text AND
+    `answer_nodes`, so it is the turn a low cap cuts, and it was the turn
+    left unwarned whenever the caller named no size of its own."""
+    client, seen, prompts, head = station
+    _ask(client, head, hops=2, cache=False)
+    assert seen[-1].get("reply_tokens") is None
+    system = prompts[-1][0]["content"]
+    assert "final answer" in system
+    assert "1500 tokens" in system
 
 
 # -- the key (J.10.7) ---------------------------------------------------------

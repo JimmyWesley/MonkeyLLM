@@ -13,8 +13,9 @@ The model and endpoint are configurable; provider resolution order:
 
     MONKEYLLM_LLM_MODEL       model id (defaults per provider)
     MONKEYLLM_LLM_API_KEY     key for custom endpoints (default: no-key)
-    MONKEYLLM_LLM_MAX_TOKENS  completion budget (default 600; raise for
-                              reasoning models if thinking is enabled)
+    MONKEYLLM_LLM_MAX_TOKENS  completion budget (default 1500; sized for the
+                              `answer` action, not for a tool call. Raise
+                              further for reasoning models)
 
 Examples:
     # Local llama.cpp (scripts/serve_llm.py)
@@ -160,9 +161,14 @@ def resolve_provider() -> tuple[str | None, str, str]:
 
 def make_llm():
     endpoint, model, api_key = resolve_provider()
-    # reasoning models spend tokens thinking before the final content —
-    # give them room (or disable thinking server-side) or content comes empty
-    max_tokens = int(os.environ.get("MONKEYLLM_LLM_MAX_TOKENS", "600"))
+    # The `answer` action is the longest single emission in the protocol —
+    # text + answer_nodes + confidence + a `proof` copied VERBATIM from a tool
+    # result — so the budget is sized for IT and not for a tool call. Measured
+    # at 600 on the 18-question suite: two questions were cut mid-object after
+    # the model had already run the right query and reached the right node,
+    # and both scored as wrong ANSWERS rather than as truncation, which is the
+    # treacherous part. Reasoning models still need room on top of this.
+    max_tokens = int(os.environ.get("MONKEYLLM_LLM_MAX_TOKENS", "1500"))
 
     if endpoint:  # any OpenAI-compatible server: llama.cpp, OpenRouter, vLLM...
         import time as _t

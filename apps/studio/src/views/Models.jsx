@@ -69,7 +69,16 @@ const ROLES = [
   // budget truncates the reply mid-JSON, which reads downstream as "the
   // model said nothing useful" rather than "it was cut off".
   { key: 'ingest', icon: Ingest, defaultTokens: 600 },
-  { key: 'answer', icon: Ask, defaultTokens: 600 },
+  // `answer` is the one role whose reply carries the citation apparatus and
+  // not just prose: on a walk the final action is a JSON object holding the
+  // answer text AND `answer_nodes`, and a client that also asks for a
+  // verbatim proof pushes it further. Measured on the 18-question suite with
+  // a local 12B, at 600 two answers were cut mid-object and scored as wrong
+  // — the model had already run the right query and reached the right node.
+  // At 1500 both pass and the wall time falls with them (139s -> 15s),
+  // because the rejected retries stop happening. The hint below already
+  // warned about this; the default did not obey it.
+  { key: 'answer', icon: Ask, defaultTokens: 1500 },
   // The G.5.1 describer. It runs where ingest runs — once per image, at
   // adopt/sync — and what it writes is the only text `sniff` will ever see
   // of a slide or a screenshot, so fidelity is the thing to pay for. Unbound,

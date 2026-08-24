@@ -136,7 +136,7 @@ Notes:
 | `MONKEYLLM_LLM_ENDPOINT` | (empty) | chat's OpenAI base_url (local llama.cpp, vLLM...) |
 | `OPENROUTER_API_KEY` | (empty) | activates OpenRouter when there's no local endpoint |
 | `MONKEYLLM_LLM_MODEL` | per provider | chat model id/alias |
-| `MONKEYLLM_LLM_MAX_TOKENS` | `600` | completion budget (raise for reasoning models) |
+| `MONKEYLLM_LLM_MAX_TOKENS` | `1500` | completion budget — sized for the `answer` action (text + nodes + verbatim proof), not for a tool call; raise further for reasoning models |
 | `MONKEYLLM_EMBED_ENDPOINT` | (empty = BM25-only) | embedder's OpenAI base_url |
 | `MONKEYLLM_EMBED_MODEL` | `bge-m3` | embedder id/alias |
 | `HF_TOKEN` | | HF token (download + serverless) |
