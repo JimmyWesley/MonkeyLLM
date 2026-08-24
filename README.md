@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/JimmyWesley/MonkeyLLM/main/docs/logo.png" alt="MonkeyLLM Logo" width="120"/>
+  <img src="https://raw.githubusercontent.com/JimmyWesley/MonkeyLLM/main/docs/banner.png" alt="MonkeyLLM: a knowledge engine for AI agents. Your files become a markdown knowledge graph an agent navigates over MCP. 11/11 on multi-hop QA where the same 12B model scores 0/11 as top-k RAG, 1.3 ms entry search at recall@5 = 1.0 with no embedder, 0.66x the token cost per correct answer of iterative RAG, 1,309 tests green." width="900"/>
 </div>
 
 # MonkeyLLM
