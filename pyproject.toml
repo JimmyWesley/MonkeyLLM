@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "monkeyllm"
-version = "0.63.0"
+version = "0.64.0"
 description = "A knowledge engine for AI agents: your documents become a git-versioned markdown knowledge graph an agent navigates over MCP, instead of flat vector search."
 readme = "README.md"
 requires-python = ">=3.11"
