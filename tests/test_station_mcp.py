@@ -140,3 +140,79 @@ def test_mcp_calls_are_audited(mcp_station):
          key=_scoped_key(registry, principal="watched-agent"))
     entries = registry.audit(limit=5, principal="watched-agent")
     assert entries and entries[0]["primitive"] == "locate"
+
+
+# --- J.1.2 rule 4 as amended, and J.1.4 (v0.64) ---------------------------
+
+MODERN = "2026-07-28"
+_ENVELOPE = {
+    "io.modelcontextprotocol/protocolVersion": MODERN,
+    "io.modelcontextprotocol/clientCapabilities": {},
+    "io.modelcontextprotocol/clientInfo": {"name": "t", "version": "1"},
+}
+
+
+def _modern(client, method, key, params=None, rid=1):
+    """One request on the 2026-07-28 wire, where the envelope rides `_meta`
+    and the method is named again in a header."""
+    body = {"jsonrpc": "2.0", "id": rid, "method": method,
+            "params": {**(params or {}), "_meta": _ENVELOPE}}
+    return client.post("/mcp/", json=body, headers={
+        **HEADERS, "Authorization": f"Bearer {key}",
+        "MCP-Protocol-Version": MODERN, "MCP-Method": method})
+
+
+def test_what_is_withheld_is_the_two_families_and_nothing_else(mcp_station):
+    """F.135. J.1.2 rule 4 withholds `prompts` and `resources`, and the list
+    that implements it once reached one method further —
+    `subscriptions/listen`, which is not a feature a client lists but the
+    2026-07-28 era's only server-to-client channel. Withholding it did not
+    save a round trip; it ended the connection (J.1.4). The shape of the
+    list is the guard, because the next name added to it will be added for
+    rule 4's reason and may not be rule 4's kind of thing."""
+    from monkeyllm_station.mcp_surface import UNSERVED_METHODS
+
+    assert UNSERVED_METHODS
+    assert all(m.startswith(("prompts/", "resources/")) for m in UNSERVED_METHODS)
+
+
+def test_list_changed_is_announced_only_where_the_handler_derives_it(mcp_station):
+    """F.135. Serving the handler flips `tools.listChanged` at the modern era
+    and at no other: the earlier eras derive the flag from notification
+    options, so they are unchanged to the bit."""
+    client, registry = mcp_station
+    key = _scoped_key(registry)
+    for version, expected in (("2025-06-18", False), ("2025-11-25", False)):
+        reply = client.post("/mcp/", json={
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": version, "capabilities": {},
+                       "clientInfo": {"name": "t", "version": "1"}}},
+            headers={**HEADERS, "Authorization": f"Bearer {key}"})
+        caps = reply.json()["result"]["capabilities"]
+        assert caps["tools"]["listChanged"] is expected, version
+
+    caps = _modern(client, "server/discover", key).json()["result"]["capabilities"]
+    assert caps["tools"]["listChanged"] is True
+
+
+@pytest.mark.parametrize("method", ["resources/list", "prompts/list",
+                                    "nonsense/method"])
+def test_an_unserved_method_is_not_a_lost_session(mcp_station, method):
+    """F.136. On this transport 404 means the session is gone, so a client
+    that reads one stops using a connection that was healthy — and the call
+    that fails is the next one. A method this Station does not serve is a
+    JSON-RPC error under a 2xx; the refusal itself is unchanged."""
+    client, registry = mcp_station
+    reply = _modern(client, method, _scoped_key(registry))
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["error"]["code"] == -32601
+
+
+def test_a_wrong_path_under_the_mount_is_still_absent(mcp_station):
+    """F.136's boundary: the rule is about a refusal spoken by the
+    dispatcher, never about an address. A 404 that is not a JSON-RPC body
+    is left exactly as it was."""
+    client, registry = mcp_station
+    reply = client.get("/mcp/nope",
+                       headers={"Authorization": f"Bearer {_scoped_key(registry)}"})
+    assert reply.status_code == 404

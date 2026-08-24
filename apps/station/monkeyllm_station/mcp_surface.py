@@ -44,6 +44,39 @@ def package_version() -> str:
         except Exception:  # pragma: no cover - no package, no number
             return ""
 
+
+# J.1.2 rule 4: the two families this Station registers nothing behind, so
+# announcing them would instruct every client to spend a round trip learning
+# "empty". The list reaches those two families and stops there (amended
+# v0.64): `subscriptions/listen` was on it once, and it is not a feature a
+# client lists — at the 2026-07-28 era it is the only server-to-client
+# channel, so withholding it ends the connection rather than saving anything
+# (J.1.4). A test asserts the shape of this tuple for that reason.
+UNSERVED_METHODS = (
+    "prompts/list", "prompts/get", "resources/list",
+    "resources/templates/list", "resources/read",
+    "resources/subscribe", "resources/unsubscribe",
+)
+
+
+def _is_jsonrpc_error(body: bytes) -> bool:
+    """Whether these bytes are a JSON-RPC error object (J.1.4).
+
+    The test is on the shape rather than on the code: every refusal the
+    dispatcher spells is `{"jsonrpc": ..., "error": {...}}`, and a 404 the
+    ROUTER spells (a wrong path under the mount) is not JSON at all. Any
+    doubt answers False, because the fallback is the status the SDK chose.
+    """
+    if not body or len(body) > 64 * 1024:
+        return False
+    try:
+        parsed = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return (isinstance(parsed, dict) and parsed.get("jsonrpc") == "2.0"
+            and isinstance(parsed.get("error"), dict))
+
+
 ALLOWED_HOSTS_ENV = "MONKEYLLM_STATION_ALLOWED_HOSTS"
 DEFAULT_ALLOWED_HOSTS = "localhost,localhost:8800,127.0.0.1,127.0.0.1:8800,testserver"
 # J.1.1 (v0.52): the host-level code for a transport refusal. It lives here,
@@ -223,16 +256,10 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
 
     mcp = MCPServer("monkeyllm-station", instructions=INSTRUCTIONS,
                     version=package_version())
-    # J.1.2 rule 4: no empty promises. The SDK registers resource/prompt
-    # handlers unconditionally and derives capabilities from their
-    # presence; this Station serves neither, so announcing them makes
-    # every connecting client spend two round trips to learn "empty".
+    # J.1.2 rule 4, and only what it names: see UNSERVED_METHODS.
     try:
         handlers = mcp._lowlevel_server._request_handlers
-        for method in ("prompts/list", "prompts/get", "resources/list",
-                       "resources/templates/list", "resources/read",
-                       "resources/subscribe", "resources/unsubscribe",
-                       "subscriptions/listen"):
+        for method in UNSERVED_METHODS:
             handlers.pop(method, None)
     except AttributeError:  # pragma: no cover - the SDK moved its registry
         pass
@@ -678,6 +705,57 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         transport_security=security,
     )
 
+    class SoftRefusal:
+        """J.1.4 (v0.64): a refusal is not a disconnection.
+
+        On this transport 404 carries a meaning of its own — the session
+        named by the request no longer exists (streamable HTTP 2.5.3) — so
+        a conforming client that reads one correctly stops using the
+        connection. The SDK also spends it on `-32601 Method not found`,
+        and at the 2026-07-28 era that is what a client meets: it asks for
+        a method this Station does not serve, is told its session ended,
+        and tears down a connection that was healthy. The call that then
+        fails is the NEXT one, which is why the symptom arrives with the
+        wrong name attached.
+
+        The mount is stateless, so it issues no session id and no 404 it
+        produces can be about a session. A 404 whose body is a JSON-RPC
+        error is re-stated as 200 with that body untouched — the refusal
+        is unchanged, only the layer it was spoken at. A 404 that is not a
+        JSON-RPC body (a wrong path under the mount) is left alone: that
+        one really is about an address.
+        """
+
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                return await self.app(scope, receive, send)
+            start: dict | None = None
+            chunks: list[bytes] = []
+
+            async def send_wrapper(message):
+                nonlocal start
+                if message["type"] == "http.response.start":
+                    if message.get("status") == 404:
+                        start = dict(message)
+                        return  # held until the body says what it is
+                    return await send(message)
+                if start is not None and message["type"] == "http.response.body":
+                    chunks.append(message.get("body") or b"")
+                    if message.get("more_body"):
+                        return
+                    body = b"".join(chunks)
+                    if _is_jsonrpc_error(body):
+                        start["status"] = 200
+                    await send(start)
+                    return await send({"type": "http.response.body",
+                                       "body": body, "more_body": False})
+                await send(message)
+
+            await self.app(scope, receive, send_wrapper)
+
     class HostRefusal:
         """J.1.1 rule 1: rewrite the transport guard's `421` body, never its
         verdict.
@@ -745,4 +823,5 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                 CAPS_MASK.reset(mask_token)
                 PRINCIPAL.reset(token)
 
-    return Authenticated(HostRefusal(inner)), mcp.session_manager.run
+    return (Authenticated(HostRefusal(SoftRefusal(inner))),
+            mcp.session_manager.run)
