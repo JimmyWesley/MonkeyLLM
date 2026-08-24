@@ -4,15 +4,18 @@
 
 # MonkeyLLM
 
-**This repository is not an application. It is a knowledge engine: a new
-way to query data.**
+**A knowledge engine for AI agents: a new way to query your data.** Your
+documents become a git-versioned markdown knowledge graph an agent
+navigates over MCP: curated summaries, typed edges, cited answers, SQL
+over your spreadsheets, nothing chunked into anonymous fragments.
 
-Knowledge lives in a **forest**: a git-versioned tree of markdown nodes,
-each carrying a curated, scent-bearing passport. An AI does not get handed
-a retrieval dump. It **navigates**: drops in through search, follows typed
-edges, reads exactly the node it needs, and plants what it learns.
-Successful hunts deposit pheromone and mint shortcut links, so the corpus
-itself learns from use.
+This repository is **not an application**. Knowledge lives in a
+**forest**: a git-versioned tree of markdown nodes, each carrying a
+curated, scent-bearing passport. An AI does not get handed a retrieval
+dump. It **navigates**: drops in through search, follows typed edges,
+reads exactly the node it needs, and plants what it learns. Successful
+hunts deposit pheromone and mint shortcut links, so the corpus itself
+learns from use.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/JimmyWesley/MonkeyLLM/main/docs/guide/assets/graph-sample.png" alt="A real knowledge forest: 1,877 nodes across 49 branches, seen in the Explore console" width="900"/>
@@ -25,7 +28,7 @@ itself learns from use.
 The number that made us write it down: on a benchmark where **every
 question needs ≥3 chained hops**, the *same* 12B local model scores
 **0 / 11 as a classic top-k RAG reader** and **11 / 11 (100%) as a forest
-navigator**, at **0.58×** the token cost per correct answer of an
+navigator**, at **0.66×** the token cost per correct answer of an
 iterative-RAG baseline, on a single consumer GPU. If your first reaction
 is *"I need to test whether this actually serves my case"*, good. Every
 number is reproducible from committed scripts, and the whole design is
@@ -211,7 +214,7 @@ the working backlog is [`tasks/`](https://github.com/JimmyWesley/MonkeyLLM/blob/
 
 | Next | What it means | Where it stands |
 |---|---|---|
-| **Monkey Bench, officially** | The full benchmark run published with its traces, against top-k and iterative RAG baselines | 3 of 4 exit criteria met; the fourth re-measured as tokens-per-correct (0.58×) |
+| **Monkey Bench, officially** | The full benchmark run published with its traces, against top-k and iterative RAG baselines | 3 of 4 exit criteria met; the fourth re-measured as tokens-per-correct (0.66×) |
 | **Convergence curve** | Proving hops-to-answer *drops* as a forest is used: the pheromone economy paying off, and the paper's signature chart | measured once; the criterion is not met yet, and the findings (floor effect, pheromone cross-talk) are themselves results |
 | **The Troop** | Parallel foragers with a judge: today an accuracy amplifier, not yet a speed one | 8/8 accuracy on both arms; the wall-clock criterion needs a deeper corpus |
 | **Entities and typed edges at ingest** | The Gardener extracting people, places and relations, beyond today's summaries and `related-to` proposals | designed (Part G), needs a spec bump |

@@ -5,12 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "monkeyllm"
 version = "0.63.0"
-description = "An agent-navigable knowledge forest: markdown and indexes an LLM traverses through MCP, instead of flat vector search."
+description = "A knowledge engine for AI agents: your documents become a git-versioned markdown knowledge graph an agent navigates over MCP, instead of flat vector search."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-keywords = ["llm", "rag", "mcp", "agents", "retrieval", "knowledge-base", "markdown", "knowledge-graph"]
+keywords = [
+    "llm", "rag", "retrieval-augmented-generation", "agentic-rag",
+    "ai-agents", "agent-memory", "ai-memory", "context-engineering",
+    "mcp", "mcp-server", "model-context-protocol", "claude-code",
+    "knowledge-graph", "knowledge-base", "graphrag", "markdown",
+    "sqlite", "local-first", "self-hosted",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

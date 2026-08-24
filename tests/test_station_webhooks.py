@@ -568,6 +568,14 @@ def test_a_delivery_can_be_re_sent_unchanged(station, receiver):
     first = receiver.wait(1)[0]
 
     delivery = first["json"]["id"]
+    # One wire, two writers (the retry test above says it too): the receiver
+    # has the request before the dispatcher has written the row it re-sends,
+    # so a redelivery asked at `wait`'s speed asks for a delivery that is not
+    # recorded yet — and reads back E_NOT_FOUND, on a slow runner only.
+    deadline = time.monotonic() + 6.0
+    while (registry.delivery(hook_id, delivery) is None
+           and time.monotonic() < deadline):
+        time.sleep(0.05)
     reply = client.post(f"/v1/forests/{MINE}/webhooks/{hook_id}",
                         json={"action": "redeliver", "delivery": delivery},
                         headers=headers)
