@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.63.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.64.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,34 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **A transport method is not a capability, and 404 is not a refusal (spec
+  J.1.2 rule 4 + J.1.4, v0.64)**: J.1.2 rule 4 withholds what nothing is
+  registered behind, and the implementation withheld one name more than the
+  rule ever named — `subscriptions/listen`, which at the **2026-07-28** era
+  is not a feature a client lists but the **only server-to-client channel**,
+  the replacement for the standing GET stream. The Station answers
+  `server/discover` at that era with a 200, so it says the era is spoken;
+  the client then opens its listen stream and the SDK answers an
+  unregistered method with **HTTP 404**, which on this transport means *your
+  session is gone* (2.5.3). A released client (Antigravity, on the Go SDK)
+  read exactly that, tore down a healthy connection, and reported **0
+  tools** — the error naming a session id never issued rather than the
+  method never served, so the symptom arrives with the wrong name attached
+  and the call that fails is the NEXT one. Now: the withheld list is
+  `UNSERVED_METHODS` and reaches `prompts/*` and `resources/*` and stops (a
+  test asserts that SHAPE, because the next name added will be added for
+  rule 4's reason and may not be rule 4's kind of thing); and `SoftRefusal`
+  re-states any 404 whose body is a JSON-RPC error as a **200** with the
+  envelope untouched — the mount is stateless, so no 404 it produces can be
+  about a session, while a 404 that is not a JSON-RPC body (a wrong path
+  under the mount) is left alone, because that one really is an address.
+  The admitted cost: at 2026-07-28 the SDK derives `tools.listChanged` from
+  the served handler, so we announce `true` and publish no such event — an
+  empty promise by rule 4's letter, but the round trip rule 4 was written
+  against does not exist here (one quiet stream, versus a fatal 404). The
+  earlier eras are unchanged to the bit. The end-to-end stream is NOT in the
+  suite: its response never ends, and the in-process client cannot hold one
+  open without holding its own shutdown (F.135 records the gap).
 - **The budget nobody chose is still a budget (spec J.10/J.10.8, v0.63)**:
   every binding shipped at `max_tokens` **600**, and J.10.8 stated the cap in
   the prompt only **when a caller set `reply_tokens`**. Both were sized for a
