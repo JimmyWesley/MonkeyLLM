@@ -15,8 +15,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
+import { fmtMs, nodeLink } from './shared.jsx'
 import {
-  Badge, Card, CopyButton, Empty, ErrorNote, Field, Select, Spinner,
+  Badge, Card, CopyButton, Empty, ErrorNote, Select, Spinner,
 } from '../design/ui.jsx'
 import { Markdown } from '../design/markdown.jsx'
 import {
@@ -24,61 +25,183 @@ import {
 } from '../design/icons.jsx'
 
 export default function Read({ forest, grant, node, setNode, goto }) {
-  const { t } = useI18n()
   if (!node) {
-    return <Finder forest={forest} onOpen={setNode} />
+    return <Finder forest={forest} />
   }
   return <Document key={`${forest}:${node}`} forest={forest} grant={grant}
                    node={node} setNode={setNode} goto={goto} />
 }
 
-/** No selection: find the document to read. A thin `locate` — the full
- *  instrument lives in Explore; this is only the way to a page. */
-function Finder({ forest, onOpen }) {
+/** The one call this page makes returns at most a budget's worth of entries
+ *  (C.6): asking for more than fits changes nothing, so the page size and
+ *  the ask are the same number. */
+const PAGE = 10
+
+/** No selection: find the document to read.
+ *
+ *  Shaped like a search engine and not like a form, because that is what a
+ *  person opening this console is doing. Three things follow from that:
+ *
+ *  1. **The result is a link.** A real `href` through the router's own
+ *     helper, so middle click, "copy link" and the status bar all work — a
+ *     list of buttons looks the same and answers none of those.
+ *  2. **The clock is the engine's** (J.10.6). `Server-Timing: vine` is the
+ *     forest's own figure; the round trip is the internet's and rides in the
+ *     tooltip, never in the headline. When the header is absent — an older
+ *     Station, a proxy that dropped it — the line simply carries no time,
+ *     because printing the stopwatch there would be the exact claim J.10.6
+ *     forbids.
+ *  3. **The page is one page.** `locate` answers within a token budget
+ *     (C.6, 800) and has no cursor, so ~10 entries is the whole of what one
+ *     call can return: there is no page two to offer. When the budget cut
+ *     the list, the line SAYS there are more rather than implying the
+ *     forest holds ten.
+ *
+ *  A thin `locate` on purpose — it searches curated metadata and never the
+ *  bodies (C.6b), so the empty state names the search it did not do and
+ *  points at Explore, which runs both halves. The full instrument lives
+ *  there; this is only the way to a page.
+ */
+function Finder({ forest }) {
   const { t } = useI18n()
   const [q, setQ] = useState('')
-  const [hits, setHits] = useState(null)
+  const [res, setRes] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
   const search = async (e) => {
     e?.preventDefault()
-    if (!q.trim()) return
+    const query = q.trim()
+    if (!query) return
     setBusy(true); setError(null)
+    const t0 = performance.now()
     try {
-      const r = await api.call(forest, 'locate', { query: q, k: 8 })
-      setHits(r.results || [])
-    } catch (err) { setError(err) } finally { setBusy(false) }
+      const { data, timing } = await api.timedCall(
+        forest, 'locate', { query, k: PAGE })
+      setRes({
+        query,
+        hits: data.results || [],
+        truncated: !!data.truncated,
+        // C.1.1: what an empty read owes its caller — how large the space
+        // was. Present only on the empty path, which is the only place the
+        // console has a use for it.
+        searched: data.searched ?? null,
+        engine: timing?.vine ?? null,
+        wall: performance.now() - t0,
+      })
+    } catch (err) { setError(err); setRes(null) } finally { setBusy(false) }
+  }
+
+  const box = (
+    <SearchBox q={q} setQ={setQ} onSubmit={search} busy={busy}
+               placeholder={t('read.finder_placeholder')}
+               label={t('common.search')} />
+  )
+
+  // Nothing asked yet: the whole page is the question.
+  if (!res && !error) {
+    return (
+      <div className="grid min-h-[56vh] place-items-center px-4">
+        <div className="w-full max-w-2xl text-center">
+          <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl
+                           bg-surface-2 text-text-3"><Book size={22} /></span>
+          <h1 className="text-[19px] font-medium text-text">{t('read.title')}</h1>
+          <p className="mx-auto mt-1 max-w-[46ch] text-[12.5px] text-text-3">
+            {t('read.finder_hint')}
+          </p>
+          <div className="mt-6">{box}</div>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <Card title={t('read.title')} icon={Book}>
-      <p className="mb-3 text-[12.5px] text-text-3">{t('read.finder_hint')}</p>
-      <form onSubmit={search} className="flex gap-2">
-        <input className="input flex-1" value={q} placeholder={t('read.finder_placeholder')}
-               onChange={(e) => setQ(e.target.value)} />
-        <button className="btn btn-primary" type="submit" disabled={busy || !q.trim()}>
-          <Search size={14} /> {t('common.search')}
-        </button>
-      </form>
-      {error && <div className="mt-3"><ErrorNote error={error} /></div>}
-      {busy && <div className="mt-4"><Spinner label={t('common.loading')} /></div>}
-      {hits && !busy && (hits.length ? (
-        <ul className="mt-4 space-y-1">
-          {hits.map((h) => (
-            <li key={h.id}>
-              <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-surface-2"
-                      onClick={() => onOpen(h.id)}>
-                <span className="block text-[13px] font-medium text-text">{h.title}</span>
-                <span className="block truncate text-[12px] text-text-3">{h.summary}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+    <div className="max-w-3xl">
+      <div className="max-w-2xl">{box}</div>
+      {error && <div className="mt-4"><ErrorNote error={error} /></div>}
+      {busy && <div className="mt-6"><Spinner label={t('common.loading')} /></div>}
+      {res && !busy && (res.hits.length ? (
+        <>
+          <Stats res={res} />
+          <ol className="mt-4 space-y-6">
+            {res.hits.map((h) => <Hit key={h.id} forest={forest} hit={h} />)}
+          </ol>
+          {res.truncated && (
+            <p className="mt-8 border-t border-line pt-4 text-[12.5px] text-text-3">
+              {t('read.finder_more')}
+            </p>
+          )}
+        </>
       ) : (
-        <div className="mt-4"><Empty title={t('read.finder_empty')} icon={Search} /></div>
+        <div className="mt-8">
+          <Empty title={t('read.finder_empty')} icon={Search}>
+            <span className="mt-1 block text-[12px] text-text-3">
+              {res.searched != null && `${t('read.finder_searched', { n: res.searched })} · `}
+              {t('read.finder_scent_only')}
+            </span>
+          </Empty>
+        </div>
       ))}
-    </Card>
+    </div>
+  )
+}
+
+function SearchBox({ q, setQ, onSubmit, busy, placeholder, label }) {
+  return (
+    <form onSubmit={onSubmit} className="flex items-center gap-2">
+      <label className="relative min-w-0 flex-1">
+        <Search size={16} className="pointer-events-none absolute left-4 top-1/2
+                                     -translate-y-1/2 text-text-3" />
+        <input
+          className="w-full rounded-full border border-line bg-surface-2 py-2.5 pl-11 pr-4
+                     text-sm text-text shadow-card outline-none transition
+                     placeholder:text-text-3 focus:border-accent focus:bg-surface
+                     focus:ring-2 focus:ring-accent/20"
+          value={q} placeholder={placeholder} autoFocus
+          onChange={(e) => setQ(e.target.value)} />
+      </label>
+      <button className="btn btn-primary rounded-full px-4" type="submit"
+              disabled={busy || !q.trim()}>
+        <Search size={14} /> {label}
+      </button>
+    </form>
+  )
+}
+
+/** How many, and whose clock said how fast. */
+function Stats({ res }) {
+  const { t } = useI18n()
+  const n = res.hits.length
+  return (
+    <p className="mt-5 text-[12px] text-text-3"
+       title={t('read.finder_roundtrip', { ms: fmtMs(res.wall) })}>
+      {n === 1 ? t('read.finder_found_one') : t('read.finder_found', { n })}
+      {res.engine != null && ` · ${t('read.finder_time', { ms: fmtMs(res.engine) })}`}
+    </p>
+  )
+}
+
+/** One result. The address above, the title as the link, the summary below —
+ *  the shape a person already knows how to read. */
+function Hit({ forest, hit }) {
+  const { t } = useI18n()
+  const crumbs = hit.id.replace(/\/_index$/, '').split('/')
+  return (
+    <li>
+      <div className="flex items-center gap-2 text-[11.5px] text-text-3">
+        <span className="min-w-0 truncate">{crumbs.join(' › ')}</span>
+        {hit.kind === 'branch' && <Badge>{t('read.finder_branch')}</Badge>}
+      </div>
+      <a {...nodeLink(forest, hit.id, 'read')}
+         className="mt-0.5 block text-[16px] leading-snug text-accent hover:underline">
+        {hit.title}
+      </a>
+      {hit.summary && (
+        <p className="mt-1 max-w-[80ch] text-[13px] leading-relaxed text-text-2">
+          {hit.summary}
+        </p>
+      )}
+    </li>
   )
 }
 
@@ -243,13 +366,16 @@ function SharePanel({ forest, node }) {
     <Card title={t('read.share_title')} icon={Share} bodyClass="p-3">
       <p className="mb-2 text-[12px] text-text-3">{t('read.share_hint')}</p>
       <div className="flex items-end gap-2">
-        <Field label={t('read.share_days')} className="flex-1">
-          <Select value={days} onChange={(e) => setDays(e.target.value)}>
-            <option value="7">{t('read.days_7')}</option>
-            <option value="30">{t('read.days_30')}</option>
-            <option value="90">{t('read.days_90')}</option>
-          </Select>
-        </Field>
+        {/* The select carries its own label: wrapping it in a `Field` made
+            React render an <input> with children, which is a hard throw
+            (#137) — and with no boundary above it, that throw took the whole
+            console down every time a document opened. */}
+        <Select label={t('read.share_days')} className="flex-1"
+                value={days} onChange={(e) => setDays(e.target.value)}>
+          <option value="7">{t('read.days_7')}</option>
+          <option value="30">{t('read.days_30')}</option>
+          <option value="90">{t('read.days_90')}</option>
+        </Select>
         <button className="btn btn-primary btn-sm" onClick={mint} disabled={busy}>
           <Share size={13} /> {t('read.share_create')}
         </button>

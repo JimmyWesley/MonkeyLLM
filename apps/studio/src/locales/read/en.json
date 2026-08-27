@@ -1,6 +1,6 @@
 {
   "read.title": "Read a document",
-  "read.finder_hint": "Find the document to read — or open one from Explore.",
+  "read.finder_hint": "Search the forest and open a document to read.",
   "read.finder_placeholder": "Search by title, summary or tag…",
   "read.finder_empty": "Nothing matched. Try other words, or browse in Explore.",
   "read.copy_raw": "Copy markdown",
@@ -23,5 +23,13 @@
   "read.share_expires": "expires {date}",
   "read.share_revoke": "Revoke this link",
   "read.shared_gone": "This link no longer works",
-  "read.shared_expires": "Shared document · link expires {date}"
+  "read.shared_expires": "Shared document · link expires {date}",
+  "read.finder_found": "{n} documents",
+  "read.finder_found_one": "1 document",
+  "read.finder_time": "{ms} in the forest",
+  "read.finder_roundtrip": "Round trip, network included: {ms}",
+  "read.finder_more": "There are more matches than one search can carry. Narrow the term, or use Explore, which reads the texts too.",
+  "read.finder_searched": "among {n} documents",
+  "read.finder_scent_only": "Titles, summaries and tags only — never the texts. Explore reads those too.",
+  "read.finder_branch": "branch"
 }
