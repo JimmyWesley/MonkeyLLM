@@ -67,6 +67,26 @@ const LABEL_LIMIT = 22    // past this a caption per hit whites out the map
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
 
+/** Colours live in the stylesheet with every other colour, so the map
+ *  repaints with the theme. Read once per theme change, never per frame.
+ *  Each stage names its own token in `trailmap.js`, so a stage added there
+ *  arrives here with a colour and no edit. */
+function readPalette() {
+  const css = getComputedStyle(document.documentElement)
+  const channel = (name, fallback) => {
+    const raw = css.getPropertyValue(`--${name}`).trim()
+    return raw ? `rgb(${raw.split(/\s+/).join(' ')})` : fallback
+  }
+  const out = { stage: {} }
+  for (const s of STAGES) out.stage[s.key] = channel(s.token, 'rgb(120 132 124)')
+  out.dot = channel('text-3', 'rgb(120 132 124)')
+  out.edge = channel('graph-edge', 'rgb(120 132 124)')
+  out.proposal = channel('graph-shortcut', 'rgb(200 132 40)')
+  out.trail = channel('graph-trail', 'rgb(202 146 18)')
+  out.label = channel('text-2', 'rgb(90 100 92)')
+  return out
+}
+
 export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
   const { t } = useI18n()
   const { resolved } = useTheme()
