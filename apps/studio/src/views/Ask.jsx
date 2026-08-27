@@ -13,9 +13,11 @@ import {
 } from '../design/ui.jsx'
 import { Markdown } from '../design/markdown.jsx'
 import {
-  Ask as AskIcon, Clock, Collapse, Download, Expand, Printer, Sparkle, Trash,
+  Ask as AskIcon, Clock, Collapse, Download, Expand, Eye, Printer, Sparkle,
+  Trash,
 } from '../design/icons.jsx'
 import { PayloadImage } from './files.jsx'
+import AnswerTrail from './trail.jsx'
 import {
   Metric, NeedsCapability, Row, TraceSteps, fmtMs, has, nodeLink, useAsync,
 } from './shared.jsx'
@@ -28,9 +30,10 @@ const REPLY_STEPS = [0, 200, 400, 600, 900, 1200, 1800, 2600, 4000]
 
 function loadPrefs() {
   try {
-    return { reply: 0, ...JSON.parse(localStorage.getItem(ASK_PREFS_KEY) || '{}') }
+    return { reply: 0, graph: true,
+             ...JSON.parse(localStorage.getItem(ASK_PREFS_KEY) || '{}') }
   } catch {
-    return { reply: 0 }
+    return { reply: 0, graph: true }
   }
 }
 
@@ -73,6 +76,15 @@ export default function Ask({ forest, grant, me, goto }) {
   // without comparison the runs history exists to read side by side.
   const [cache, setCache] = useState(true)
   const [wide, setWide] = useState(false)
+  // J.5.4: the map of what the answer did. A preference like the reply
+  // size — it lives in the browser and never in the address (J.5.8) —
+  // and it is its OWN switch, deliberately not folded into `hops`: the
+  // walk is what costs seconds, the drawing costs nothing, and one
+  // control over both would teach an operator that the picture is slow.
+  const [showGraph, setShowGraph] = useState(() => loadPrefs().graph !== false)
+  // The retrieval half of the sweep, fetched alongside the answer so the
+  // map is drawn while the model is still writing (see `ask`).
+  const [preview, setPreview] = useState(null)
   // The runs kept in this browser (J.5.9), and which of them — if any — is
   // what the answer panel is currently showing.
   const [history, setHistory] = useState(false)
@@ -95,6 +107,19 @@ export default function Ask({ forest, grant, me, goto }) {
     if (!q) return
     setQuestion(q)
     setBusy(true); setError(null); setResult(null); setRestored(null)
+    setPreview(null)
+    // The sweep's retrieval is milliseconds and the model is seconds, so
+    // the map can be drawn long before the reply exists. This is the SAME
+    // deterministic, read-only sweep `answer` runs — same question, same
+    // `k`, same entry ranker — so it is what the answer saw rather than an
+    // approximation of it, and it deposits no pheromone: heat is the
+    // whisper's, at the close of an answer (J.10.7), never a read's.
+    // Fire and forget: a preview that fails is a map that arrives late.
+    if (showGraph) {
+      api.call(forest, 'harvest',
+               { query: q, k, ...(hybrid ? { hybrid: true } : {}) })
+        .then(setPreview).catch(() => {})
+    }
     // Kept beside the answer because they are half of what a comparison
     // needs: the same question at `k=2` and at `k=6` are two runs, and a
     // record that dropped them would show two answers and no reason.
@@ -132,6 +157,7 @@ export default function Ask({ forest, grant, me, goto }) {
     setHybrid(!!run.params?.hybrid)
     setHops(!!run.params?.hops)
     setCache(run.params?.cache !== false)
+    setPreview(null)
     setResult(run.result)
     setRestored({ ts: run.ts, model: run.result?.model })
   }
@@ -218,6 +244,9 @@ export default function Ask({ forest, grant, me, goto }) {
           </div>
 
           <div className="space-y-3 border-t border-line pt-3">
+            <Toggle checked={showGraph}
+                    onChange={(v) => { setShowGraph(v); savePrefs({ graph: v }) }}
+                    label={t('ask.graph')} hint={t('ask.graph_hint')} />
             <Toggle checked={hops} onChange={setHops}
                     label={t('ask.hops')} hint={t('ask.hops_hint')} />
             {dense && (
@@ -246,6 +275,19 @@ export default function Ask({ forest, grant, me, goto }) {
       </Card>
 
       {busy && <Working hops={hops} />}
+
+      {/* J.10.4 drawn: the same material the panel below lists, on the
+          forest it came out of. The final result outranks the preview the
+          moment it lands — they are the same sweep, but only one of them
+          is what was actually answered from. */}
+      {showGraph && (
+        <AnswerTrail forest={forest}
+                     evidence={result ? (result.harvest?.results || result.read)
+                       : preview?.results}
+                     cited={Array.isArray(result?.hops) ? result.evidence : undefined}
+                     trace={result?.trace}
+                     busy={busy} />
+      )}
 
       {error && (
         <Card>
@@ -666,9 +708,15 @@ function Material({ results, sources = [] }) {
       <div className="label">{t('ask.material')}</div>
       <p className="mb-3 text-[12px] text-text-3">{t('ask.material_hint')}</p>
       <div className="space-y-2">
-        {results.map((r) => (
-          <details key={r.id} className="rounded-lg border border-line bg-surface">
-            <summary className="flex cursor-pointer flex-wrap items-baseline gap-2 px-3 py-2">
+        {results.map((r) => {
+          /* A row that opens on nothing must not offer to open. The sweep
+             can hand back a node it found by curated metadata alone whose
+             body it could not read (G.7): no snippet, no section, nothing
+             behind the eye — and an affordance over an empty box is a
+             promise this panel exists not to make. */
+          const readable = (r.matches?.length || 0) + (r.content?.length || 0) > 0
+          const head = (
+            <>
               <span className="font-mono text-[12px] text-text">{r.id}</span>
               <span className="text-[11.5px] text-text-3">
                 {t('ask.material_counts', {
@@ -676,63 +724,97 @@ function Material({ results, sources = [] }) {
                   s: r.content?.length || 0,
                 })}
               </span>
-              {r.found_by?.length > 0 && (
-                <span className="ml-auto font-mono text-[10.5px] uppercase tracking-[0.08em]
-                                 text-text-3">{r.found_by.join(' + ')}</span>
-              )}
+              <span className="ml-auto flex items-center gap-2">
+                {r.found_by?.length > 0 && (
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.08em]
+                                   text-text-3">{r.found_by.join(' + ')}</span>
+                )}
+                {/* The affordance, not a second control: the summary already
+                    IS the button, so this is a span the row's own click
+                    drives — a nested <button> would be two targets for one
+                    act. Open or shut is read off `details[open]` in CSS, so
+                    nothing here keeps state the DOM already holds. */}
+                {readable && (
+                  <span className="btn gap-1.5 rounded-md bg-surface-2 px-2 py-1
+                                   text-[11.5px] text-text-2 hover:bg-surface-3
+                                   group-open:border-accent/30
+                                   group-open:bg-accent-soft group-open:text-accent">
+                    <Eye size={13} />
+                    <span className="group-open:hidden">{t('ask.material_show')}</span>
+                    <span className="hidden group-open:inline">{t('ask.material_hide')}</span>
+                  </span>
+                )}
+              </span>
               {scent(r.id) && (
                 <span className="w-full text-[11.5px] leading-relaxed text-text-3">
                   {scent(r.id)}
                 </span>
               )}
-            </summary>
+            </>
+          )
 
-            <div className="space-y-3 border-t border-line px-3 py-2.5">
-              {r.matches?.length > 0 && (
-                <ul className="space-y-1.5">
-                  {r.matches.map((m, i) => (
-                    <li key={i} className="text-[12px]">
-                      <span className="font-mono text-[10.5px] text-text-3">
-                        {m.section || '—'}:{m.line}
-                      </span>
-                      <p className="mt-0.5 border-l-2 border-accent/40 pl-2
-                                    font-mono text-[11.5px] leading-relaxed text-text-2">
-                        {m.snippet}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
+          if (!readable) {
+            return (
+              <div key={r.id} className="flex flex-wrap items-baseline gap-2 rounded-lg
+                                         border border-line bg-surface px-3 py-2">
+                {head}
+              </div>
+            )
+          }
 
-              {r.content?.map((c, i) => (
-                /* Rows are a table. Rendering them as pretty-printed JSON
-                   asked the reader to parse a serialisation of something
-                   the console already knows how to draw. */
-                c.columns ? <Rows key={i} {...c} /> : (
-                  <div key={i}>
-                    <div className="mb-1 text-[11px] text-text-3">
-                      {c.section
-                        ? t('ask.material_section', { s: c.section })
-                        : c.outline ? t('ask.material_outline')
-                        : t('ask.material_full')}
-                      {c.body_tokens != null && ` · ${c.body_tokens} tokens`}
+          return (
+            <details key={r.id} className="group rounded-lg border border-line bg-surface">
+              <summary className="flex cursor-pointer flex-wrap items-baseline gap-2 px-3 py-2">
+                {head}
+              </summary>
+
+              <div className="space-y-3 border-t border-line px-3 py-2.5">
+                {r.matches?.length > 0 && (
+                  <ul className="space-y-1.5">
+                    {r.matches.map((m, i) => (
+                      <li key={i} className="text-[12px]">
+                        <span className="font-mono text-[10.5px] text-text-3">
+                          {m.section || '—'}:{m.line}
+                        </span>
+                        <p className="mt-0.5 border-l-2 border-accent/40 pl-2
+                                      font-mono text-[11.5px] leading-relaxed text-text-2">
+                          {m.snippet}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {r.content?.map((c, i) => (
+                  /* Rows are a table. Rendering them as pretty-printed JSON
+                     asked the reader to parse a serialisation of something
+                     the console already knows how to draw. */
+                  c.columns ? <Rows key={i} {...c} /> : (
+                    <div key={i}>
+                      <div className="mb-1 text-[11px] text-text-3">
+                        {c.section
+                          ? t('ask.material_section', { s: c.section })
+                          : c.outline ? t('ask.material_outline')
+                          : t('ask.material_full')}
+                        {c.body_tokens != null && ` · ${c.body_tokens} tokens`}
+                      </div>
+                      {c.body && (
+                        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words
+                                        rounded-md bg-surface-2 p-2.5 font-mono text-[11.5px]
+                                        leading-relaxed text-text-2">{c.body}</pre>
+                      )}
+                      {c.outline && (
+                        <p className="font-mono text-[11.5px] text-text-3">
+                          {(Array.isArray(c.outline) ? c.outline : [c.outline]).join(' · ')}
+                        </p>
+                      )}
                     </div>
-                    {c.body && (
-                      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words
-                                      rounded-md bg-surface-2 p-2.5 font-mono text-[11.5px]
-                                      leading-relaxed text-text-2">{c.body}</pre>
-                    )}
-                    {c.outline && (
-                      <p className="font-mono text-[11.5px] text-text-3">
-                        {(Array.isArray(c.outline) ? c.outline : [c.outline]).join(' · ')}
-                      </p>
-                    )}
-                  </div>
-                )
-              ))}
-            </div>
-          </details>
-        ))}
+                  )
+                ))}
+              </div>
+            </details>
+          )
+        })}
       </div>
     </div>
   )
