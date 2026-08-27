@@ -11,6 +11,7 @@ import {
 import { Card, ErrorNote, Field, Note, Spinner, Tabs } from './design/ui.jsx'
 import { Forest, Globe, Moon, Sun } from './design/icons.jsx'
 import { Shell, consolesFor } from './components/Shell.jsx'
+import { Boundary } from './components/Boundary.jsx'
 import Overview from './views/Overview.jsx'
 import Ask from './views/Ask.jsx'
 import Explore from './views/Explore.jsx'
@@ -133,8 +134,10 @@ export default function App() {
         // Resolving in the effect above: one frame, not a screen.
         <Spinner label={t('common.loading')} size={18} />
       ) : (
-        <View key={`${forest}:${view}`} forest={forest} grant={grant} me={session.me}
-              node={node} setNode={setNode} goto={goto} />
+        <Boundary resetKey={`${forest}:${view}:${node}`}>
+          <View key={`${forest}:${view}`} forest={forest} grant={grant} me={session.me}
+                node={node} setNode={setNode} goto={goto} />
+        </Boundary>
       )}
     </Shell>
   )

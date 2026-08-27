@@ -7,8 +7,15 @@
 name: tests
 
 on:
+  # `main` only. A commit on `develop` is a commit on a pull request's head —
+  # the ruleset requires one — so listing `develop` here ran the whole suite
+  # twice for the same SHA, once per event, on a two-version matrix: ~20
+  # runner-minutes to learn one thing. The pull_request event is the one that
+  # gates the merge, and a required check is matched by name against the head
+  # SHA whichever event produced it. The trade named plainly: a push to
+  # `develop` with no pull request open is no longer tested until one is.
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main, develop]
   # `release.yml` calls this same file instead of restating the suite. A
@@ -21,6 +28,15 @@ on:
 # never be handed one.
 permissions:
   contents: read
+
+# One run per ref at a time: pushing three times in a row used to leave two
+# full suites racing to answer a question nobody would read the answer to.
+# Never for a tag — that run is the gate in front of an irreversible upload
+# (`release.yml` calls this file), and a push landing meanwhile must not be
+# able to cancel it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   tests:

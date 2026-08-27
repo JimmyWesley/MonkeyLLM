@@ -1,7 +1,7 @@
 {
   "read.title": "Leer un documento",
-  "read.finder_hint": "Encuentra el documento para leer — o abre uno desde Explorar.",
-  "read.finder_placeholder": "Busca por título, resumen o etiqueta…",
+  "read.finder_hint": "Busca en el bosque y abre un documento para leer.",
+  "read.finder_placeholder": "Buscar por título, resumen o etiqueta…",
   "read.finder_empty": "Nada coincide. Prueba otras palabras, o navega en Explorar.",
   "read.copy_raw": "Copiar markdown",
   "read.download": "Descargar",
@@ -23,5 +23,13 @@
   "read.share_expires": "caduca {date}",
   "read.share_revoke": "Revocar este enlace",
   "read.shared_gone": "Este enlace ya no funciona",
-  "read.shared_expires": "Documento compartido · el enlace caduca {date}"
+  "read.shared_expires": "Documento compartido · el enlace caduca {date}",
+  "read.finder_found": "{n} documentos",
+  "read.finder_found_one": "1 documento",
+  "read.finder_time": "{ms} en el bosque",
+  "read.finder_roundtrip": "Ida y vuelta, red incluida: {ms}",
+  "read.finder_more": "Hay más coincidencias de las que una búsqueda puede llevar. Afina el término, o usa Explorar, que también lee los textos.",
+  "read.finder_searched": "entre {n} documentos",
+  "read.finder_scent_only": "Solo títulos, resúmenes y etiquetas — nunca los textos. Explorar también lee los textos.",
+  "read.finder_branch": "rama"
 }

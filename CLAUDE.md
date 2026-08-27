@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.64.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.65.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,32 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **The retrieval is done long before the reply is (spec J.5.15, v0.65)**:
+  a hosted `answer` is two costs three orders of magnitude apart — 19 ms of
+  sweep on the fixture against 10 s of provider — and since the Station
+  answers ONCE, the bundle sat in the host from millisecond 19 and left at
+  second 10, so the Ask console spent the gap on a spinner. The path panel
+  draws it instead: the console runs the sweep's retrieval ITSELF in
+  parallel through the ordinary `harvest` (same question, same `k`, same
+  ranker, so it is what the answer will see, and it forges no heat —
+  pheromone is the whisper's at the close of an answer, never a read's),
+  over the J.11 `graph` projection Explore already reads. Its switch is
+  SEPARATE from `hops` on purpose: a walk costs one model call per hop and
+  the drawing costs none, and one control over both teaches an operator
+  that the picture is what made the answer slow. Two rules are where the
+  honest version and the flattering one part: on a **sweep** `evidence` is
+  the whole bundle (the reply is prose and names nothing), so there is no
+  `cited` stage to draw and inventing one shows a selection that never
+  happened; and on a walk the entry `locate` marks nothing, because J.10.4
+  keeps only what carries text — the stage reads zero, which is true,
+  instead of being filled from `sources` to look complete. The trail
+  follows `parent` (already scope-filtered by J.11) and carries its OWN
+  colour token: a `discovered-shortcut` is a fact the forest holds, a trail
+  is what one question did to it. And the panel prints the real millisecond
+  figure off the Part D trace beside a reveal that takes seconds — on a
+  console whose subject is how cheap retrieval is, an audience must not
+  read the animation's own duration as the measurement. Live hops are NOT
+  here: that needs the host to push, which is a contract.
 - **A transport method is not a capability, and 404 is not a refusal (spec
   J.1.2 rule 4 + J.1.4, v0.64)**: J.1.2 rule 4 withholds what nothing is
   registered behind, and the implementation withheld one name more than the

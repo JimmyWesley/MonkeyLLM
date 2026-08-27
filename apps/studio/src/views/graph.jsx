@@ -80,7 +80,7 @@ function readPalette(types) {
 /** A branch is a fact the id holds (J.5.4 v0.38): the group of
  *  `tasks/back-end/041-oauth` at depth 2 is `tasks/back-end`. A node that
  *  lives at the root has no branch to name, so it groups under `/`. */
-function groupOf(id, depth) {
+export function groupOf(id, depth) {
   const parts = id.split('/')
   if (parts.length <= 1) return '/'
   return parts.slice(0, Math.min(depth, parts.length - 1)).join('/')
@@ -171,7 +171,7 @@ function applyRepulsion(root, n, k, rand) {
 }
 
 /** One tick. `p` is the operator's force tuning (×1 = the defaults). */
-function step(sim, w, h, p) {
+export function step(sim, w, h, p) {
   const { nodes, springs, rand } = sim
   sim.alpha += (sim.alphaTarget - sim.alpha) * ALPHA_DECAY
   const alpha = sim.alpha
@@ -221,7 +221,7 @@ function step(sim, w, h, p) {
  *  physics only has to bloom it, not carry it across the map. Orphans with
  *  no home at all seed on the outer ring, which is where the repulsion
  *  would take them anyway. */
-function seed(sim, w, h) {
+export function seed(sim, w, h) {
   let s = 7
   const rand = () => {
     s = (s * 1103515245 + 12345) % 2147483648

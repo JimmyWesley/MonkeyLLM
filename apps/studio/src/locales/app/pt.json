@@ -1,5 +1,8 @@
 {
   "app.name": "MonkeyLLM",
   "app.studio": "Studio",
-  "app.tagline": "Console de uma floresta governada."
+  "app.tagline": "Console de uma floresta governada.",
+  "app.crashed": "Este console parou de renderizar",
+  "app.crashed_hint": "Algo nesta página falhou. A floresta está intacta e nada foi perdido — tente de novo ou vá para outro console.",
+  "app.crashed_retry": "Tentar de novo"
 }
