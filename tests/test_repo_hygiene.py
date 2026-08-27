@@ -58,6 +58,29 @@ def test_no_tracked_text_file_starts_with_a_utf8_bom():
         "signature — in source, the mark is artifact, not content.")
 
 
+def test_no_tracked_source_file_reads_as_binary():
+    """A NUL in source costs the file its history, and nothing else.
+
+    Git decides text-or-binary by looking for a NUL in the first 8000 bytes.
+    A source file that trips that check still imports, still runs, still
+    passes every test about what it does — and arrives in every diff, every
+    blame and every review as `Bin 0 -> 6550 bytes`. It landed exactly once,
+    as a literal NUL used for a map key's separator, and nothing in the suite
+    noticed because the code was correct.
+
+    Written as a whitelist of the extensions this project stores code in, so
+    a real binary that gains one of them would be the thing to explain.
+    """
+    offenders = [
+        path.relative_to(ROOT).as_posix() for path in _tracked()
+        if path.suffix in TEXT_SUFFIXES and path.is_file()
+        and b"\x00" in path.open("rb").read(8000)]
+    assert not offenders, (
+        f"git will treat these as binary: {offenders}. A NUL byte belongs in "
+        "source as an escape (\\u0000), never as itself — as itself it costs "
+        "the file its diff and its blame.")
+
+
 def test_the_sweep_actually_reaches_the_repository():
     """Guards the guard: a `git ls-files` that returned nothing would make
     every assertion above vacuously true."""
