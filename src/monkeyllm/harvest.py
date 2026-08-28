@@ -26,11 +26,25 @@ MAX_SECTIONS_PER_NODE = 2
 MAX_CONTENT_TOKENS_PER_NODE = 1200
 MAX_REFINED_MATCHES = 5
 
-# Question-words and connectives that carry no scent (PT + EN); everything
-# else >= 4 chars is a candidate sniff term.
+# Question-words, connectives and demonstratives that carry no scent
+# (PT + EN + ES); everything else >= 4 chars is a candidate sniff term.
+# Compared against the folded, lower-cased token, so accented spellings
+# ("está") are covered by their unaccented row.
+#
+# Not a contract: C.6b does not enumerate this set and must not — a list
+# fixed in the specification is a specification amended in every language
+# somebody asks a question in.
 STOPWORDS = {
     "qual", "quais", "como", "para", "com", "das", "dos", "uma", "que",
     "quando", "onde", "quem", "sobre", "foram", "pela", "pelo",
+    # PT demonstratives: the English ones were here from the start and
+    # their counterparts were not, so "esta" reached `sniff` as a literal
+    # search that matches inside "restart" and "timestamp".
+    "esta", "este", "estas", "estes", "essa", "esse", "essas", "esses",
+    "isto", "isso", "aquele", "aquela", "aqueles", "aquelas", "aquilo",
+    # ES demonstratives, on the same rule.
+    "esa", "ese", "eso", "esas", "esos", "esto", "estos",
+    "aquel", "aquella", "aquello", "aquellos", "aquellas",
     "what", "which", "where", "when", "who", "does", "with", "from",
     "this", "that", "have", "about", "were",
 }
@@ -68,11 +82,20 @@ def derive_terms(query: str) -> list[str]:
         if len(w) < 2:
             continue
         folded = "".join(unicodedata.normalize("NFD", ch)[0] for ch in w).lower()
-        if folded in STOPWORDS or folded in seen:
+        if folded in seen:
             continue
+        # Code-shape is asked FIRST, and the order is the whole point: the
+        # stopword set is a list of grammar in three languages and a fold
+        # erases the one thing that told `ESA` from `esa`, `DOS` from `dos`,
+        # `WHO` from `who`. Testing membership before shape drops exactly
+        # the tokens the floor was written to exempt — the ones a technical
+        # corpus is searched BY. Nothing else moves: a token that is not
+        # code-shaped meets the same set it always did.
         if _code_shaped(w):
             seen.add(folded)
             coded.append(w)
+        elif folded in STOPWORDS:
+            continue
         elif len(w) >= 4:
             seen.add(folded)
             ordinary.append(w)

@@ -397,6 +397,119 @@ def test_a_failed_hop_reports_what_went_wrong_not_only_that_it_did(
     assert "no such column" in hops[1]["out"]["message"]
 
 
+# -- what the walk may ask about the corpus itself (v0.67) -------------------
+
+
+def test_the_walk_may_ask_what_the_forest_holds(station, scripted):
+    """F.139 / J.10.5. "What is this forest about" is not a point lookup and
+    is not settled by ranking documents against it. C.17 is the read built
+    for it, and the closed whitelist was barring it from the one mode that
+    could decide to call it — leaving a walk no move but to read one
+    document and describe the corpus from it."""
+    client, registry = station
+    script, seen = scripted
+    script += [tool("coverage"), final("ok", [])]
+
+    out = _ask(client, _key(registry), question="what is this forest about?",
+               hops=3)
+
+    hop = out["hops"][0]
+    assert hop["tool"] == "coverage" and hop["ok"] is True
+    assert hop["out"]["nodes"] > 0, hop
+    # It went through ScopedVine like any other hop — the engine timed it —
+    # and its result reached the next turn in the primitive's own shape.
+    assert "coverage" in [s["step"] for s in out["trace"]["steps"]]
+    fed_back = json.loads(seen["messages"][-1]["content"])
+    assert fed_back["roots"] and fed_back["total"] > 0
+
+
+def test_coverage_is_a_read_and_the_walk_still_cannot_write(station, scripted):
+    """Admitting one read widens nothing else: the whitelist is still the
+    only thing standing between a question and an edit."""
+    client, registry = station
+    script, _ = scripted
+    script += [tool("prune", id=NODE), tool("coverage"), final("no", [])]
+
+    out = _ask(client, _key(registry), question="q", hops=3)
+    assert [h["tool"] for h in out["hops"]] == ["coverage"]
+
+
+def test_a_windowed_hunt_does_not_bound_the_map(station, scripted):
+    """C.13.1 forces the window onto the SEARCHING calls. `coverage` counts a
+    whole scope and takes no window at all — forcing one on it would refuse
+    the call rather than narrow it."""
+    client, registry = station
+    script, _ = scripted
+    script += [tool("coverage"), final("ok", [])]
+
+    out = _ask(client, _key(registry), question="q", hops=3,
+               since="2020", until="2030")
+    assert out["hops"][0]["ok"] is True, out["hops"]
+    assert out["hops"][0]["args"] == {}
+
+
+# -- a hop that returned a set names the set (v0.67) -------------------------
+
+
+def test_a_hop_that_returned_a_set_names_the_set(station, scripted):
+    """F.140. One number tells "sniff → 0" from "sniff → 5" and cannot say
+    WHICH five, so a spectator watching a walk arrive (J.10.12) could light
+    nothing for the two tools a hunt does most."""
+    client, registry = station
+    script, _ = scripted
+    script += [tool("locate", query="architecture", k=3),
+               tool("sniff", terms=["architecture"]),
+               tool("scan", parent_id=NODE),
+               tool("move", id=NODE, rel="children"),
+               tool("look", id=NODE),
+               tool("pick", id=NODE),
+               final("ok", [NODE])]
+
+    hops = {h["tool"]: h for h in _ask(client, _key(registry), question="q",
+                                       hops=7)["hops"]}
+
+    for name in ("locate", "sniff", "scan", "move"):
+        named = hops[name].get("ids")
+        assert named, f"{name} named no set: {hops[name]}"
+        assert len(named) <= 10 and all(isinstance(i, str) for i in named)
+    # `also`, not `instead`: an addressed call keeps the id it was given,
+    # because the two fields answer two questions — where the call went, and
+    # what it brought back.
+    assert hops["scan"]["id"] == NODE and hops["move"]["id"] == NODE
+    # A tool that returns no set gains nothing.
+    assert "ids" not in hops["look"] and hops["look"]["id"] == NODE
+    assert "ids" not in hops["pick"] and hops["pick"]["id"] == NODE
+
+
+def test_a_hop_that_found_nothing_names_no_set(station, scripted):
+    """The absent field reads as an empty list and never as a claim — a
+    record written before this version has none at all, and those outlive
+    the version that wrote them (J.10.7)."""
+    client, registry = station
+    script, _ = scripted
+    script += [tool("sniff", terms=["zzqqxnotinanyforest"]), final("ok", [])]
+
+    hop = _ask(client, _key(registry), question="q", hops=3)["hops"][0]
+    assert hop["out"]["results"] == 0
+    assert "ids" not in hop
+
+
+def test_the_named_set_is_result_order_and_capped():
+    """The record is a report on a hunt, not a second copy of its results:
+    the cap is the same judgement every other clipped field here makes."""
+    from monkeyllm_station.inference import HOP_IDS_MAX, _hop_ids
+
+    many = {"results": [{"id": f"n/{i}"} for i in range(25)]}
+    assert _hop_ids("locate", many) == [f"n/{i}" for i in range(HOP_IDS_MAX)]
+    assert _hop_ids("sniff", many)[:2] == ["n/0", "n/1"]
+    assert _hop_ids("scan", {"nodes": [{"id": "a"}, {"id": "b"}]}) == ["a", "b"]
+    assert _hop_ids("move", {"neighbors": [{"id": "z"}]}) == ["z"]
+    # No set to name: a body, a refusal, a digest.
+    assert _hop_ids("pick", {"body": "..."}) == []
+    assert _hop_ids("locate", {"error": {"code": "E_FORBIDDEN"}}) == []
+    assert _hop_ids("look", {"children": [{"id": "a"}]}) == []
+
+
 def test_the_model_is_told_why_a_hop_failed(station, scripted):
     """It already was — this pins it. The console reporting is a copy of
     what the loop feeds back, never the source of it."""

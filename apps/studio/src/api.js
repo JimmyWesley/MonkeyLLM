@@ -96,6 +96,59 @@ export const api = {
     request(`/v1/forests/${encodeURIComponent(forest)}/${primitive}`,
             { method: 'POST', body: payload, timing: true }),
 
+  /** The progress of one `answer`, while it is still being answered (J.10.12).
+   *
+   *  `fetch` and not `EventSource`, for one reason that decides it: an
+   *  EventSource cannot carry a header, and this Station is reached with a
+   *  Bearer token. The alternative is the key in the query string, and a
+   *  credential in a URL is a credential in every log and every referrer —
+   *  the same rule J.16 keeps when it audits a webhook's host and never its
+   *  path. So the frames are parsed here, which is a dozen lines.
+   *
+   *  Resolves when the run closes. Never rejects: a channel is an
+   *  enhancement over a call that is happening anyway, so a Station that
+   *  does not serve one, a proxy that buffers it away, or a network that
+   *  drops it must cost the caller nothing but the picture.
+   */
+  events: async (forest, run, onEvent, signal) => {
+    try {
+      const res = await fetch(
+        `/v1/forests/${encodeURIComponent(forest)}/answer/`
+        + `${encodeURIComponent(run)}/events`,
+        { headers: { ...(getKey() ? { Authorization: `Bearer ${getKey()}` } : {}) },
+          signal })
+      if (!res.ok || !res.body) return
+      const reader = res.body.getReader()
+      const decode = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decode.decode(value, { stream: true })
+        // SSE frames are separated by a blank line. A partial frame stays in
+        // the buffer: a chunk boundary is not a message boundary.
+        let cut = buffer.indexOf('\n\n')
+        while (cut !== -1) {
+          const frame = buffer.slice(0, cut)
+          buffer = buffer.slice(cut + 2)
+          let kind = 'message'
+          let data = ''
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event: ')) kind = line.slice(7)
+            else if (line.startsWith('data: ')) data += line.slice(6)
+          }
+          if (kind !== 'ping') {
+            try {
+              onEvent(kind, data ? JSON.parse(data) : {})
+            } catch { /* one bad frame is not the end of the channel */ }
+          }
+          if (kind === 'done') return
+          cut = buffer.indexOf('\n\n')
+        }
+      }
+    } catch { /* aborted, unreachable, or unsupported: the call is unaffected */ }
+  },
+
   // Map projections (J.11): a region in one call rather than one call per
   // node. Read-only, scoped exactly like the primitives, and derived — a
   // stale answer is fixed by reindexing, never by reconciling here.

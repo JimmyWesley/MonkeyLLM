@@ -191,6 +191,12 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         # question with its own message.
         "question": _param("string"),
         "query": _param("string"),
+        # J.10.3 (v0.67): the caller's own literal terms for the sweep's
+        # `sniff` leg — the same shapes `harvest` takes, on the same rules.
+        # Absent, the sweep derives them from the question as it always has;
+        # sent beside `hops` it is E_SCHEMA, because a walk authors its own
+        # retrieval and a parameter silently dropped is a lie about what ran.
+        "terms": _param("string[]"),
         "k": _param("integer"),
         "cache": _param("boolean"),
         "reply_tokens": _param("integer"),

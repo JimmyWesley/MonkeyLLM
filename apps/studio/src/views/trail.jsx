@@ -5,8 +5,14 @@
  *
  * Explore's graph answers "what is in here". This answers a different
  * question — "what did THIS question do to it" — and that is why it is a
- * second view rather than a mode of the first: no filters, no settings, no
- * pan, nothing to tune. One question, one path, and the map is the caption.
+ * second view rather than a mode of the first: no filters, no settings,
+ * nothing to tune. One question, one path, and the map is the caption.
+ *
+ * The one thing it does take is a hand on the view (J.5.15 rule 10, v0.67):
+ * a thousand dots drawn to fit is a field of dots, and "where did that come
+ * from" is read by looking closer at one part of it. Navigating spends
+ * nothing — no call, no write, no heat, and not one millisecond of rule 7's
+ * figure, which is the retrieval's own cost and never this panel's.
  *
  * Decisions worth keeping:
  *
@@ -45,6 +51,22 @@
  *    number of stages that have data, so the sweep's three land together in
  *    milliseconds and `cited` lands when the model is finally done — the
  *    pause in the middle is the model writing, not a scripted beat.
+ * 8. **The background is dots, and the trail is the only line** (J.5.15
+ *    rule 9, v0.67). The edge set is still read and still pulls: paint and
+ *    physics are separate concerns, and Explore has always shipped exactly
+ *    this split — its hidden proposals pull as springs while no line is
+ *    drawn for them — so the clusters, the hubs and the branch discs are
+ *    where they were. What used to be painted here was every edge J.11
+ *    returns, the `confidence < 1` class included and at twice the opacity
+ *    of structure, so the answer's trail lay under a mat of proposals
+ *    nobody had asked to see.
+ * 9. **The dots carry the one fact this panel is about: where.** They are
+ *    coloured by home branch — a fact the forest holds — with Explore's own
+ *    palette and the operator's own stored grouping depth, because two
+ *    consoles that group one forest two ways teach a person that the
+ *    branches moved. They stay dim: the trail and its stages are the
+ *    subject, and the map is the room it happened in. And whichever fact a
+ *    colour encodes, the legend names it (J.5.4).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
@@ -57,15 +79,43 @@ import {
   STAGES, boxOf, markNodes, reachedStages, shortName, stageCounts,
   stagesFor, trailSegments,
 } from '../trailmap.js'
-import { groupOf, seed, step } from './graph.jsx'
+import { groupOf, groupPalette, seed, step } from './graph.jsx'
 import { useAsync } from './shared.jsx'
 
 const STAGE_MS = 620      // one stage's share of the reveal
 const FORCE = { repel: 1, distance: 1.15, attract: 1, center: 1 }
 const PAD = 34            // camera margin, in css pixels
 const LABEL_LIMIT = 22    // past this a caption per hit whites out the map
+const TAU = Math.PI * 2
+const ZOOM_STEP = 1.15    // one mouse notch
+const ZOOM_MIN = 0.5      // times the fitted scale — never an absolute one:
+const ZOOM_MAX = 8        // "fitted" is a different number per forest
+const GROUP_DEPTH = 3     // Explore's own default, when a forest has no view
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+
+/** How deep a branch group runs, as the operator's own Explore is showing
+ *  this forest (J.5.4 v0.38 keeps that per forest, in the browser, never in
+ *  the address and never a call). Read, never written: the panel takes the
+ *  grouping and gives none back.
+ *
+ *  `colorBy` — Explore's switch between branch and type — is deliberately
+ *  not taken. J.5.15 rule 9 fixes what THIS panel's colour encodes, the home
+ *  branch, because the question it answers is *where*; the legend names that
+ *  fact whichever way Explore happens to be set. The depth is the part that
+ *  must agree, or the same forest is grouped two ways by two consoles.
+ *
+ *  The fallback is Explore's `DEFAULTS.groupDepth`, restated rather than
+ *  imported: this panel honours two fields of a presentation preset that is
+ *  Explore's own, and importing the whole preset would tie a console's taste
+ *  to another console's. */
+function readGroupDepth(forest) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`monkeyllm.graph.${forest}`) || '{}')
+    const depth = Math.floor(Number(raw.groupDepth))
+    return depth >= 1 && depth <= 8 ? depth : GROUP_DEPTH
+  } catch { return GROUP_DEPTH }
+}
 
 /** Colours live in the stylesheet with every other colour, so the map
  *  repaints with the theme. Read once per theme change, never per frame.
@@ -79,24 +129,33 @@ function readPalette() {
   }
   const out = { stage: {} }
   for (const s of STAGES) out.stage[s.key] = channel(s.token, 'rgb(120 132 124)')
+  // `dot` is the root group's colour and the colour of every dot until the
+  // branch palette is computed — the absence of a branch, not one more
+  // branch (the rule Explore's own `pal.other` follows). No edge token is
+  // read any more: nothing here draws one.
   out.dot = channel('text-3', 'rgb(120 132 124)')
-  out.edge = channel('graph-edge', 'rgb(120 132 124)')
-  out.proposal = channel('graph-shortcut', 'rgb(200 132 40)')
   out.trail = channel('graph-trail', 'rgb(202 146 18)')
   out.label = channel('text-2', 'rgb(90 100 92)')
   return out
 }
 
-export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
+export default function AnswerTrail({ forest, evidence, cited, trace, busy,
+                                      live = false }) {
   const { t } = useI18n()
   const { resolved } = useTheme()
   const box = useRef(null)
   const canvas = useRef(null)
   const sim = useRef({ nodes: [], springs: [], links: [], index: {},
                        alpha: 0, alphaTarget: 0, active: false, rand: Math.random })
-  const cam = useRef({ x: 0, y: 0, k: 1 })
+  // `fitK` is the scale the camera would choose on its own — the zoom clamp
+  // is relative to it, because "fitted" is a different number per forest.
+  // `manual` is a hand on the view: from the first wheel or drag the camera
+  // stops framing itself, until a double click or a new forest (rule 10).
+  const cam = useRef({ x: 0, y: 0, k: 1, fitK: 1, manual: false })
   const anim = useRef({ pos: 0 })
   const needsDraw = useRef(true)
+  // The colouring, held where `build()` can reach it (see the effect below).
+  const colourRuns = useRef(null)
   const [hover, setHover] = useState(null)
   const [replays, setReplays] = useState(0)
 
@@ -124,6 +183,27 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
 
   const palette = useMemo(() => readPalette(), [resolved])
 
+  /* The branch hues, Explore's formula over Explore's own sorted key list
+     (J.5.15 rule 9): the same forest must arrive in the same colours in both
+     consoles, so the palette is imported and the grouping is the operator's.
+     Computed once per forest, theme or depth — never per frame. */
+  const groupDepth = useMemo(() => readGroupDepth(forest), [forest])
+  const groupColors = useMemo(() => {
+    const keys = new Set()
+    for (const n of map.data?.nodes || []) keys.add(groupOf(n.id, groupDepth))
+    return groupPalette([...keys].sort(), resolved === 'dark')
+  }, [map.data, groupDepth, resolved])
+
+  /* Three real branch hues for the legend. The row names what the colour
+     encodes (J.5.4), and it names it in the colours actually on the map. */
+  const swatch = useMemo(() => {
+    const out = []
+    for (const key of Object.keys(groupColors)) {
+      if (groupColors[key] && out.length < 3) out.push(groupColors[key])
+    }
+    return out
+  }, [groupColors])
+
   const paletteRef = useRef(palette)
   const trailRef = useRef(trail)
   const marksRef = useRef(marks)
@@ -140,7 +220,10 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
   const fit = useCallback((ease = 1) => {
     const el = canvas.current
     const s = sim.current
-    if (!el || !s.nodes.length) return
+    // A hand on the view owns it: the camera stops reframing under somebody
+    // who is looking at one corner of the map (rule 10). `manual` is cleared
+    // by the reset gesture and by a new forest, and by nothing else.
+    if (!el || !s.nodes.length || cam.current.manual) return
     const whole = boxOf(s.nodes)
     if (!whole) return
     const touched = []
@@ -165,6 +248,10 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
     const k = Math.min((w - PAD * 2) / Math.max(1, x1 - x0),
                        (h - PAD * 2) / Math.max(1, y1 - y0), 2.4)
     const v = cam.current
+    // The TARGET scale, not the eased one: the zoom clamp is a multiple of
+    // what the camera would choose, and a limit that moved while the camera
+    // was still settling would be a different limit every frame.
+    v.fitK = k
     v.k += (k - v.k) * ease
     v.x += ((w / 2 - ((x0 + x1) / 2) * k) - v.x) * ease
     v.y += ((h / 2 - ((y0 + y1) / 2) * k) - v.y) * ease
@@ -212,25 +299,69 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
                 active: true, rand: Math.random }
     seed(s, w, h)
     sim.current = s
+    // The colours belong to the simulation and this is a new one, so they are
+    // put back here rather than left to an effect that watches a different set
+    // of things. `calm` rebuilds and no colour input changes with it, so a
+    // viewer who turns Reduce Motion on mid-session would otherwise be left
+    // with a grey map under a legend still naming the branches.
+    colourRuns.current?.(s)
     if (calm) {
       // Settled before the first paint: nobody asked to watch the layout
       // assemble here. The reveal is the animation; the map is the stage.
       for (let i = 0; i < 420 && s.active; i += 1) step(s, w, h, FORCE)
       s.active = false
     }
+    // A new map is a new view: whatever the hand did to the last forest's
+    // camera it did not do to this one.
+    cam.current.manual = false
     fit(1)
     needsDraw.current = true
   }, [map.data, calm, fit])
 
   useEffect(() => { build() }, [build])
 
-  /* A new ask restarts the reveal — `busy` rising is the moment one left
-     the browser — and so does the replay button and a change of forest. */
+  /* The dots, grouped by colour once rather than styled one at a time: on a
+     1200-node forest the fill state changes are what cost, not the arcs. A
+     run is an array of indices into `s.nodes`, rebuilt when the layout, the
+     theme or the grouping changes and never inside a frame. Runs live on the
+     simulation because the draw reads it through a ref, like everything else
+     it paints.
+
+     Held in a ref as well as run here, because those are two different
+     moments: this effect fires when a COLOUR input moves, and `build()`
+     replaces the simulation wholesale when one of ITS inputs moves. Neither
+     set contains the other, and a rebuilt simulation carries no colours until
+     they are put back — which `build()` does with this same function, so the
+     two cannot drift into a map that is grey under a legend about branches. */
   useEffect(() => {
-    if (!busy) return
+    colourRuns.current = (s) => {
+      if (!s.nodes.length) return
+      const grey = palette.dot
+      const runs = new Map()
+      for (let i = 0; i < s.nodes.length; i += 1) {
+        // The root group has no branch to name, so it stays grey — the rule
+        // Explore follows for the same nodes.
+        const color = groupColors[groupOf(s.nodes[i].id, groupDepth)] || grey
+        const held = runs.get(color)
+        if (held) held.push(i)
+        else runs.set(color, [i])
+      }
+      s.runs = [...runs].map(([color, list]) => ({ color, list }))
+      needsDraw.current = true
+    }
+    colourRuns.current(sim.current)
+  }, [map.data, groupColors, groupDepth, palette])
+
+  /* A new ask restarts the reveal — `busy` rising is the moment one left
+     the browser — and so does the replay button and a change of forest.
+     A LIVE walk is the exception: its hops arrive one at a time (J.10.12)
+     and each one is a step forward, so the reveal advances with the hunt
+     rather than replaying itself on every arrival. */
+  useEffect(() => {
+    if (!busy || live) return
     anim.current.pos = 0
     needsDraw.current = true
-  }, [busy])
+  }, [busy, live])
   useEffect(() => {
     anim.current.pos = 0
     needsDraw.current = true
@@ -263,33 +394,50 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
     ctx.clearRect(0, 0, w, h)
     ctx.lineCap = 'round'
 
-    /* 1. The forest as context. Two passes rather than a style per edge:
-          the state changes are what cost, not the lines. A proposal is
-          `confidence < 1` and is dashed here for the reason it is dashed in
-          Explore — it is a proposal, never an assertion. */
-    ctx.lineWidth = 1
-    for (const pass of [false, true]) {
-      ctx.globalAlpha = pass ? 0.22 : 0.11
-      ctx.strokeStyle = pass ? pal.proposal : pal.edge
-      ctx.setLineDash(pass ? [3, 4] : [])
-      ctx.beginPath()
-      for (const e of s.links) {
-        if ((!e.structure && e.confidence < 1) !== pass) continue
-        const a = s.nodes[s.index[e.src]]
-        const b = s.nodes[s.index[e.dst]]
-        ctx.moveTo(X(a), Y(a))
-        ctx.lineTo(X(b), Y(b))
-      }
-      ctx.stroke()
-    }
-    ctx.setLineDash([])
+    /* 1. The forest as context: dots, and not one edge (J.5.15 rule 9). The
+          edge set is still read and still pulls — it is in `s.springs`, and
+          the layout below is the layout it produces — but nothing is drawn
+          for it: the panel's question is *where*, and the answer used to
+          arrive under a mat of proposals nobody had asked to see.
 
+          The colour is the home branch, dim, so the trail and its stages
+          stay the foreground. One path per branch instead of one fill per
+          dot; a dot outside the canvas is skipped, which is what makes a
+          zoomed-in view cheaper than a fitted one rather than the same.
+          Radius is screen space on purpose: zooming spreads a cluster
+          apart instead of inflating it, which is the reason to zoom. */
     ctx.globalAlpha = 0.3
-    ctx.fillStyle = pal.dot
-    for (const n of s.nodes) {
-      if (marked.has(n.id)) continue
+    const runs = s.runs
+    if (runs) {
+      for (const run of runs) {
+        ctx.fillStyle = run.color
+        ctx.beginPath()
+        for (const i of run.list) {
+          const n = s.nodes[i]
+          if (marked.has(n.id)) continue
+          const x = X(n)
+          if (x < -6 || x > w + 6) continue
+          const y = Y(n)
+          if (y < -6 || y > h + 6) continue
+          const r = n.r0 * 0.62
+          ctx.moveTo(x + r, y)
+          ctx.arc(x, y, r, 0, TAU)
+        }
+        ctx.fill()
+      }
+    } else {
+      // One frame can land before the colouring effect does. Grey is the
+      // honest answer there — it is what a node with no branch gets anyway.
+      ctx.fillStyle = pal.dot
       ctx.beginPath()
-      ctx.arc(X(n), Y(n), n.r0 * 0.62, 0, Math.PI * 2)
+      for (const n of s.nodes) {
+        if (marked.has(n.id)) continue
+        const x = X(n)
+        const y = Y(n)
+        const r = n.r0 * 0.62
+        ctx.moveTo(x + r, y)
+        ctx.arc(x, y, r, 0, TAU)
+      }
       ctx.fill()
     }
 
@@ -452,12 +600,133 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
     return () => ro.disconnect()
   }, [calm, fit])
 
+  /* -- the hand on the view (J.5.15 rule 10) ------------------------------- */
+
+  /* Zoom about a point, so the pixel under the cursor stays under it. A
+     world point sits at `p·k + v`; asking that it still sit there at `k' =
+     k·f` gives `v' = p_screen − (p_screen − v)·(k'/k)`, which is the whole
+     of it — the same line Explore's wheel uses, on a scale clamped to a
+     multiple of the fitted one rather than to an absolute number that would
+     mean something different per forest.
+
+     It spends nothing: no call, no write, no heat, and no touch to the
+     millisecond figure below the canvas (rule 10, rule 7). */
+  const zoomAt = useCallback((px, py, factor) => {
+    const v = cam.current
+    const base = v.fitK || v.k || 1
+    const k = Math.max(base * ZOOM_MIN, Math.min(base * ZOOM_MAX, v.k * factor))
+    v.manual = true
+    if (k !== v.k) {
+      v.x = px - (px - v.x) * (k / v.k)
+      v.y = py - (py - v.y) * (k / v.k)
+      v.k = k
+    }
+    needsDraw.current = true
+    if (calm) drawRef.current()
+  }, [calm])
+
+  /* Back to the framed view. The fit is recomputed rather than remembered,
+     because the forest may have settled — or the answer moved — since. */
+  const resetView = useCallback(() => {
+    cam.current.manual = false
+    fit(1)
+    needsDraw.current = true
+    if (calm) drawRef.current()
+  }, [calm, fit])
+
+  /* Wheel must be non-passive to preventDefault, which React's onWheel is
+     not — so it is bound by hand, and re-bound when the canvas appears (it
+     is behind the map's skeleton until the projection lands). */
+  useEffect(() => {
+    const el = canvas.current
+    if (!el) return undefined
+    const onWheel = (event) => {
+      event.preventDefault()
+      const rect = el.getBoundingClientRect()
+      // A trackpad pinch arrives as a wheel with `ctrlKey` and a continuous
+      // delta; a mouse notch is one fixed step. Read the same way, a pinch
+      // is either inert or violent.
+      const factor = event.ctrlKey
+        ? Math.exp(-event.deltaY / 120)
+        : (event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP)
+      zoomAt(event.clientX - rect.left, event.clientY - rect.top, factor)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [zoomAt, map.busy, map.error])
+
   /* -- pointing ----------------------------------------------------------- */
 
-  const onMove = (event) => {
+  const pointers = useRef(new Map())
+  const pinch = useRef(null)
+  const pan = useRef(null)
+  // Where the gesture began, so a drag that ends on a node is not a click.
+  const gesture = useRef({ x: 0, y: 0, moved: false })
+
+  const onPointerDown = (event) => {
+    const el = canvas.current
+    if (!el) return
+    try { el.setPointerCapture(event.pointerId) } catch { /* gone already */ }
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (pointers.current.size === 2) {
+      // A second finger turns any gesture into a pinch — never a pan, and
+      // never a click however still it ends.
+      const [a, b] = [...pointers.current.values()]
+      pinch.current = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+                        mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }
+      pan.current = null
+      gesture.current.moved = true
+      return
+    }
+    pan.current = { x: event.clientX, y: event.clientY }
+    gesture.current = { x: event.clientX, y: event.clientY, moved: false }
+  }
+
+  const onPointerMove = (event) => {
     const el = canvas.current
     const s = sim.current
     if (!el || !s.nodes.length) return
+    if (pointers.current.has(event.pointerId)) {
+      pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    }
+    if (pinch.current && pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()]
+      const d = Math.hypot(a.x - b.x, a.y - b.y) || 1
+      const mx = (a.x + b.x) / 2
+      const my = (a.y + b.y) / 2
+      const rect = el.getBoundingClientRect()
+      // Two fingers that also travelled asked to pan while they zoomed, and
+      // the pan is applied first so the zoom is about where they now are.
+      const factor = d / pinch.current.d
+      const v = cam.current
+      v.x += mx - pinch.current.mx
+      v.y += my - pinch.current.my
+      pinch.current = { d, mx, my }
+      zoomAt(mx - rect.left, my - rect.top, factor)
+      return
+    }
+    if (pan.current) {
+      const dx = event.clientX - pan.current.x
+      const dy = event.clientY - pan.current.y
+      if (dx || dy) {
+        const v = cam.current
+        v.x += dx
+        v.y += dy
+        v.manual = true
+        pan.current = { x: event.clientX, y: event.clientY }
+        if (!gesture.current.moved
+            && (Math.abs(event.clientX - gesture.current.x) > 4
+                || Math.abs(event.clientY - gesture.current.y) > 4)) {
+          gesture.current.moved = true
+          // The card names the node under the pointer, and once the map is
+          // moving under it that is no longer the node it names.
+          if (hover) setHover(null)
+        }
+        needsDraw.current = true
+        if (calm) drawRef.current()
+      }
+      return
+    }
     const rect = el.getBoundingClientRect()
     const px = event.clientX - rect.left
     const py = event.clientY - rect.top
@@ -473,6 +742,12 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
       if (d < bestD) { bestD = d; best = { id, x: px, y: py } }
     }
     setHover(best)
+  }
+
+  const onPointerUp = (event) => {
+    pointers.current.delete(event.pointerId)
+    if (pointers.current.size < 2) pinch.current = null
+    pan.current = null
   }
 
   /* -- the panel ---------------------------------------------------------- */
@@ -507,10 +782,19 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
               says which node that is. */}
           <div ref={box} className="relative h-[360px] w-full overflow-hidden rounded-lg
                                     border border-line bg-bg sm:h-[500px]">
+            {/* `touch-none` because the panel takes the gesture: without it
+                a two-finger pinch zooms the page and a drag scrolls it, and
+                the map underneath never hears either. A drag that travelled
+                is a pan and not a click, or reaching a corner of the forest
+                would keep opening whatever was under the finger. */}
             <canvas ref={canvas}
-                    className={`h-full w-full ${hover ? 'cursor-pointer' : ''}`}
-                    onMouseMove={onMove} onMouseLeave={() => setHover(null)}
-                    onClick={() => hover && navigate(
+                    className={`h-full w-full touch-none
+                                ${hover ? 'cursor-pointer' : 'cursor-grab'}`}
+                    onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+                    onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
+                    onPointerLeave={() => setHover(null)}
+                    onDoubleClick={resetView}
+                    onClick={() => !gesture.current.moved && hover && navigate(
                       hrefFor(forest, 'explore', { node: hover.id }))} />
             {hovered && (
               /* Above the pointer, unless there is no room above — the box
@@ -554,6 +838,30 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy }) {
                 {t('ask.trail_real', { ms: trace.retrieval_ms })}
               </span>
             )}
+          </div>
+
+          {/* Whichever fact a colour encodes, the legend names it (J.5.4):
+              the rings above are the stages, and the dots behind them are
+              the branches the forest already had. The gesture rides the same
+              line because nothing on a canvas says it can be moved. */}
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1
+                          text-[11px] text-text-3">
+            <span className="flex items-center gap-1.5">
+              {swatch.length > 0 && (
+                <span className="flex gap-[3px]" aria-hidden="true">
+                  {swatch.map((color, i) => (
+                    // Keyed by position: two branches CAN land on one hue
+                    // once the golden angle wraps, and a duplicate key is a
+                    // warning about a swatch that is merely decorative.
+                    // eslint-disable-next-line react/no-array-index-key
+                    <span key={i} className="h-2 w-2 rounded-full"
+                          style={{ background: color, opacity: 0.75 }} />
+                  ))}
+                </span>
+              )}
+              {t('ask.trail_colour')}
+            </span>
+            <span className="opacity-70">{t('ask.trail_view_hint')}</span>
           </div>
         </>
       )}

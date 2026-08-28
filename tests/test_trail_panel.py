@@ -9,6 +9,13 @@ gets MARKED, and the rules that decide are in `apps/studio/src/trailmap.js`
 precisely so a machine can put the questions to them:
 `apps/studio/check-trail.mjs` does, and this module runs it.
 
+A walk is marked from two objects rather than one — J.10.12's `hop` events
+while the call is open, the response's own `read` and `hops` at the close
+(J.5.15 rule 2) — so the checker also puts the question those two raise
+together: the live picture MUST be contained in the final one. A dot that
+lights while a hunt runs and goes dark when its answer lands is two pictures
+of one hunt, which is the thing the live channel exists to end.
+
 Two of F.137's claims are not the console's to keep, and they are checked
 here directly:
 
@@ -44,8 +51,10 @@ def test_the_panel_marks_only_what_the_material_says():
     r = subprocess.run(["node", str(CHECKER)], capture_output=True, text=True,
                        cwd=STUDIO)
     assert r.returncode == 0, r.stdout + r.stderr
-    # Every criterion reported, not just the ones that happened to run.
-    assert r.stdout.count("PASS") >= 20, r.stdout
+    # Every criterion reported, not just the ones that happened to run: the
+    # checker is one module, so a throw partway down exits non-zero while the
+    # criteria after it are never asked at all.
+    assert r.stdout.count("PASS") >= 35, r.stdout
 
 
 def test_a_harvest_deposits_no_pheromone(vine_rw):
@@ -112,3 +121,76 @@ def test_the_panel_is_its_own_switch():
     # The two switches are separate pieces of state, so neither can move the
     # other. `hops` reaching the panel's state at all is the defect.
     assert not re.search(r"setShowGraph\((?!v\b|\(|false|true)", source), source
+
+
+def _block(source: str, opens_at: int) -> tuple[int, int]:
+    """The span of the braced block whose first `{` is at or after `opens_at`."""
+    start = source.index("{", opens_at)
+    depth = 0
+    for i in range(start, len(source)):
+        if source[i] == "{":
+            depth += 1
+        elif source[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return start, i
+    raise AssertionError("unbalanced braces around the preview guard")
+
+
+def test_no_retrieval_preview_on_a_walk():
+    """J.5.15 rule 2 (v0.67), F.142: the preview is a sweep's, and only a sweep's.
+
+    A walk runs no `harvest` at all — its entry is a bare `locate` and every
+    retrieval after it is a call the model authored (J.10.5) — so a harvest
+    fired beside a walk is not the same sweep, it is a sweep that never
+    happened, and painting its results as the answer's retrieval is exactly
+    what rule 3 forbids.
+
+    What a canvas paints is not machine-readable (F.137 states that
+    boundary), so what is asked here is REACHABILITY, in the idiom
+    F.111-F.116 use for generated text: every path that starts the parallel
+    retrieval — the immediate one and the fallback that stands in for an
+    absent J.10.12 channel — must lie inside the block the walk switch turns
+    off.
+    """
+    source = ASK.read_text(encoding="utf-8")
+    starts = [m.start() for m in re.finditer(r"'harvest'", source)]
+    assert starts, "the path panel's retrieval preview is gone from Ask.jsx"
+
+    guards = [m.start() for m in re.finditer(r"if \(!hops\) \{", source)]
+    assert len(guards) == 1, (
+        "the sweep-only guard must be exactly one block, or 'every path that "
+        "starts a preview' is not a question this check can ask")
+    opened, closed = _block(source, guards[0])
+    for at in starts:
+        assert opened < at < closed, (
+            "a retrieval preview is reachable while the walk switch is on: "
+            "the panel would paint a sweep that never happened (J.5.15 rule 2)")
+
+    # The other half of the same rule: the drawing is the only reason a
+    # preview ever ran, so with the panel switched off nothing fires in
+    # either mode — and the call then carries no `run` either.
+    drawing = [m.start() for m in re.finditer(r"if \(runId\) \{", source)]
+    assert len(drawing) == 1, "the panel's own gate is not one block"
+    opened, closed = _block(source, drawing[0])
+    for at in starts:
+        assert opened < at < closed, (
+            "a retrieval preview is reachable with the path panel switched "
+            "off, and the drawing was the only reason it ran (J.5.15 rule 1)")
+
+
+def test_the_fallback_dies_when_the_answer_lands():
+    """J.5.15 rule 1: the panel costs the forest nothing.
+
+    The fallback exists to stand in for a progress channel that never spoke.
+    Once the POST has settled there is no gap left for it to fill, and a
+    stored answer (J.10.7) returns in milliseconds — so a timer nobody
+    cancels makes the store's own economy pay for a retrieval on every hit,
+    and draws nothing with it.
+    """
+    source = ASK.read_text(encoding="utf-8")
+    settle = re.search(r"finally \{(.{0,600}?)setBusy\(false\)", source, re.S)
+    assert settle, "the ask's settle is gone from Ask.jsx"
+    assert "clearTimeout(" in settle.group(1), (
+        "the answer settles without cancelling the preview fallback: a "
+        "stored answer would pay for a retrieval it never draws")

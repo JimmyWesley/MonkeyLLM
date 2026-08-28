@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Jimmy Wesley
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import {
   MAX_RUNS, clearRuns, exportRuns, listRuns, loadRun, saveRun,
@@ -13,10 +13,11 @@ import {
 } from '../design/ui.jsx'
 import { Markdown } from '../design/markdown.jsx'
 import {
-  Ask as AskIcon, Clock, Collapse, Download, Expand, Eye, Printer, Sparkle,
-  Trash,
+  Ask as AskIcon, Clock, Collapse, Download, Expand, Eye, Graph as GraphIcon,
+  Printer, Sparkle, Trash,
 } from '../design/icons.jsx'
 import { PayloadImage } from './files.jsx'
+import { evidenceFromHops, mergeEvidence } from '../trailmap.js'
 import AnswerTrail from './trail.jsx'
 import {
   Metric, NeedsCapability, Row, TraceSteps, fmtMs, has, nodeLink, useAsync,
@@ -42,6 +43,21 @@ function savePrefs(patch) {
     localStorage.setItem(ASK_PREFS_KEY, JSON.stringify({ ...loadPrefs(), ...patch }))
   } catch { /* private mode: the preference just does not persist */ }
 }
+
+/* J.10.12: how long the console waits for the answer's own progress channel
+ * before falling back to J.5.15's second retrieval. Long enough that a
+ * served channel always wins (the bundle is published in milliseconds),
+ * short enough that an older Station's map is not visibly late. */
+const CHANNEL_GRACE_MS = 900
+
+/* A rendezvous, not a name (J.10.12 rule 5): opaque, this browser's own, and
+ * never reused. `randomUUID` needs a secure context, which a Station on plain
+ * http over a LAN is not — so there is a fallback, and it only has to be
+ * unique among one person's own in-flight questions. */
+const newRunId = () => (
+  globalThis.crypto?.randomUUID
+    ? crypto.randomUUID()
+    : `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`)
 
 const replyStepIndex = (value) => REPLY_STEPS.reduce(
   (best, v, i) => (Math.abs(v - value) < Math.abs(REPLY_STEPS[best] - value) ? i : best), 0)
@@ -81,14 +97,24 @@ export default function Ask({ forest, grant, me, goto }) {
   // and it is its OWN switch, deliberately not folded into `hops`: the
   // walk is what costs seconds, the drawing costs nothing, and one
   // control over both would teach an operator that the picture is slow.
+  // On by default (J.5.15 rule 10): a demonstration should show the
+  // product's own subject without a preparation step.
   const [showGraph, setShowGraph] = useState(() => loadPrefs().graph !== false)
-  // The retrieval half of the sweep, fetched alongside the answer so the
-  // map is drawn while the model is still writing (see `ask`).
+  // What the answer's own progress channel has delivered so far (J.10.12):
+  // the sweep's bundle at ~19 ms, and a walk's hops as each completes. The
+  // `preview` is the J.5.15 fallback for a Station that serves no channel.
   const [preview, setPreview] = useState(null)
+  const [live, setLive] = useState(null)
   // The runs kept in this browser (J.5.9), and which of them — if any — is
   // what the answer panel is currently showing.
   const [history, setHistory] = useState(false)
   const [restored, setRestored] = useState(null)
+  // The progress subscription of the ask currently in flight (J.10.12).
+  // One at a time and never longer than its own call: a channel left open
+  // keeps delivering ITS run's hops into whatever `live` now belongs to, and
+  // one question's path drawn as another's is the invention J.5.15 rule 3
+  // forbids — the panel would be honest about material from the wrong hunt.
+  const channel = useRef(null)
   const principal = me?.principal || ''
 
   const admin = has(grant, 'admin')
@@ -97,6 +123,41 @@ export default function Ask({ forest, grant, me, goto }) {
   // right: it is a measurement instrument, not a preference.
   const canopy = useAsync(() => api.canopy(forest), [forest], { skip: !admin })
   const dense = canopy.data?.state === 'active' && canopy.data?.enabled !== false
+
+  /** Close a progress subscription (J.10.12), and forget it if it is still
+   *  the one this console is watching. The guard is for the ask that already
+   *  replaced this one: it owns the ref now, and an older settle arriving
+   *  late must not tear down the channel of the question now on screen. */
+  function closeChannel(open) {
+    open?.abort()
+    if (channel.current === open) channel.current = null
+  }
+
+  // A subscription must not outlive the console that opened it.
+  useEffect(() => () => channel.current?.abort(), [])
+
+  /* What the path panel draws, in the order the sources can be trusted
+     (J.5.15 rule 2): the finished answer outranks everything; while a walk
+     runs, its hops as they arrive; and a sweep's bundle, which reaches the
+     console before either — and on a walk is never fired at all, so `preview`
+     stays null and the panel holds nothing until the walk says otherwise.
+
+     A walk's close is the UNION of its two records, because neither contains
+     the other: `read` carries the text that was handed over and names no
+     `locate`, `scan` or `move`, while the hop records name exactly those and
+     are the only place they are written down. Taking `read` alone would drop
+     every dot the live walk lit and collapse the entry stage to zero at the
+     moment the answer landed — two pictures of one hunt, which is the thing
+     the live channel exists to end.
+
+     Memoised because the identity is what the panel re-marks on: recomputing
+     it per keystroke would re-derive the marks and the trail of an answer
+     that has not changed since it landed. */
+  const drawn = useMemo(() => {
+    if (!result) return live?.length ? evidenceFromHops(live) : preview?.results
+    if (result.harvest?.results) return result.harvest.results
+    return mergeEvidence(result.read, evidenceFromHops(result.hops))
+  }, [result, live, preview])
 
   if (!has(grant, 'read')) {
     return <NeedsCapability message={t('access.needs_admin')} hint={t('cap.read')} />
@@ -107,24 +168,59 @@ export default function Ask({ forest, grant, me, goto }) {
     if (!q) return
     setQuestion(q)
     setBusy(true); setError(null); setResult(null); setRestored(null)
-    setPreview(null)
-    // The sweep's retrieval is milliseconds and the model is seconds, so
-    // the map can be drawn long before the reply exists. This is the SAME
-    // deterministic, read-only sweep `answer` runs — same question, same
-    // `k`, same entry ranker — so it is what the answer saw rather than an
-    // approximation of it, and it deposits no pheromone: heat is the
-    // whisper's, at the close of an answer (J.10.7), never a read's.
-    // Fire and forget: a preview that fails is a map that arrives late.
-    if (showGraph) {
-      api.call(forest, 'harvest',
-               { query: q, k, ...(hybrid ? { hybrid: true } : {}) })
-        .then(setPreview).catch(() => {})
+    setPreview(null); setLive(null)
+    // J.10.12: watch this call's own progress. The bundle arrives from the
+    // answer itself at ~19 ms and each hop as it completes, so on a Station
+    // that serves the channel the console runs NO second retrieval — the
+    // map is drawn from the very object the reply will be written from.
+    const runId = showGraph ? newRunId() : null
+    // Held so the answer's own settle can cancel it: past that moment there
+    // is nothing left for a second retrieval to be early FOR, and a stored
+    // answer (J.10.7) would otherwise pay for a read nobody ever draws.
+    let fallback = null
+    // The previous ask's channel, if one is somehow still open, belongs to a
+    // question this panel is no longer showing. Closed before this one opens,
+    // so its remaining hops cannot land in the new run's `live`.
+    closeChannel(channel.current)
+    const watching = runId ? new AbortController() : null
+    channel.current = watching
+    if (runId) {
+      let arrived = false
+      api.events(forest, runId, (kind, data) => {
+        if (kind === 'retrieval') { arrived = true; setPreview(data) }
+        if (kind === 'hop') {
+          arrived = true
+          setLive((held) => [...(held || []), data])
+        }
+      }, watching.signal)
+      // J.5.15 rule 2 (v0.67): the preview is a SWEEP's, and only a sweep's.
+      // A walk runs no `harvest` at all — its entry is a bare `locate` and
+      // every retrieval after it is a call the model authored (J.10.5) — so
+      // a harvest fired beside a walk is not the same sweep, it is a sweep
+      // that never happened, and painting its results as the answer's
+      // retrieval is exactly what rule 3 forbids. A walk's panel starts
+      // empty (a fact, not a placeholder) and fills from the hops
+      // themselves: J.10.12's events while the call is open, and the
+      // response's own `read`/`evidence` at the close.
+      if (!hops) {
+        // The J.5.15 fallback, held back for the channel rather than raced
+        // with it: an older Station, or a proxy that ate the stream, still
+        // draws — and a current one pays for no extra read at all.
+        fallback = setTimeout(() => {
+          if (arrived) return
+          api.call(forest, 'harvest',
+                   { query: q, k, ...(hybrid ? { hybrid: true } : {}) })
+            .then((data) => { if (!arrived) setPreview(data) })
+            .catch(() => {})
+        }, CHANNEL_GRACE_MS)
+      }
     }
     // Kept beside the answer because they are half of what a comparison
     // needs: the same question at `k=2` and at `k=6` are two runs, and a
     // record that dropped them would show two answers and no reason.
     const params = {
-      k, ...(reply ? { reply_tokens: reply } : {}),
+      k, ...(runId ? { run: runId } : {}),
+      ...(reply ? { reply_tokens: reply } : {}),
       ...(hybrid ? { hybrid: true } : {}), ...(hops ? { hops: true } : {}),
       ...(cache ? {} : { cache: false }),
     }
@@ -137,7 +233,16 @@ export default function Ask({ forest, grant, me, goto }) {
       // browser that cannot keep a run (private window, refused quota) has
       // not failed the ask, and J.5.9 says it must not be told it has.
       saveRun({ principal, forest, question: q, params, result: run }).catch(() => {})
-    } catch (err) { setError(err) } finally { setBusy(false) }
+    } catch (err) { setError(err) } finally {
+      // Whatever the answer did, it has landed: the fallback's whole job was
+      // to stand in for a channel that never spoke, and a call that is over
+      // has no gap left to fill. A stored answer returns in milliseconds,
+      // so without this the store's own economy paid for a retrieval on
+      // every hit (J.5.15 rule 1: the panel costs the forest nothing).
+      if (fallback) clearTimeout(fallback)
+      closeChannel(watching)
+      setBusy(false)
+    }
   }
 
   /** Reading a run back reads a record: no call leaves the browser (J.5.9).
@@ -148,6 +253,9 @@ export default function Ask({ forest, grant, me, goto }) {
   async function restore(id) {
     const run = await loadRun(id)
     if (!run) return
+    // A record is now what the panel shows, so a live hunt's hops belong to
+    // no question on this screen.
+    closeChannel(channel.current)
     setHistory(false); setError(null); setBusy(false)
     setQuestion(run.question)
     setK(run.params?.k ?? 3)
@@ -157,7 +265,7 @@ export default function Ask({ forest, grant, me, goto }) {
     setHybrid(!!run.params?.hybrid)
     setHops(!!run.params?.hops)
     setCache(run.params?.cache !== false)
-    setPreview(null)
+    setPreview(null); setLive(null)
     setResult(run.result)
     setRestored({ ts: run.ts, model: run.result?.model })
   }
@@ -184,13 +292,31 @@ export default function Ask({ forest, grant, me, goto }) {
           linked to, so it is a control on the console rather than a place
           the address bar can name. */}
       <Card title={t('ask.title')} subtitle={t('ask.sub')} icon={AskIcon}
-            actions={
+            actions={<>
+              {/* J.5.15 rule 10: the panel's own switch, compact, and here
+                  rather than in the form below — the drawing is not a
+                  parameter of the question (it changes nothing about what is
+                  asked or what is charged), and a control the answer pushes
+                  off the screen is a control nobody finds when the panel is
+                  what they want to hide. Still never the walk's switch
+                  (rule 1), and still a browser preference (rule 8). */}
+              <button type="button" aria-pressed={showGraph}
+                      className={`btn btn-sm btn-ghost !px-2
+                        ${showGraph ? 'bg-accent-soft text-accent' : 'text-text-3'}`}
+                      title={t('ask.graph_hint')} aria-label={t('ask.graph')}
+                      onClick={() => {
+                        const v = !showGraph
+                        setShowGraph(v)
+                        savePrefs({ graph: v })
+                      }}>
+                <GraphIcon size={15} />
+              </button>
               <button type="button" className="btn btn-sm btn-ghost !px-2"
                       title={t('ask.history_title')} aria-label={t('ask.history_title')}
                       onClick={() => setHistory(true)}>
                 <Clock size={15} />
               </button>
-            }>
+            </>}>
         <form onSubmit={(e) => { e.preventDefault(); ask() }} className="space-y-3">
           <textarea
             className="field min-h-[92px] resize-y text-[14px] leading-relaxed"
@@ -198,7 +324,14 @@ export default function Ask({ forest, grant, me, goto }) {
             placeholder={t('ask.placeholder')}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ask() }
+              // The shortcut is the button, so it is the button's state too:
+              // the send control is disabled while an answer is in flight,
+              // and a keyboard path that was not would let one question's
+              // POST land as another's answer.
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                if (!busy) ask()
+              }
             }}
           />
           {/* Settings left, action right — the same order every form on this
@@ -243,10 +376,10 @@ export default function Ask({ forest, grant, me, goto }) {
             </button>
           </div>
 
+          {/* What the question is asked WITH. The drawing is not one of
+              these — it is a way of reading the answer, so it lives on the
+              header (J.5.15 rule 10) and never in this list. */}
           <div className="space-y-3 border-t border-line pt-3">
-            <Toggle checked={showGraph}
-                    onChange={(v) => { setShowGraph(v); savePrefs({ graph: v }) }}
-                    label={t('ask.graph')} hint={t('ask.graph_hint')} />
             <Toggle checked={hops} onChange={setHops}
                     label={t('ask.hops')} hint={t('ask.hops_hint')} />
             {dense && (
@@ -275,19 +408,6 @@ export default function Ask({ forest, grant, me, goto }) {
       </Card>
 
       {busy && <Working hops={hops} />}
-
-      {/* J.10.4 drawn: the same material the panel below lists, on the
-          forest it came out of. The final result outranks the preview the
-          moment it lands — they are the same sweep, but only one of them
-          is what was actually answered from. */}
-      {showGraph && (
-        <AnswerTrail forest={forest}
-                     evidence={result ? (result.harvest?.results || result.read)
-                       : preview?.results}
-                     cited={Array.isArray(result?.hops) ? result.evidence : undefined}
-                     trace={result?.trace}
-                     busy={busy} />
-      )}
 
       {error && (
         <Card>
@@ -435,6 +555,23 @@ export default function Ask({ forest, grant, me, goto }) {
           <Explain trace={result.trace} wall={result.ms} hybrid={hybrid}
                    cost={result.cost} timing={result.timing} />
         </div>
+      )}
+
+      {/* J.10.4 drawn: the same material the answer lists, on the forest it
+          came out of — and UNDER the answer (J.5.15 rule 10), because the
+          answer is what was asked for and this is where it came from. The
+          final result outranks the preview the moment it lands: on a sweep
+          they are the same sweep, but only one of them is what was actually
+          answered from. */}
+      {showGraph && (
+        /* What it draws is decided above (`drawn`), where the three sources
+           and their order can be read in one place. */
+        <AnswerTrail forest={forest}
+                     evidence={drawn}
+                     cited={Array.isArray(result?.hops) ? result.evidence : undefined}
+                     trace={result?.trace}
+                     live={!result && !!live?.length}
+                     busy={busy} />
       )}
 
       <History open={history} onClose={() => setHistory(false)}

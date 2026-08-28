@@ -45,7 +45,12 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import (
+    FileResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -66,7 +71,7 @@ from monkeyllm.errors import (
 from monkeyllm.server import ForestPool
 from monkeyllm.signatures import validate_args
 from monkeyllm.windows import normalize_window
-from monkeyllm_station import answer_store, vision, webhooks
+from monkeyllm_station import answer_store, runs as runs_mod, vision, webhooks
 from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
 from monkeyllm_station.registry import Registry
@@ -103,6 +108,11 @@ EXPLAINED = frozenset({"answer", "harvest"})
 # default bound is generous enough that no ordinary forest meets it and low
 # enough that meeting it is survivable; either way `truncated` says so.
 MAP_KINDS = frozenset({"graph", "trails"})
+
+# J.10.12 rule 5: a run id is a rendezvous, not a name. It is the
+# caller's own opaque string, so it is bounded rather than parsed — the
+# host never reads meaning out of it and never puts it in a forest.
+RUN_ID_MAX = 120
 MAP_LIMIT = 2000
 MAP_MAX = 10000
 
@@ -903,6 +913,70 @@ def build_app(
             return await in_forest_thread(forest, fn)
         return await in_reader_thread(forest, slot, fn)
 
+    # -- the progress of one answer (J.10.12) --------------------------------
+
+    # Host memory, like the job board below and for the same reason: a
+    # restart forgets records and never work.
+    runs = runs_mod.RunBoard()
+
+    def publish(sample: dict, kind: str, data) -> None:
+        """One progress event, if this call is being watched.
+
+        Reached from a forest lane. `RunBoard.publish` never blocks and
+        never raises, so an answer cannot be slowed or failed by a
+        spectator (J.10.12 rule 4).
+        """
+        key = sample.get("run_key")
+        if key is not None:
+            runs.publish(key, kind, data)
+
+    async def answer_events(request: Request):
+        """`GET /v1/forests/{forest}/answer/{run}/events` (J.10.12).
+
+        The progress of one `answer` the same principal is making, on a
+        channel of its own so the response's shape never moves.
+
+        No forest is touched here — no lane, no trace, no pheromone. Like a
+        J.9 job record this reads host memory alone, which is also why it
+        cannot lie about a Station that restarted: the record is gone and
+        the channel closes.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        # Asked before the run is looked up, so no principal can learn
+        # whether somebody else's run exists by watching which spelling of
+        # "no" comes back.
+        if registry.policy_for(principal, forest) is None:
+            return _unknown_forest(forest)
+
+        # The key IS the authorization, and that is the whole of it: a
+        # record exists only because THIS principal's `answer` on THIS
+        # forest claimed it, and a principal without `read` could never have
+        # made that call. So there is no capability to re-test here — an
+        # id nobody claimed keys nothing, and a channel for it closes.
+        key = (principal, forest, request.path_params["run"][:RUN_ID_MAX])
+
+        async def frames():
+            # An unknown or finished run yields what it has and closes
+            # (rule 6). `stream` is what decides that; this only renders.
+            async for event in runs.stream(key):
+                data = json.dumps(event["data"], ensure_ascii=False,
+                                  default=str)
+                yield f"event: {event['event']}\ndata: {data}\n\n".encode()
+
+        return StreamingResponse(
+            frames(), media_type="text/event-stream",
+            headers={
+                # A progress channel behind a buffering proxy is a progress
+                # channel that arrives all at once, at the end, which is the
+                # problem this section exists to solve.
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            })
+
     # -- ingest jobs (J.9) ---------------------------------------------------
 
     board = JobBoard()
@@ -1436,6 +1510,14 @@ def build_app(
         # K.3, entry search: set on every call, never left over from the last
         # one. `False` is both the default and the reset.
         vine.hybrid_locate = bool(payload.pop("hybrid", False))
+        # J.10.12: the progress channel's rendezvous. Popped here for the
+        # reason `hybrid` is — it is the host's field, not the primitive's,
+        # so what `validate_args` checks below is what the composite reads.
+        # An id nobody claimed keys nothing, so an unwatched call publishes
+        # into a record that does not exist and pays a dict lookup for it.
+        run_id = payload.pop("run", None)
+        if isinstance(run_id, str) and run_id:
+            sample["run_key"] = (principal, forest, run_id[:RUN_ID_MAX])
         mark = len(vine.tracer.events)
         # Where the engine's own clock starts for this call (J.10.6). Read
         # after the fact rather than accumulated here, so there is still only
@@ -1814,7 +1896,10 @@ def build_app(
 
         t0 = time.perf_counter()
         head = _git(Path(vine.forest.root), "rev-parse", "HEAD")
-        # The walk's `k` is not capped by C.6c and keys as given.
+        # The walk's `k` is not capped by C.6c and keys as given. Its
+        # effective terms are the derived ones and can be nothing else:
+        # `terms` beside `hops` is refused before this point (J.10.3), so
+        # this IS the "or the sweep derived them" half of J.10.7 rule 2.
         key = answer_store.build_key(
             question=question, terms=derive_terms(question),
             k=k, hops=budget, window=window,
@@ -1855,7 +1940,7 @@ def build_app(
 
     def serve_from_reading(sample, forest, vine, policy, binding, payload,
                            question, k, bundle, reply_tokens=None,
-                           window=None):
+                           window=None, include_superseded=False):
         """The sweep's J.10.7 check (v0.35): the key finds the entry, the
         reading decides the model. The sweep already ran — this function
         never touches a primitive, so a hit's trace and pheromone are the
@@ -1872,16 +1957,31 @@ def build_app(
         from monkeyllm.harvest import clamp_k, derive_terms
 
         t0 = time.perf_counter()
+        # J.10.7 rule 2 (v0.67): the EFFECTIVE terms — the ones the call
+        # actually used, whether the caller supplied them (J.10.3) or the
+        # sweep derived them. The bundle states them (C.6c), so the key
+        # reads them off the retrieval that just ran instead of deriving a
+        # second copy of the same list. A caller who sends none keys exactly
+        # as before this version, so no stored entry is invalidated.
+        terms = bundle.get("terms")
+        if terms is None:  # a bundle with no terms field: derive, as ever.
+            terms = derive_terms(question)
         # The sweep's answer is shaped by the C.6c cap, so the capped value
         # is what names it (J.10.7): a cap raised between restarts misses
         # cleanly instead of serving five-banana answers under a ten-banana
         # promise.
         key = answer_store.build_key(
-            question=question, terms=derive_terms(question),
+            question=question, terms=terms,
             k=clamp_k(k), hops=None, window=window,
             hybrid=bool(getattr(vine, "hybrid_locate", False)),
             binding=binding, policy=policy, head=None,
-            reply_tokens=reply_tokens)
+            reply_tokens=reply_tokens,
+            # C.6c.4 rule 4: the history view is a different reading, so it
+            # is a different entry. The fingerprint would already refuse to
+            # serve one for the other, but a key that cannot tell them apart
+            # makes each one evict the other on a forest where both are
+            # asked.
+            include_superseded=include_superseded)
         fingerprint = answer_store.reading_fingerprint(bundle)
         store = answer_store.AnswerStore(Path(vine.forest.root))
         sample["cache_store"] = {"store": store, "key": key,
@@ -2080,6 +2180,31 @@ def build_app(
                 # you would have picked"; a number sets it.
                 hops = payload.get("hops")
                 budget = (6 if hops is True else int(hops)) if hops else None
+                # J.10.3 (v0.67): the caller's own terms, on the sweep only.
+                # Shape is the C.12 table's business (`string[]`, refused in
+                # `harvest`'s own words); what belongs here is the one thing
+                # the table cannot say — that a walk takes none. It authors
+                # its retrieval from hop 1 (J.10.5), so accepting a list and
+                # dropping it would be a lie about what ran, which is C.13
+                # rule 4's judgement of a silently ignored window applied to
+                # a silently ignored parameter.
+                terms = payload.get("terms")
+                if budget and terms is not None:
+                    raise VineError(
+                        E_SCHEMA,
+                        "answer: 'terms' is not accepted with 'hops'",
+                        hint="A walk authors its own retrieval from hop 1. "
+                             "Drop 'hops' to hand the sweep your terms, or "
+                             "drop 'terms' to let the walk search for itself.")
+                # C.6c.4 rule 4: the history view — forwarded to the
+                # retrieval that does the suppressing, and into the J.10.7
+                # key, because it changes the reading. Deliberately NOT
+                # refused beside `hops` the way `terms` is, and rule 5 is the
+                # whole difference: navigation never suppresses, so a walk
+                # already sees the replaced document at every hop. The flag
+                # asks a walk for exactly what a walk already does, where
+                # terms handed to a walk would be searched by nobody.
+                superseded = bool(payload.get("include_superseded"))
                 if budget:
                     served = consult_walk_store(
                         sample, forest, vine, policy, binding, payload,
@@ -2087,7 +2212,8 @@ def build_app(
                     if served is None:
                         served = inference.forage(
                             scoped, question, binding, k=k, max_hops=budget,
-                            reply_tokens=reply, window=window)
+                            reply_tokens=reply, window=window,
+                            on_hop=lambda hop: publish(sample, "hop", hop))
                         whisper(vine, served.get("evidence")
                                 if isinstance(served, dict) else None)
                     # J.10.8 (v0.54): the clamp is reported — a caller who
@@ -2097,12 +2223,17 @@ def build_app(
                     return served
                 # The sweep's retrieval always runs — it is the cheap half,
                 # and its reading is what decides the hit (J.10.7 v0.35).
-                bundle = scoped.harvest(question, k=k,
+                bundle = scoped.harvest(question, terms=terms, k=k,
                                         since=payload.get("since"),
                                         until=payload.get("until"),
-                                        date_field=payload.get("date_field"))
+                                        date_field=payload.get("date_field"),
+                                        include_superseded=superseded)
                 if isinstance(bundle, dict) and "error" in bundle:
                     return bundle
+                # J.10.12: 19 ms in, against a reply 10 s out. The SAME
+                # object the response carries as `harvest` (rule 2: an event
+                # is a prefix of the answer, never a second rendering of it).
+                publish(sample, "retrieval", bundle)
                 # J.10.10 (v0.52): the floor, counted before the store is
                 # consulted and before the provider is called — so a refusal
                 # is never billed, never cached, and never a stored answer
@@ -2112,7 +2243,7 @@ def build_app(
                     return floor
                 served = serve_from_reading(
                     sample, forest, vine, policy, binding, payload,
-                    question, k, bundle, reply, window)
+                    question, k, bundle, reply, window, superseded)
                 if served is None:
                     if sample is not None and sample.get("defer_model"):
                         # J.10.11 (v0.57): the provider is not a lane. The
@@ -3558,8 +3689,26 @@ def build_app(
         # Read off the request BEFORE the lane, like the MCP surface does:
         # the mask belongs to the credential and the lane never saw one.
         mask = mask_of(request)
-        result = await execute_call(principal, forest, name, payload,
-                                    clocks, mask)
+        # J.10.12: a caller may watch this call's progress. Claimed HERE, on
+        # the loop, because the record captures the loop a forest lane will
+        # later wake it from — and claimed before the call so the channel can
+        # be opened without racing the first event.
+        run_key = None
+        if name == "answer" and isinstance(payload.get("run"), str) and payload["run"]:
+            run_key = (principal, forest, payload["run"][:RUN_ID_MAX])
+            if not runs.claim(run_key):
+                return _envelope(VineError(
+                    E_SCHEMA, "that run id is already in flight",
+                    hint="A run identifies ONE call while it runs (J.10.12). "
+                         "Use a fresh id per question."))
+        try:
+            result = await execute_call(principal, forest, name, payload,
+                                        clocks, mask)
+        finally:
+            # The channel closes whatever happened — an errored call that
+            # left its watcher waiting would be a spinner with no end.
+            if run_key is not None:
+                runs.finish(run_key)
         timing = _server_timing(clocks)
         if result is None:
             response = _unknown_forest(forest)
@@ -5450,6 +5599,11 @@ def build_app(
         # matches in order, and `payload/...` would otherwise be read as a
         # map projection named "payload". `:path` because node ids carry
         # slashes.
+        # The progress channel (J.10.12) before the `{kind}` GET below, for
+        # the reason `payload` and `export` are: Starlette matches in order,
+        # and `answer/...` would otherwise read as a map projection.
+        Route("/v1/forests/{forest}/answer/{run}/events", answer_events,
+              methods=["GET"]),
         Route("/v1/forests/{forest}/payload/{node:path}", forest_payload,
               methods=["GET"]),
         # The document as text/markdown (J.14.1): same ordering reason and
@@ -5519,6 +5673,9 @@ def build_app(
                     middleware=[Middleware(SecurityHeaders, csp=studio_csp())])
     app.state.pool = pool
     app.state.registry = registry
+    # J.10.12: reachable for the same reason the job board is — a test, and
+    # a future console, ask the host what is in flight without a forest.
+    app.state.runs = runs
     app.state.ingest_roots = ingest_roots
     app.state.run_primitive = run_primitive
     # Exposing the pool without the threads it may be touched from was an

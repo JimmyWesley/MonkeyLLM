@@ -82,7 +82,8 @@ def normalize(question: str) -> str:
 def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
               binding: dict, policy, head: str | None = None,
               reply_tokens: int | None = None,
-              window: dict | None = None) -> str:
+              window: dict | None = None,
+              include_superseded: bool = False) -> str:
     """The closed list of J.10.7 — and nothing off it.
 
     Every component here can change the answer; nothing else may enter,
@@ -98,6 +99,10 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
     nothing. `window` (C.13.1) enters on the same terms and MUST: it
     changes which nodes the retrieval could reach at all, so the same
     question bounded to June and to July are two questions.
+    `include_superseded` (C.6c.4 rule 4) enters on those same terms and for
+    that same reason: the flag decides whether a replaced document is in the
+    material at all, so the history view and the current view are two
+    questions — and off, which is the default, keys exactly as before.
     """
     material = json.dumps({
         "question": normalize(question),
@@ -124,6 +129,7 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
                        "until": window.get("until"),
                        "date_field": window.get("date_field")}}
            if window else {}),
+        **({"include_superseded": True} if include_superseded else {}),
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 

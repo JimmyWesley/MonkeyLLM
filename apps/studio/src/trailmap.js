@@ -104,6 +104,103 @@ export function stageCounts(marks) {
   })
 }
 
+/* Which stage a hop's returned SET belongs to (J.10.5 `ids`, v0.67).
+ *
+ * `locate` and `sniff` are the two the sweep has as well, and they mean the
+ * same thing here. `scan` and `move` are navigation — a branch listed, an
+ * edge followed — and what they hand back is reached exactly the way a
+ * `locate` hit is: named and ranked or listed, and not yet read. They mark
+ * the entry stage for that reason and never the read one, because neither
+ * call returns a body.
+ *
+ * A Map, not an object: `hop.tool` arrives off the wire, and an object would
+ * answer `constructor` with something truthy. */
+const SET_STAGE = new Map([
+  ['locate', 'locate'], ['sniff', 'sniff'], ['scan', 'locate'], ['move', 'locate'],
+])
+
+/** A walk's hops, in the shape the sweep's bundle already has.
+ *
+ *  J.10.12 delivers `hops[n]` as each step completes, and J.10.4 assembles
+ *  the same steps into `read` at the end. This is that assembly, done early
+ *  and by the same rule, so the map a person watches being drawn and the map
+ *  left standing afterwards are the same map — only what carries text counts
+ *  (`sniff` snippets, `pick` bodies, `query` rows); a `look` is a digest, and
+ *  calling a summary an excerpt would blur the distinction the panel exists
+ *  to make.
+ */
+export function evidenceFromHops(hops) {
+  const byId = new Map()
+  const slot = (id, by) => {
+    if (typeof id !== 'string' || !id) return null
+    if (!byId.has(id)) byId.set(id, { id, found_by: [], content: [] })
+    const entry = byId.get(id)
+    if (!entry.found_by.includes(by)) entry.found_by.push(by)
+    return entry
+  }
+  for (const hop of hops || []) {
+    if (!hop?.ok) continue
+    const tool = hop.tool
+    const stage = SET_STAGE.get(tool)
+    if (stage) {
+      // A hop that returned a set names it: `ids`, in result order, capped at
+      // 10 (J.10.5, v0.67). A COUNT lights nothing — `out` says how many came
+      // back and never which — so a record written before that version, which
+      // has no `ids` at all, marks no node here. Absent reads as empty, never
+      // as "the call returned nothing" and never as something inferred from
+      // the count, the arguments, or the id the call was addressed by.
+      for (const id of hop.ids || []) slot(id, stage)
+    } else if (tool === 'pick' || tool === 'query') {
+      // These return no set; they carry the one id they were addressed by,
+      // and what they bring back is text.
+      const entry = slot(hop.id, tool)
+      if (entry) entry.content.push({ section: hop.args?.section || null })
+    }
+  }
+  return [...byId.values()]
+}
+
+/** Several records of one hunt, folded into the one list `markNodes` reads.
+ *
+ *  A walk's close holds two, and neither contains the other. `read` (J.10.4)
+ *  keeps every node whose call handed TEXT over — every id a `sniff` matched,
+ *  uncapped, with the body or the rows it produced — and records nothing at
+ *  all for `locate`, `scan` or `move`, because none of them returns a body.
+ *  The hop records (J.10.5, v0.67) are the only place those three are written
+ *  down, as `ids`, capped at 10.
+ *
+ *  Taking one and dropping the other is how a map drawn live goes dark at the
+ *  end: every dot a `locate` hop lit while the walk ran would be dropped by
+ *  the response that hop helped produce, and the entry stage would fall to
+ *  zero at the exact moment the answer arrived. Both halves are the response's
+ *  own material — a `hop` IS `hops[n]` (J.10.12 rule 2) — so nothing here is
+ *  inferred (J.5.15 rule 3); the map left standing is the union, and never
+ *  less than the map that was watched being drawn.
+ *
+ *  Earlier lists win the text: two records of one `pick` are one body read
+ *  once, and concatenating them would draw the node as read twice.
+ */
+export function mergeEvidence(...lists) {
+  const byId = new Map()
+  for (const list of lists) {
+    for (const item of list || []) {
+      const id = item?.id
+      if (typeof id !== 'string' || !id) continue
+      let held = byId.get(id)
+      if (!held) {
+        held = { id, found_by: [], matches: [], content: [] }
+        byId.set(id, held)
+      }
+      for (const by of item.found_by || []) {
+        if (!held.found_by.includes(by)) held.found_by.push(by)
+      }
+      if (!held.matches.length && item.matches?.length) held.matches = [...item.matches]
+      if (!held.content.length && item.content?.length) held.content = [...item.content]
+    }
+  }
+  return [...byId.values()]
+}
+
 /** Root-to-node chains, deduplicated into segments.
  *
  *  Structure comes from `parent`, which J.11 has already filtered to what
