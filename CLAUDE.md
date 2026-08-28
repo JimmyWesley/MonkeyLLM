@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.65.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.67.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,85 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **A sample is not the corpus (spec J.10.5/J.10.3/J.5.15, v0.67)**: a 1,200-
+  node forest asked what it was about answered from the readme (walk) and
+  from five ranked excerpts (sweep), and BOTH were the spec working as
+  written — which is why the repair is four spec sentences and not a patch.
+  (1) The walk's whitelist was closed ("and nothing else") around the one
+  primitive built for the question class: **`coverage` is on it now** —
+  metadata only, no body opened (C.17 r1), every number the policy's own
+  (C.17 r7) — and the loop's stated menu MUST name it, because a tool the
+  model is never offered is a tool the whitelist did not admit. (2) The
+  sweep's prompt had **no denominator**: `searched` rides the empty path
+  only (C.1.1's rule, and it stays), so five items of twelve hundred arrive
+  in the exact shape twelve hundred of twelve hundred would, and
+  generalising them is prompt-COMPLIANT. The prompt MUST state the material
+  is a ranked top-k of a larger corpus — J.10.8's "the cap is said whatever
+  chose it", applied to the sample size. Two matching walk rules: the prompt
+  MUST say the entry was a synthetic `locate` of the question VERBATIM (so
+  re-authoring retrieval — translate, pick the rarer term — reads as a first
+  move, not a repetition), and MUST route corpus-scope questions to
+  structure (`coverage`, the root index, more than one branch: **a single
+  document is one node's claim, never the corpus**). Wording stays
+  implementation freedom; the omissions do not. (3) **`answer` gains
+  `terms`** (sweep only; `terms`+`hops` is `E_SCHEMA` — a walk authors its
+  own retrieval and a parameter silently dropped is a lie about what ran),
+  forwarded to C.6c's sniff leg on harvest's own validation and entering the
+  J.10.7 key as the effective terms — which makes that key's "whether the
+  caller supplied them or the sweep derived them" TRUE for the first time
+  since v0.33. No planning turn: C.6c stays zero-LLM, J.10.11's phases stay
+  ordered, J.10.10's floor stays before the model, and a call without
+  `terms` is byte-identical, key included. (4) The J.5.15 panel drew what
+  did not happen, twice. On a walk it fired a `harvest` the walk never runs
+  and painted it as the answer's retrieval, so the WRONG picture arrived
+  first and the live hops displaced it — which reads as the model ignoring
+  what it was shown; the preview is **mode-aware** now (no harvest for a
+  walk, fallback included), the walk's panel starts EMPTY (rule 3: an empty
+  stage is a fact) and fills from J.10.12 `hop` events then the response's
+  `read`. For those events to light anything the hop RECORD gains **`ids`**
+  (locate/sniff/scan/move, result order, ≤10; `ids` is ADDED, so `id` stays
+  wherever it was already set — `scan`/`move` carry both, and where the call
+  named neither there is neither) — a count lights no node — and F.138's
+  event==record comparison extends to it; a pre-v0.67 record's absent `ids`
+  MUST read as empty, never inferred. And the background is **dots-only**:
+  it was painting the whole J.11 edge set including the `confidence<1` class
+  Explore hides by default, at TWICE structural opacity. Edges still feed
+  the layout springs (paint/physics split, Explore's own shipped
+  precedent), dots are coloured by home branch using the operator's OWN
+  Explore grouping (per-forest stored settings, Explore's defaults
+  otherwise) and the legend names it (J.5.4); the trail
+  stays the only line drawn, on its own token. Panel moves BELOW the answer,
+  gains zoom/pan, keeps a compact switch defaulting ON as a browser
+  preference (J.5.8 stands: the address carries the selection, not the
+  taste). Acceptance F.139-F.142; F.142 is a static source check (the canvas
+  is unverifiable, F.137's boundary), so dots-only/colour/legend are
+  normative text with no test. The derived-term stopword set also gains the
+  PT/ES demonstratives (`esta` was absent while `this`/`that` were present,
+  so a Portuguese question sniffed as a substring hit inside `restart`) —
+  C.6b enumerates no list, so that one is implementation freedom.
+- **The answer arrives once; the work does not (spec J.10.12, v0.66)**: the
+  live half of J.5.15, and it was smaller than the estimate because the
+  estimate had the wrong cause. A walk holds its reader lane for its whole
+  duration, so emitting a hop mid-call looked like it needed J.10.11's
+  treatment first (the model lifted off the lane) — it does not: a lane is a
+  thread in an executor and the loop is reachable from any thread, so
+  `call_soon_threadsafe` hands a hop across without the walk moving at all.
+  The lane question is real, is about throughput, and is NOT this one.
+  Added: one optional `run` on `answer` (a call without it is byte-identical,
+  response included) and `GET .../answer/{run}/events` — `retrieval` when the
+  bundle exists, `hop` per completed step, `done` at the close. The safety
+  rule is deliberately **not J.16's**: a webhook leaves the Station's
+  authority behind so its payload is rationed to identity, while this is
+  PULLED by the same principal under the same credential, so an event may
+  carry anything **the completed response would have carried to that same
+  principal** and nothing more — `retrieval` IS the response's `harvest`,
+  `hop` IS its `hops[n]`, and F.138 compares them rather than asserting each.
+  Three properties keep a spectator free: emission never blocks (a slow
+  consumer loses events, never slows the hunt), nothing outlives its call
+  (host memory like a J.9 job; a channel for a finished or unknown run
+  CLOSES instead of hanging), and the stream is never the answer (the reply
+  is served on the POST alone). The MCP surface gains nothing — this is the
+  console's channel in J.10.6's sense.
 - **The retrieval is done long before the reply is (spec J.5.15, v0.65)**:
   a hosted `answer` is two costs three orders of magnitude apart — 19 ms of
   sweep on the fixture against 10 s of provider — and since the Station
