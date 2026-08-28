@@ -632,7 +632,17 @@ def _traced(fn):
 
     def wrapper(self: "Vine", *args, **kwargs):
         t0 = time.perf_counter()
-        result = fn(self, *args, **kwargs)
+        # The K.2 embed runs inside whichever primitive needed the vector,
+        # so its share is collected here and named on the event (Part D,
+        # v0.68). Save/restore, because a traced call inside another traced
+        # call must not hand its share to the outer frame.
+        outer_embed = self._embed_ms_pending
+        self._embed_ms_pending = None
+        try:
+            result = fn(self, *args, **kwargs)
+            embed_ms = self._embed_ms_pending
+        finally:
+            self._embed_ms_pending = outer_embed
         elapsed = (time.perf_counter() - t0) * 1000
         node_id = kwargs.get("id") or (args[0] if takes_id and args else None)
         self.tracer.record(
@@ -641,6 +651,7 @@ def _traced(fn):
             tokens_in=estimate_tokens(json.dumps([str(a) for a in args]) + json.dumps(kwargs, default=str)),
             tokens_out=estimate_payload_tokens(result),
             elapsed_ms=elapsed,
+            embed_ms=embed_ms,
         )
         return result
 
@@ -692,6 +703,9 @@ class Vine:
         self.hybrid_locate = hybrid_locate
         self._goal: list[float] | None = None
         self._goal_text: str | None = None
+        # What the K.2/K.6 embed cost inside the currently traced primitive
+        # (v0.68). `_traced` resets and collects it around every call.
+        self._embed_ms_pending: float | None = None
 
     @property
     def commit_trailers(self) -> list[str]:
@@ -818,15 +832,23 @@ class Vine:
         come through here: the Canopy index is their home, and a second
         copy would be a second answer to "what is this node's vector".
         """
-        key = " ".join(str(text).split())
-        model = self.embedder.model
-        cached = self.catalog.embed_memo(model, key)
-        if cached is not None:
-            self.catalog.embed_memo_touch(model, key)
-            return cached
-        vec = self.embedder.embed([text])[0]
-        self.catalog.embed_memo_store(model, key, vec)
-        return vec
+        t0 = time.perf_counter()
+        try:
+            key = " ".join(str(text).split())
+            model = self.embedder.model
+            cached = self.catalog.embed_memo(model, key)
+            if cached is not None:
+                self.catalog.embed_memo_touch(model, key)
+                return cached
+            vec = self.embedder.embed([text])[0]
+            self.catalog.embed_memo_store(model, key, vec)
+            return vec
+        finally:
+            # Attributed to the primitive this ran inside (Part D, v0.68),
+            # memo hit and round trip alike — a hit's near-zero is the memo
+            # working, and only the named share can say so.
+            elapsed = (time.perf_counter() - t0) * 1000
+            self._embed_ms_pending = (self._embed_ms_pending or 0.0) + elapsed
 
     def refresh_canopy(self) -> dict:
         """Embed the nodes marked stale by plant/graft/ingest (J.13.4).

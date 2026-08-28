@@ -109,7 +109,7 @@ def test_a_trace_carries_shape_not_content(station):
     client, _, head = station
     trace = _call(client, head, "answer", question=QUESTION)["trace"]
     for step in trace["steps"]:
-        assert set(step) <= {"step", "ms", "tokens", "id", "detail"}
+        assert set(step) <= {"step", "ms", "tokens", "id", "detail", "embed_ms"}
         assert QUESTION not in str(step.get("id") or "")
 
 
@@ -364,3 +364,76 @@ def test_the_flag_does_not_reach_the_primitive(station):
     parameter and would raise if it were forwarded."""
     client, _, head = station
     assert "results" in _call(client, head, "harvest", query=QUESTION, hybrid=True)
+
+
+# -- the embedder's share is named, not billed to the forest (F.144) --------
+
+
+def test_the_embedders_share_is_named_not_billed_to_the_forest(
+        tmp_path, monkeypatch):
+    """With hybrid entry on, the K.2 query embed is a provider round trip
+    run inside `locate`'s span — 8.3 s of it, on the ask that motivated
+    v0.68, against some forty milliseconds of actual forest work. The trace
+    names that share (`embed_ms`, per step and summed) and changes nothing
+    else: `retrieval_ms` still accounts the whole engine span, and a call
+    that never embedded is byte-identical."""
+    from starlette.testclient import TestClient
+
+    from monkeyllm.canopy import CanopyIndex
+    from monkeyllm.vine import Vine
+    from monkeyllm_station import inference
+    from monkeyllm_station.app import build_app
+    from test_gauntlet import FakeEmbedder
+
+    class SlowEmbedder(FakeEmbedder):
+        def embed(self, texts):
+            time.sleep(0.05)
+            return super().embed(texts)
+
+    root = tmp_path / "root"
+    build_forest(root / FOREST)
+
+    # The canopy is on disk before the Station opens the forest, exactly
+    # as a J.13.4 build leaves it: saved, model recorded.
+    seed = Vine(root / FOREST, writable=False)
+    rows = [(r["id"], f"{r['title']}. {r['summary']}")
+            for r in seed.catalog.conn.execute(
+                "SELECT id, title, summary FROM nodes")]
+    CanopyIndex.build(rows, SlowEmbedder()).save(seed.forest.derived_dir)
+    seed.close()
+
+    def fake(binding, **_kw):
+        return (lambda messages: "stub answer"), binding.get("model", "stub")
+
+    monkeypatch.setattr(inference, "chat_from_binding", fake)
+    monkeypatch.setattr(inference, "embedder_from_binding",
+                        lambda binding: SlowEmbedder())
+    monkeypatch.setenv("MONKEYLLM_STATION_READERS", "0")
+
+    app = build_app(root=root, registry_path=tmp_path / "embed.db", mcp=False)
+    registry = app.state.registry
+    key = registry.issue_key("root")
+    registry.grant("root", FOREST, {"read"})
+    registry.put_provider("p", "http://stub/v1", None)
+    registry.bind_model(FOREST, "answer", "p", "stub-model")
+    registry.bind_model(FOREST, "embed", "p", "fake-1")
+    registry.set_setting(FOREST, "answer_cache", {"enabled": False})
+    head = {"Authorization": f"Bearer {key}"}
+
+    with TestClient(app) as client:
+        trace = _call(client, head, "answer", question=QUESTION,
+                      hybrid=True)["trace"]
+        locate = next(s for s in trace["steps"] if s["step"] == "locate")
+        assert locate["embed_ms"] >= 50
+        assert locate["ms"] >= locate["embed_ms"]
+        assert trace["embed_ms"] == pytest.approx(
+            sum(s.get("embed_ms", 0.0) for s in trace["steps"]), abs=0.2)
+        # `retrieval_ms` keeps its meaning to the byte: the engine span,
+        # embed included — the console subtracts, the host never does.
+        forest = sum(s["ms"] for s in trace["steps"] if s["step"] != "model")
+        assert trace["retrieval_ms"] == pytest.approx(forest, abs=0.2)
+
+        # The same question without hybrid embeds nothing and says nothing.
+        plain = _call(client, head, "answer", question=QUESTION)["trace"]
+        assert "embed_ms" not in plain
+        assert all("embed_ms" not in s for s in plain["steps"])

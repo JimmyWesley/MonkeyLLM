@@ -1094,8 +1094,17 @@ function Explain({ trace, wall, hybrid, cost, timing }) {
 
   return (
     <Card title={t('explain.title')} subtitle={t('explain.sub')}>
-      <div className="grid grid-cols-2 gap-2">
-        <Metric label={t('explain.retrieval')} value={`${trace.retrieval_ms} ms`} tone="accent" />
+      {/* The forest figure is net of the embedder's round trip (J.10.4
+          v0.68): `retrieval_ms` is the engine's whole span and the K.2
+          embed rides inside it, so printing it whole reads a provider's
+          8 s as the forest's — the exact misreading this panel exists to
+          prevent, raised by the panel itself. */}
+      <div className={`grid gap-2 ${trace.embed_ms ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        <Metric label={t('explain.retrieval')} tone="accent"
+                value={`${Math.round((trace.retrieval_ms - (trace.embed_ms || 0)) * 10) / 10} ms`} />
+        {trace.embed_ms > 0 && (
+          <Metric label={t('explain.embed')} value={`${trace.embed_ms} ms`} />
+        )}
         <Metric label={t('explain.model')}
                 value={trace.steps.find((s) => s.step === 'model')
                   ? `${trace.steps.find((s) => s.step === 'model').ms} ms` : '—'} />

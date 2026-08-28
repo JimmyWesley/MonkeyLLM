@@ -1832,7 +1832,11 @@ def build_app(
             return result
         steps = [
             {"step": e["primitive"], "ms": e["elapsed_ms"], "tokens": e["tokens_out"],
-             **({"id": e["id"]} if e["id"] else {})}
+             **({"id": e["id"]} if e["id"] else {}),
+             # The K.2 embed's share of this step (v0.68): a provider round
+             # trip inside the engine's span, named so the panel never
+             # reads it as the forest's own work.
+             **({"embed_ms": e["embed_ms"]} if e.get("embed_ms") is not None else {})}
             for e in (events if events is not None
                       else vine.tracer.events[mark:])
         ]
@@ -1854,6 +1858,12 @@ def build_app(
             "retrieval_ms": round(sum(s["ms"] for s in steps if s["step"] != "model"), 1),
             "total_ms": round(sum(s["ms"] for s in steps), 1),
         }
+        # J.10.4 (v0.68): the embedder's summed share, only when one ran —
+        # `retrieval_ms` keeps its meaning (the whole engine span) and the
+        # console subtracts, so no shipped number is redefined.
+        embed_total = round(sum(s.get("embed_ms", 0.0) for s in steps), 1)
+        if embed_total:
+            result["trace"]["embed_ms"] = embed_total
         return result
 
     # The answer store's per-forest switches (J.10.7). `ttl_hours` is

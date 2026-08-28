@@ -33,6 +33,7 @@ class Tracer:
         tokens_in: int,
         tokens_out: int,
         elapsed_ms: float,
+        embed_ms: float | None = None,
     ) -> None:
         event = {
             "ts": time.time(),
@@ -43,6 +44,11 @@ class Tracer:
             "tokens_out": tokens_out,
             "elapsed_ms": round(elapsed_ms, 3),
         }
+        if embed_ms is not None:
+            # The K.2/K.6 query embed ran inside this call (v0.68): its
+            # share of `elapsed_ms`, named so the embedder's round trip is
+            # never read as the forest's own work.
+            event["embed_ms"] = round(embed_ms, 3)
         self.events.append(event)
         with self.trace_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
