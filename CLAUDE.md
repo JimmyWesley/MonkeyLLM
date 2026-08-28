@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.67.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.68.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,28 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **The gauntlet rides inside the forest's clock (spec Part D/J.10.4/K.2,
+  v0.68)**: with hybrid entry on, the K.2 query embed is an HTTP round trip
+  to the embedding provider run INSIDE `locate`'s span (or the first hop's,
+  when the goal embeds lazily) — measured 8391 ms of "locate" against ~40 ms
+  of actual forest work, read on the very panel built to prevent "the forest
+  is slow", and the K.6 memo makes the figure vanish on the retry meant to
+  confirm it. The Part D event now carries `embed_ms` — the K.2/K.6 embed's
+  share, memo hits included (a hit's near-zero is the memo working), absent
+  when no embed ran so every other event is byte-identical. Collected by
+  `_traced` off `Vine._embed_ms_pending` (save/restore, so nested traced
+  calls keep their own shares); `embed_query` accumulates it. `explain`
+  forwards it per step and sums `trace.embed_ms` only when nonzero;
+  `retrieval_ms`/`total_ms`/`Server-Timing` are unchanged to the byte — the
+  host serves the whole span plus the named share, NEVER a subtracted
+  figure. The netting is the console's, and its shape is Jimmy's own rule:
+  every primitive row prints the engine's smallest true number (ms net of
+  its share) and the summed share is listed ONCE at the tail beside `model`,
+  in the model's tone — provider spend sits with provider spend
+  (`TraceSteps` builds the synthetic `embed` row, so Ask and Playground
+  agree); the FLORESTA card is net with an EMBEDDING card beside it.
+  F.143/F.144; the panel rendering is normative text with no test, on
+  F.142's boundary.
 - **A sample is not the corpus (spec J.10.5/J.10.3/J.5.15, v0.67)**: a 1,200-
   node forest asked what it was about answered from the readme (walk) and
   from five ranked excerpts (sweep), and BOTH were the spec working as
