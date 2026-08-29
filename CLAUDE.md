@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.71.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.72.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,45 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **The helicopter does not land on the file (spec J.5.15 r5/r6/r9/r10,
+  v0.72)**: the path panel drew ONE line from the root to each hit, up the
+  `parent` chain. Rule 5 called that "the forest's own structure" and it is
+  — but a reader sees a JOURNEY, and the journey shown was the agent
+  arriving in one move on the exact document it needed, which is the claim
+  an entry search does not make: the value of dropping somebody NEAR is
+  lost the moment the picture shows them landing ON. Two attempts to
+  animate it made it worse first (marching dashes turned an address into
+  footsteps down from the root; a depth-staggered reveal made several hits
+  look like several journeys taken in turn). The split is MECHANICAL, not
+  editorial: **a segment whose destination is a marked node belongs to the
+  walk, every segment above it is the flight** — so the flight is
+  structurally incapable of entering a document and the old claim cannot
+  come back by tuning. The walk is the agent's OWN movement and means that
+  in both modes, which is what lets one legend line describe it: on a sweep
+  the one step from branch into the opened file, on a walk the real hop
+  sequence, where a hop naming ONE node (`move`/`pick`/`look`) is a
+  position and a hop returning a SET is the agent looking around from where
+  it already stands (a line to the first of ten results is a step nobody
+  took; consecutive hops on one node collapse). Two journeys, two colour
+  tokens, and a `discovered-shortcut` is a third — neither may be a colour
+  the dots use, since those are grouped by home branch. Both lines MOVE
+  (a still line beside a moving one reads as a wire beside a route) and
+  every leg advances on ONE clock: several hits are several drops leaving
+  the base together, and sequencing them invents an order a ranked set
+  never had. Every node the trail TOUCHES is named, way-through captions
+  quieter than results and yielding to them when crowded. The camera leans
+  on what has been REVEALED, not the final set — framing the answer before
+  it arrives tells the viewer there is nothing to discover. The panel's
+  switch moved from an icon alone in the header into the controls row with
+  its icon before the label: rule 10 never said "header", and that row sits
+  above the answer so it is not pushed off screen, which was the reason the
+  header was chosen. `Toggle` gained a `compact` variant for it, because a
+  `<label>` wrapped around a `<button role="switch">` associates nothing
+  and leaves half the target dead to the pointer. Acceptance F.151-F.153,
+  all three read off the source on F.137's stated boundary (the canvas is
+  unverifiable), and each verified to fail with the previous behaviour put
+  back.
 
 - **The scan is the other half of the bill (spec J.10.4.1, v0.71)**: v0.68
   found a provider round trip inside `locate`'s span, named it `embed_ms`

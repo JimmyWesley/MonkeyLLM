@@ -209,7 +209,7 @@ def _draw_block(source: str, anchor: str, span: int = 520) -> str:
 
 
 def test_the_helicopter_stops_at_the_branch():
-    """Two lines, and the split is WHERE the flight ends.
+    """F.151. Two lines, and the split is WHERE the flight ends.
 
     This panel spent two revisions saying the wrong thing, and both were the
     same wrong thing: that the agent arrived, in one move, on the exact file
@@ -246,7 +246,7 @@ def test_the_helicopter_stops_at_the_branch():
 
 
 def test_the_drops_leave_together():
-    """Several hits are several drops leaving the base at once.
+    """F.152. Several hits are several drops leaving the base at once.
 
     The reveal used to stagger each leg by its depth, so a two-hit answer
     drew one chain and then the other and read as an order the retrieval
@@ -262,7 +262,7 @@ def test_the_drops_leave_together():
 
 
 def test_a_sweep_draws_no_route():
-    """`hopSegments` is empty without hops, and an absent line is the true
+    """F.152. `hopSegments` is empty without hops, and an absent line is the true
     statement that no walking occurred. Asserted on the rule rather than on
     the canvas: a sweep passes no `hops`, so there is nothing to collapse."""
     source = (STUDIO / "src" / "trailmap.js").read_text(encoding="utf-8")
@@ -301,3 +301,28 @@ def test_every_node_the_trail_touches_is_named():
         "the caption pass no longer reads both sets"
     assert re.search(r"hit \? at : at \* 0\.\d+", source), \
         "a way-through caption must not read as loudly as a result"
+
+
+def test_the_camera_frames_what_has_been_revealed():
+    """F.153: the view travels, because the reveal is the subject.
+
+    Leaning on every marked node from the first frame puts the whole answer
+    in shot before any of it has arrived, and a viewer shown the destination
+    first has been told there is nothing to discover. The frame is computed
+    from what the reveal has reached.
+
+    Read off the source for F.137's reason. What is asserted is the input to
+    the camera, not the picture: a build that collects marks without
+    consulting the reveal position fails, whatever it then does with them.
+    """
+    source = TRAIL.read_text(encoding="utf-8")
+    fit = _draw_block(source, "const touched = []", 420)
+    assert "anim.current.pos" in _draw_block(source, "const at = anim.current.pos", 60), \
+        "the camera has no clock"
+    assert re.search(r"if \(Math\.min\(\.\.\.stages\) > at\) continue", fit), \
+        "the camera leans on marks the reveal has not reached yet"
+    assert re.search(r"if \(seg\.stage > at\) continue", fit), \
+        "the camera leans on segments the reveal has not reached yet"
+    # And it keeps re-framing while the reveal runs, or the travel is one jump.
+    assert re.search(r"anim\.current\.pos \+ dt / STAGE_MS\)\n\s*//.*\n(\s*//.*\n)*\s*fit\(",
+                     source), "the frame is computed once and never updated"
