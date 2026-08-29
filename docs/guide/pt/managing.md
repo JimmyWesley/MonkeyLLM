@@ -223,19 +223,36 @@ Numa implantação Docker, o mesmo comando roda dentro do contêiner:
 
 ### Snapshots
 
-Um snapshot é a floresta empacotada num **arquivo só** o repositório git
-dela como um bundle, com todo o histórico, cada plant e cada commit de
-auditoria viajando junto. Do console de Saúde você pode tirar um ("Incluir
-os payloads dos datasets" acrescenta um arquivo sidecar para os `.db` que o
-git nunca guarda), e a pessoa **dona** pode baixar o bundle e o sidecar.
+Um snapshot é a floresta empacotada num **arquivo só**: um `.forest`, que
+guarda o repositório git dela como bundle (histórico completo, cada plant e
+cada commit de auditoria viajando junto) junto dos bytes que o git nunca
+guarda os `.db` dos datasets e as mídias arquivadas. Do console de Saúde
+você tira um, e a pessoa **dona** baixa num clique só, porque não há
+segunda coisa para buscar.
+
+Eram dois arquivos, um bundle e um sidecar de payloads opcional, e eles se
+separavam: nada os amarrava, então dava para importar uma floresta inteira
+e ela chegar com os datasets vazios. Agora os payloads viajam a menos que
+você desligue e, se desligar, o console diz quantos arquivos ficaram para
+trás um snapshot que reporta "0 payloads" não pode significar ao mesmo
+tempo *esta floresta não tem nenhum* e *você não pediu*. Snapshots tirados
+antes disso continuam importando, sidecar e tudo.
+
+Nada aqui precisa do MonkeyLLM para abrir. Um `.forest` é um zip com um
+`README.txt` dentro trazendo os dois comandos (`unzip`, depois `git clone
+forest.bundle`) que devolvem a floresta como Markdown puro, com histórico.
+Um backup que ninguém abre sem o fornecedor não é um backup.
 
 A importação passa pelo seletor de florestas: **Importar snapshot** cria
-uma floresta nova a partir de um bundle, com histórico e tudo, só para a
-pessoa dona o bundle entra como está, sem passar pela curadoria, que é
+uma floresta nova a partir de um snapshot, com histórico e tudo, só para a
+pessoa dona ele entra como está, sem passar pela curadoria, que é
 exatamente por que só o principal que governa o volume pode plantar um. A
 floresta importada chega servível (a Station a reindexa na chegada) e fria:
 nenhuma chamada de modelo é gasta, e a busca fica só por palavra-chave até
-alguém construir a camada vetorial.
+alguém construir a camada vetorial. Se algum nó nomear um payload que o
+snapshot não trouxe, a importação diz quantos em vez de reportar sucesso
+limpo esses nós ficam mortos até os bytes chegarem de onde o snapshot foi
+tirado.
 
 > **Nota** Restaurar *por cima* de uma floresta viva deliberadamente não
 > é oferecido no console; isso continua na linha de comando (`vine

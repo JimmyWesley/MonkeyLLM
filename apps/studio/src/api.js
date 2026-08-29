@@ -325,12 +325,12 @@ export const api = {
     request('/v1/admin/unlock', { method: 'POST', body: { forest } }),
   snapshots: (forest) =>
     request(`/v1/admin/snapshots?forest=${encodeURIComponent(forest)}`),
-  takeSnapshot: (forest, withPayloads = false) =>
+  takeSnapshot: (forest, withPayloads = true) =>
     request('/v1/admin/snapshots',
             { method: 'POST', body: { forest, with_payloads: withPayloads } }),
 
   // Snapshot travel (J.13.1/J.13.2, owner-only). Both step around
-  // `request`: the download's body is the bundle rather than JSON, and the
+  // `request`: the download's body is the snapshot rather than JSON, and the
   // import's is multipart — the browser sets the boundary itself, so no
   // Content-Type is spelled out.
   downloadSnapshot: async (forest, name) => {

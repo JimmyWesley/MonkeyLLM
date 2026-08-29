@@ -13,7 +13,7 @@ import { api, signOut } from '../api.js'
 import { hrefFor, linkTo } from '../router.js'
 import { useI18n, LANGUAGES } from '../i18n.jsx'
 import { useTheme } from '../theme.jsx'
-import { ErrorNote, Field, Modal } from '../design/ui.jsx'
+import { ErrorNote, Field, Modal, Note } from '../design/ui.jsx'
 import {
   CONSOLE_ICON, ChevronDown, Download, Forest, Globe, LogOut, Moon, More,
   PanelLeft, Plus, Star, Sun, Upload, X,
@@ -502,8 +502,13 @@ export function NewForestModal({ open, onClose, onCreated }) {
 }
 
 /** A forest from a snapshot (J.13.2, owner-only). The id obeys the same J.7
- *  rules as creation — a name, refused if taken — and the bundle enters
- *  as-is: no curation, no canopy, `locate` BM25-only until built. */
+ *  rules as creation — a name, refused if taken — and the snapshot enters
+ *  as-is: no curation, no canopy, `locate` BM25-only until built.
+ *
+ *  One file since v0.74. The sidecar field stays for snapshots taken before
+ *  that, because those halves exist and dropping the field would strand
+ *  them — but nothing produced from now on needs it, and the host decides
+ *  which shape arrived by reading the file, never its name. */
 export function ImportForestModal({ open, onClose, onCreated }) {
   const { t } = useI18n()
   const [id, setId] = useState('')
@@ -511,17 +516,21 @@ export function ImportForestModal({ open, onClose, onCreated }) {
   const [payloads, setPayloads] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [hollow, setHollow] = useState(null)
 
   useEffect(() => {
-    if (open) { setId(''); setBundle(null); setPayloads(null); setError(null) }
+    if (open) {
+      setId(''); setBundle(null); setPayloads(null)
+      setError(null); setHollow(null)
+    }
   }, [open])
 
-  // The bundle is named after its forest and stamp; the stamp is not an id,
-  // so the suggestion strips it. Still just a suggestion.
+  // The snapshot is named after its forest and stamp; the stamp is not an
+  // id, so the suggestion strips it. Still just a suggestion.
   const onBundle = (file) => {
     setBundle(file)
     if (file && !id) {
-      setId(file.name.replace(/(-\d{8}T\d{6}Z(-\d+)?)?\.bundle$/, '')
+      setId(file.name.replace(/(-\d{8}T\d{6}Z(-\d+)?)?\.(forest|bundle)$/, '')
         .toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
         .replace(/^-|-$/g, '').slice(0, 63))
     }
@@ -529,10 +538,15 @@ export function ImportForestModal({ open, onClose, onCreated }) {
 
   async function submit(e) {
     e.preventDefault()
-    setBusy(true); setError(null)
+    setBusy(true); setError(null); setHollow(null)
     try {
-      await api.importSnapshot({ id, bundle, payloads })
+      const r = await api.importSnapshot({ id, bundle, payloads })
       onCreated(id)
+      // The forest exists and serves — this is not an error. But nodes
+      // whose payload never arrived are dead, and the operator learning
+      // that from a 404 two days later is the whole reason for the count
+      // (Part I, v0.74). Said here, before the modal closes on it.
+      if (r?.payloads_missing > 0) { setHollow(r.payloads_missing); return }
       onClose()
     } catch (err) { setError(err) } finally { setBusy(false) }
   }
@@ -542,14 +556,18 @@ export function ImportForestModal({ open, onClose, onCreated }) {
            subtitle={t('forest.import_sub')}
            footer={<>
              <button className="btn" onClick={onClose}>{t('common.cancel')}</button>
-             <button className="btn btn-primary" form="import-forest"
-                     disabled={busy || !id || !bundle}>
-               {busy ? t('common.working') : t('forest.import_go')}
-             </button>
+             {hollow !== null
+               ? <button className="btn btn-primary" onClick={onClose}>
+                   {t('common.close')}
+                 </button>
+               : <button className="btn btn-primary" form="import-forest"
+                         disabled={busy || !id || !bundle}>
+                   {busy ? t('common.working') : t('forest.import_go')}
+                 </button>}
            </>}>
       <form id="import-forest" onSubmit={submit} className="space-y-3.5">
-        <Field label={t('forest.bundle')} type="file" accept=".bundle" required
-               hint={t('forest.bundle_hint')}
+        <Field label={t('forest.bundle')} type="file" accept=".forest,.bundle"
+               required hint={t('forest.bundle_hint')}
                onChange={(e) => onBundle(e.target.files?.[0] || null)} />
         <Field label={t('forest.id')} value={id} required
                placeholder="imported-forest" hint={t('forest.id_hint')}
@@ -557,6 +575,9 @@ export function ImportForestModal({ open, onClose, onCreated }) {
         <Field label={`${t('forest.payloads')} (${t('common.optional')})`}
                type="file" accept=".zip" hint={t('forest.payloads_hint')}
                onChange={(e) => setPayloads(e.target.files?.[0] || null)} />
+        {hollow !== null && (
+          <Note tone="warn">{t('forest.payloads_missing', { count: hollow })}</Note>
+        )}
         <ErrorNote error={error} />
       </form>
     </Modal>

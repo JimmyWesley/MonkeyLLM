@@ -68,17 +68,25 @@ def main(argv: list[str] | None = None) -> int:
     p_ranger.add_argument("--every", type=int, default=None,
                           help="service mode: repeat every N seconds until interrupted")
 
-    p_snap = sub.add_parser("snapshot", help="package/restore the forest as a git bundle (spec Part I)")
+    p_snap = sub.add_parser("snapshot", help="package/restore the forest as one file (spec Part I)")
     p_snap.add_argument("action", choices=["create", "restore"])
     p_snap.add_argument("file", nargs="?", default=None,
-                        help="bundle file (restore: required; create: optional output)")
+                        help="snapshot file (restore: required; create: optional output)")
     p_snap.add_argument("--forest", default=".")
-    p_snap.add_argument("--with-payloads", action="store_true",
-                        help="create: also zip the dataset payloads as a sidecar")
+    # Payloads travel by default since v0.74: a snapshot without them is
+    # the only kind that loses data, so leaving them out is a decision
+    # somebody makes rather than one they inherit.
+    p_snap.add_argument("--no-payloads", dest="with_payloads",
+                        action="store_false",
+                        help="create: leave the dataset and media payloads out")
+    p_snap.add_argument("--with-payloads", dest="with_payloads",
+                        action="store_true",
+                        help="create: the default since v0.74; accepted for scripts")
+    p_snap.set_defaults(with_payloads=True)
     p_snap.add_argument("--payloads", default=None,
-                        help="restore: payload sidecar zip to extract")
+                        help="restore: payload sidecar of a pre-v0.74 snapshot")
     p_snap.add_argument("--to", default=None,
-                        help="create: upload the bundle to this URI (file:// or s3://)")
+                        help="create: upload the snapshot to this URI (file:// or s3://)")
 
     p_prefetch = sub.add_parser("prefetch", help="warm remote payloads under a branch (spec G.9.5)")
     p_prefetch.add_argument("scope", nargs="?", default="_index")
@@ -221,21 +229,28 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "create":
             info = create_snapshot(forest_root, out=Path(args.file) if args.file else None,
                                    with_payloads=args.with_payloads)
-            print(f"bundle: {info['bundle']} ({info['bytes']:,} bytes)")
-            if info.get("payload_sidecar"):
-                print(f"payload sidecar: {info['payload_sidecar']} ({info['payloads']} file(s))")
+            print(f"snapshot: {info['snapshot']} ({info['bytes']:,} bytes, "
+                  f"{info['payloads']} payload(s))")
+            # An omission is said out loud: `0 payload(s)` alone means both
+            # "this forest has none" and "you asked for none" (Part I).
+            if info["payloads_omitted"]:
+                print(f"left out: {info['payloads_omitted']} payload file(s) "
+                      f"— the nodes naming them will restore dead")
             if args.to:
                 from monkeyllm.fetch import upload
 
-                upload(Path(info["bundle"]), args.to)
+                upload(Path(info["snapshot"]), args.to)
                 print(f"uploaded to {args.to}")
         else:
             if not args.file:
-                parser.error("snapshot restore needs the bundle file")
+                parser.error("snapshot restore needs the snapshot file")
             info = restore_snapshot(Path(args.file), forest_root,
                                     payload_sidecar=Path(args.payloads) if args.payloads else None)
             print(f"restored {info['nodes']} nodes -> {info['forest']}"
                   + (f" (+{info['restored_payloads']} payload(s))" if info["restored_payloads"] else ""))
+            if info["payloads_missing"]:
+                print(f"warning: {info['payloads_missing']} node(s) name a payload "
+                      f"this snapshot did not carry")
         return 0
 
     if args.command == "prefetch":

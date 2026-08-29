@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.73.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.74.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,59 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **A snapshot that is not one file is not a snapshot (spec Part I +
+  J.13.1/J.13.2, v0.74)**: Part I opens with "A forest snapshot is ONE
+  file" and that stopped being true when `--with-payloads` was added — a
+  forest with a dataset needed a bundle AND a sidecar, separate at every
+  step (two files written, two links, two upload fields with the second
+  optional and defaulting OFF). It came apart in the field: a 1,877-node
+  forest imported from a bare bundle, audit row `{"nodes": "1877",
+  "payloads": "0"}`, status `ok`, two dataset passports naming a `payload:`
+  that was not on the volume. Found two days later by a **404 in a
+  console**. The mechanism was never broken — created and restored a
+  sidecar correctly on the fixture the whole time — which is why the fix is
+  not in it. **The load-bearing failure is the silence**: omitting payloads
+  is legitimate (a metadata-only backup is a real artifact, and refusing to
+  restore one would strand every pre-v0.74 bundle), but `payloads: 0`
+  meaning both *this forest has none* and *you did not ask* is not, and a
+  200 reporting how many payloads were PACKED while never reporting how
+  many nodes are now DEAD is not. Both counts were free — the producer
+  walks the tree, the restore rebuilds the catalog off the very passports
+  that name the missing files. Now: the artifact is `<forest>-<stamp>`
+  **`.forest`**, a zip of `forest.bundle` + `payloads/<forest-relative
+  path>` + a `README.txt` carrying the two commands (`unzip`, `git clone
+  forest.bundle`) that open it with no MonkeyLLM present — the anti-lock-in
+  property is exactly what a container can hide, so it is written INSIDE
+  the file rather than assumed. `with_payloads` defaults **true**
+  everywhere (library, CLI `--no-payloads`, Station POST, Health toggle);
+  `create` reports `payloads_omitted` and `restore` reports
+  `payloads_missing`, the latter through `catalog.count_missing_payloads`
+  shared with C.17 rule 11 — two counts of one condition agree only where
+  somebody compared them, and this one decides whether an operator is told
+  their datasets are dead. **The shape is read from the file's CONTENT**
+  (bundle magic at offset 0 first, `is_zipfile` second — a packfile is
+  arbitrary bytes and the EOCD is searched from the tail), never the name:
+  on the import route the filename is a claim by whoever is importing. The
+  payload set gained `_assets/` — it is in the forest's own `.gitignore`
+  AND was in no sidecar, so a `type: media` node survived no snapshot at
+  all; `_assets` is per-BRANCH (G.5.1), so it is a directory name at any
+  depth. Container members: under `payloads/`, no `..`, no backslash, **no
+  component beginning with a dot**, and then a `.db`/`.sqlite` or something
+  under `_assets/`. The dot clause is load-bearing and its own negative
+  control proved my test suite did not cover it — `payloads/.git/config`
+  was already refused by the extension clause, but `payloads/.git/_assets/x`
+  rides the `_assets` clause straight into the repository git reads on the
+  next commit. F.158-F.161. Two process notes worth keeping: this file was
+  cut while a PARALLEL session held an uncommitted v0.73 (the Audit
+  console), and `DST.write_text()` on `docs/monkeyllm-spec-v0.73.md`
+  destroyed it — recovered by replaying that session's own cut commands out
+  of its transcript, and caught only because APFS preserves **birthtime**
+  across an overwrite. **A spec cut must check the file does not exist.**
+  And verifying a restore by re-running anchor asserts proves only the
+  anchors you thought to name; the peer verified it by `diff` against the
+  previous version, which is the check that would have caught a missing
+  edit.
 
 - **The log that could not be read (spec J.4.2/J.4.3/J.5.16, v0.73)**: the
   Audit console showed when/who/call/forest/`ok`/size/commit, and the

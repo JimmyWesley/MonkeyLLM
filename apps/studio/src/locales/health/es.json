@@ -2,7 +2,7 @@
   "health.all_clear": "Nada que informar.",
   "health.confidence": "confianza {c}",
   "health.download": "Descargar el bundle",
-  "health.download_payloads": "Descargar el sidecar de payloads",
+  "health.download_payloads": "Descargar el sidecar de payloads (snapshot anterior a v0.74)",
   "health.fat_nodes": "Nodos sobrecargados",
   "health.fat_nodes_hint": "Más senderos de los que alguien puede seguir desde un solo lugar.",
   "health.heat": "Feromona",
@@ -22,13 +22,14 @@
   "health.needs_split": "Ramas para dividir",
   "health.needs_split_hint": "Una rama tan ancha le cuesta a cada lector que pasa por ella.",
   "health.no_snapshots": "Ninguna tomada todavía.",
+  "health.payloads_omitted": "{count} archivo(s) de payload quedaron fuera. Los nodos que los nombran restaurarán muertos — este snapshot lleva el mapa, no las bases ni los medios.",
   "health.release": "Liberar el lock huérfano",
   "health.releasing": "Liberando",
-  "health.restore_note": "Restaurar sobre un bosque vivo sigue en la línea de comandos. Un snapshot viaja: el owner puede descargarlo aquí e importarlo como bosque nuevo desde el selector de bosques.",
+  "health.restore_note": "Restaurar sobre un bosque vivo sigue en la línea de comandos. Un snapshot viaja como un solo archivo: el owner puede descargarlo aquí e importarlo como bosque nuevo desde el selector de bosques.",
   "health.scoped": "Este informe cubre todo el bosque.",
   "health.scoped_hint": "Cuenta problemas en todas partes, así que exige un acceso de admin no limitado a una rama.",
   "health.snapshots": "Instantáneas",
-  "health.snapshots_sub": "El bosque empaquetado en un solo archivo, con todo el historial.",
+  "health.snapshots_sub": "El bosque empaquetado en un solo archivo: historial completo, payloads incluidos.",
   "health.stale_passports": "Fuentes que desaparecieron",
   "health.stale_passports_hint": "El nodo permanece; el archivo de origen ya no está. El Ranger nunca borra.",
   "health.sub": "Lo que el Ranger informaría en su próxima pasada. Leerlo no cambia nada.",
@@ -37,5 +38,5 @@
   "health.title": "Salud del bosque",
   "health.uncertain": "Propuestas de enlace",
   "health.uncertain_hint": "Enlaces por debajo de la confianza total, esperando que el Ranger promueva o pode.",
-  "health.with_payloads": "Incluir los payloads de los datasets"
+  "health.with_payloads": "Llevar los payloads de dataset y medios"
 }

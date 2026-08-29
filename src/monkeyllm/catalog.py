@@ -737,3 +737,31 @@ class Catalog:
         return self.conn.execute(
             "SELECT * FROM nodes WHERE parent = ?", (parent_id,)
         ).fetchall()
+
+
+def count_missing_payloads(catalog: Catalog, forest: Forest,
+                           where: list[str] | None = None,
+                           params: list | None = None) -> int:
+    """Local payloads a passport names and the filesystem does not have.
+
+    C.17 rule 11 counts this per root, and Part I's restore counts it over
+    the whole forest to say what a snapshot did not bring (v0.74). One
+    implementation, because two counts of one condition agree only where
+    somebody compared them — and this one decides whether an operator is
+    told their datasets are dead.
+
+    One statement selects the nodes that declare a payload at all — a
+    handful beside the node count — and each is a stat, never an open, so
+    C.17 rule 1 stands. Remote payloads (G.9) are skipped: their bytes were
+    never local, their absence is a fetch away, and counting them would
+    report a hole that does not exist.
+    """
+    from monkeyllm.fetch import is_remote
+
+    gone = 0
+    for node_id, payload in catalog.local_payloads(where or [], params or []):
+        if is_remote(payload):
+            continue
+        if not (forest.path_for(node_id).parent / payload).is_file():
+            gone += 1
+    return gone

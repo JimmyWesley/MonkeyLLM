@@ -210,18 +210,35 @@ On a Docker deployment, the same command runs inside the container:
 
 ### Snapshots
 
-A snapshot is the forest packaged as **one file** its git repository as
-a bundle, full history included, every plant and every audit commit
-travelling along. From the Health console you can take one ("Include
-dataset payloads" adds a sidecar archive for the `.db` files git never
-holds), and the **owner** can download the bundle and the sidecar.
+A snapshot is the forest packaged as **one file**: a `.forest`, holding
+its git repository as a bundle (full history, every plant and every audit
+commit travelling along) together with the payload bytes git never holds
+the dataset `.db` files and the archived media. From the Health console
+you can take one and the **owner** can download it, in a single click,
+because there is nothing else to fetch.
+
+It used to be two files, a bundle and an optional payload sidecar, and
+they came apart: nothing tied them, so a forest could be imported whole
+and arrive with its datasets empty. Payloads now travel unless you switch
+them off, and if you do, the console says how many files were left behind
+a snapshot reporting "0 payloads" must not mean both *this forest has
+none* and *you did not ask*. Snapshots taken before that still import,
+sidecar and all.
+
+Nothing here needs MonkeyLLM to open. A `.forest` is a zip carrying a
+`README.txt` with the two commands (`unzip`, then `git clone
+forest.bundle`) that give you the forest back as plain Markdown with its
+history. A backup nobody can open without the vendor is not a backup.
 
 Importing goes through the forest switcher: **Import snapshot** creates a
-new forest from a bundle, history included, owner-only the bundle enters
+new forest from a snapshot, history included, owner-only it enters
 as-is, with no curation pass, which is exactly why only the principal that
 governs the volume may plant one. The imported forest arrives servable
 (the Station reindexes it on arrival) and cold: no model call is spent,
-and search stays keyword-only until someone builds the vector layer.
+and search stays keyword-only until someone builds the vector layer. If
+any node names a payload the snapshot did not carry, the import says how
+many rather than reporting a clean success those nodes are dead until
+the bytes arrive from wherever the snapshot was taken.
 
 > **Note** Restoring *over* a live forest is deliberately not offered in
 > the console; that stays on the command line (`vine snapshot restore`).

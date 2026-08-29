@@ -3746,18 +3746,12 @@ class Vine:
         """C.17 rule 11 (v0.61): local payloads the passport names and the
         filesystem does not have.
 
-        One statement selects the nodes that declare a payload at all — a
-        handful beside the node count — and each is a stat, never an open,
-        so C.17 rule 1 stands. Remote payloads are skipped: their absence
-        is a fetch away and is not a fact the catalog holds.
+        Shared with Part I's restore since v0.74 — the same condition,
+        counted once, in `catalog.count_missing_payloads`.
         """
-        gone = 0
-        for node_id, payload in self.catalog.local_payloads(where, params):
-            if is_remote(payload):
-                continue
-            if not (self.forest.path_for(node_id).parent / payload).is_file():
-                gone += 1
-        return gone
+        from monkeyllm.catalog import count_missing_payloads
+
+        return count_missing_payloads(self.catalog, self.forest, where, params)
 
     def _root_where(self, root_id: str) -> tuple[list[str], list]:
         """A root as a predicate over the catalog (C.17 rule 3).

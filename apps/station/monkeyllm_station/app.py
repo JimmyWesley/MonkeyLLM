@@ -70,6 +70,7 @@ from monkeyllm.errors import (
 )
 from monkeyllm.server import ForestPool
 from monkeyllm.signatures import validate_args
+from monkeyllm.snapshot import CONTAINER_SUFFIX
 from monkeyllm.windows import exclusive_end, normalize_window
 from monkeyllm_station import answer_store, runs as runs_mod, vision, webhooks
 from monkeyllm_station.jobs import JobBoard
@@ -4912,7 +4913,7 @@ def build_app(
     def snapshot_dir(forest: str) -> Path:
         """Bundles are host state, beside the registry — never inside a forest.
 
-        A `.bundle` in the tree would be a binary where A.3.1 keeps binaries
+        A snapshot in the tree would be a binary where A.3.1 keeps binaries
         out, and the next snapshot would package the previous one.
         """
         return Path(registry_path).resolve().parent / "snapshots" / forest
@@ -5383,13 +5384,20 @@ def build_app(
 
         directory = snapshot_dir(forest)
         if request.method == "GET":
-            bundles = sorted(directory.glob("*.bundle"), reverse=True) \
-                if directory.is_dir() else []
+            # J.13.1 (v0.74): one snapshot is one row. A container is that
+            # row on its own; a pre-v0.74 bundle keeps the second control
+            # for its sidecar, because those halves are real and hiding one
+            # would lose it.
+            taken = sorted(
+                [*directory.glob(f"*{CONTAINER_SUFFIX}"), *directory.glob("*.bundle")],
+                key=lambda f: f.stat().st_mtime, reverse=True,
+            ) if directory.is_dir() else []
             return JSONResponse({"snapshots": [
                 {"name": b.name, "bytes": b.stat().st_size,
                  "created": _iso(b.stat().st_mtime),
+                 "container": b.suffix == CONTAINER_SUFFIX,
                  "payloads": b.with_suffix(b.suffix + ".payloads.zip").is_file()}
-                for b in bundles]})
+                for b in taken]})
 
         def work():
             from monkeyllm.snapshot import create_snapshot
@@ -5405,15 +5413,17 @@ def build_app(
             # collision is resolved by counting rather than by borrowing
             # digits nobody wants — overwriting would silently destroy the
             # bundle somebody took a moment before doing something risky.
-            out = directory / f"{forest}-{stamp}.bundle"
+            out = directory / f"{forest}-{stamp}{CONTAINER_SUFFIX}"
             attempt = 2
             while out.exists():
-                out = directory / f"{forest}-{stamp}-{attempt}.bundle"
+                out = directory / f"{forest}-{stamp}-{attempt}{CONTAINER_SUFFIX}"
                 attempt += 1
             try:
+                # Part I (v0.74): payloads travel unless the caller says
+                # otherwise. A default that loses data is not a default.
                 return create_snapshot(
                     Path(vine.forest.root), out=out,
-                    with_payloads=bool(body.get("with_payloads")))
+                    with_payloads=body.get("with_payloads", True) is not False)
             except VineError as e:
                 return e.to_dict()
 
@@ -5424,14 +5434,16 @@ def build_app(
         registry.record(principal=principal, forest=forest, primitive="snapshot",
                         args={}, result="ok", size=result.get("bytes", 0))
         hooks.emit(forest, "snapshot.created", principal,
-                   {"name": Path(result["bundle"]).name,
+                   {"name": Path(result["snapshot"]).name,
                     "bytes": result["bytes"],
-                    "payloads": result.get("payloads")})
+                    "payloads": result.get("payloads"),
+                    "payloads_omitted": result.get("payloads_omitted")})
         # The absolute path is host detail; the caller gets the name it will
         # see in the listing.
-        return JSONResponse({"name": Path(result["bundle"]).name,
+        return JSONResponse({"name": Path(result["snapshot"]).name,
                              "bytes": result["bytes"],
-                             "payloads": result.get("payloads")})
+                             "payloads": result.get("payloads"),
+                             "payloads_omitted": result.get("payloads_omitted")})
 
     async def admin_snapshot_file(request: Request):
         """One bundle or sidecar, streamed out (J.13.1).
@@ -5464,7 +5476,8 @@ def build_app(
         plausible = (FOREST_ID.match(forest)
                      and "/" not in name and "\\" not in name
                      and not name.startswith(".")
-                     and (name.endswith(".bundle")
+                     and (name.endswith(CONTAINER_SUFFIX)
+                          or name.endswith(".bundle")
                           or name.endswith(".bundle.payloads.zip")))
         target = (directory / name).resolve() if plausible else None
         if target is None or target.parent != directory or not target.is_file():
@@ -5480,11 +5493,18 @@ def build_app(
     async def admin_snapshot_import(request: Request) -> JSONResponse:
         """A forest from a snapshot (J.13.2): J.7 creation, with content.
 
-        Owner-only: an imported bundle bypasses every converter, curation
+        Owner-only: an imported snapshot bypasses every converter, curation
         pass and review the J.8 surface imposes on bytes entering a forest —
-        a bundle is already forest and enters as-is. It arrives servable
+        a snapshot is already forest and enters as-is. It arrives servable
         (restore rebuilds the catalog) and arrives cold: no model call, no
         canopy — `locate` stays BM25-only until an operator asks (C.6).
+
+        The upload is a v0.74 container or a pre-v0.74 bundle, decided by
+        its CONTENT (Part I): the filename came with the request, so here it
+        is a claim by whoever is importing. The response says how many
+        passports name a payload the snapshot did not carry — importing a
+        bare bundle is allowed and produces exactly that, and the operator
+        is entitled to learn it now rather than from a 404 two days later.
         """
         principal, err = require_principal(request)
         if err:
@@ -5517,9 +5537,10 @@ def build_app(
                 hint="Lowercase letters, digits, '-' and '_'; up to 63 characters."))
         if bundle is None or isinstance(bundle, str):
             return _envelope(VineError(
-                E_SCHEMA, "a bundle file is required",
-                hint="Send multipart/form-data with the bundle in 'bundle' "
-                     "and, optionally, the payload sidecar in 'payloads'."))
+                E_SCHEMA, "a snapshot file is required",
+                hint="Send multipart/form-data with the snapshot in 'bundle'; "
+                     "a pre-v0.74 snapshot adds its payload sidecar in "
+                     "'payloads'."))
         target = pool.root / forest_id
         if target.exists():
             # Same rule as J.7 creation: adopting the existing forest because
@@ -5570,7 +5591,7 @@ def build_app(
                 except VineError as e:
                     shutil.rmtree(target, ignore_errors=True)
                     return e.to_dict()
-                except Exception as e:  # noqa: BLE001 — a corrupt bundle fails the clone
+                except Exception as e:  # noqa: BLE001 — a corrupt snapshot fails the clone
                     # A half-restored tree would be a forest nobody asked
                     # for, so it is removed rather than reported as a
                     # success with a hole in it (J.7).
@@ -5578,7 +5599,7 @@ def build_app(
                     return VineError(
                         E_SCHEMA, f"could not import '{forest_id}': {e}",
                         hint="Nothing was left behind; is this a Part I "
-                             "bundle?").to_dict()
+                             "snapshot?").to_dict()
 
             result = await in_forest_thread(forest_id, work)
         finally:
@@ -5599,11 +5620,13 @@ def build_app(
         registry.record(principal=principal, forest=forest_id,
                         primitive="snapshot-import",
                         args={"nodes": result.get("nodes"),
-                              "payloads": result.get("restored_payloads")},
+                              "payloads": result.get("restored_payloads"),
+                              "payloads_missing": result.get("payloads_missing")},
                         result="ok", size=uploaded, commit_sha=commit)
         return JSONResponse({"forest": {"id": forest_id, "commit": commit},
                              "nodes": result.get("nodes"),
                              "payloads": result.get("restored_payloads"),
+                             "payloads_missing": result.get("payloads_missing"),
                              "grants": registry.grants_of(principal)})
 
     # One instance: `/s/{token}` renders the same shell without going
