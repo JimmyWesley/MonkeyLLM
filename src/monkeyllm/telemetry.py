@@ -34,6 +34,7 @@ class Tracer:
         tokens_out: int,
         elapsed_ms: float,
         embed_ms: float | None = None,
+        dense_ms: float | None = None,
     ) -> None:
         event = {
             "ts": time.time(),
@@ -49,6 +50,14 @@ class Tracer:
             # share of `elapsed_ms`, named so the embedder's round trip is
             # never read as the forest's own work.
             event["embed_ms"] = round(embed_ms, 3)
+        if dense_ms is not None:
+            # The Canopy scan's share (v0.71): local CPU over every node
+            # vector, which is the OTHER half of a hybrid entry search and
+            # the larger one whenever the query embed is a memo hit. Kept
+            # apart from `embed_ms` because one is a provider and one is
+            # this process, and an operator tuning the wrong one wastes a
+            # week.
+            event["dense_ms"] = round(dense_ms, 3)
         self.events.append(event)
         with self.trace_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")

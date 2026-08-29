@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.68.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.71.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,102 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **The scan is the other half of the bill (spec J.10.4.1, v0.71)**: v0.68
+  found a provider round trip inside `locate`'s span, named it `embed_ms`
+  and closed the case — on half of it. The same complaint came back against
+  a grown corpus, and the same query asked TWICE is what separates the
+  halves: cold, `locate` raw 262 ms with `embed` 166; warm, the K.6 memo
+  answers in **0.13 ms** and **74 ms is still charged to `locate`**. It is
+  not the network. `CanopyIndex.search` over 1,877 vectors of dim 1024
+  measures **68 ms** — 36 us per vector — against 0.35 ms for the catalog
+  refill beside it and 0.01 ms for the fusion. v0.42's "the vector scan was
+  never the problem (0.044 ms per dim-1024 dot product)" was a true claim
+  about ONE comparison, and a hybrid entry makes one per node: that sentence
+  survives its own arithmetic only while the corpus is small, and it should
+  be quoted with its date. Now `dense_ms` rides the Part D event beside
+  `embed_ms` (scan + the rows the dense half pulled back + the fuse), saved
+  and restored across nested traced calls so a `harvest` never inherits its
+  `locate`'s share. They stay **apart** on purpose: whoever is dominated by
+  `embed_ms` buys a closer embedder and whoever is dominated by `dense_ms`
+  needs an index instead of a scan, so one merged "hybrid overhead" figure
+  sends half its readers to fix the wrong thing. Host NAMES, console NETS —
+  `elapsed_ms`/`retrieval_ms`/`total_ms` keep meaning the whole span to the
+  byte, and `TraceSteps` (shared by Ask AND Playground, so both are fixed in
+  one place) subtracts both shares per row and lists each once at the tail.
+  Measured after: `locate` net **1.01 ms** cold and **0.97 ms** warm against
+  raw spans of 262 and 75. Acceptance F.149-F.150. Order note: the
+  measurement had to come before the contract here, so the code preceded the
+  spec cut — the rule is still spec-before-code and this was the exception
+  that proves why it is worth stating.
+
+- **The question is not the query (spec C.1.2, v0.70)**: `locate` handed the
+  whole sentence to FTS5 — split on whitespace, quoted, OR'd — so every
+  article and preposition was a search term with a vote. `harvest` has
+  derived terms since C.6c and the entry search it calls did not. Now
+  `Vine.locate` calls `derive_terms` first (**harvest's own**, never a
+  second derivation: two readings of one intent agree only where somebody
+  compared them, and the sweep calls both). Measured: recall@1 **0.711 ->
+  0.778**, MRR 0.734 -> 0.791, five questions up and none down, with p50
+  latency 1.9 -> 0.7 ms as a side effect (fewer terms in the OR). The
+  load-bearing half is **rule 2, the fallback**: `api`, `sql`, `ui` and a
+  sentence made of grammar all derive to NOTHING — the floor that removes
+  grammar also removes short lowercase tokens — so an empty derivation
+  searches the raw query and those calls stay byte-identical. Passing the
+  empty list through would answer nothing to a caller who typed one word,
+  which is C.1.1's failure manufactured on purpose. Stated cost, not a bug
+  to rediscover: "erro sql no worker" searches `erro`+`worker` and drops the
+  discriminating term; lowering the floor to 3 changed nothing on the
+  labelled set, so it was left alone rather than tuned against no evidence.
+  **The reason this could not ship before is the instrument**: two of three
+  labelled sets scored recall@1 = 1.000 before any change and the third
+  resolves one question in eighteen — on it, this identical change measured
+  3 up / 3 down. `bench/questions-locate-v1.json` (T17) is the new set: 60
+  questions over a 1,877-node corpus, four classes (inflection, silence,
+  index-vs-content, grammar), `expected_nodes` written from READING
+  documents and never from running a search, baseline 0.711. A ranking
+  change measured on a saturated set has not been measured. Two findings
+  that set produced and that are NOT fixed: `locate` returns results for
+  every one of the 15 questions the forest cannot answer, and `strength` is
+  normalised against the best hit in its own result set so the top result
+  scores 1.000 for all 60 — the absolute BM25 that does separate them
+  (silence median -11.5 vs -24..-39) is discarded. That is C.1.1 from the
+  other side and wants its own round. Acceptance F.147-F.148; the fixture's
+  q05 drops 1 -> 2 (two expected nodes, the derived query surfaces the other
+  one), the only regression across four sets.
+
+- **A path is not a syscall (spec C.6b.2, v0.69)**: `Forest.path_for` mapped
+  an id to a file AND decided containment, and it decided it with
+  `Path.resolve()` — a `realpath` walk, a syscall per component — which the
+  body scan called **once per node in scope**. Measured on 1,877 nodes it was
+  72 ms in an isolated loop and 31% of the profiled cold `sniff`, against
+  2.6 ms for the same containment decided on the string. The split is by
+  PROVENANCE, never by cost: an id arriving from outside the engine (the
+  wire, `ScopedVine`, host-supplied paths, and **every write**, whose id came
+  from a caller) resolves symlinks; an id the engine read out of its own
+  catalog takes `path_for(..., trusted=True)`, where `normpath` still
+  collapses `..` so traversal is still refused and only symlink-following is
+  given up. Keyword-only and never dispatched (G.2.5's `adopted=`
+  construction). The rule is only as good as its boundary list, because the
+  failure is **silent** — nothing raises, nothing logs, an id just passes —
+  so `tests/test_containment.py` is a surfaces x escapes matrix (engine /
+  `ScopedVine` / REST / MCP, each against traversal, encoded traversal,
+  absolute, and a REAL symlink planted inside a test forest) and a surface
+  absent from it is not covered. Measured after: cold `sniff` 226 → 186 ms
+  (min), and the largest item is now **`sniff_memo_store`** (30%), which
+  nobody has looked at. Two estimates in this round were wrong the same way
+  and it is worth naming: the **profiler inflates per-call overhead**, so
+  `path_for` (1,877 calls) read as 223 ms when the real in-situ saving was
+  ~30 ms, and the fold table (196,608 calls to `_fold_char`) read as 180 ms
+  when it is **35.7 ms**. The first `sniff` of a process is ~100 ms dearer
+  than the next one for a different reason entirely — the OS page cache for
+  1,877 bodies, which `warm()` deliberately does not pay (J.6.1: the whole
+  corpus off disk is a different trade). `_fold_table` gains a lock (N
+  readers of the J.6.2 pool could each build their own copy; harmless,
+  wasteful) and is built in `warm()` — never at import, which is v0.62's
+  standing rule. Acceptance F.145-F.146. Known gap pinned, not fixed: a
+  symlink out of the forest makes `reindex` raise a bare `ValueError` from
+  `pathlib` instead of C.12's envelope (`test_reindex_meets_a_symlink`).
 
 - **The gauntlet rides inside the forest's clock (spec Part D/J.10.4/K.2,
   v0.68)**: with hybrid entry on, the K.2 query embed is an HTTP round trip
