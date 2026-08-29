@@ -283,7 +283,17 @@ export const api = {
   // governance
   principals: () => request('/v1/admin/principals'),
   grant: (body) => request('/v1/admin/grant', { method: 'POST', body }),
-  audit: (limit = 200) => request(`/v1/admin/audit?limit=${limit}`),
+  // J.4.3: every filter is the route's, applied before the page is cut, so
+  // the totals beside the entries describe the same set the entries came
+  // from. An empty value is dropped rather than sent — `?primitive=` would
+  // be a filter for the call named "".
+  audit: (params = {}) => {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries({ limit: 200, ...params })) {
+      if (v !== undefined && v !== null && v !== '' && v !== false) q.set(k, String(v))
+    }
+    return request(`/v1/admin/audit?${q.toString()}`)
+  },
 
   // inference providers and per-forest bindings
   providers: () => request('/v1/admin/providers'),

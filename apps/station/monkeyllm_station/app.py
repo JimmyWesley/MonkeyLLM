@@ -70,7 +70,7 @@ from monkeyllm.errors import (
 )
 from monkeyllm.server import ForestPool
 from monkeyllm.signatures import validate_args
-from monkeyllm.windows import normalize_window
+from monkeyllm.windows import exclusive_end, normalize_window
 from monkeyllm_station import answer_store, runs as runs_mod, vision, webhooks
 from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
@@ -1404,12 +1404,32 @@ def build_app(
             "cost": result.get("cost"),
         })
 
+    def refusal_code(result) -> str | None:
+        """The envelope's code, or None when nothing was refused (J.4.2).
+
+        The CODE and never the message: a code is a closed vocabulary, while
+        a message carries hints that name nodes, terms and table names — and
+        the audit log records access, not content (J.4).
+        """
+        error = result.get("error") if isinstance(result, dict) else None
+        return (error or {}).get("code") or None
+
+    def engine_ms(events) -> float | None:
+        """This call's own span, off the Part D slice it already produced.
+
+        `None` when the slice is empty, which is not the same as zero: a
+        call refused by the policy never reached the engine, and a row
+        claiming it took 0.0 ms would be describing work that did not
+        happen (J.4.2).
+        """
+        total = sum(e["elapsed_ms"] for e in events or ())
+        return round(float(total), 3) if events else None
+
     def emit_refusal(principal: str, forest: str, name: str, result) -> None:
         """A scoped call was refused. The security signal an automation
         actually wants, and it costs nothing to say: the refusal already
         happened and is already audited."""
-        error = result.get("error") if isinstance(result, dict) else None
-        code = (error or {}).get("code")
+        code = refusal_code(result)
         if code in (E_FORBIDDEN, E_QUERY_FORBIDDEN):
             hooks.emit(forest, "access.denied", principal,
                        {"primitive": name, "code": code})
@@ -1630,6 +1650,10 @@ def build_app(
             principal=principal, forest=forest, primitive=name, args=payload,
             result="error" if (isinstance(result, dict) and "error" in result) else "ok",
             size=len(json.dumps(result, default=str)), commit_sha=commit_sha,
+            # J.4.2: the same slice `Server-Timing: vine` reports, read here
+            # rather than measured again — one instrumentation, two readers.
+            ms=engine_ms(vine.tracer.events[mark:]),
+            error_code=refusal_code(result),
         )
         if (name in WRITE_PRIMITIVES and isinstance(result, dict)
                 and "error" not in result):
@@ -1674,6 +1698,18 @@ def build_app(
             else ("error" if isinstance(result.get("error"), dict) else "ok"),
             size=len(json.dumps(result, default=str)),
             commit_sha=result.get("commit"),
+            # J.4.2. The clocks come apart on purpose (J.10.4.1's reason):
+            # a deployment dominated by the forest buys a different fix from
+            # one dominated by the provider, and one merged figure sends
+            # half its readers to repair the wrong half.
+            ms=engine_ms(events if events is not None
+                         else vine.tracer.events[mark:]),
+            model_ms=sample.get("model"),
+            error_code=refusal_code(result),
+            # On a hit this is the ORIGINAL run's figure and the row's own
+            # `result` is what says it was avoided rather than spent (J.4.2):
+            # two fields saying that would eventually disagree.
+            cost=result.get("cost") if isinstance(result, dict) else None,
         )
         # J.16: after the record, before the return. The act is complete
         # and audited; the announcement is O(1) when nobody subscribes
@@ -3850,16 +3886,51 @@ def build_app(
                         "prefix": out["api_key"][:9]})
         return JSONResponse(out)
 
+    # J.4.2: the fields a row gained in v0.73. Emitted only when the row
+    # actually carries them — a row written by an older Station makes no
+    # claim about its cost, its refusal or its clock, and answering `0` on
+    # its behalf would invent one.
+    AUDIT_OPTIONAL = ("ms", "model_ms", "error_code", "usd", "tokens",
+                      "calls", "priced")
+
+    def audit_entry(row: dict) -> dict:
+        out = {k: v for k, v in row.items()
+               if k not in AUDIT_OPTIONAL or v is not None}
+        if "priced" in out:
+            out["priced"] = bool(out["priced"])
+        return out
+
     async def admin_audit(request: Request) -> JSONResponse:
+        """The access log, filtered and totalled (J.4, J.4.3).
+
+        Every filter is applied in SQL, before the page is cut, and the
+        totals are computed over the same filtered set rather than over the
+        page that came back. That is the whole difference between a summary
+        and a fact about the page size — and it is why the filter is built
+        in one place in the registry and read three ways from there.
+        """
         principal, err = require_principal(request)
         if err:
             return err
         if not is_admin(principal, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
-        limit = min(int(request.query_params.get("limit", 100)), 500)
-        # An audit entry records what somebody read. Same rule as J.3.2:
-        # over-fetch, then keep only the forests this caller governs, so a
-        # short page is a short page rather than a leak.
+        q = request.query_params
+        try:
+            limit = min(max(int(q.get("limit", 100)), 1), 500)
+        except (TypeError, ValueError):
+            return _envelope(VineError(
+                E_SCHEMA, f"limit must be an integer, got {q.get('limit')!r}"))
+        # C.13's rule, on the one route where being wrong about it is a
+        # false statement about who did what: a bound we cannot read is
+        # refused, never quietly dropped.
+        try:
+            window = normalize_window(q.get("since"), q.get("until"), None)
+        except VineError as e:
+            return _envelope(e)
+        # An audit entry records what somebody read. Same rule as J.3.2: the
+        # scope decides first, and since v0.73 it decides in SQL — a total
+        # over rows this caller may not read would be a finer size oracle
+        # than the page ever was.
         mine = administered(principal)
         # Governance rows belong to no forest, and they describe the whole
         # deployment: who was granted what, which keys exist, where the
@@ -3868,10 +3939,23 @@ def build_app(
         # J.3.2 corrected for content.
         if registry.is_owner(principal):
             mine = mine | {NO_FOREST}
-        entries = [e for e in registry.audit(
-            limit=limit * 4, principal=request.query_params.get("principal"))
-            if e["forest"] in mine]
-        return JSONResponse({"entries": entries[:limit]})
+        scope = {"forests": mine,
+                 "since": (window or {}).get("since"),
+                 "before": exclusive_end(window["until"])
+                 if window and window.get("until") else None}
+        filters = {**scope,
+                   "principal": q.get("principal"),
+                   "forest": q.get("forest"),
+                   "primitive": q.get("primitive"),
+                   "result": q.get("result"),
+                   "errors": q.get("errors") in ("1", "true", "yes")}
+        return JSONResponse({
+            "entries": [audit_entry(e) for e in registry.audit(limit=limit, **filters)],
+            "totals": registry.audit_totals(**filters),
+            # Narrowed by the scope and the window only: choosing a
+            # primitive must not empty the list of primitives (J.4.3).
+            "filters": registry.audit_facets(**scope),
+        })
 
     async def admin_providers(request: Request) -> JSONResponse:
         principal, err = require_principal(request)

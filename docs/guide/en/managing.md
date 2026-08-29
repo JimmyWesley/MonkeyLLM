@@ -233,9 +233,10 @@ The Audit console answers "who saw what". Its two halves are stored where
 each belongs:
 
 - **Reads** land in the audit log: who, which forest, which call, an
-  argument digest, the result size, and when. Bodies and snippets are
-  never copied in the log records access, not content and the console
-  says so on the screen.
+  argument digest, the result size, when it happened, how long the forest
+  took, what the provider charged, and which refusal it was when it was
+  refused. Bodies and snippets are never copied in the log records
+  access, not content and the console says so on the screen.
 - **Writes** are already commits in the forest's own git history, each
   carrying a `station-principal: <name>` trailer naming the acting
   principal, so the history of what changed is the forest's own.
@@ -246,8 +247,23 @@ served from the store (see below) is audited as one the row carries the
 entry's key digest, is marked as served from the store, and the cost it
 records is the cost *avoided*, never a second spend.
 
-The log is filterable by person, and reading it needs the `admin`
-capability.
+The screen opens with four numbers over the set you are looking at: how
+many calls, how many were refused, what was spent, and what the answer
+store made unnecessary. Those two money figures are deliberately apart a
+store hit's cost is money that was *not* paid, and one "cost" covering both
+is a bill nobody can reconcile. A call whose provider publishes no price is
+shown as unpriced rather than as free.
+
+Filtering is by person, by call, by forest, by outcome (everything, only
+the refusals, only what the store served) and by date, and every filter is
+in the address, so a filtered view is a link you can send to whoever has to
+look at it. The four numbers describe the filtered set and not the page of
+rows below them a summary that counted the rows on screen would change
+when you changed how many rows fit.
+
+Reading it needs the `admin` capability, and it shows only the forests you
+administer the totals are narrowed the same way, because counting a
+forest is a way of learning its size.
 
 ## Optimize
 

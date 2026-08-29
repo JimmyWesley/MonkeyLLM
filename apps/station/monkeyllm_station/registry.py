@@ -76,10 +76,24 @@ CREATE TABLE IF NOT EXISTS audit (
     args      TEXT NOT NULL,   -- digest only: never bodies or snippets (J.4)
     result    TEXT NOT NULL,
     size      INTEGER NOT NULL DEFAULT 0,
-    commit_sha TEXT
+    commit_sha TEXT,
+    -- J.4.2 (v0.73). All nullable, all read as ABSENT rather than as zero:
+    -- a row written by an older Station makes no claim about its cost, its
+    -- refusal or its clock, and `0.0 ms` / `$0.00` are both claims.
+    ms         REAL,      -- the engine's own span (the Part D slice)
+    model_ms   REAL,      -- the provider round trip, when one ran
+    error_code TEXT,      -- the envelope's code (C.12) — never its message
+    usd        REAL,      -- what the provider's catalogue prices this at
+    tokens     INTEGER,   -- prompt + completion, the provider's own count
+    calls      INTEGER,   -- provider round trips inside this one call
+    priced     INTEGER    -- 1 when a catalogue answered; 0 = tokens, no price
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_principal ON audit(principal);
+-- The audit console filters by forest and reads its totals per forest
+-- (J.4.3), and the scope rule turns every one of those into a forest
+-- predicate — so this is the index the whole route rides on.
+CREATE INDEX IF NOT EXISTS idx_audit_forest ON audit(forest, ts);
 
 -- Inference providers (J.10): any OpenAI-compatible /v1 — OpenRouter,
 -- LiteLLM, vLLM, a local llama.cpp. The key is write-only over the API.
@@ -237,6 +251,11 @@ MIGRATIONS = {
         "caps": "TEXT",
     },
     "providers": {"origin": "TEXT NOT NULL DEFAULT 'console'"},
+    # J.4.2 (v0.73): the bill, the refusal and the clock. Nullable by
+    # design — see the table above.
+    "audit": {"ms": "REAL", "model_ms": "REAL", "error_code": "TEXT",
+              "usd": "REAL", "tokens": "INTEGER", "calls": "INTEGER",
+              "priced": "INTEGER"},
 }
 
 # A login is good for a working day. Long enough not to nag, short enough
@@ -660,30 +679,159 @@ class Registry:
     # -- audit (J.4) --------------------------------------------------------
 
     def record(self, *, principal: str, forest: str, primitive: str, args: dict,
-               result: str, size: int = 0, commit_sha: str | None = None) -> None:
+               result: str, size: int = 0, commit_sha: str | None = None,
+               ms: float | None = None, model_ms: float | None = None,
+               error_code: str | None = None, cost: dict | None = None) -> None:
         """Access log. Arguments are digested, never stored verbatim: the log
-        records who read what, not the content they read."""
+        records who read what, not the content they read.
+
+        `ms`, `model_ms`, `error_code` and `cost` are J.4.2 (v0.73). Every
+        one of them is optional and stored as NULL when the caller does not
+        have it, because "this Station did not measure it" and "it measured
+        zero" are different statements and only one of them is usually true:
+        a `look` calls no provider, and recording `$0.00` for it would put a
+        price on the row that nobody quoted.
+
+        `cost` is the shape J.10.2 already builds and the response already
+        carries — never recomputed here, because an audit write must not be
+        able to fail the act it describes.
+        """
         digest = {}
         for key, value in (args or {}).items():
             text = str(value)
             digest[key] = text if len(text) <= 80 else f"<{len(text)} chars>"
+        cost = cost or {}
+        tokens = None
+        if cost.get("prompt_tokens") is not None \
+                or cost.get("completion_tokens") is not None:
+            tokens = int(cost.get("prompt_tokens") or 0) \
+                + int(cost.get("completion_tokens") or 0)
         self.conn.execute(
-            "INSERT INTO audit (ts, principal, forest, primitive, args, result, size, commit_sha) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO audit (ts, principal, forest, primitive, args, result, "
+            "  size, commit_sha, ms, model_ms, error_code, usd, tokens, calls, priced) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (_now(), principal, forest, primitive,
-             json.dumps(digest, ensure_ascii=False), result, size, commit_sha),
+             json.dumps(digest, ensure_ascii=False), result, size, commit_sha,
+             None if ms is None else round(float(ms), 3),
+             None if model_ms is None else round(float(model_ms), 3),
+             error_code or None,
+             cost.get("usd"), tokens, cost.get("calls"),
+             None if not cost else int(bool(cost.get("priced")))),
         )
         self.conn.commit()
 
-    def audit(self, limit: int = 100, principal: str | None = None) -> list[dict]:
-        sql = "SELECT * FROM audit"
+    # The result values that ARE a refusal (J.4.3). Stated positively: a
+    # primitive's envelope lands as 'error', a governance guard's as
+    # 'refused', and the other values this table holds ('ok', 'cache', and
+    # the outcomes of admin repairs like 'kept') are not refusals and must
+    # not be counted as ones. `error_code` catches anything newer.
+    REFUSED = ("error", "refused")
+
+    def _audit_where(self, *, forests=None, principal=None, forest=None,
+                     primitive=None, result=None, errors=False,
+                     since=None, before=None) -> tuple[str, list]:
+        """The J.4.3 filter, built once and read three ways.
+
+        `forests` is the scope (J.3.2), and it is a different kind of
+        argument from the rest: the others are what the caller asked for and
+        this one is what they are allowed to ask about. `None` means no
+        restriction; an EMPTY collection means this principal governs
+        nothing, and it must match nothing rather than everything — the
+        difference between "no filter" and "a filter that excludes all" is
+        one `if` away from handing a stranger the whole log.
+
+        `before` is already exclusive: the route expands an inclusive
+        `until` to the day after it, exactly as C.13 does, so the comparison
+        here stays a bare range over the indexed column.
+        """
+        where: list[str] = []
         params: list = []
-        if principal:
-            sql += " WHERE principal = ?"
-            params.append(principal)
-        sql += " ORDER BY ts DESC, rowid DESC LIMIT ?"
-        params.append(limit)
-        return [dict(r) for r in self.conn.execute(sql, params)]
+        if forests is not None:
+            names = sorted(set(forests))
+            if not names:
+                return " WHERE 1 = 0", []
+            where.append(f"forest IN ({','.join('?' * len(names))})")
+            params.extend(names)
+        for column, value in (("principal", principal), ("forest", forest),
+                              ("primitive", primitive), ("result", result)):
+            if value:
+                where.append(f"{column} = ?")
+                params.append(value)
+        if errors:
+            marks = ",".join("?" * len(self.REFUSED))
+            where.append(f"(result IN ({marks}) OR error_code IS NOT NULL)")
+            params.extend(self.REFUSED)
+        if since:
+            where.append("ts >= ?")
+            params.append(since)
+        if before:
+            where.append("ts < ?")
+            params.append(before)
+        return (" WHERE " + " AND ".join(where)) if where else "", params
+
+    def audit(self, limit: int = 100, **filters) -> list[dict]:
+        """A page of the filtered log, newest first."""
+        where, params = self._audit_where(**filters)
+        return [dict(r) for r in self.conn.execute(
+            f"SELECT * FROM audit{where} ORDER BY ts DESC, rowid DESC LIMIT ?",
+            [*params, limit])]
+
+    def audit_totals(self, **filters) -> dict:
+        """What the WHOLE filtered set adds up to (J.4.3).
+
+        Computed here rather than over the returned page, which is the whole
+        point: a count of the rows on screen is a fact about the page size.
+
+        Spend and saving are separate sums over the same column, split by
+        `result`: a store hit's `usd` is the cost that was NOT paid (J.4.2),
+        and adding the two together would bill a deployment for the calls it
+        avoided.
+        """
+        where, params = self._audit_where(**filters)
+        marks = ",".join("?" * len(self.REFUSED))
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS calls,"
+            f" SUM(result IN ({marks}) OR error_code IS NOT NULL) AS errors,"
+            " SUM(result = 'cache') AS cached,"
+            " SUM(CASE WHEN result = 'cache' THEN 0 ELSE COALESCE(usd, 0) END) AS usd,"
+            " SUM(CASE WHEN result = 'cache' THEN COALESCE(usd, 0) ELSE 0 END) AS usd_saved,"
+            " SUM(CASE WHEN result = 'cache' THEN 0 ELSE COALESCE(tokens, 0) END) AS tokens,"
+            # A row whose provider published no catalogue: it has tokens
+            # and no price, and J.5.16 rule 4 needs to say so rather than
+            # render it free. NULL `priced` is a row that called no
+            # provider at all and SUM skips it, which is the wanted answer.
+            " SUM(priced = 0) AS unpriced,"
+            " COUNT(DISTINCT principal) AS people,"
+            " MIN(ts) AS first, MAX(ts) AS last"
+            f" FROM audit{where}", [*self.REFUSED, *params]).fetchone()
+        out = {k: row[k] for k in row.keys()}
+        for key in ("calls", "errors", "cached", "tokens", "unpriced",
+                    "people"):
+            out[key] = int(out[key] or 0)
+        for key in ("usd", "usd_saved"):
+            out[key] = round(float(out[key] or 0.0), 6)
+        return out
+
+    def audit_facets(self, *, forests=None, since=None, before=None,
+                     cap: int = 200) -> dict:
+        """The values the filters can actually take, over this caller's set.
+
+        Narrowed by the scope and the window and by nothing else: choosing a
+        primitive must not empty the list of primitives. A filter offering a
+        value that returns nothing teaches an operator that the log is empty
+        when it is the filter that is (J.4.3).
+        """
+        where, params = self._audit_where(forests=forests, since=since,
+                                          before=before)
+        out: dict[str, list[str]] = {}
+        for key, column in (("principals", "principal"), ("forests", "forest"),
+                            ("primitives", "primitive"),
+                            ("codes", "error_code")):
+            rows = self.conn.execute(
+                f"SELECT DISTINCT {column} AS v FROM audit{where}"
+                f" ORDER BY v LIMIT {int(cap)}", params)
+            out[key] = [r["v"] for r in rows if r["v"]]
+        return out
 
     # -- introspection ------------------------------------------------------
 

@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.72.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.73.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,41 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **The log that could not be read (spec J.4.2/J.4.3/J.5.16, v0.73)**: the
+  Audit console showed when/who/call/forest/`ok`/size/commit, and the
+  `QUANDO` column was BLANK — the row's field is `ts` and the console read
+  `e.at`, so the one column every row has always had rendered as nothing.
+  Under it, three facts the row never carried. **Cost**: J.4 has said since
+  v0.35 that a store hit is audited with "the cost avoided, never a second
+  spend", a sentence about a column that did not exist — the Station
+  computes the figure, attaches it to the response, keeps it in the answer
+  store and drops it when it writes the row. **Which refusal**: `result`
+  was `ok`/`error`, so somebody reaching for a scope they do not hold and a
+  mistyped id were the same row, which is the one distinction an access log
+  exists to make (`error_code` is the envelope's CODE and never its
+  message — a code is a closed vocabulary, a message carries hints naming
+  nodes, terms and tables). **The clock**: `ms` off the same Part D slice
+  `Server-Timing: vine` reports, `model_ms` beside it — apart for
+  J.10.4.1's reason. All nullable and emitted only when present: a
+  pre-v0.73 row reads them as ABSENT, because `0.0 ms` and `$0.00` are
+  claims and an old row makes neither. The route took `limit` and
+  `principal`, so every other filter was the reader's, applied over
+  whatever page they held — which makes every summary a summary of a PAGE,
+  a number that moves when somebody changes the limit. Now
+  `principal`/`forest`/`primitive`/`result`/`errors`/`since`/`until` are
+  applied in SQL before the page is cut, `totals` is computed over the
+  whole filtered set (spend and saving split by `result` off ONE column, so
+  nothing bills a deployment for the calls it avoided), and `filters` names
+  the values that actually occur — a console-side list of primitives goes
+  stale silently. `_audit_where` is built once and read three ways (page,
+  totals, facets): three descriptions of one filter agree only where
+  somebody compared them. The scope decides FIRST and in SQL — a total is a
+  finer size oracle than a page ever was. Console: four cards above the
+  table reading the host's totals (never a local sum), the argument digest
+  finally rendered (it is the only field saying WHICH node was read, it is
+  already digested, and hiding it made nothing private), every filter in
+  the address. Acceptance F.154-F.157.
 
 - **The helicopter does not land on the file (spec J.5.15 r5/r6/r9/r10,
   v0.72)**: the path panel drew ONE line from the root to each hit, up the

@@ -47,8 +47,9 @@ export function Card({ title, subtitle, actions, icon: Icon, children,
 
 /** The dashboard tile: label, one number, a line of context, tinted glyph. */
 export function Stat({ label, value, hint, icon: Icon, tone = 'accent' }) {
-  const tint = tone === 'muted'
-    ? 'bg-surface-2 text-text-3' : 'bg-accent-soft text-accent'
+  const tint = tone === 'muted' ? 'bg-surface-2 text-text-3'
+    : tone === 'danger' ? 'bg-danger-soft text-danger'
+    : 'bg-accent-soft text-accent'
   return (
     <div className="card p-4">
       <div className="flex items-start justify-between gap-3">

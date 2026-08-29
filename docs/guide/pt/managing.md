@@ -248,9 +248,10 @@ O console de Auditoria responde "quem viu o quê". As duas metades dele são
 guardadas onde cada uma pertence:
 
 - **Leituras** caem no log de auditoria: quem, qual floresta, qual chamada,
-  um digest dos argumentos, o tamanho do resultado, e quando. Corpos e
-  trechos nunca são copiados para lá o log registra acesso, não conteúdo
-  e o console diz isso na tela.
+  um digest dos argumentos, o tamanho do resultado, quando aconteceu,
+  quanto tempo a floresta levou, quanto o provedor cobrou, e qual recusa
+  foi quando houve recusa. Corpos e trechos nunca são copiados para lá o
+  log registra acesso, não conteúdo e o console diz isso na tela.
 - **Escritas** já são commits no histórico git da própria floresta, cada
   um carregando um trailer `station-principal: <name>` que nomeia o
   principal que agiu, então a história do que mudou é da própria floresta.
@@ -261,7 +262,24 @@ resposta servida do banco (veja abaixo) é auditada como tal a linha
 carrega o digest da chave da entrada, é marcada como servida do banco, e o
 custo que ela registra é o custo *evitado*, nunca um segundo gasto.
 
-O log é filtrável por pessoa, e lê-lo exige a capacidade `admin`.
+A tela abre com quatro números sobre o conjunto que você está olhando:
+quantas chamadas, quantas foram recusadas, quanto foi gasto, e quanto o
+banco de respostas tornou desnecessário. Esses dois números de dinheiro
+ficam separados de propósito o custo de um acerto no banco é dinheiro que
+*não* foi pago, e um único "custo" cobrindo os dois é uma conta que ninguém
+consegue conciliar. Uma chamada cujo provedor não publica preço aparece
+como sem preço, nunca como grátis.
+
+O filtro é por pessoa, por chamada, por floresta, por desfecho (tudo, só as
+recusadas, só o que veio do banco) e por data, e todo filtro fica no
+endereço, então uma visão filtrada é um link que você manda para quem
+precisa olhar. Os quatro números descrevem o conjunto filtrado e não a
+página de linhas abaixo deles um resumo que contasse as linhas na tela
+mudaria quando você mudasse quantas linhas cabem.
+
+Lê-lo exige a capacidade `admin`, e ele mostra só as florestas que você
+administra os totais são estreitados do mesmo jeito, porque contar uma
+floresta é um jeito de descobrir o tamanho dela.
 
 ## Otimizar
 
