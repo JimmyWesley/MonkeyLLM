@@ -380,16 +380,19 @@ export const api = {
   // J.13.6 (v0.61): re-derive what ingest would derive today, from the
   // passports. Not a job — it runs on the lane and the caller waits, like
   // the rebuild beside it.
+  // `body` is the OBJECT: `request` stringifies it (line 63). Passing a
+  // string here encoded it twice, so the Station's `request.json()` handed
+  // the route a `str` and `body.get(...)` raised — a 500 on every press of
+  // the Re-derive button. `reindex` below is what the shape should be.
   recurate: (forest, derive = ['aliases']) =>
-    request('/v1/admin/recurate', { method: 'POST',
-                                    body: JSON.stringify({ forest, derive }) }),
+    request('/v1/admin/recurate', { method: 'POST', body: { forest, derive } }),
   // J.13.7 (v0.61): what is in the upload staging area that is not a
   // document, and the sweep for it. One resource, two verbs — the same
   // question asked twice.
   staging: (forest) =>
     request(`/v1/admin/staging?forest=${encodeURIComponent(forest)}`),
   clearStaging: (forest) => request('/v1/admin/staging', { method: 'POST',
-                                    body: JSON.stringify({ forest }) }),
+                                                          body: { forest } }),
   reindex: (forest) => request('/v1/admin/reindex', { method: 'POST',
                                                       body: { forest } }),
 }

@@ -1,6 +1,7 @@
 {
   "explore.children": "Dentro deste galho",
   "explore.coverage": "Cobertura",
+  "explore.coverage_counts": "{notes} notas · {branches} galhos",
   "explore.degree": "Trilhas",
   "explore.edges": "Trilhas a partir daqui",
   "explore.edges_hint": "Só aparecem trilhas cuja outra ponta está dentro do seu escopo.",

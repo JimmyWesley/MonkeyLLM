@@ -299,9 +299,16 @@ function NodeDetail({ forest, grant, id, digest, setNode, goto }) {
           <Metric label={t('explore.updated')} value={d.updated || '—'} />
         </div>
 
+        {/* `coverage` is C.2's OBJECT — `{notes, branches}` — and it was
+            rendered straight into the paragraph, which React refuses as a
+            child (#31). Every branch carries it and no leaf does, so this
+            console crashed on every branch and never on a leaf: the tree
+            mode, whose whole job is branches, could not open one. */}
         {d.coverage && (
           <p className="mt-3 text-[12px] text-text-3">
-            <span className="font-medium">{t('explore.coverage')}:</span> {d.coverage}
+            <span className="font-medium">{t('explore.coverage')}:</span>{' '}
+            {t('explore.coverage_counts', { notes: d.coverage.notes ?? 0,
+                                            branches: d.coverage.branches ?? 0 })}
           </p>
         )}
 

@@ -482,9 +482,16 @@ def _server_timing(clocks: dict) -> str:
     can never say more than the response it rides on. `cache` appears only
     when the answer store was consulted (J.10.7); on a hit `model` is
     absent, because no provider ran.
+
+    `embed` and `dense` (J.10.4.1, v0.71) are SHARES OF `vine`, not clocks
+    beside it: they name what a hybrid entry spent on a provider round trip
+    and on the vector scan, and `vine` still reports the whole engine span.
+    A consumer that wants the forest's own work subtracts them; one that
+    sums every clock to reconstruct the request must not.
     """
     return ", ".join(f"{name};dur={clocks[name]}"
-                     for name in ("vine", "model", "cache", "host") if name in clocks)
+                     for name in ("vine", "embed", "dense", "model", "cache", "host")
+                     if name in clocks)
 
 
 def _no_such_endpoint(path: str) -> JSONResponse:
@@ -670,6 +677,30 @@ ENV_PROVIDERS = (
     ("embed", "MONKEYLLM_EMBED_PROVIDER", "MONKEYLLM_EMBED_ENDPOINT",
      "MONKEYLLM_EMBED_API_KEY"),
 )
+
+
+def _json_object(parsed):
+    """A request body is an OBJECT or it is `E_SCHEMA` (C.12).
+
+    Every route here reads its arguments with `body.get(...)`, so a body that
+    parses as a bare string, list or number reached that call as whatever it
+    was and raised `AttributeError` — answered as `E_INTERNAL`/500, which
+    tells the caller "this is a defect on the server" about a malformed
+    request they sent. A double-encoded body is the way this actually
+    happens: `JSON.stringify` applied twice parses back to a `str`, which is
+    exactly the bug the Studio console had on `recurate` and `clearStaging`.
+
+    Returns the dict, or raises the refusal that names what arrived.
+    """
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict):
+        raise VineError(
+            E_SCHEMA,
+            f"request body must be a JSON object, got {type(parsed).__name__}",
+            hint="Send the arguments as an object, e.g. {\"forest\": \"...\"}. "
+                 "A body encoded to JSON twice arrives as a string.")
+    return parsed
 
 
 def _name_from_endpoint(endpoint: str) -> str:
@@ -1468,11 +1499,24 @@ def build_app(
         finally:
             if clocks is not None:
                 tracer, mark = sample.get("tracer"), sample.get("mark", 0)
-                engine = float(sum(e["elapsed_ms"] for e in tracer.events[mark:])
-                               if tracer is not None else 0.0)
+                slice_ = tracer.events[mark:] if tracer is not None else []
+                engine = float(sum(e["elapsed_ms"] for e in slice_))
                 model = sample.get("model")
                 store_ms = sample.get("cache")
                 clocks["vine"] = round(engine, 3)
+                # J.10.4.1 (v0.71): the dense layer's two shares, as clocks.
+                # A single primitive gets no `trace` — the body would carry a
+                # one-step list saying what the header already says — so
+                # without these a bare hybrid `locate` had nowhere to report
+                # that 68 of its 80 ms were a vector scan.
+                #
+                # They are shares INSIDE `vine`, never beside it: `host`
+                # keeps subtracting `engine` alone, and a client summing
+                # every clock must not add these twice.
+                for key, field in (("embed", "embed_ms"), ("dense", "dense_ms")):
+                    share = sum(e.get(field) or 0.0 for e in slice_)
+                    if share:
+                        clocks[key] = round(share, 3)
                 if model is not None:
                     clocks["model"] = round(model, 3)
                 if store_ms is not None:
@@ -1836,7 +1880,10 @@ def build_app(
              # The K.2 embed's share of this step (v0.68): a provider round
              # trip inside the engine's span, named so the panel never
              # reads it as the forest's own work.
-             **({"embed_ms": e["embed_ms"]} if e.get("embed_ms") is not None else {})}
+             **({"embed_ms": e["embed_ms"]} if e.get("embed_ms") is not None else {}),
+             # The Canopy scan's share (v0.71): the same discipline, the
+             # other provider-less half of a hybrid entry.
+             **({"dense_ms": e["dense_ms"]} if e.get("dense_ms") is not None else {})}
             for e in (events if events is not None
                       else vine.tracer.events[mark:])
         ]
@@ -1864,6 +1911,9 @@ def build_app(
         embed_total = round(sum(s.get("embed_ms", 0.0) for s in steps), 1)
         if embed_total:
             result["trace"]["embed_ms"] = embed_total
+        dense_total = round(sum(s.get("dense_ms", 0.0) for s in steps), 1)
+        if dense_total:
+            result["trace"]["dense_ms"] = dense_total
         return result
 
     # The answer store's per-forest switches (J.10.7). `ttl_hours` is
@@ -3084,7 +3134,7 @@ def build_app(
         if not setup_open():
             return _no_such_endpoint("/auth/setup")
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except json.JSONDecodeError:
             return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
         username = str(body.get("username") or "").strip()
@@ -3138,7 +3188,7 @@ def build_app(
         never what it may do.
         """
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except json.JSONDecodeError:
             return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
         username = str(body.get("username") or "").strip()
@@ -3186,7 +3236,7 @@ def build_app(
         use, so it never adds a capability and never outlives a revocation.
         """
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except json.JSONDecodeError:
             return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
         username = str(body.get("username") or "").strip()
@@ -3279,7 +3329,7 @@ def build_app(
             return JSONResponse({"keys": registry.keys_of(visible),
                                  "principals": visible})
 
-        body = await request.json()
+        body = _json_object(await request.json())
         if body.get("revoke"):
             # Authorize BEFORE the effect. Revoking first and checking after
             # would answer 403 while the token was already dead — a refusal
@@ -3334,7 +3384,7 @@ def build_app(
         mask = mask_of(request)
         if mask is not None and "admin" not in mask:
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
-        body = await request.json()
+        body = _json_object(await request.json())
         target = str(body.get("principal") or "").strip()
         if not target or not administers_fully(principal, target):
             return _envelope(VineError(
@@ -3363,7 +3413,7 @@ def build_app(
         if err:
             return err
         forest = request.query_params.get("forest")
-        body = await request.json() if request.method == "POST" else {}
+        body = _json_object(await request.json() if request.method == "POST" else {})
         if not forest:
             forest = body.get("forest")
         if not is_admin(principal, forest, mask=mask_of(request)):
@@ -3457,7 +3507,7 @@ def build_app(
                 })
             return JSONResponse({"people": people, "forests": sorted(mine)})
 
-        body = await request.json()
+        body = _json_object(await request.json())
         target = str(body.get("principal") or "").strip()
         if not target:
             return _envelope(VineError(E_SCHEMA, "principal is required"))
@@ -3610,7 +3660,7 @@ def build_app(
             return _envelope(
                 VineError(E_FORBIDDEN, "creating a forest requires the 'admin' "
                                        "capability on an existing forest"), 403)
-        body = await request.json()
+        body = _json_object(await request.json())
         forest_id = str(body.get("id") or "").strip()
         title = str(body.get("title") or "").strip()
         if not FOREST_ID.match(forest_id):
@@ -3764,7 +3814,7 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
-        body = await request.json()
+        body = _json_object(await request.json())
         forest = body.get("forest")
         gate = admin_gate(principal, forest, request)
         if gate is not None:
@@ -3840,7 +3890,7 @@ def build_app(
                 E_FORBIDDEN, "managing providers requires authority over every forest",
                 hint="A provider serves every forest; administering one of "
                      "several does not cover it."), 403)
-        body = await request.json()
+        body = _json_object(await request.json())
         try:
             if body.get("remove"):
                 registry.delete_provider(body["name"])
@@ -3882,7 +3932,7 @@ def build_app(
                      "several does not cover it."), 403)
         from monkeyllm_station import inference
 
-        body = await request.json()
+        body = _json_object(await request.json())
         secret = registry.provider_secret(body.get("name", ""))
         stored_endpoint = (secret or {}).get("endpoint")
         endpoint = body.get("endpoint") or stored_endpoint
@@ -3920,7 +3970,7 @@ def build_app(
             if not is_admin(principal, forest, mask=mask_of(request)):
                 return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
             return JSONResponse({"bindings": registry.bindings(forest)})
-        body = await request.json()
+        body = _json_object(await request.json())
         forest = body.get("forest")
         if not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
@@ -4173,7 +4223,7 @@ def build_app(
             })
 
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         if not isinstance(body, dict):
@@ -4246,7 +4296,7 @@ def build_app(
             return JSONResponse({"deleted": hook["id"]})
 
         try:
-            body = await request.json() if await request.body() else {}
+            body = _json_object(await request.json() if await request.body() else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         action = str(body.get("action") or "").strip()
@@ -4610,7 +4660,7 @@ def build_app(
                 E_FORBIDDEN, "'share' requires the 'read' capability",
                 hint=f"This principal holds: {sorted(policy.caps)}."), 403)
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except Exception:
             body = None
         if not isinstance(body, dict) or not isinstance(body.get("node"), str) \
@@ -4838,7 +4888,7 @@ def build_app(
         if err:
             return err
         try:
-            body = await request.json() if await request.body() else {}
+            body = _json_object(await request.json() if await request.body() else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
@@ -4901,7 +4951,7 @@ def build_app(
         if err:
             return err
         try:
-            body = await request.json() if await request.body() else {}
+            body = _json_object(await request.json() if await request.body() else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
@@ -4990,7 +5040,7 @@ def build_app(
             return err
         clearing = request.method == "POST"
         try:
-            body = await request.json() if (clearing and await request.body()) else {}
+            body = _json_object(await request.json() if (clearing and await request.body()) else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
@@ -5113,7 +5163,7 @@ def build_app(
         if err:
             return err
         try:
-            body = await request.json() if await request.body() else {}
+            body = _json_object(await request.json() if await request.body() else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
@@ -5159,7 +5209,7 @@ def build_app(
             forest = request.query_params.get("forest") or ""
         else:
             try:
-                body = await request.json() if await request.body() else {}
+                body = _json_object(await request.json() if await request.body() else {})
             except json.JSONDecodeError as e:
                 return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
             forest = str(body.get("forest") or "")
@@ -5239,7 +5289,7 @@ def build_app(
             forest = request.query_params.get("forest") or ""
         else:
             try:
-                body = await request.json() if await request.body() else {}
+                body = _json_object(await request.json() if await request.body() else {})
             except json.JSONDecodeError as e:
                 return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
             forest = str(body.get("forest") or "")
@@ -5678,8 +5728,20 @@ def build_app(
             500,
         )
 
+    async def refused(request: Request, exc: VineError) -> JSONResponse:
+        """A `VineError` that reaches the top is still the caller's answer.
+
+        Without this, the only registered handler was `Exception`, so a
+        refusal raised outside a route's own try/except was re-labelled
+        `E_INTERNAL`/500 — telling the caller "this is a defect on the
+        server" about their own malformed argument. The code the refusal
+        already carries decides the status (C.12).
+        """
+        return _envelope(exc, STATUS_BY_CODE.get(exc.code, 400))
+
     app = Starlette(routes=routes, lifespan=lifespan,
-                    exception_handlers={Exception: unhandled},
+                    exception_handlers={VineError: refused,
+                                        Exception: unhandled},
                     middleware=[Middleware(SecurityHeaders, csp=studio_csp())])
     app.state.pool = pool
     app.state.registry = registry
