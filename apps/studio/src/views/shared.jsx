@@ -114,14 +114,21 @@ export function TraceSteps({ steps }) {
   // the whole span plus the named share; the netting is this panel's.
   const round3 = (n) => Math.round(n * 1000) / 1000
   const embedTotal = steps.reduce((n, s) => n + (s.embed_ms || 0), 0)
-  const rows = steps.map((s) => ({
-    ...s, ms: round3(s.ms - Math.min(s.embed_ms || 0, s.ms)),
-  }))
-  if (embedTotal > 0) {
-    const tail = rows.length && rows[rows.length - 1].step === 'model'
-      ? rows.length - 1 : rows.length
-    rows.splice(tail, 0, { step: 'embed', ms: round3(embedTotal) })
-  }
+  // The Canopy scan (v0.71), on the same rule and for the same reason. It
+  // is the half nobody had named: on a warm query embed the round trip is a
+  // memo hit worth 0.1 ms and the scan is 68 ms of local CPU over every
+  // node vector, so `locate` read as 70 ms of forest work that the forest
+  // never did. Two rows, not one, because a provider and a process are
+  // tuned differently.
+  const denseTotal = steps.reduce((n, s) => n + (s.dense_ms || 0), 0)
+  const rows = steps.map((s) => {
+    const share = Math.min((s.embed_ms || 0) + (s.dense_ms || 0), s.ms)
+    return { ...s, ms: round3(s.ms - share) }
+  })
+  const tailAt = () => (rows.length && rows[rows.length - 1].step === 'model'
+    ? rows.length - 1 : rows.length)
+  if (denseTotal > 0) rows.splice(tailAt(), 0, { step: 'dense', ms: round3(denseTotal) })
+  if (embedTotal > 0) rows.splice(tailAt(), 0, { step: 'embed', ms: round3(embedTotal) })
   // Proportional to the slowest step, not to the total: the model dwarfs
   // everything, and a bar chart scaled to it would render every retrieval
   // step as the same invisible sliver.

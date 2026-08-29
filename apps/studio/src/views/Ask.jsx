@@ -293,24 +293,6 @@ export default function Ask({ forest, grant, me, goto }) {
           the address bar can name. */}
       <Card title={t('ask.title')} subtitle={t('ask.sub')} icon={AskIcon}
             actions={<>
-              {/* J.5.15 rule 10: the panel's own switch, compact, and here
-                  rather than in the form below — the drawing is not a
-                  parameter of the question (it changes nothing about what is
-                  asked or what is charged), and a control the answer pushes
-                  off the screen is a control nobody finds when the panel is
-                  what they want to hide. Still never the walk's switch
-                  (rule 1), and still a browser preference (rule 8). */}
-              <button type="button" aria-pressed={showGraph}
-                      className={`btn btn-sm btn-ghost !px-2
-                        ${showGraph ? 'bg-accent-soft text-accent' : 'text-text-3'}`}
-                      title={t('ask.graph_hint')} aria-label={t('ask.graph')}
-                      onClick={() => {
-                        const v = !showGraph
-                        setShowGraph(v)
-                        savePrefs({ graph: v })
-                      }}>
-                <GraphIcon size={15} />
-              </button>
               <button type="button" className="btn btn-sm btn-ghost !px-2"
                       title={t('ask.history_title')} aria-label={t('ask.history_title')}
                       onClick={() => setHistory(true)}>
@@ -365,6 +347,18 @@ export default function Ask({ forest, grant, me, goto }) {
                     : t('ask.reply_auto')}
                 </span>
               </label>
+              {/* J.5.15 rule 10, kept by moving rather than by staying: the
+                  drawing is still NOT a parameter of the question — it is
+                  not in the flags list below, which is "what the question is
+                  asked with" — and it is still never the walk's switch
+                  (rule 1) and still a browser preference (rule 8). What
+                  changed is that an icon alone in the header was a control
+                  nobody found. This row sits above the answer and is not
+                  pushed off screen by it, which was the reason the header
+                  was chosen in the first place. */}
+              <Toggle compact icon={GraphIcon} checked={showGraph}
+                      label={t('ask.graph')} hint={t('ask.graph_hint')}
+                      onChange={(v) => { setShowGraph(v); savePrefs({ graph: v }) }} />
             </div>
             {/* A keyboard shortcut is not advice on a phone. */}
             <span className="hidden text-[11.5px] text-text-3 sm:inline">
@@ -569,6 +563,7 @@ export default function Ask({ forest, grant, me, goto }) {
         <AnswerTrail forest={forest}
                      evidence={drawn}
                      cited={Array.isArray(result?.hops) ? result.evidence : undefined}
+                     hops={result?.hops}
                      trace={result?.trace}
                      live={!result && !!live?.length}
                      busy={busy} />
@@ -1099,9 +1094,19 @@ function Explain({ trace, wall, hybrid, cost, timing }) {
           embed rides inside it, so printing it whole reads a provider's
           8 s as the forest's — the exact misreading this panel exists to
           prevent, raised by the panel itself. */}
-      <div className={`grid gap-2 ${trace.embed_ms ? 'grid-cols-3' : 'grid-cols-2'}`}>
+      {/* Two columns, never four. The panel lives in a narrow rail, and a
+          fourth column there does not make the tiles smaller — it clips the
+          LABELS, which is the half that says what the number is. Two and
+          two wraps to a second row and every caption stays whole. Three
+          tiles take the same grid and leave one cell empty, which reads as
+          a grid with three things in it rather than as a broken row. */}
+      <div className="grid grid-cols-2 gap-2">
         <Metric label={t('explain.retrieval')} tone="accent"
-                value={`${Math.round((trace.retrieval_ms - (trace.embed_ms || 0)) * 10) / 10} ms`} />
+                value={`${Math.round((trace.retrieval_ms - (trace.embed_ms || 0)
+                                      - (trace.dense_ms || 0)) * 10) / 10} ms`} />
+        {trace.dense_ms > 0 && (
+          <Metric label={t('explain.dense')} value={`${trace.dense_ms} ms`} />
+        )}
         {trace.embed_ms > 0 && (
           <Metric label={t('explain.embed')} value={`${trace.embed_ms} ms`} />
         )}

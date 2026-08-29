@@ -156,6 +156,10 @@ export default function Playground({ forest, grant }) {
   // unlike a rate derived from one sample, it does not move between clicks.
   // Branches count — `locate` searches their metadata like any other node's,
   // and on the test forest the top hit for most queries IS one.
+  // The header's shares (J.10.4.1). Absent on a lexical call, so both
+  // default to zero and every non-hybrid response renders as before.
+  const denseShare = state.timing?.dense || 0
+  const embedShare = state.timing?.embed || 0
   const haystack = SEARCH_OPS.includes(op) && tree.data
     ? `${tree.data.nodes + tree.data.branches.length}${tree.data.partial ? '+' : ''}`
     : null
@@ -242,11 +246,28 @@ export default function Playground({ forest, grant }) {
                     describe the call. Without the header there is no engine
                     figure to lead with, so the old number stays — under its
                     own, honest name. */}
+                {/* J.10.4.1 (v0.71): `vine` is the whole engine span and the
+                    dense layer's two shares ride INSIDE it, so the engine
+                    tile subtracts them and each gets its own. Without this a
+                    bare hybrid `locate` read as 109 ms of forest work when
+                    68 of those were a vector scan and the forest's own part
+                    was ~1 ms — the same misreading the Ask console fixed,
+                    arriving here through the header instead of the trace
+                    because a single primitive carries no trace. */}
                 <div className={`mb-3 grid grid-cols-2 gap-2 ${
-                  haystack ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+                  denseShare || embedShare ? 'sm:grid-cols-3'
+                    : haystack ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
                   <Metric tone="accent"
                           label={t(state.timing ? 'playground.engine' : 'playground.latency')}
-                          value={fmtMs(state.timing ? state.timing.vine : state.ms)} />
+                          value={fmtMs(state.timing
+                            ? state.timing.vine - denseShare - embedShare
+                            : state.ms)} />
+                  {denseShare > 0 && (
+                    <Metric label={t('explain.dense')} value={fmtMs(denseShare)} />
+                  )}
+                  {embedShare > 0 && (
+                    <Metric label={t('explain.embed')} value={fmtMs(embedShare)} />
+                  )}
                   {/* Not a rate: a rate off one sample swung twentyfold
                       between clicks, and it was read as seconds. This is the
                       haystack, it is the same number every time, and it is

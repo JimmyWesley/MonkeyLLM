@@ -44,6 +44,7 @@ REPO = Path(__file__).resolve().parents[1]
 STUDIO = REPO / "apps" / "studio"
 CHECKER = STUDIO / "check-trail.mjs"
 ASK = STUDIO / "src" / "views" / "Ask.jsx"
+TRAIL = STUDIO / "src" / "views" / "trail.jsx"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
@@ -194,3 +195,109 @@ def test_the_fallback_dies_when_the_answer_lands():
     assert "clearTimeout(" in settle.group(1), (
         "the answer settles without cancelling the preview fallback: a "
         "stored answer would pay for a retrieval it never draws")
+
+
+def _draw_block(source: str, anchor: str, span: int = 520) -> str:
+    """The source right after `anchor` — the loop that draws one line.
+
+    Named apart from `_block` above, which answers a different question
+    about a different file: two helpers sharing a name is how a passing
+    test starts failing for a reason that has nothing to do with it.
+    """
+    i = source.index(anchor)
+    return source[i:i + span]
+
+
+def test_the_helicopter_stops_at_the_branch():
+    """Two lines, and the split is WHERE the flight ends.
+
+    This panel spent two revisions saying the wrong thing, and both were the
+    same wrong thing: that the agent arrived, in one move, on the exact file
+    it needed. First as one amber chain from the root, then as one chain
+    that marched. The product does not claim that — the helicopter puts you
+    near, and the last step in is yours.
+
+    So the blue line is the flight and it STOPS at the branch: a segment
+    whose destination is a marked node is not its to draw. The amber is the
+    monkey's own movement and means that in both modes — on a sweep, the one
+    step into the opened file; on a walk, the real hop sequence.
+    """
+    source = TRAIL.read_text(encoding="utf-8")
+    assert "pal.drop" in source and "pal.trail" in source, \
+        "the two lines no longer come from two tokens"
+    assert re.search(r"out\.drop = channel\('graph-drop'", source), \
+        "the flight has no colour of its own"
+
+    # The split rule itself: destination marked => the monkey's leg.
+    assert re.search(r"legOf = \(seg\) => \(marked\.has\(seg\.b\)", source), \
+        "nothing decides where the flight ends"
+    # A window after the anchor, not a brace match: the block is long and
+    # counting braces from a regex is how a test starts failing for reasons
+    # that have nothing to do with what it checks.
+    fly = _draw_block(source, "ctx.strokeStyle = pal.drop")
+    assert "legOf(seg) !== 'fly'" in fly, \
+        "the flight draws legs that belong to the walk"
+
+    # Both march: the eye must read two movements, not a movement and a wire.
+    assert len(re.findall(r"ctx\.lineDashOffset = -march", source)) >= 2, \
+        "one of the two lines is static"
+    assert re.search(r"trailRef\.current\.segments\.length\s*&&", source), \
+        "the march is not gated on there being anything to draw"
+
+
+def test_the_drops_leave_together():
+    """Several hits are several drops leaving the base at once.
+
+    The reveal used to stagger each leg by its depth, so a two-hit answer
+    drew one chain and then the other and read as an order the retrieval
+    never had — `locate` returns a ranked set, not a sequence of journeys.
+    One progress value, shared by every leg.
+    """
+    source = TRAIL.read_text(encoding="utf-8")
+    assert re.search(r"const flown = clamp01\(", source), "the flight has no clock"
+    # The tell-tale of the old behaviour: progress computed FROM the leg.
+    fly = _draw_block(source, "ctx.strokeStyle = pal.drop")
+    assert "seg.depth" not in fly, \
+        "the flight is still staggered by depth; drops must leave together"
+
+
+def test_a_sweep_draws_no_route():
+    """`hopSegments` is empty without hops, and an absent line is the true
+    statement that no walking occurred. Asserted on the rule rather than on
+    the canvas: a sweep passes no `hops`, so there is nothing to collapse."""
+    source = (STUDIO / "src" / "trailmap.js").read_text(encoding="utf-8")
+    fn = re.search(r"export function hopSegments\(hops, byId\) \{(.*?)\n\}",
+                   source, re.S)
+    assert fn, "hopSegments is gone"
+    body = fn.group(1)
+    # Only a hop that NAMES one node is a position. A hop that returned a
+    # set is the agent looking around from where it already stands, and a
+    # line to the first of ten results is a step nobody took.
+    assert "STANDS_ON.has(hop.tool)" in body, body
+    assert re.search(r"STANDS_ON = new Set\(\['move', 'pick', 'look'\]\)", source)
+    # Standing still twice is one place.
+    assert re.search(r"stops\[stops\.length - 1\]\.id === id", body), body
+
+
+def test_every_node_the_trail_touches_is_named():
+    """A waypoint with no name is a shape, not a route.
+
+    The captions used to come from `marked` alone — the nodes the answer
+    stopped at — so the branches it climbed THROUGH to reach them were
+    anonymous. Half of "where did this answer go" is the way there.
+    """
+    source = TRAIL.read_text(encoding="utf-8")
+    passed = re.search(r"const passed = new Map\(\)(.{0,600}?)\n\s*if \(marked\.size",
+                       source, re.S)
+    assert passed, "the through-nodes are no longer collected"
+    body = passed.group(1)
+    # Built from the segments, which is what "passed through" means, and
+    # never double-counting a node the answer actually stopped at.
+    assert "for (const seg of segments)" in body, body
+    assert "marked.has(id)" in body, body
+    # Both sets reach the caption pass, and a hit stays visibly a hit.
+    rows = re.search(r"const rows = \[(.{0,400}?)\]\n", source, re.S)
+    assert rows and "marked" in rows.group(1) and "passed" in rows.group(1), \
+        "the caption pass no longer reads both sets"
+    assert re.search(r"hit \? at : at \* 0\.\d+", source), \
+        "a way-through caption must not read as loudly as a result"

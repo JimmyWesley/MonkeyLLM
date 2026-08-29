@@ -201,6 +201,44 @@ export function mergeEvidence(...lists) {
   return [...byId.values()]
 }
 
+/** Where the agent actually STOOD, hop after hop (J.5.15).
+ *
+ *  This is the other line, and it is a different claim from `trailSegments`.
+ *  That one climbs `parent` from every hit to the root: it is an ADDRESS —
+ *  "the node the entry search found lives in this branch" — and it exists
+ *  even on a sweep, which never moves at all. This one is a ROUTE, and only
+ *  a walk has one.
+ *
+ *  A position is a hop that names ONE node: `move`, `pick`, `look`. A hop
+ *  that returned a set (`locate`, `sniff`, `scan`) is the agent looking
+ *  around from where it already is, not going somewhere — drawing a line to
+ *  the first of ten results would invent a step it never took, which is the
+ *  exact misreading the two-line split exists to remove.
+ *
+ *  Consecutive hops on the same node collapse: reading a node and then
+ *  picking it is one place, twice.
+ */
+const STANDS_ON = new Set(['move', 'pick', 'look'])
+
+export function hopSegments(hops, byId) {
+  const stops = []
+  for (const hop of hops || []) {
+    if (!hop?.ok || !STANDS_ON.has(hop.tool)) continue
+    const id = typeof hop.id === 'string' && hop.id ? hop.id : null
+    if (!id || !byId.has(id)) continue
+    if (stops.length && stops[stops.length - 1].id === id) continue
+    stops.push({ id, n: hop.n })
+  }
+  const segments = []
+  for (let i = 1; i < stops.length; i += 1) {
+    // `depth` is the step number, so the reveal walks them in the order
+    // they happened rather than by how deep in the tree they sit.
+    segments.push({ a: stops[i - 1].id, b: stops[i].id, depth: i - 1,
+                    stage: 0 })
+  }
+  return { segments, stops, deepest: Math.max(0, stops.length - 2) }
+}
+
 /** Root-to-node chains, deduplicated into segments.
  *
  *  Structure comes from `parent`, which J.11 has already filtered to what

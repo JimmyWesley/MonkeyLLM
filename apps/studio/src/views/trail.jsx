@@ -76,7 +76,7 @@ import { Card, ErrorNote, Skeleton } from '../design/ui.jsx'
 import { Graph as GraphIcon, Play } from '../design/icons.jsx'
 import { hrefFor, navigate } from '../router.js'
 import {
-  STAGES, boxOf, markNodes, reachedStages, shortName, stageCounts,
+  STAGES, boxOf, hopSegments, markNodes, reachedStages, shortName, stageCounts,
   stagesFor, trailSegments,
 } from '../trailmap.js'
 import { groupOf, groupPalette, seed, step } from './graph.jsx'
@@ -86,6 +86,12 @@ const STAGE_MS = 620      // one stage's share of the reveal
 const FORCE = { repel: 1, distance: 1.15, attract: 1, center: 1 }
 const PAD = 34            // camera margin, in css pixels
 const LABEL_LIMIT = 22    // past this a caption per hit whites out the map
+// The walking dashes: short mark, longer gap, so the eye reads footsteps
+// rather than a dotted rule. `MARCH_PX_PER_S` is deliberately slow — this
+// panel sits beside a real millisecond figure (J.5.15) and an animation
+// that hurries makes the retrieval look like the thing taking the time.
+const TRAIL_DASH = [3, 6]
+const MARCH_PX_PER_S = 26
 const TAU = Math.PI * 2
 const ZOOM_STEP = 1.15    // one mouse notch
 const ZOOM_MIN = 0.5      // times the fitted scale — never an absolute one:
@@ -135,12 +141,13 @@ function readPalette() {
   // read any more: nothing here draws one.
   out.dot = channel('text-3', 'rgb(120 132 124)')
   out.trail = channel('graph-trail', 'rgb(202 146 18)')
+  out.drop = channel('graph-drop', 'rgb(38 150 190)')
   out.label = channel('text-2', 'rgb(90 100 92)')
   return out
 }
 
 export default function AnswerTrail({ forest, evidence, cited, trace, busy,
-                                      live = false }) {
+                                      hops, live = false }) {
   const { t } = useI18n()
   const { resolved } = useTheme()
   const box = useRef(null)
@@ -174,6 +181,10 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
     return out
   }, [map.data])
   const trail = useMemo(() => trailSegments(marks, byId), [marks, byId])
+  // The walk's own line (J.5.15): where the agent STOOD, in the order it
+  // stood there. Empty on a sweep, which is the honest answer — a sweep
+  // does not move, and the amber line above is its address, not its route.
+  const route = useMemo(() => hopSegments(hops, byId), [hops, byId])
 
   // Which stages this run can have, what they hold, and how far the reveal
   // may run — all three decided in `trailmap.js`, where F.137 can ask.
@@ -206,9 +217,11 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
 
   const paletteRef = useRef(palette)
   const trailRef = useRef(trail)
+  const routeRef = useRef(route)
   const marksRef = useRef(marks)
   useEffect(() => { paletteRef.current = palette; needsDraw.current = true }, [palette])
   useEffect(() => { trailRef.current = trail; needsDraw.current = true }, [trail])
+  useEffect(() => { routeRef.current = route; needsDraw.current = true }, [route])
   useEffect(() => { marksRef.current = marks; needsDraw.current = true }, [marks])
 
   /* -- camera ------------------------------------------------------------- */
@@ -226,12 +239,21 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
     if (!el || !s.nodes.length || cam.current.manual) return
     const whole = boxOf(s.nodes)
     if (!whole) return
+    // Only what has been REVEALED so far (v0.71). Framing the final set
+    // from the first frame makes the camera answer a question the viewer
+    // has not been asked yet: everything is already in shot, so nothing
+    // that follows is a discovery. Leaning on the growing set instead makes
+    // the view travel — it tightens as the answer narrows, which is the
+    // thing being watched.
+    const at = anim.current.pos
     const touched = []
-    for (const id of marksRef.current.keys()) {
+    for (const [id, stages] of marksRef.current) {
+      if (Math.min(...stages) > at) continue
       const n = s.nodes[s.index[id]]
       if (n) touched.push(n)
     }
     for (const seg of trailRef.current.segments) {
+      if (seg.stage > at) continue
       for (const id of [seg.a, seg.b]) {
         const n = s.nodes[s.index[id]]
         if (n) touched.push(n)
@@ -384,6 +406,7 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
     const pal = paletteRef.current
     const v = cam.current
     const pos = anim.current.pos
+    const march = anim.current.march || 0
     const { segments, deepest } = trailRef.current
     const marked = marksRef.current
     const X = (n) => n.x * v.k + v.x
@@ -444,23 +467,84 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
     /* 2. The trail, crawling outward from the root. Each segment takes its
           own slice of its stage's reveal, ordered by depth, so the line
           travels through the forest instead of appearing on it. */
+    /* 2a. The HELICOPTER (blue): base to the nearest BRANCH, and it stops
+           there. The segment that would enter the document is not drawn
+           here — that last step is the monkey's, below. Drawing the whole
+           chain in one colour was the bug: it read as "flown straight onto
+           the exact file", which is the claim the product does not make and
+           the panel was making for it.
+
+           Every leg advances TOGETHER, not staggered by depth: several hits
+           are several drops leaving the base at once, and revealing them
+           one after another invented an order the retrieval never had. */
+    const legOf = (seg) => (marked.has(seg.b) ? 'walk' : 'fly')
+    const flown = clamp01(pos / Math.max(1, STAGES.length - 1))
     ctx.lineWidth = 1.9
-    ctx.strokeStyle = pal.trail
+    ctx.setLineDash(TRAIL_DASH)
+    ctx.strokeStyle = pal.drop
+    ctx.lineDashOffset = -march
     for (const seg of segments) {
-      const stageAt = reveal(seg.stage)
-      if (stageAt <= 0) continue
-      const local = clamp01(stageAt * (deepest + 1) - seg.depth)
-      if (local <= 0) continue
+      if (legOf(seg) !== 'fly') continue
+      if (reveal(seg.stage) <= 0) continue
       const a = s.nodes[s.index[seg.a]]
       const b = s.nodes[s.index[seg.b]]
       if (!a || !b) continue
       const ax = X(a); const ay = Y(a)
-      ctx.globalAlpha = 0.34 + 0.5 * local
+      ctx.globalAlpha = 0.30 + 0.5 * flown
       ctx.beginPath()
       ctx.moveTo(ax, ay)
-      ctx.lineTo(ax + (X(b) - ax) * local, ay + (Y(b) - ay) * local)
+      ctx.lineTo(ax + (X(b) - ax) * flown, ay + (Y(b) - ay) * flown)
       ctx.stroke()
     }
+
+    /* 2b. The MONKEY (amber): its own movement, and the colour means that
+           in BOTH modes — which is what lets one legend line describe it.
+
+           On a sweep the movement is one step: the branch the drop reached,
+           into the document that was opened. That is the last segment of
+           each chain, the one 2a refused to draw.
+
+           On a walk it is the real hop sequence instead — the agent moved
+           for real, several times, and painting only its final step would
+           throw away the one thing a walk has that a sweep does not. The
+           amber never means "an address" in either case.
+
+           It starts AFTER the flight so the eye reads the order — flown in,
+           then stepped through — without the stages being staggered. */
+    const legs = routeRef.current.segments
+    const walked = clamp01((pos - 0.55) / Math.max(1, STAGES.length - 1))
+    ctx.strokeStyle = pal.trail
+    ctx.lineWidth = 2.2
+    ctx.lineDashOffset = -march
+    if (legs.length) {
+      for (const leg of legs) {
+        const a = s.nodes[s.index[leg.a]]
+        const b = s.nodes[s.index[leg.b]]
+        if (!a || !b || walked <= 0) continue
+        const ax = X(a); const ay = Y(a)
+        ctx.globalAlpha = 0.45 + 0.5 * walked
+        ctx.beginPath()
+        ctx.moveTo(ax, ay)
+        ctx.lineTo(ax + (X(b) - ax) * walked, ay + (Y(b) - ay) * walked)
+        ctx.stroke()
+      }
+    } else {
+      for (const seg of segments) {
+        if (legOf(seg) !== 'walk') continue
+        if (reveal(seg.stage) <= 0 || walked <= 0) continue
+        const a = s.nodes[s.index[seg.a]]
+        const b = s.nodes[s.index[seg.b]]
+        if (!a || !b) continue
+        const ax = X(a); const ay = Y(a)
+        ctx.globalAlpha = 0.45 + 0.5 * walked
+        ctx.beginPath()
+        ctx.moveTo(ax, ay)
+        ctx.lineTo(ax + (X(b) - ax) * walked, ay + (Y(b) - ay) * walked)
+        ctx.stroke()
+      }
+    }
+    ctx.setLineDash([])
+    ctx.lineDashOffset = 0
 
     /* 3. The hits, ringed from the inside out in stage order — so a node
           the model actually read is visibly more than one `locate` ranked,
@@ -492,7 +576,24 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
       }
     }
 
-    /* 4. Names, but only while the result is small enough to read them. */
+    /* 4. Names — for every node the trail TOUCHES, not only the ones it
+          stopped at. A route whose waypoints are anonymous is a shape, and
+          the question this panel answers is *where the answer went*: the
+          branch it climbed through is half of that answer. Nodes the walk
+          only passed through are written dimmer and smaller, so the reading
+          order stays hit-first; they are captions on the way, not results.
+
+          `marked` still decides whether captions are drawn at all, because
+          it is the count that says how busy the answer was — a sweep with
+          forty hits is unreadable with or without the ancestors. */
+    const passed = new Map()   // id -> stage it lights at (through-nodes only)
+    for (const seg of segments) {
+      for (const id of [seg.a, seg.b]) {
+        if (marked.has(id)) continue
+        const held = passed.get(id)
+        if (held === undefined || seg.stage < held) passed.set(id, seg.stage)
+      }
+    }
     if (marked.size <= LABEL_LIMIT) {
       ctx.font = '500 10.5px ui-monospace, SFMono-Regular, Menlo, monospace'
       ctx.textAlign = 'center'
@@ -508,17 +609,25 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
         // dot but not the rings around it is still a caption on a node.
         if (n) placed.push({ x: X(n), y: Y(n), half: n.r0 + 8 + 3 * stages.size })
       }
-      const rows = [...marked].map(([id, stages]) => ({ id, stages }))
-        .sort((a, b) => {
-          const na = s.nodes[s.index[a.id]]
-          const nb = s.nodes[s.index[b.id]]
-          return (na ? na.y : 0) - (nb ? nb.y : 0)
-        })
-      for (const { id, stages } of rows) {
+      for (const id of passed.keys()) {
+        const n = s.nodes[s.index[id]]
+        if (n) placed.push({ x: X(n), y: Y(n), half: n.r0 + 8 })
+      }
+      // Hits first: they claim their space before the way-through captions
+      // compete for it, so a crowded map loses an ancestor's name and never
+      // a result's.
+      const rows = [
+        ...[...marked].map(([id, stages]) => ({ id, at: Math.min(...stages), hit: true })),
+        ...[...passed].map(([id, stage]) => ({ id, at: stage, hit: false })),
+      ]
+      for (const { id, at: stageOf, hit } of rows) {
         const n = s.nodes[s.index[id]]
         if (!n) continue
-        const at = reveal(Math.min(...stages))
+        const at = reveal(stageOf)
         if (at <= 0.25) continue
+        ctx.font = hit
+          ? '500 10.5px ui-monospace, SFMono-Regular, Menlo, monospace'
+          : '500 9.5px ui-monospace, SFMono-Regular, Menlo, monospace'
         const label = shortName(id).slice(0, 26)
         const half = ctx.measureText(label).width / 2 + 5
         const x = X(n)
@@ -536,7 +645,7 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
         }
         if (y === null) continue
         placed.push({ x, y, half })
-        ctx.globalAlpha = at
+        ctx.globalAlpha = hit ? at : at * 0.55
         ctx.fillText(label, x, y)
       }
       ctx.textAlign = 'start'
@@ -573,6 +682,20 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
         }
         if (anim.current.pos < available) {
           anim.current.pos = Math.min(available, anim.current.pos + dt / STAGE_MS)
+          // Re-frame as it goes, gently: the set the camera leans on grows
+          // stage by stage, so a fixed frame would be a still picture of a
+          // reveal. Eased hard (0.05) because a camera that snaps to each
+          // new node is a camera nobody can read.
+          fit(0.05)
+          needsDraw.current = true
+        }
+        // The dashes keep walking after the reveal has finished, so the
+        // panel stays a route being travelled instead of freezing into a
+        // diagram. Only while there IS a trail: an empty panel that repaints
+        // forever is a battery bug, not an animation.
+        if (trailRef.current.segments.length && anim.current.pos > 0) {
+          anim.current.march = (anim.current.march || 0)
+            + (dt / 1000) * MARCH_PX_PER_S
           needsDraw.current = true
         }
       }
@@ -833,6 +956,23 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
                 <span className="font-mono tabular-nums">{counts[i]}</span>
               </span>
             ))}
+            {/* The two lines, named. Without this the reader has to guess
+                which colour is a claim about the forest's shape and which
+                is a claim about what happened, and the amber one is the
+                easier of the two to misread. */}
+            <span className="flex items-baseline gap-1.5 text-[11.5px] text-text-2">
+              <span className="h-0 w-4 shrink-0 translate-y-[-2px] border-t-2 border-dashed"
+                    style={{ borderColor: palette.drop }} />
+              {t('ask.trail_line_drop')}
+            </span>
+            <span className="flex items-baseline gap-1.5 text-[11.5px] text-text-2">
+              <span className="h-0 w-4 shrink-0 translate-y-[-2px] border-t-2 border-dashed"
+                    style={{ borderColor: palette.trail }} />
+              {t(route.segments.length ? 'ask.trail_line_walk' : 'ask.trail_line_step')}
+              {route.segments.length > 0 && (
+                <span className="font-mono tabular-nums">{route.stops.length}</span>
+              )}
+            </span>
             {trace?.retrieval_ms != null && (
               <span className="ml-auto font-mono text-[11px] tabular-nums text-text-3">
                 {t('ask.trail_real', { ms: trace.retrieval_ms })}
