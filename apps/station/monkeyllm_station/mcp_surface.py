@@ -532,6 +532,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
 
     @mcp.tool()
     async def answer(forest: str, question: str, k: int = 3,
+                     terms: list[str] | None = None,
                      cache: bool = True,
                      reply_tokens: int | None = None,
                      min_evidence: int = 0,
@@ -546,6 +547,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         round-trip. A repeat of a question may be served from the forest's
         answer store, labelled `cached: true`; pass `cache: false` to skip
         the store and buy a fresh run (which replaces the stored one).
+        `terms` hands the sweep the literal words its `sniff` leg should
+        look for, exactly as `harvest` takes them. Absent, they are derived
+        from the question — which is the wrong move whenever the question's
+        vocabulary is not the corpus's: a question in one language over a
+        forest written in another, or a word the material spells some other
+        way. You hold a model; translate the question into the forest's own
+        terms and pass them here rather than letting the derivation guess.
         `reply_tokens` bounds the reply's size per call (clamped to
         [64, 4000]); absent, the forest's own binding decides.
         `min_evidence` is the floor below which no model runs: the sweep's
@@ -566,6 +574,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         default and named in `superseded_excluded`;
         `include_superseded: true` answers from the history too."""
         return await call(forest, "answer", question=question, k=k,
+                          terms=terms,
                           cache=cache, since=since, until=until,
                           date_field=date_field,
                           **({"reply_tokens": reply_tokens}

@@ -16,9 +16,12 @@ callable, and answering composes `harvest` — both public surfaces.
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 from monkeyllm.errors import E_SCHEMA, VineError
+
+log = logging.getLogger(__name__)
 
 # The material is whatever was ingested, and ingestion is how outside text
 # gets in — the Clipper exists to capture third-party pages. So the material
@@ -29,7 +32,18 @@ from monkeyllm.errors import E_SCHEMA, VineError
 ANSWER_SYSTEM = (
     "You answer strictly from the harvested forest material you are given. "
     "If the material does not contain the answer, say so plainly instead of "
-    "guessing. Close with the sources you used, one per line, each as its "
+    "guessing. "
+    # J.10.3 (v0.67): the instruction above is right and the omission beside
+    # it was not. A top-`k` sample arrives in the exact shape the whole corpus
+    # would take, so a model told it is "the forest material" answers about
+    # five excerpts and is OBEYING the prompt — faithful, cited, and wrong
+    # about its subject, which is the failure C.17 was written for.
+    "The material is a ranked top-k retrieval from a larger corpus, never "
+    "the corpus itself: it is what best matched this question, and whatever "
+    "did not match is simply absent. So answer a question this material "
+    "cannot support as a partial reading, or say it is not here — never "
+    "generalise the sample into a claim about the whole. "
+    "Close with the sources you used, one per line, each as its "
     "title followed by its node id in square brackets — `Title [node id]`, "
     "ids exactly as they appear in the material. "
     "The material states its time (C.6c.3): items carry `created` and "
@@ -334,7 +348,16 @@ def answer(scoped_vine, question: str, binding: dict, k: int = 3,
 # Reads only. The policy would already refuse a write to a principal without
 # the capability — but a principal who HAS `write` asked a question, not for
 # an edit, and a loop that could plant would turn one into the other.
-FORAGE_TOOLS = ("locate", "sniff", "look", "move", "pick", "scan", "query")
+#
+# `coverage` joined in v0.67 (J.10.5) for what it answers: "what is this
+# forest about" is not a point lookup and is not settled by ranking documents
+# against it. C.17 is the map's own read — the roots, their sizes, their
+# sources — and the closed list was barring it from the one mode that could
+# decide to call it, which left a walk with no move but to read one document
+# and describe the corpus from it. Nothing widens: it opens no body (C.17
+# rule 1) and every number in it is the calling policy's own (rule 7).
+FORAGE_TOOLS = ("locate", "sniff", "look", "move", "pick", "scan", "query",
+                "coverage")
 
 MAX_HOPS = 16
 
@@ -350,10 +373,15 @@ Always respond with a SINGLE JSON object, nothing else:
 - {"tool": "pick", "args": {"id": "...", "section": null}} -> the body, or one section of it
 - {"tool": "scan", "args": {"parent_id": "...", "filter": {}}} -> filter children by metadata
 - {"tool": "query", "args": {"id": "...", "sql": "SELECT ..."}} -> read-only SQL on type:dataset nodes
+- {"tool": "coverage", "args": {}} -> what this forest HOLDS: every root with its node count, date
+  range and source, plus totals by type. Counts and curated metadata, no search and no bodies.
 - {"tool": "answer", "args": {"text": "...", "answer_nodes": ["full/id"]}} -> the final answer
 
 Strategy: an exact rare term (code, proper name, number)? sniff first — it lands in the section and
 you read it with pick(id, section). Conceptual? locate first, look around, pick only the target.
+About the CORPUS itself (what is this forest about, what does it hold, is there anything here on X)?
+Start with coverage or look("_index"), then read across MORE THAN ONE branch: a single document —
+a readme included — is one node's claim about the forest, and never the forest.
 Rules:
 - "truncated": true means the result was CUT by budget — do not conclude something does not exist;
   refine with more specific terms or scan(parent_id, filter). On a query it means rows were
@@ -369,7 +397,10 @@ Rules:
   ![<short caption>](media:<node id>) on its own line — only ids you actually saw in tool
   results, never invented, and never for audio.
 - answer_nodes are exact ids from tool results, and only nodes you actually opened.
-Entry points for this question are in the first message."""
+The first message holds entry points from a synthetic locate of the question VERBATIM — nobody
+translated it, nobody chose a rarer term, and against a corpus written in another language it can
+be pure noise. If it reads as off-topic, searching again with your own terms — in the corpus's own
+language, preferring rare exact ones — is your first move, not a repeat of work already done."""
 
 FORAGE_DEADLINE = (
     "Step budget spent. Do NOT call another tool. Using ONLY what you have already "
@@ -427,6 +458,38 @@ def _hop_args(args: dict) -> dict:
     return out
 
 
+# J.10.5 (v0.67): the tools whose result is a listed or ranked set, and the
+# field each one names that set by. One number tells "sniff → 0" from
+# "sniff → 5" and cannot say *which* five, so a spectator watching a walk
+# arrive (J.10.12) could light nothing at all for the two tools a hunt does
+# most — indistinguishable, on a console, from a walk that found nothing.
+HOP_IDS_FIELD = {"locate": "results", "sniff": "results",
+                 "scan": "nodes", "move": "neighbors"}
+HOP_IDS_MAX = 10
+
+
+def _hop_ids(tool: str, result) -> list[str]:
+    """The ids that call returned, in result order, capped.
+
+    The cap is the same judgement every other clipped field here makes: the
+    record is a report on a hunt, not a second copy of its results, and the
+    budget belongs to the reply. Nothing is disclosed that was not — the same
+    call already returned these ids to this principal, through a scope that
+    filtered them before the model saw them.
+    """
+    field = HOP_IDS_FIELD.get(tool)
+    if field is None or not isinstance(result, dict):
+        return []
+    out: list[str] = []
+    for item in result.get(field) or []:
+        node_id = item.get("id") if isinstance(item, dict) else None
+        if isinstance(node_id, str):
+            out.append(node_id)
+            if len(out) == HOP_IDS_MAX:
+                break
+    return out
+
+
 def _outcome(tool: str, result: dict) -> dict:
     """One number per hop: did it find anything, and how much.
 
@@ -452,6 +515,12 @@ def _outcome(tool: str, result: dict) -> dict:
                        ("neighbors", "neighbors"), ("children", "children")):
         if isinstance(result.get(key), list):
             return {field: len(result[key])}
+    if tool == "coverage":
+        # C.17's answer is a map, not a list of hits: the number that says
+        # what came back is how much material the map accounts for. Reported
+        # under the field a reader already knows, rather than as a word only
+        # this one tool would ever emit.
+        return {"nodes": result.get("total")}
     if tool == "pick":
         return {"tokens": result.get("body_tokens")}
     if tool == "query":
@@ -570,7 +639,7 @@ def _teach_datasets(scoped_vine, entry: dict) -> None:
 
 def forage(scoped_vine, question: str, binding: dict, k: int = 3,
            max_hops: int = 6, reply_tokens: int | None = None,
-           window: dict | None = None) -> dict:
+           window: dict | None = None, on_hop=None) -> dict:
     """Answer by navigating (J.10.5), instead of by one deterministic sweep.
 
     `answer`'s default is `harvest`: entry search, no hops, one model call —
@@ -687,19 +756,39 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
         asked.add(key)
 
         h0 = time.perf_counter()
-        if bounds and tool in ("locate", "sniff", "scan", "harvest"):
+        # The searching calls, and only those: `coverage` takes no window
+        # (C.17 counts a whole scope, and `date_field` is the caller's, not
+        # the hunt's), and `harvest` is not on the whitelist — it was refused
+        # above long before this line could ever see it.
+        if bounds and tool in ("locate", "sniff", "scan"):
             args = {**args, **bounds}
         result = scoped_vine.call(tool, **args)
         hop_ms = (time.perf_counter() - h0) * 1000
         failed = isinstance(result, dict) and "error" in result
         node = args.get("id") or args.get("parent_id")
+        # `also`, not `instead`: `scan` and `move` are addressed by an id and
+        # keep it, because the two fields answer two questions — where the
+        # call went, and what it brought back.
+        ids = _hop_ids(tool, result)
         hops.append({"n": len(hops) + 1, "tool": tool,
                      **({"id": node} if isinstance(node, str) else {}),
+                     **({"ids": ids} if ids else {}),
                      "args": _hop_args(args), "out": _outcome(tool, result),
                      # Two numbers, because they are two different costs: the
                      # forest call, and the model turn that decided to make it.
                      "ms": round(hop_ms, 3), "model_ms": round(turn_ms, 1),
                      "ok": not failed})
+        if on_hop is not None:
+            # J.10.12: the record just appended, handed over as it is — an
+            # event is a PREFIX of the response, so this must be the same
+            # object the response will carry as `hops[n]` and not a second
+            # rendering of it. Never allowed to fail the hunt: a spectator
+            # does not get a vote on whether the walk continues.
+            try:
+                on_hop(hops[-1])
+            except Exception:
+                log.debug("progress observer raised on hop %d", len(hops),
+                          exc_info=True)
         if not failed and tool in ("look", "pick", "query") and isinstance(node, str):
             if node not in opened:
                 opened.append(node)

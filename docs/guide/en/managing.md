@@ -210,18 +210,35 @@ On a Docker deployment, the same command runs inside the container:
 
 ### Snapshots
 
-A snapshot is the forest packaged as **one file** its git repository as
-a bundle, full history included, every plant and every audit commit
-travelling along. From the Health console you can take one ("Include
-dataset payloads" adds a sidecar archive for the `.db` files git never
-holds), and the **owner** can download the bundle and the sidecar.
+A snapshot is the forest packaged as **one file**: a `.forest`, holding
+its git repository as a bundle (full history, every plant and every audit
+commit travelling along) together with the payload bytes git never holds
+the dataset `.db` files and the archived media. From the Health console
+you can take one and the **owner** can download it, in a single click,
+because there is nothing else to fetch.
+
+It used to be two files, a bundle and an optional payload sidecar, and
+they came apart: nothing tied them, so a forest could be imported whole
+and arrive with its datasets empty. Payloads now travel unless you switch
+them off, and if you do, the console says how many files were left behind
+a snapshot reporting "0 payloads" must not mean both *this forest has
+none* and *you did not ask*. Snapshots taken before that still import,
+sidecar and all.
+
+Nothing here needs MonkeyLLM to open. A `.forest` is a zip carrying a
+`README.txt` with the two commands (`unzip`, then `git clone
+forest.bundle`) that give you the forest back as plain Markdown with its
+history. A backup nobody can open without the vendor is not a backup.
 
 Importing goes through the forest switcher: **Import snapshot** creates a
-new forest from a bundle, history included, owner-only the bundle enters
+new forest from a snapshot, history included, owner-only it enters
 as-is, with no curation pass, which is exactly why only the principal that
 governs the volume may plant one. The imported forest arrives servable
 (the Station reindexes it on arrival) and cold: no model call is spent,
-and search stays keyword-only until someone builds the vector layer.
+and search stays keyword-only until someone builds the vector layer. If
+any node names a payload the snapshot did not carry, the import says how
+many rather than reporting a clean success those nodes are dead until
+the bytes arrive from wherever the snapshot was taken.
 
 > **Note** Restoring *over* a live forest is deliberately not offered in
 > the console; that stays on the command line (`vine snapshot restore`).
@@ -233,9 +250,10 @@ The Audit console answers "who saw what". Its two halves are stored where
 each belongs:
 
 - **Reads** land in the audit log: who, which forest, which call, an
-  argument digest, the result size, and when. Bodies and snippets are
-  never copied in the log records access, not content and the console
-  says so on the screen.
+  argument digest, the result size, when it happened, how long the forest
+  took, what the provider charged, and which refusal it was when it was
+  refused. Bodies and snippets are never copied in the log records
+  access, not content and the console says so on the screen.
 - **Writes** are already commits in the forest's own git history, each
   carrying a `station-principal: <name>` trailer naming the acting
   principal, so the history of what changed is the forest's own.
@@ -246,8 +264,23 @@ served from the store (see below) is audited as one the row carries the
 entry's key digest, is marked as served from the store, and the cost it
 records is the cost *avoided*, never a second spend.
 
-The log is filterable by person, and reading it needs the `admin`
-capability.
+The screen opens with four numbers over the set you are looking at: how
+many calls, how many were refused, what was spent, and what the answer
+store made unnecessary. Those two money figures are deliberately apart a
+store hit's cost is money that was *not* paid, and one "cost" covering both
+is a bill nobody can reconcile. A call whose provider publishes no price is
+shown as unpriced rather than as free.
+
+Filtering is by person, by call, by forest, by outcome (everything, only
+the refusals, only what the store served) and by date, and every filter is
+in the address, so a filtered view is a link you can send to whoever has to
+look at it. The four numbers describe the filtered set and not the page of
+rows below them a summary that counted the rows on screen would change
+when you changed how many rows fit.
+
+Reading it needs the `admin` capability, and it shows only the forests you
+administer the totals are narrowed the same way, because counting a
+forest is a way of learning its size.
 
 ## Optimize
 

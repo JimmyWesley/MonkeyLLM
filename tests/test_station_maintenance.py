@@ -113,17 +113,18 @@ def test_health_writes_nothing(station):
 
 
 def test_snapshot_lands_outside_every_forest(station, tmp_path):
-    """F.26: a bundle inside the tree would be a binary where A.3.1 keeps
-    them out, and the next snapshot would package the last one."""
+    """F.26: a snapshot inside the tree would be a binary where A.3.1 keeps
+    them out, and the next one would package the last one."""
     client, registry, root = station
     r = client.post("/v1/admin/snapshots", json={"forest": FOREST},
                     headers=_key(registry))
     assert r.status_code == 200, r.text
     assert r.json()["bytes"] > 0
 
-    assert not list((root / FOREST).rglob("*.bundle"))
-    assert not list(root.glob("*.bundle"))
-    assert list((tmp_path / "snapshots" / FOREST).glob("*.bundle"))
+    for pattern in ("*.forest", "*.bundle"):
+        assert not list((root / FOREST).rglob(pattern))
+        assert not list(root.glob(pattern))
+    assert list((tmp_path / "snapshots" / FOREST).glob("*.forest"))
 
 
 def test_a_second_snapshot_does_not_package_the_first(station, tmp_path):
@@ -135,7 +136,7 @@ def test_a_second_snapshot_does_not_package_the_first(station, tmp_path):
                          headers=headers).json()
     assert first["name"] != second["name"]
     # Same history, so the same size give or take packing — certainly not the
-    # first bundle carried inside the second.
+    # first snapshot carried inside the second.
     assert second["bytes"] < first["bytes"] * 2
 
 
@@ -208,21 +209,21 @@ def test_snapshot_round_trip_download_and_import(station, tmp_path):
     assert hashlib.sha256(got.content).hexdigest() \
         == hashlib.sha256(on_disk).hexdigest()
 
-    sidecar_name = taken["name"] + ".payloads.zip"
-    sidecar = client.get(f"/v1/admin/snapshots/{FOREST}/{sidecar_name}",
-                         headers=owner)
-    assert sidecar.status_code == 200
+    # v0.74: one file. There is no second thing to fetch and therefore no
+    # second thing to forget.
+    assert taken["name"].endswith(".forest")
 
     r = client.post("/v1/admin/snapshots/import",
                     data={"id": "imported"},
-                    files={"bundle": (taken["name"], got.content),
-                           "payloads": (sidecar_name, sidecar.content)},
+                    files={"bundle": (taken["name"], got.content)},
                     headers=owner)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["forest"]["id"] == "imported"
     assert body["nodes"] > 0
     assert body["payloads"] > 0  # the fixture's sales dataset travelled
+    assert body["payloads_missing"] == 0
+    assert (root / "imported" / "sales" / "report-q1-2026.db").is_file()
 
     assert _history(root / "imported") == _history(root / FOREST)
     assert _history(root / FOREST) == before  # travel left no commit behind
@@ -234,6 +235,72 @@ def test_snapshot_round_trip_download_and_import(station, tmp_path):
     assert hit.status_code == 200, hit.text
     assert "results" in hit.json()
     assert not (root / "imported" / "_derived" / "canopy").exists()
+
+
+def test_payloads_travel_unless_the_caller_says_otherwise(station):
+    """Part I (v0.74): the default that loses data is gone.
+
+    A snapshot omitting the payloads is a legitimate artifact, so the two
+    are distinguishable in the response rather than by whether somebody
+    remembers what they clicked.
+    """
+    client, registry, _ = station
+    headers = _key(registry)
+    default = client.post("/v1/admin/snapshots", json={"forest": FOREST},
+                          headers=headers).json()
+    assert default["payloads"] > 0 and default["payloads_omitted"] == 0
+
+    bare = client.post("/v1/admin/snapshots",
+                       json={"forest": FOREST, "with_payloads": False},
+                       headers=headers).json()
+    assert bare["payloads"] == 0 and bare["payloads_omitted"] == default["payloads"]
+
+
+def test_import_says_how_many_nodes_it_left_dead(station, tmp_path):
+    """The failure this round was written against: 1,877 nodes, `payloads: 0`,
+    status ok, and two dataset passports pointing at bytes that never came.
+
+    The restore knew — it had just rebuilt the catalog off those very
+    passports — and said nothing. Now it says.
+    """
+    client, registry, root = station
+    owner = _owner_key(registry)
+    bare = client.post("/v1/admin/snapshots",
+                       json={"forest": FOREST, "with_payloads": False},
+                       headers=owner).json()
+    blob = (tmp_path / "snapshots" / FOREST / bare["name"]).read_bytes()
+
+    r = client.post("/v1/admin/snapshots/import", data={"id": "hollow"},
+                    files={"bundle": (bare["name"], blob)}, headers=owner)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["nodes"] > 0 and body["payloads"] == 0
+    assert body["payloads_missing"] > 0
+    assert not (root / "hollow" / "sales" / "report-q1-2026.db").exists()
+    # and the audit carries it, so the fact outlives the response
+    rows = [row for row in registry.audit(limit=50)
+            if row["primitive"] == "snapshot-import"]
+    assert rows and all("payloads_missing" in (r["args"] or "") for r in rows)
+
+
+def test_a_pre_v074_bundle_imports_under_any_name(station, tmp_path):
+    """F.160 at the boundary: the shape is the content, and the filename on
+    an upload is a claim by whoever is importing."""
+    import subprocess
+
+    client, registry, root = station
+    owner = _owner_key(registry)
+    legacy = tmp_path / "legacy.bundle"
+    subprocess.run(["git", "-C", str(root / FOREST), "bundle", "create",
+                    str(legacy), "--all"], capture_output=True, check=True)
+
+    r = client.post("/v1/admin/snapshots/import", data={"id": "fromlegacy"},
+                    files={"bundle": ("anything.forest", legacy.read_bytes())},
+                    headers=owner)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["nodes"] > 0
+    assert body["payloads"] == 0 and body["payloads_missing"] > 0
 
 
 def test_download_and_import_require_the_owner(station):

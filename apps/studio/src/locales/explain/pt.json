@@ -2,6 +2,8 @@
   "explain.calls": "Chamadas ao modelo",
   "explain.cost": "Custo",
   "explain.cost_unknown": "Este provedor não publica preço, então o custo é desconhecido não é zero.",
+  "explain.dense": "Match",
+  "explain.embed": "Embedding",
   "explain.entry": "Busca de entrada",
   "explain.entry_bm25": "BM25",
   "explain.entry_hybrid": "híbrida (RRF)",

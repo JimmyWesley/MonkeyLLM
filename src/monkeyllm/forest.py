@@ -167,8 +167,36 @@ class Forest:
 
     # -- id/path ---------------------------------------------------------
 
-    def path_for(self, node_id: str) -> Path:
+    def path_for(self, node_id: str, *, trusted: bool = False) -> Path:
+        """Map an id to its file, refusing ids that escape the forest.
+
+        Two forms of one question (C.6b.2, v0.69). The default resolves
+        symlinks, and that is what every boundary accepting an id from
+        outside the engine MUST use — the wire, `ScopedVine`, host-supplied
+        paths, and every write, whose id came from a caller.
+
+        `trusted=True` decides containment on the string instead:
+        `normpath` collapses `..` (so traversal is still refused) and the
+        root must be a prefix. It is for ids read out of the engine's OWN
+        catalog — nodes this engine planted, whose paths it wrote — and it
+        exists because `resolve()` is a `realpath` walk, one syscall per
+        component, and a body scan calls this once per node in scope:
+        measured 72 ms of a ~230 ms cold `sniff` over 1,877 nodes, against
+        2.6 ms textual.
+
+        Keyword-only and never dispatched, so no caller on the wire can
+        select it (rule 5; the construction is G.2.5's `adopted=`).
+        """
         node_id = node_id.strip().strip("/")
+        if trusted:
+            # The engine's own path. `..` is still collapsed by normpath, so
+            # traversal is refused here exactly as it is below; what this
+            # form does not do is follow a symlink, which is why rule 2
+            # confines it to ids the catalog produced.
+            p = Path(os.path.normpath(os.path.join(str(self.root), f"{node_id}.md")))
+            if not str(p).startswith(str(self.root) + os.sep):
+                raise VineError(E_NOT_FOUND, f"id escapes forest: {node_id}")
+            return p
         p = (self.root / f"{node_id}.md").resolve()
         if self.root not in p.parents and p != self.root:
             raise VineError(E_NOT_FOUND, f"id escapes forest: {node_id}")

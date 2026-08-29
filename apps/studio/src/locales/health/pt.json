@@ -2,7 +2,7 @@
   "health.all_clear": "Nada a relatar.",
   "health.confidence": "confiança {c}",
   "health.download": "Baixar o bundle",
-  "health.download_payloads": "Baixar o sidecar de payloads",
+  "health.download_payloads": "Baixar o sidecar de payloads (snapshot anterior à v0.74)",
   "health.fat_nodes": "Nós sobrecarregados",
   "health.fat_nodes_hint": "Mais trilhas do que alguém consegue seguir de um lugar só.",
   "health.heat": "Feromônio",
@@ -22,13 +22,14 @@
   "health.needs_split": "Galhos para dividir",
   "health.needs_split_hint": "Um galho tão largo custa caro a cada leitor que passa por ele.",
   "health.no_snapshots": "Nenhum tirado ainda.",
+  "health.payloads_omitted": "{count} arquivo(s) de payload ficaram de fora. Os nós que os nomeiam vão restaurar mortos — este snapshot leva o mapa, não os bancos nem as mídias.",
   "health.release": "Liberar o lock órfão",
   "health.releasing": "Liberando",
-  "health.restore_note": "Restaurar por cima de uma floresta viva continua na linha de comando. Um snapshot viaja: o owner pode baixá-lo aqui e importá-lo como floresta nova no seletor de florestas.",
+  "health.restore_note": "Restaurar por cima de uma floresta viva continua na linha de comando. Um snapshot viaja como um arquivo só: o owner pode baixá-lo aqui e importá-lo como floresta nova pelo seletor de florestas.",
   "health.scoped": "Este relatório cobre a floresta inteira.",
   "health.scoped_hint": "Ele conta problemas em toda parte, então exige um acesso de admin que não esteja limitado a um galho.",
   "health.snapshots": "Snapshots",
-  "health.snapshots_sub": "A floresta empacotada num arquivo só, com todo o histórico.",
+  "health.snapshots_sub": "A floresta empacotada num arquivo só: histórico completo, payloads inclusos.",
   "health.stale_passports": "Fontes que sumiram",
   "health.stale_passports_hint": "O nó fica; o arquivo de origem sumiu. O Ranger nunca apaga.",
   "health.sub": "O que o Ranger reportaria na próxima passagem. Ler não muda nada.",
@@ -37,5 +38,5 @@
   "health.title": "Saúde da floresta",
   "health.uncertain": "Propostas de link",
   "health.uncertain_hint": "Links abaixo da confiança total, esperando o Ranger promover ou podar.",
-  "health.with_payloads": "Incluir os payloads dos datasets"
+  "health.with_payloads": "Levar os payloads de dataset e mídia"
 }

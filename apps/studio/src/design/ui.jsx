@@ -47,8 +47,9 @@ export function Card({ title, subtitle, actions, icon: Icon, children,
 
 /** The dashboard tile: label, one number, a line of context, tinted glyph. */
 export function Stat({ label, value, hint, icon: Icon, tone = 'accent' }) {
-  const tint = tone === 'muted'
-    ? 'bg-surface-2 text-text-3' : 'bg-accent-soft text-accent'
+  const tint = tone === 'muted' ? 'bg-surface-2 text-text-3'
+    : tone === 'danger' ? 'bg-danger-soft text-danger'
+    : 'bg-accent-soft text-accent'
   return (
     <div className="card p-4">
       <div className="flex items-start justify-between gap-3">
@@ -255,7 +256,29 @@ export function CheckList({
   )
 }
 
-export function Toggle({ checked, onChange, label, hint }) {
+export function Toggle({ checked, onChange, label, hint, icon: Icon, compact }) {
+  // `compact` is one control, not a label wrapping a switch: nesting a
+  // `<label>` around a `<button role="switch">` associates nothing and
+  // leaves half the target dead to the pointer. So the whole row IS the
+  // switch, with the icon reading before the word — which is what makes it
+  // findable next to the other settings instead of alone in a header.
+  if (compact) {
+    return (
+      <button type="button" role="switch" aria-checked={checked} title={hint}
+              onClick={() => onChange(!checked)}
+              className="flex items-center gap-2 rounded-lg px-1 py-0.5
+                         transition hover:bg-surface-2">
+        {Icon && <Icon size={14} className={checked ? 'text-accent' : 'text-text-3'} />}
+        <span className="text-[11.5px] text-text-3">{label}</span>
+        <span className={`h-[16px] w-7 shrink-0 rounded-full border transition
+          ${checked ? 'border-accent bg-accent' : 'border-line-strong bg-surface-2'}`}>
+          <span className={`block h-3 w-3 translate-y-[1px] rounded-full bg-white
+            shadow-sm transition-transform
+            ${checked ? 'translate-x-[13px]' : 'translate-x-[1px]'}`} />
+        </span>
+      </button>
+    )
+  }
   return (
     <label className="flex cursor-pointer items-start gap-2.5">
       <button

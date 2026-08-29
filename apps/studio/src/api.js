@@ -96,6 +96,59 @@ export const api = {
     request(`/v1/forests/${encodeURIComponent(forest)}/${primitive}`,
             { method: 'POST', body: payload, timing: true }),
 
+  /** The progress of one `answer`, while it is still being answered (J.10.12).
+   *
+   *  `fetch` and not `EventSource`, for one reason that decides it: an
+   *  EventSource cannot carry a header, and this Station is reached with a
+   *  Bearer token. The alternative is the key in the query string, and a
+   *  credential in a URL is a credential in every log and every referrer —
+   *  the same rule J.16 keeps when it audits a webhook's host and never its
+   *  path. So the frames are parsed here, which is a dozen lines.
+   *
+   *  Resolves when the run closes. Never rejects: a channel is an
+   *  enhancement over a call that is happening anyway, so a Station that
+   *  does not serve one, a proxy that buffers it away, or a network that
+   *  drops it must cost the caller nothing but the picture.
+   */
+  events: async (forest, run, onEvent, signal) => {
+    try {
+      const res = await fetch(
+        `/v1/forests/${encodeURIComponent(forest)}/answer/`
+        + `${encodeURIComponent(run)}/events`,
+        { headers: { ...(getKey() ? { Authorization: `Bearer ${getKey()}` } : {}) },
+          signal })
+      if (!res.ok || !res.body) return
+      const reader = res.body.getReader()
+      const decode = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decode.decode(value, { stream: true })
+        // SSE frames are separated by a blank line. A partial frame stays in
+        // the buffer: a chunk boundary is not a message boundary.
+        let cut = buffer.indexOf('\n\n')
+        while (cut !== -1) {
+          const frame = buffer.slice(0, cut)
+          buffer = buffer.slice(cut + 2)
+          let kind = 'message'
+          let data = ''
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event: ')) kind = line.slice(7)
+            else if (line.startsWith('data: ')) data += line.slice(6)
+          }
+          if (kind !== 'ping') {
+            try {
+              onEvent(kind, data ? JSON.parse(data) : {})
+            } catch { /* one bad frame is not the end of the channel */ }
+          }
+          if (kind === 'done') return
+          cut = buffer.indexOf('\n\n')
+        }
+      }
+    } catch { /* aborted, unreachable, or unsupported: the call is unaffected */ }
+  },
+
   // Map projections (J.11): a region in one call rather than one call per
   // node. Read-only, scoped exactly like the primitives, and derived — a
   // stale answer is fixed by reindexing, never by reconciling here.
@@ -230,7 +283,17 @@ export const api = {
   // governance
   principals: () => request('/v1/admin/principals'),
   grant: (body) => request('/v1/admin/grant', { method: 'POST', body }),
-  audit: (limit = 200) => request(`/v1/admin/audit?limit=${limit}`),
+  // J.4.3: every filter is the route's, applied before the page is cut, so
+  // the totals beside the entries describe the same set the entries came
+  // from. An empty value is dropped rather than sent — `?primitive=` would
+  // be a filter for the call named "".
+  audit: (params = {}) => {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries({ limit: 200, ...params })) {
+      if (v !== undefined && v !== null && v !== '' && v !== false) q.set(k, String(v))
+    }
+    return request(`/v1/admin/audit?${q.toString()}`)
+  },
 
   // inference providers and per-forest bindings
   providers: () => request('/v1/admin/providers'),
@@ -262,12 +325,12 @@ export const api = {
     request('/v1/admin/unlock', { method: 'POST', body: { forest } }),
   snapshots: (forest) =>
     request(`/v1/admin/snapshots?forest=${encodeURIComponent(forest)}`),
-  takeSnapshot: (forest, withPayloads = false) =>
+  takeSnapshot: (forest, withPayloads = true) =>
     request('/v1/admin/snapshots',
             { method: 'POST', body: { forest, with_payloads: withPayloads } }),
 
   // Snapshot travel (J.13.1/J.13.2, owner-only). Both step around
-  // `request`: the download's body is the bundle rather than JSON, and the
+  // `request`: the download's body is the snapshot rather than JSON, and the
   // import's is multipart — the browser sets the boundary itself, so no
   // Content-Type is spelled out.
   downloadSnapshot: async (forest, name) => {
@@ -327,16 +390,19 @@ export const api = {
   // J.13.6 (v0.61): re-derive what ingest would derive today, from the
   // passports. Not a job — it runs on the lane and the caller waits, like
   // the rebuild beside it.
+  // `body` is the OBJECT: `request` stringifies it (line 63). Passing a
+  // string here encoded it twice, so the Station's `request.json()` handed
+  // the route a `str` and `body.get(...)` raised — a 500 on every press of
+  // the Re-derive button. `reindex` below is what the shape should be.
   recurate: (forest, derive = ['aliases']) =>
-    request('/v1/admin/recurate', { method: 'POST',
-                                    body: JSON.stringify({ forest, derive }) }),
+    request('/v1/admin/recurate', { method: 'POST', body: { forest, derive } }),
   // J.13.7 (v0.61): what is in the upload staging area that is not a
   // document, and the sweep for it. One resource, two verbs — the same
   // question asked twice.
   staging: (forest) =>
     request(`/v1/admin/staging?forest=${encodeURIComponent(forest)}`),
   clearStaging: (forest) => request('/v1/admin/staging', { method: 'POST',
-                                    body: JSON.stringify({ forest }) }),
+                                                          body: { forest } }),
   reindex: (forest) => request('/v1/admin/reindex', { method: 'POST',
                                                       body: { forest } }),
 }

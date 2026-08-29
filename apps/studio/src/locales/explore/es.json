@@ -1,6 +1,7 @@
 {
   "explore.children": "Dentro de esta rama",
   "explore.coverage": "Cobertura",
+  "explore.coverage_counts": "{notes} notas · {branches} ramas",
   "explore.degree": "Senderos",
   "explore.edges": "Senderos desde aquí",
   "explore.edges_hint": "Solo aparecen senderos cuyo otro extremo está dentro de tu alcance.",

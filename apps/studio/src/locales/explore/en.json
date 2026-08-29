@@ -1,6 +1,7 @@
 {
   "explore.children": "Inside this branch",
   "explore.coverage": "Coverage",
+  "explore.coverage_counts": "{notes} notes · {branches} branches",
   "explore.degree": "Trails",
   "explore.edges": "Trails from here",
   "explore.edges_hint": "Only trails whose other end is within your scope are listed.",

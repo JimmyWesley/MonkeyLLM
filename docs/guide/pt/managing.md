@@ -223,19 +223,36 @@ Numa implantação Docker, o mesmo comando roda dentro do contêiner:
 
 ### Snapshots
 
-Um snapshot é a floresta empacotada num **arquivo só** o repositório git
-dela como um bundle, com todo o histórico, cada plant e cada commit de
-auditoria viajando junto. Do console de Saúde você pode tirar um ("Incluir
-os payloads dos datasets" acrescenta um arquivo sidecar para os `.db` que o
-git nunca guarda), e a pessoa **dona** pode baixar o bundle e o sidecar.
+Um snapshot é a floresta empacotada num **arquivo só**: um `.forest`, que
+guarda o repositório git dela como bundle (histórico completo, cada plant e
+cada commit de auditoria viajando junto) junto dos bytes que o git nunca
+guarda os `.db` dos datasets e as mídias arquivadas. Do console de Saúde
+você tira um, e a pessoa **dona** baixa num clique só, porque não há
+segunda coisa para buscar.
+
+Eram dois arquivos, um bundle e um sidecar de payloads opcional, e eles se
+separavam: nada os amarrava, então dava para importar uma floresta inteira
+e ela chegar com os datasets vazios. Agora os payloads viajam a menos que
+você desligue e, se desligar, o console diz quantos arquivos ficaram para
+trás um snapshot que reporta "0 payloads" não pode significar ao mesmo
+tempo *esta floresta não tem nenhum* e *você não pediu*. Snapshots tirados
+antes disso continuam importando, sidecar e tudo.
+
+Nada aqui precisa do MonkeyLLM para abrir. Um `.forest` é um zip com um
+`README.txt` dentro trazendo os dois comandos (`unzip`, depois `git clone
+forest.bundle`) que devolvem a floresta como Markdown puro, com histórico.
+Um backup que ninguém abre sem o fornecedor não é um backup.
 
 A importação passa pelo seletor de florestas: **Importar snapshot** cria
-uma floresta nova a partir de um bundle, com histórico e tudo, só para a
-pessoa dona o bundle entra como está, sem passar pela curadoria, que é
+uma floresta nova a partir de um snapshot, com histórico e tudo, só para a
+pessoa dona ele entra como está, sem passar pela curadoria, que é
 exatamente por que só o principal que governa o volume pode plantar um. A
 floresta importada chega servível (a Station a reindexa na chegada) e fria:
 nenhuma chamada de modelo é gasta, e a busca fica só por palavra-chave até
-alguém construir a camada vetorial.
+alguém construir a camada vetorial. Se algum nó nomear um payload que o
+snapshot não trouxe, a importação diz quantos em vez de reportar sucesso
+limpo esses nós ficam mortos até os bytes chegarem de onde o snapshot foi
+tirado.
 
 > **Nota** Restaurar *por cima* de uma floresta viva deliberadamente não
 > é oferecido no console; isso continua na linha de comando (`vine
@@ -248,9 +265,10 @@ O console de Auditoria responde "quem viu o quê". As duas metades dele são
 guardadas onde cada uma pertence:
 
 - **Leituras** caem no log de auditoria: quem, qual floresta, qual chamada,
-  um digest dos argumentos, o tamanho do resultado, e quando. Corpos e
-  trechos nunca são copiados para lá o log registra acesso, não conteúdo
-  e o console diz isso na tela.
+  um digest dos argumentos, o tamanho do resultado, quando aconteceu,
+  quanto tempo a floresta levou, quanto o provedor cobrou, e qual recusa
+  foi quando houve recusa. Corpos e trechos nunca são copiados para lá o
+  log registra acesso, não conteúdo e o console diz isso na tela.
 - **Escritas** já são commits no histórico git da própria floresta, cada
   um carregando um trailer `station-principal: <name>` que nomeia o
   principal que agiu, então a história do que mudou é da própria floresta.
@@ -261,7 +279,24 @@ resposta servida do banco (veja abaixo) é auditada como tal a linha
 carrega o digest da chave da entrada, é marcada como servida do banco, e o
 custo que ela registra é o custo *evitado*, nunca um segundo gasto.
 
-O log é filtrável por pessoa, e lê-lo exige a capacidade `admin`.
+A tela abre com quatro números sobre o conjunto que você está olhando:
+quantas chamadas, quantas foram recusadas, quanto foi gasto, e quanto o
+banco de respostas tornou desnecessário. Esses dois números de dinheiro
+ficam separados de propósito o custo de um acerto no banco é dinheiro que
+*não* foi pago, e um único "custo" cobrindo os dois é uma conta que ninguém
+consegue conciliar. Uma chamada cujo provedor não publica preço aparece
+como sem preço, nunca como grátis.
+
+O filtro é por pessoa, por chamada, por floresta, por desfecho (tudo, só as
+recusadas, só o que veio do banco) e por data, e todo filtro fica no
+endereço, então uma visão filtrada é um link que você manda para quem
+precisa olhar. Os quatro números descrevem o conjunto filtrado e não a
+página de linhas abaixo deles um resumo que contasse as linhas na tela
+mudaria quando você mudasse quantas linhas cabem.
+
+Lê-lo exige a capacidade `admin`, e ele mostra só as florestas que você
+administra os totais são estreitados do mesmo jeito, porque contar uma
+floresta é um jeito de descobrir o tamanho dela.
 
 ## Otimizar
 

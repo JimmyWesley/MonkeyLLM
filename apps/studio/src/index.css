@@ -63,6 +63,16 @@
        forest holds, a trail is what this question did to it, and
        two different facts must not arrive in one colour. */
     --graph-trail: 202 146 18;
+    /* Two lines, two claims (J.5.15). `--graph-drop` is the HELICOPTER:
+       base to the nearest branch, and it stops there — it never enters the
+       document, because dropping somebody onto the exact file they needed
+       is the claim this panel was accidentally making and the one the
+       product does not make. `--graph-trail` is the MONKEY's own movement,
+       and it means that in both modes: on a sweep it is the last step, the
+       branch into the file; on a walk it is the real hop sequence. Blue
+       reads as travel-over, amber as travel-through, and neither may be
+       mistaken for a branch hue — that is what colours the dots. */
+    --graph-drop: 38 150 190;
 
     /* Syntax colour (design/highlight.jsx) — one token palette for every
        language the console prints. Aliased to the type-hues above, not
@@ -120,6 +130,7 @@
     --graph-edge: 110 126 114;
     --graph-shortcut: 255 190 100;
     --graph-trail: 250 214 96;
+    --graph-drop: 96 200 240;
     color-scheme: dark;
   }
 

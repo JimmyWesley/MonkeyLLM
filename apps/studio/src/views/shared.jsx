@@ -107,13 +107,35 @@ export const fmtMs = (n) =>
 export function TraceSteps({ steps }) {
   const { t } = useI18n()
   if (!steps?.length) return null
+  // Every primitive row prints the engine's own work: the K.2 embed share
+  // is subtracted where it rode and listed ONCE at the tail beside `model`
+  // (J.10.4 v0.68) — provider spend sits with provider spend, so `locate`
+  // stays the smallest number the trace can back. The host still serves
+  // the whole span plus the named share; the netting is this panel's.
+  const round3 = (n) => Math.round(n * 1000) / 1000
+  const embedTotal = steps.reduce((n, s) => n + (s.embed_ms || 0), 0)
+  // The Canopy scan (v0.71), on the same rule and for the same reason. It
+  // is the half nobody had named: on a warm query embed the round trip is a
+  // memo hit worth 0.1 ms and the scan is 68 ms of local CPU over every
+  // node vector, so `locate` read as 70 ms of forest work that the forest
+  // never did. Two rows, not one, because a provider and a process are
+  // tuned differently.
+  const denseTotal = steps.reduce((n, s) => n + (s.dense_ms || 0), 0)
+  const rows = steps.map((s) => {
+    const share = Math.min((s.embed_ms || 0) + (s.dense_ms || 0), s.ms)
+    return { ...s, ms: round3(s.ms - share) }
+  })
+  const tailAt = () => (rows.length && rows[rows.length - 1].step === 'model'
+    ? rows.length - 1 : rows.length)
+  if (denseTotal > 0) rows.splice(tailAt(), 0, { step: 'dense', ms: round3(denseTotal) })
+  if (embedTotal > 0) rows.splice(tailAt(), 0, { step: 'embed', ms: round3(embedTotal) })
   // Proportional to the slowest step, not to the total: the model dwarfs
   // everything, and a bar chart scaled to it would render every retrieval
   // step as the same invisible sliver.
-  const worst = Math.max(...steps.map((s) => s.ms), 1)
+  const worst = Math.max(...rows.map((s) => s.ms), 1)
   return (
     <ol className="space-y-2.5">
-      {steps.map((s, i) => (
+      {rows.map((s, i) => (
         <li key={i}>
           <div className="flex items-baseline gap-2">
             {/* Which decision caused this step. Without it the panel is a
@@ -132,7 +154,10 @@ export function TraceSteps({ steps }) {
             </span>
           </div>
           <div className="mt-1 h-1 overflow-hidden rounded-full bg-surface-2">
-            <div className={`h-full rounded-full ${s.step === 'model' ? 'bg-text-3' : 'bg-accent'}`}
+            {/* `embed` wears the model's tone: it IS a provider round
+                trip, and painting it as the forest is the misreading the
+                v0.68 split exists to prevent. */}
+            <div className={`h-full rounded-full ${s.step === 'model' || s.step === 'embed' ? 'bg-text-3' : 'bg-accent'}`}
                  style={{ width: `${Math.max(2, (s.ms / worst) * 100)}%` }} />
           </div>
           {s.detail && <p className="mt-1 truncate text-[11px] text-text-3">{s.detail}</p>}

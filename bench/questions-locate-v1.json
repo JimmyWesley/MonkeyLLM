@@ -1,0 +1,588 @@
+[
+ {
+  "id": "inf01",
+  "class": "inflection",
+  "question": "como tornar idempotente a persistencia do turno injetado",
+  "expected_nodes": [
+   "tasks/incidentes-sistemicos/004-idempotencia-turno-injetado"
+  ]
+ },
+ {
+  "id": "inf02",
+  "class": "inflection",
+  "question": "validar que a skill MCP tem conector ativo",
+  "expected_nodes": [
+   "tasks/back-end/085-validacao-skill-mcp"
+  ]
+ },
+ {
+  "id": "inf03",
+  "class": "inflection",
+  "question": "indexacao unica no slug do tenant",
+  "expected_nodes": [
+   "tasks/banco-de-dados/082-indice-unique-slug"
+  ]
+ },
+ {
+  "id": "inf04",
+  "class": "inflection",
+  "question": "contar o total de chunks gerados do documento",
+  "expected_nodes": [
+   "tasks/workers/031-contar-chunks-total"
+  ]
+ },
+ {
+  "id": "inf05",
+  "class": "inflection",
+  "question": "resolver qual modelo usar a partir do tier",
+  "expected_nodes": [
+   "tasks/workers/153-tier-model-resolver"
+  ]
+ },
+ {
+  "id": "inf06",
+  "class": "inflection",
+  "question": "reportar o uso metered para a Stripe",
+  "expected_nodes": [
+   "tasks/plataforma-billing/back-end/007-reporte-uso-metered-ao-stripe"
+  ]
+ },
+ {
+  "id": "inf07",
+  "class": "inflection",
+  "question": "vincular um agente a uma maquina permitida",
+  "expected_nodes": [
+   "tasks/machine-access-api/002-db-agent-machine-binding"
+  ]
+ },
+ {
+  "id": "inf08",
+  "class": "inflection",
+  "question": "sobrescrever a execucao do daemon na argv",
+  "expected_nodes": [
+   "tasks/harness-ux/003-daemon-overrides-execucao"
+  ]
+ },
+ {
+  "id": "inf09",
+  "class": "inflection",
+  "question": "apagar todos os dados do titular espalhados entre schemas",
+  "expected_nodes": [
+   "tasks/findleads/security/lgpd-erasure-cross-schema"
+  ]
+ },
+ {
+  "id": "inf10",
+  "class": "inflection",
+  "question": "classificar o erro de um turno como transiente ou terminal",
+  "expected_nodes": [
+   "tasks/incidentes-sistemicos/002-classificacao-erro-transient-terminal"
+  ]
+ },
+ {
+  "id": "inf11",
+  "class": "inflection",
+  "question": "provisionar o customer e gerir a assinatura unica",
+  "expected_nodes": [
+   "tasks/plataforma-billing/back-end/002-customer-provisioning-subscription-mgmt"
+  ]
+ },
+ {
+  "id": "inf12",
+  "class": "inflection",
+  "question": "faturar de forma agregada com breakdown por produto",
+  "expected_nodes": [
+   "tasks/plataforma-billing/back-end/005-invoice-agregada-breakdown-por-produto"
+  ]
+ },
+ {
+  "id": "inf13",
+  "class": "inflection",
+  "question": "acordar o subagente por ponteiro em vez de despejar texto",
+  "expected_nodes": [
+   "tasks/incidentes-sistemicos/005-wake-por-ponteiro"
+  ]
+ },
+ {
+  "id": "inf14",
+  "class": "inflection",
+  "question": "semear o connector machine e reservar o slug",
+  "expected_nodes": [
+   "tasks/machine-mcp/004-db-seed-connector"
+  ]
+ },
+ {
+  "id": "inf15",
+  "class": "inflection",
+  "question": "isolar tenants na bateria completa de testes",
+  "expected_nodes": [
+   "tasks/findleads/security/tenant-isolation-full-battery-ci"
+  ]
+ },
+ {
+  "id": "idx01",
+  "class": "index_vs_content",
+  "question": "qual incidente registrou 138 duplicatas exatas com md5 identico",
+  "expected_nodes": [
+   "tasks/incidentes-sistemicos/001-runaway-wake-loop",
+   "tasks/incidentes-sistemicos/004-idempotencia-turno-injetado"
+  ]
+ },
+ {
+  "id": "idx02",
+  "class": "index_vs_content",
+  "question": "qual task entrega o controller MCP HTTP e o auth guard do machine-mcp",
+  "expected_nodes": [
+   "tasks/machine-mcp/001-be-module-controller-auth"
+  ]
+ },
+ {
+  "id": "idx03",
+  "class": "index_vs_content",
+  "question": "onde ficam os modelos do board de trabalho com cards e atividade",
+  "expected_nodes": [
+   "tasks/agent-runtime/001-db-board-cards"
+  ]
+ },
+ {
+  "id": "idx04",
+  "class": "index_vs_content",
+  "question": "regra de lint que exige filtro de tenant quando o bypass e usado",
+  "expected_nodes": [
+   "tasks/findleads/security/eslint-require-tenant-filter-when-bypass"
+  ]
+ },
+ {
+  "id": "idx05",
+  "class": "index_vs_content",
+  "question": "persistir as decisoes de aprovacao no metadata da mensagem",
+  "expected_nodes": [
+   "tasks/harness-ux/004-persistir-aprovacoes-metadata"
+  ]
+ },
+ {
+  "id": "idx06",
+  "class": "index_vs_content",
+  "question": "handlers de leitura da fase 1 do machine mcp",
+  "expected_nodes": [
+   "tasks/machine-mcp/003-be-handlers-fase1"
+  ]
+ },
+ {
+  "id": "idx07",
+  "class": "index_vs_content",
+  "question": "budget interno pre-turno para sessoes BYOK",
+  "expected_nodes": [
+   "tasks/incidentes-sistemicos/006-budget-pre-turno-byok-e-sessao"
+  ]
+ },
+ {
+  "id": "idx08",
+  "class": "index_vs_content",
+  "question": "daemon que expoe um MCP server stdio pelo tunel",
+  "expected_nodes": [
+   "tasks/agent-runtime/011-daemon-mcp-proxy"
+  ]
+ },
+ {
+  "id": "idx09",
+  "class": "index_vs_content",
+  "question": "capabilities da maquina expostas para agentes de API",
+  "expected_nodes": [
+   "tasks/machine-access-api/005-be-capabilities-api"
+  ]
+ },
+ {
+  "id": "idx10",
+  "class": "index_vs_content",
+  "question": "smoke SQL de RLS e verificacao de grants no CI",
+  "expected_nodes": [
+   "tasks/findleads/security/rls-smoke-test-ci-grants-check"
+  ]
+ },
+ {
+  "id": "idx11",
+  "class": "index_vs_content",
+  "question": "fail fast com cascata de cancelamento e caixa de decisao do usuario",
+  "expected_nodes": [
+   "tasks/incidentes-sistemicos/003-fail-fast-cascata-e-decisao-usuario"
+  ]
+ },
+ {
+  "id": "idx12",
+  "class": "index_vs_content",
+  "question": "portal do cliente da Stripe para gerir a assinatura",
+  "expected_nodes": [
+   "tasks/plataforma-billing/back-end/006-customer-portal"
+  ]
+ },
+ {
+  "id": "idx13",
+  "class": "index_vs_content",
+  "question": "webhooks da Stripe que ativam entitlements",
+  "expected_nodes": [
+   "tasks/plataforma-billing/back-end/004-webhooks-provisioning-entitlements"
+  ]
+ },
+ {
+  "id": "idx14",
+  "class": "index_vs_content",
+  "question": "des-gating do chat com files e preview para agentes API",
+  "expected_nodes": [
+   "tasks/machine-access-api/006-fe-desgating-chat"
+  ]
+ },
+ {
+  "id": "idx15",
+  "class": "index_vs_content",
+  "question": "hardening da superficie publica do chat embutido",
+  "expected_nodes": [
+   "tasks/findleads/security/embedded-chat-public-surface-hardening"
+  ]
+ },
+ {
+  "id": "sil01",
+  "class": "silence",
+  "question": "politica de ferias e banco de horas dos funcionarios",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil02",
+  "class": "silence",
+  "question": "integracao com SAP ERP para notas fiscais",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil03",
+  "class": "silence",
+  "question": "operador Kubernetes para gerenciar clusters Cassandra",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil04",
+  "class": "silence",
+  "question": "contrato de aluguel do escritorio e reajuste anual",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil05",
+  "class": "silence",
+  "question": "campanha de marketing no TikTok para geracao Z",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil06",
+  "class": "silence",
+  "question": "plano de saude e beneficios dos colaboradores",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil07",
+  "class": "silence",
+  "question": "configuracao de firewall Cisco ASA e regras NAT",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil08",
+  "class": "silence",
+  "question": "migracao do banco para Oracle Exadata",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil09",
+  "class": "silence",
+  "question": "treinamento de brigada de incendio e rota de evacuacao",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil10",
+  "class": "silence",
+  "question": "aquisicao de licencas do AutoCAD para engenharia",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil11",
+  "class": "silence",
+  "question": "protocolo de atendimento presencial na recepcao",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil12",
+  "class": "silence",
+  "question": "manutencao preventiva da frota de veiculos",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil13",
+  "class": "silence",
+  "question": "certificacao ISO 14001 ambiental da fabrica",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil14",
+  "class": "silence",
+  "question": "cardapio do refeitorio e restricoes alimentares",
+  "expected_nodes": []
+ },
+ {
+  "id": "sil15",
+  "class": "silence",
+  "question": "cronograma de obras da nova sede em Curitiba",
+  "expected_nodes": []
+ },
+ {
+  "id": "gra01",
+  "class": "grammar",
+  "question": "o que acontece quando a chamada ao LLM falha e o evento e re-enfileirado",
+  "expected_nodes": [
+   "tasks/incidentes-sistemicos/004-idempotencia-turno-injetado"
+  ]
+ },
+ {
+  "id": "gra02",
+  "class": "grammar",
+  "question": "por que o CORS aceita apenas localhost quando a variavel de ambiente falta",
+  "expected_nodes": [
+   "tasks/defit-tech/029-cors-fallback-to-localhost-in-production"
+  ]
+ },
+ {
+  "id": "gra03",
+  "class": "grammar",
+  "question": "como eu faco para o health check saber se o Redis esta respondendo",
+  "expected_nodes": [
+   "tasks/back-end/169-redis-health-indicator"
+  ]
+ },
+ {
+  "id": "gra04",
+  "class": "grammar",
+  "question": "qual e o motivo de nao existir chave estrangeira entre os schemas",
+  "expected_nodes": [
+   "tasks/findleads/security/lgpd-erasure-cross-schema"
+  ]
+ },
+ {
+  "id": "gra05",
+  "class": "grammar",
+  "question": "quais sao os valores aceitos para o permission mode do daemon",
+  "expected_nodes": [
+   "tasks/harness-ux/003-daemon-overrides-execucao"
+  ]
+ },
+ {
+  "id": "gra06",
+  "class": "grammar",
+  "question": "onde eu configuro o upload de arquivos com multer no backend",
+  "expected_nodes": [
+   "tasks/back-end/127-multer-upload-config"
+  ]
+ },
+ {
+  "id": "gra07",
+  "class": "grammar",
+  "question": "de que forma o painel do super admin mostra os logs de um tenant",
+  "expected_nodes": [
+   "tasks/super-administrativo/043-tab-logs-tenant"
+  ]
+ },
+ {
+  "id": "gra08",
+  "class": "grammar",
+  "question": "o que e preciso para criar o decorator que devolve o usuario atual",
+  "expected_nodes": [
+   "tasks/back-end/043-decorator-current-user"
+  ]
+ },
+ {
+  "id": "gra09",
+  "class": "grammar",
+  "question": "como o checkout autenticado adiciona um item na assinatura",
+  "expected_nodes": [
+   "tasks/plataforma-billing/back-end/003-checkout-in-app-autenticado"
+  ]
+ },
+ {
+  "id": "gra10",
+  "class": "grammar",
+  "question": "qual pagina do painel permite editar um model tier",
+  "expected_nodes": [
+   "tasks/super-administrativo/127-editar-model-tier"
+  ]
+ },
+ {
+  "id": "gra11",
+  "class": "grammar",
+  "question": "por que o websocket do super admin aparece como offline no deploy",
+  "expected_nodes": [
+   "tasks/qa-superadmin-audit/005-deploy-ws-url"
+  ]
+ },
+ {
+  "id": "gra12",
+  "class": "grammar",
+  "question": "o que impede que um agente arquivado seja reativado por um patch",
+  "expected_nodes": [
+   "tasks/defit-tech/015-agent-archived-bypass-via-update"
+  ]
+ },
+ {
+  "id": "gra13",
+  "class": "grammar",
+  "question": "quais enderecos o endpoint de alertas da plataforma precisa expor",
+  "expected_nodes": [
+   "tasks/qa-superadmin-audit/002-be-admin-alerts-endpoint"
+  ]
+ },
+ {
+  "id": "gra14",
+  "class": "grammar",
+  "question": "como o worker agent passa a consumir o connector machine",
+  "expected_nodes": [
+   "tasks/machine-mcp/005-w-worker-agent-integration"
+  ]
+ },
+ {
+  "id": "gra15",
+  "class": "grammar",
+  "question": "de onde vem o novo layout do chat com o rail da direita",
+  "expected_nodes": [
+   "tasks/harness-ux/006-fe-layout-painel-contexto"
+  ]
+ },
+ {
+  "id": "cod01",
+  "class": "code_lookup",
+  "question": "AR-001",
+  "expected_nodes": [
+   "tasks/agent-runtime/001-db-board-cards"
+  ],
+  "note": "control: code in title"
+ },
+ {
+  "id": "cod02",
+  "class": "code_lookup",
+  "question": "BE-276",
+  "expected_nodes": [
+   "tasks/back-end/276-chat-attachments"
+  ],
+  "note": "control: code in title"
+ },
+ {
+  "id": "cod03",
+  "class": "code_lookup",
+  "question": "DB-189",
+  "expected_nodes": [
+   "tasks/banco-de-dados/189-fase3-auditoria-call-sites"
+  ],
+  "note": "control: code in title"
+ },
+ {
+  "id": "cod04",
+  "class": "code_lookup",
+  "question": "FE-226",
+  "expected_nodes": [
+   "tasks/front-end/226-chat-attachments"
+  ],
+  "note": "control: code in title"
+ },
+ {
+  "id": "cod05",
+  "class": "code_lookup",
+  "question": "HX-001",
+  "expected_nodes": [
+   "tasks/harness-ux/001-db-session-harness-config"
+  ],
+  "note": "control: code in title"
+ },
+ {
+  "id": "cod06",
+  "class": "code_lookup",
+  "question": "INC-004",
+  "expected_nodes": [
+   "tasks/incidentes-sistemicos/004-idempotencia-turno-injetado"
+  ],
+  "note": "control: code in title"
+ },
+ {
+  "id": "cod07",
+  "class": "code_lookup",
+  "question": "DT-005",
+  "expected_nodes": [
+   "tasks/defit-tech/005-chat-gateway-cors-wildcard"
+  ],
+  "note": "control: code in title"
+ },
+ {
+  "id": "cod08",
+  "class": "code_lookup",
+  "question": "MA-002",
+  "expected_nodes": [
+   "tasks/machine-access-api/002-db-agent-machine-binding"
+  ],
+  "note": "control: code in title"
+ },
+ {
+  "id": "cod09",
+  "class": "code_lookup",
+  "question": "DT-038",
+  "expected_nodes": [
+   "tasks/defit-tech/038-chat-sidebar-search-not-filtered-on-backend"
+  ],
+  "note": "treatment: code only as derived alias"
+ },
+ {
+  "id": "cod10",
+  "class": "code_lookup",
+  "question": "DT-052",
+  "expected_nodes": [
+   "tasks/defit-tech/052-mobile-responsiveness-logs-metrics-tables"
+  ],
+  "note": "treatment: code only as derived alias"
+ },
+ {
+  "id": "cod11",
+  "class": "code_lookup",
+  "question": "DT-066",
+  "expected_nodes": [
+   "tasks/defit-tech/066-backend-env-misaligned-with-database-env"
+  ],
+  "note": "treatment: code only as derived alias"
+ },
+ {
+  "id": "cod12",
+  "class": "code_lookup",
+  "question": "BE-108",
+  "expected_nodes": [
+   "tasks/back-end/108-intent-detection"
+  ],
+  "note": "treatment: code only as derived alias"
+ },
+ {
+  "id": "cod13",
+  "class": "code_lookup",
+  "question": "BE-169",
+  "expected_nodes": [
+   "tasks/back-end/169-redis-health-indicator"
+  ],
+  "note": "treatment: code only as derived alias"
+ },
+ {
+  "id": "cod14",
+  "class": "code_lookup",
+  "question": "FE-149",
+  "expected_nodes": [
+   "tasks/front-end/149-socket-namespace-notifications"
+  ],
+  "note": "treatment: code only as derived alias"
+ },
+ {
+  "id": "cod15",
+  "class": "code_lookup",
+  "question": "FE-176",
+  "expected_nodes": [
+   "tasks/front-end/176-pwa-setup"
+  ],
+  "note": "treatment: code only as derived alias"
+ }
+]

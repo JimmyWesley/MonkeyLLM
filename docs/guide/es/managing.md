@@ -224,20 +224,36 @@ En un despliegue con Docker, el mismo comando corre dentro del contenedor:
 
 ### Instantáneas
 
-Una instantánea es el bosque empaquetado en **un solo archivo** su
-repositorio git como bundle, historial completo incluido, cada plant y cada
-commit de auditoría viajando con él. Desde la consola de Salud puedes tomar
-una ("Incluir los payloads de los datasets" añade un archivo sidecar para
-los `.db` que git nunca guarda), y el **dueño** puede descargar el bundle y
-el sidecar.
+Una instantánea es el bosque empaquetado en **un solo archivo**: un
+`.forest`, que guarda su repositorio git como bundle (historial completo,
+cada plant y cada commit de auditoría viajando con él) junto a los bytes que
+git nunca guarda los `.db` de los datasets y los medios archivados. Desde
+la consola de Salud tomas una, y el **dueño** la descarga en un solo clic,
+porque no hay una segunda cosa que buscar.
+
+Eran dos archivos, un bundle y un sidecar de payloads opcional, y se
+separaban: nada los ataba, así que un bosque podía importarse entero y
+llegar con sus datasets vacíos. Ahora los payloads viajan salvo que los
+apagues y, si los apagas, la consola dice cuántos archivos quedaron atrás
+una instantánea que reporta "0 payloads" no puede significar a la vez
+*este bosque no tiene ninguno* y *no los pediste*. Las instantáneas tomadas
+antes de eso siguen importándose, con sidecar y todo.
+
+Nada de esto necesita MonkeyLLM para abrirse. Un `.forest` es un zip con un
+`README.txt` dentro que trae los dos comandos (`unzip`, luego `git clone
+forest.bundle`) que devuelven el bosque como Markdown plano, con historial.
+Un backup que nadie puede abrir sin el proveedor no es un backup.
 
 Importar pasa por el selector de bosques: **Importar snapshot** crea un
-bosque nuevo a partir de un bundle, historial incluido, solo para el dueño —
-el bundle entra tal cual, sin pasada de curación, que es exactamente la
-razón de que solo el principal que gobierna el volumen pueda plantar uno. El
+bosque nuevo a partir de una instantánea, historial incluido, solo para el
+dueño entra tal cual, sin pasada de curación, que es exactamente la razón
+de que solo el principal que gobierna el volumen pueda plantar uno. El
 bosque importado llega servible (la Station lo reindexa al llegar) y frío:
 no se gasta ninguna llamada a modelo, y la búsqueda queda solo por palabra
-clave hasta que alguien construya la capa vectorial.
+clave hasta que alguien construya la capa vectorial. Si algún nodo nombra un
+payload que la instantánea no trajo, la importación dice cuántos en vez de
+reportar un éxito limpio esos nodos quedan muertos hasta que los bytes
+lleguen de donde se tomó la instantánea.
 
 > **Nota** Restaurar *sobre* un bosque vivo deliberadamente no se ofrece
 > en la consola; eso queda en la línea de comandos (`vine snapshot
@@ -250,9 +266,11 @@ La consola de Auditoría responde "quién vio qué". Sus dos mitades se guardan
 donde le corresponde a cada una:
 
 - **Las lecturas** aterrizan en el log de auditoría: quién, qué bosque, qué
-  llamada, un digest de los argumentos, el tamaño del resultado y cuándo.
-  Los cuerpos y los fragmentos nunca se copian dentro el log registra
-  acceso, no contenido y la consola lo dice en pantalla.
+  llamada, un digest de los argumentos, el tamaño del resultado, cuándo
+  ocurrió, cuánto tardó el bosque, cuánto cobró el proveedor y cuál fue el
+  rechazo cuando hubo rechazo. Los cuerpos y los fragmentos nunca se copian
+  dentro el log registra acceso, no contenido y la consola lo dice en
+  pantalla.
 - **Las escrituras** ya son commits en el historial git del propio bosque,
   cada una con un trailer de commit `station-principal: <name>` que nombra
   al principal que actúa, así que la historia de lo que cambió es la del
@@ -265,7 +283,24 @@ lleva el digest de la clave de la entrada, queda marcada como servida del
 banco, y el costo que registra es el costo *evitado*, nunca un segundo
 gasto.
 
-El log se puede filtrar por persona, y leerlo exige la capacidad `admin`.
+La pantalla abre con cuatro números sobre el conjunto que estás mirando:
+cuántas llamadas, cuántas fueron rechazadas, cuánto se gastó y cuánto hizo
+innecesario el banco de respuestas. Esas dos cifras de dinero están
+separadas a propósito el costo de un acierto en el banco es dinero que
+*no* se pagó, y un único "costo" que cubra ambos es una cuenta que nadie
+puede conciliar. Una llamada cuyo proveedor no publica precio se muestra sin
+precio, nunca como gratis.
+
+El filtro es por persona, por llamada, por bosque, por desenlace (todo, solo
+los rechazos, solo lo que sirvió el banco) y por fecha, y cada filtro va en
+la dirección, así que una vista filtrada es un enlace que puedes mandarle a
+quien tenga que mirarlo. Los cuatro números describen el conjunto filtrado y
+no la página de filas debajo de ellos un resumen que contara las filas en
+pantalla cambiaría al cambiar cuántas filas caben.
+
+Leerlo exige la capacidad `admin`, y muestra solo los bosques que
+administras los totales se estrechan igual, porque contar un bosque es una
+manera de averiguar su tamaño.
 
 ## Optimizar
 

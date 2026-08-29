@@ -88,8 +88,12 @@ export function groupOf(id, depth) {
 
 /** Group hues walk the golden angle, so any number of branches lands evenly
  *  spread and the same forest colours the same way twice. The root group
- *  stays grey: it is the absence of a branch, not one more branch. */
-function groupPalette(keys, dark) {
+ *  stays grey: it is the absence of a branch, not one more branch.
+ *
+ *  Exported for the path panel (J.5.15 rule 9), which colours its background
+ *  dots by branch: the same forest must arrive in the same hues in both
+ *  consoles, and a second copy of this formula is a second forest. */
+export function groupPalette(keys, dark) {
   const out = {}
   keys.forEach((key, i) => {
     out[key] = key === '/'

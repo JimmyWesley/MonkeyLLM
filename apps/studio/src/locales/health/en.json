@@ -2,7 +2,7 @@
   "health.all_clear": "Nothing to report.",
   "health.confidence": "confidence {c}",
   "health.download": "Download the bundle",
-  "health.download_payloads": "Download the payload sidecar",
+  "health.download_payloads": "Download the payload sidecar (pre-v0.74 snapshot)",
   "health.fat_nodes": "Overloaded nodes",
   "health.fat_nodes_hint": "More trails than anyone can follow from one place.",
   "health.heat": "Pheromone",
@@ -22,13 +22,14 @@
   "health.needs_split": "Branches to split",
   "health.needs_split_hint": "A branch this wide costs every reader that passes through it.",
   "health.no_snapshots": "None taken yet.",
+  "health.payloads_omitted": "{count} payload file(s) left out. The nodes naming them will restore dead — this snapshot carries the map, not the databases or the media.",
   "health.release": "Release the stale lock",
   "health.releasing": "Releasing",
-  "health.restore_note": "Restoring over a live forest stays on the command line. A snapshot travels: the owner can download it here and import it as a new forest from the forest switcher.",
+  "health.restore_note": "Restoring over a live forest stays on the command line. A snapshot travels as one file: the owner can download it here and import it as a new forest from the forest switcher.",
   "health.scoped": "This report covers the whole forest.",
   "health.scoped_hint": "It counts problems everywhere, so it needs an admin grant that is not limited to a branch.",
   "health.snapshots": "Snapshots",
-  "health.snapshots_sub": "The forest packaged as one file, full history included.",
+  "health.snapshots_sub": "The forest packaged as one file: full history, payloads included.",
   "health.stale_passports": "Sources that vanished",
   "health.stale_passports_hint": "The node stays; the file it came from is gone. The Ranger never deletes.",
   "health.sub": "What the Ranger would report on its next run. Reading it changes nothing.",
@@ -37,5 +38,5 @@
   "health.title": "Forest health",
   "health.uncertain": "Link proposals",
   "health.uncertain_hint": "Links below full confidence, waiting for the Ranger to promote or prune them.",
-  "health.with_payloads": "Include dataset payloads"
+  "health.with_payloads": "Carry the dataset and media payloads"
 }

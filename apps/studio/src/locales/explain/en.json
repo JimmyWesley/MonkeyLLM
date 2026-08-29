@@ -2,6 +2,8 @@
   "explain.calls": "Model calls",
   "explain.cost": "Cost",
   "explain.cost_unknown": "This provider publishes no price, so the cost is unknown not zero.",
+  "explain.dense": "Match",
+  "explain.embed": "Embedding",
   "explain.entry": "Entry search",
   "explain.entry_bm25": "BM25",
   "explain.entry_hybrid": "hybrid (RRF)",

@@ -45,7 +45,12 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import (
+    FileResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -65,8 +70,9 @@ from monkeyllm.errors import (
 )
 from monkeyllm.server import ForestPool
 from monkeyllm.signatures import validate_args
-from monkeyllm.windows import normalize_window
-from monkeyllm_station import answer_store, vision, webhooks
+from monkeyllm.snapshot import CONTAINER_SUFFIX
+from monkeyllm.windows import exclusive_end, normalize_window
+from monkeyllm_station import answer_store, runs as runs_mod, vision, webhooks
 from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
 from monkeyllm_station.registry import Registry
@@ -103,6 +109,11 @@ EXPLAINED = frozenset({"answer", "harvest"})
 # default bound is generous enough that no ordinary forest meets it and low
 # enough that meeting it is survivable; either way `truncated` says so.
 MAP_KINDS = frozenset({"graph", "trails"})
+
+# J.10.12 rule 5: a run id is a rendezvous, not a name. It is the
+# caller's own opaque string, so it is bounded rather than parsed — the
+# host never reads meaning out of it and never puts it in a forest.
+RUN_ID_MAX = 120
 MAP_LIMIT = 2000
 MAP_MAX = 10000
 
@@ -472,9 +483,16 @@ def _server_timing(clocks: dict) -> str:
     can never say more than the response it rides on. `cache` appears only
     when the answer store was consulted (J.10.7); on a hit `model` is
     absent, because no provider ran.
+
+    `embed` and `dense` (J.10.4.1, v0.71) are SHARES OF `vine`, not clocks
+    beside it: they name what a hybrid entry spent on a provider round trip
+    and on the vector scan, and `vine` still reports the whole engine span.
+    A consumer that wants the forest's own work subtracts them; one that
+    sums every clock to reconstruct the request must not.
     """
     return ", ".join(f"{name};dur={clocks[name]}"
-                     for name in ("vine", "model", "cache", "host") if name in clocks)
+                     for name in ("vine", "embed", "dense", "model", "cache", "host")
+                     if name in clocks)
 
 
 def _no_such_endpoint(path: str) -> JSONResponse:
@@ -660,6 +678,30 @@ ENV_PROVIDERS = (
     ("embed", "MONKEYLLM_EMBED_PROVIDER", "MONKEYLLM_EMBED_ENDPOINT",
      "MONKEYLLM_EMBED_API_KEY"),
 )
+
+
+def _json_object(parsed):
+    """A request body is an OBJECT or it is `E_SCHEMA` (C.12).
+
+    Every route here reads its arguments with `body.get(...)`, so a body that
+    parses as a bare string, list or number reached that call as whatever it
+    was and raised `AttributeError` — answered as `E_INTERNAL`/500, which
+    tells the caller "this is a defect on the server" about a malformed
+    request they sent. A double-encoded body is the way this actually
+    happens: `JSON.stringify` applied twice parses back to a `str`, which is
+    exactly the bug the Studio console had on `recurate` and `clearStaging`.
+
+    Returns the dict, or raises the refusal that names what arrived.
+    """
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict):
+        raise VineError(
+            E_SCHEMA,
+            f"request body must be a JSON object, got {type(parsed).__name__}",
+            hint="Send the arguments as an object, e.g. {\"forest\": \"...\"}. "
+                 "A body encoded to JSON twice arrives as a string.")
+    return parsed
 
 
 def _name_from_endpoint(endpoint: str) -> str:
@@ -902,6 +944,70 @@ def build_app(
         if slot is None:
             return await in_forest_thread(forest, fn)
         return await in_reader_thread(forest, slot, fn)
+
+    # -- the progress of one answer (J.10.12) --------------------------------
+
+    # Host memory, like the job board below and for the same reason: a
+    # restart forgets records and never work.
+    runs = runs_mod.RunBoard()
+
+    def publish(sample: dict, kind: str, data) -> None:
+        """One progress event, if this call is being watched.
+
+        Reached from a forest lane. `RunBoard.publish` never blocks and
+        never raises, so an answer cannot be slowed or failed by a
+        spectator (J.10.12 rule 4).
+        """
+        key = sample.get("run_key")
+        if key is not None:
+            runs.publish(key, kind, data)
+
+    async def answer_events(request: Request):
+        """`GET /v1/forests/{forest}/answer/{run}/events` (J.10.12).
+
+        The progress of one `answer` the same principal is making, on a
+        channel of its own so the response's shape never moves.
+
+        No forest is touched here — no lane, no trace, no pheromone. Like a
+        J.9 job record this reads host memory alone, which is also why it
+        cannot lie about a Station that restarted: the record is gone and
+        the channel closes.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        # Asked before the run is looked up, so no principal can learn
+        # whether somebody else's run exists by watching which spelling of
+        # "no" comes back.
+        if registry.policy_for(principal, forest) is None:
+            return _unknown_forest(forest)
+
+        # The key IS the authorization, and that is the whole of it: a
+        # record exists only because THIS principal's `answer` on THIS
+        # forest claimed it, and a principal without `read` could never have
+        # made that call. So there is no capability to re-test here — an
+        # id nobody claimed keys nothing, and a channel for it closes.
+        key = (principal, forest, request.path_params["run"][:RUN_ID_MAX])
+
+        async def frames():
+            # An unknown or finished run yields what it has and closes
+            # (rule 6). `stream` is what decides that; this only renders.
+            async for event in runs.stream(key):
+                data = json.dumps(event["data"], ensure_ascii=False,
+                                  default=str)
+                yield f"event: {event['event']}\ndata: {data}\n\n".encode()
+
+        return StreamingResponse(
+            frames(), media_type="text/event-stream",
+            headers={
+                # A progress channel behind a buffering proxy is a progress
+                # channel that arrives all at once, at the end, which is the
+                # problem this section exists to solve.
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            })
 
     # -- ingest jobs (J.9) ---------------------------------------------------
 
@@ -1299,12 +1405,32 @@ def build_app(
             "cost": result.get("cost"),
         })
 
+    def refusal_code(result) -> str | None:
+        """The envelope's code, or None when nothing was refused (J.4.2).
+
+        The CODE and never the message: a code is a closed vocabulary, while
+        a message carries hints that name nodes, terms and table names — and
+        the audit log records access, not content (J.4).
+        """
+        error = result.get("error") if isinstance(result, dict) else None
+        return (error or {}).get("code") or None
+
+    def engine_ms(events) -> float | None:
+        """This call's own span, off the Part D slice it already produced.
+
+        `None` when the slice is empty, which is not the same as zero: a
+        call refused by the policy never reached the engine, and a row
+        claiming it took 0.0 ms would be describing work that did not
+        happen (J.4.2).
+        """
+        total = sum(e["elapsed_ms"] for e in events or ())
+        return round(float(total), 3) if events else None
+
     def emit_refusal(principal: str, forest: str, name: str, result) -> None:
         """A scoped call was refused. The security signal an automation
         actually wants, and it costs nothing to say: the refusal already
         happened and is already audited."""
-        error = result.get("error") if isinstance(result, dict) else None
-        code = (error or {}).get("code")
+        code = refusal_code(result)
         if code in (E_FORBIDDEN, E_QUERY_FORBIDDEN):
             hooks.emit(forest, "access.denied", principal,
                        {"primitive": name, "code": code})
@@ -1394,11 +1520,24 @@ def build_app(
         finally:
             if clocks is not None:
                 tracer, mark = sample.get("tracer"), sample.get("mark", 0)
-                engine = float(sum(e["elapsed_ms"] for e in tracer.events[mark:])
-                               if tracer is not None else 0.0)
+                slice_ = tracer.events[mark:] if tracer is not None else []
+                engine = float(sum(e["elapsed_ms"] for e in slice_))
                 model = sample.get("model")
                 store_ms = sample.get("cache")
                 clocks["vine"] = round(engine, 3)
+                # J.10.4.1 (v0.71): the dense layer's two shares, as clocks.
+                # A single primitive gets no `trace` — the body would carry a
+                # one-step list saying what the header already says — so
+                # without these a bare hybrid `locate` had nowhere to report
+                # that 68 of its 80 ms were a vector scan.
+                #
+                # They are shares INSIDE `vine`, never beside it: `host`
+                # keeps subtracting `engine` alone, and a client summing
+                # every clock must not add these twice.
+                for key, field in (("embed", "embed_ms"), ("dense", "dense_ms")):
+                    share = sum(e.get(field) or 0.0 for e in slice_)
+                    if share:
+                        clocks[key] = round(share, 3)
                 if model is not None:
                     clocks["model"] = round(model, 3)
                 if store_ms is not None:
@@ -1436,6 +1575,14 @@ def build_app(
         # K.3, entry search: set on every call, never left over from the last
         # one. `False` is both the default and the reset.
         vine.hybrid_locate = bool(payload.pop("hybrid", False))
+        # J.10.12: the progress channel's rendezvous. Popped here for the
+        # reason `hybrid` is — it is the host's field, not the primitive's,
+        # so what `validate_args` checks below is what the composite reads.
+        # An id nobody claimed keys nothing, so an unwatched call publishes
+        # into a record that does not exist and pays a dict lookup for it.
+        run_id = payload.pop("run", None)
+        if isinstance(run_id, str) and run_id:
+            sample["run_key"] = (principal, forest, run_id[:RUN_ID_MAX])
         mark = len(vine.tracer.events)
         # Where the engine's own clock starts for this call (J.10.6). Read
         # after the fact rather than accumulated here, so there is still only
@@ -1504,6 +1651,10 @@ def build_app(
             principal=principal, forest=forest, primitive=name, args=payload,
             result="error" if (isinstance(result, dict) and "error" in result) else "ok",
             size=len(json.dumps(result, default=str)), commit_sha=commit_sha,
+            # J.4.2: the same slice `Server-Timing: vine` reports, read here
+            # rather than measured again — one instrumentation, two readers.
+            ms=engine_ms(vine.tracer.events[mark:]),
+            error_code=refusal_code(result),
         )
         if (name in WRITE_PRIMITIVES and isinstance(result, dict)
                 and "error" not in result):
@@ -1548,6 +1699,18 @@ def build_app(
             else ("error" if isinstance(result.get("error"), dict) else "ok"),
             size=len(json.dumps(result, default=str)),
             commit_sha=result.get("commit"),
+            # J.4.2. The clocks come apart on purpose (J.10.4.1's reason):
+            # a deployment dominated by the forest buys a different fix from
+            # one dominated by the provider, and one merged figure sends
+            # half its readers to repair the wrong half.
+            ms=engine_ms(events if events is not None
+                         else vine.tracer.events[mark:]),
+            model_ms=sample.get("model"),
+            error_code=refusal_code(result),
+            # On a hit this is the ORIGINAL run's figure and the row's own
+            # `result` is what says it was avoided rather than spent (J.4.2):
+            # two fields saying that would eventually disagree.
+            cost=result.get("cost") if isinstance(result, dict) else None,
         )
         # J.16: after the record, before the return. The act is complete
         # and audited; the announcement is O(1) when nobody subscribes
@@ -1750,7 +1913,14 @@ def build_app(
             return result
         steps = [
             {"step": e["primitive"], "ms": e["elapsed_ms"], "tokens": e["tokens_out"],
-             **({"id": e["id"]} if e["id"] else {})}
+             **({"id": e["id"]} if e["id"] else {}),
+             # The K.2 embed's share of this step (v0.68): a provider round
+             # trip inside the engine's span, named so the panel never
+             # reads it as the forest's own work.
+             **({"embed_ms": e["embed_ms"]} if e.get("embed_ms") is not None else {}),
+             # The Canopy scan's share (v0.71): the same discipline, the
+             # other provider-less half of a hybrid entry.
+             **({"dense_ms": e["dense_ms"]} if e.get("dense_ms") is not None else {})}
             for e in (events if events is not None
                       else vine.tracer.events[mark:])
         ]
@@ -1772,6 +1942,15 @@ def build_app(
             "retrieval_ms": round(sum(s["ms"] for s in steps if s["step"] != "model"), 1),
             "total_ms": round(sum(s["ms"] for s in steps), 1),
         }
+        # J.10.4 (v0.68): the embedder's summed share, only when one ran —
+        # `retrieval_ms` keeps its meaning (the whole engine span) and the
+        # console subtracts, so no shipped number is redefined.
+        embed_total = round(sum(s.get("embed_ms", 0.0) for s in steps), 1)
+        if embed_total:
+            result["trace"]["embed_ms"] = embed_total
+        dense_total = round(sum(s.get("dense_ms", 0.0) for s in steps), 1)
+        if dense_total:
+            result["trace"]["dense_ms"] = dense_total
         return result
 
     # The answer store's per-forest switches (J.10.7). `ttl_hours` is
@@ -1814,7 +1993,10 @@ def build_app(
 
         t0 = time.perf_counter()
         head = _git(Path(vine.forest.root), "rev-parse", "HEAD")
-        # The walk's `k` is not capped by C.6c and keys as given.
+        # The walk's `k` is not capped by C.6c and keys as given. Its
+        # effective terms are the derived ones and can be nothing else:
+        # `terms` beside `hops` is refused before this point (J.10.3), so
+        # this IS the "or the sweep derived them" half of J.10.7 rule 2.
         key = answer_store.build_key(
             question=question, terms=derive_terms(question),
             k=k, hops=budget, window=window,
@@ -1855,7 +2037,7 @@ def build_app(
 
     def serve_from_reading(sample, forest, vine, policy, binding, payload,
                            question, k, bundle, reply_tokens=None,
-                           window=None):
+                           window=None, include_superseded=False):
         """The sweep's J.10.7 check (v0.35): the key finds the entry, the
         reading decides the model. The sweep already ran — this function
         never touches a primitive, so a hit's trace and pheromone are the
@@ -1872,16 +2054,31 @@ def build_app(
         from monkeyllm.harvest import clamp_k, derive_terms
 
         t0 = time.perf_counter()
+        # J.10.7 rule 2 (v0.67): the EFFECTIVE terms — the ones the call
+        # actually used, whether the caller supplied them (J.10.3) or the
+        # sweep derived them. The bundle states them (C.6c), so the key
+        # reads them off the retrieval that just ran instead of deriving a
+        # second copy of the same list. A caller who sends none keys exactly
+        # as before this version, so no stored entry is invalidated.
+        terms = bundle.get("terms")
+        if terms is None:  # a bundle with no terms field: derive, as ever.
+            terms = derive_terms(question)
         # The sweep's answer is shaped by the C.6c cap, so the capped value
         # is what names it (J.10.7): a cap raised between restarts misses
         # cleanly instead of serving five-banana answers under a ten-banana
         # promise.
         key = answer_store.build_key(
-            question=question, terms=derive_terms(question),
+            question=question, terms=terms,
             k=clamp_k(k), hops=None, window=window,
             hybrid=bool(getattr(vine, "hybrid_locate", False)),
             binding=binding, policy=policy, head=None,
-            reply_tokens=reply_tokens)
+            reply_tokens=reply_tokens,
+            # C.6c.4 rule 4: the history view is a different reading, so it
+            # is a different entry. The fingerprint would already refuse to
+            # serve one for the other, but a key that cannot tell them apart
+            # makes each one evict the other on a forest where both are
+            # asked.
+            include_superseded=include_superseded)
         fingerprint = answer_store.reading_fingerprint(bundle)
         store = answer_store.AnswerStore(Path(vine.forest.root))
         sample["cache_store"] = {"store": store, "key": key,
@@ -2080,6 +2277,31 @@ def build_app(
                 # you would have picked"; a number sets it.
                 hops = payload.get("hops")
                 budget = (6 if hops is True else int(hops)) if hops else None
+                # J.10.3 (v0.67): the caller's own terms, on the sweep only.
+                # Shape is the C.12 table's business (`string[]`, refused in
+                # `harvest`'s own words); what belongs here is the one thing
+                # the table cannot say — that a walk takes none. It authors
+                # its retrieval from hop 1 (J.10.5), so accepting a list and
+                # dropping it would be a lie about what ran, which is C.13
+                # rule 4's judgement of a silently ignored window applied to
+                # a silently ignored parameter.
+                terms = payload.get("terms")
+                if budget and terms is not None:
+                    raise VineError(
+                        E_SCHEMA,
+                        "answer: 'terms' is not accepted with 'hops'",
+                        hint="A walk authors its own retrieval from hop 1. "
+                             "Drop 'hops' to hand the sweep your terms, or "
+                             "drop 'terms' to let the walk search for itself.")
+                # C.6c.4 rule 4: the history view — forwarded to the
+                # retrieval that does the suppressing, and into the J.10.7
+                # key, because it changes the reading. Deliberately NOT
+                # refused beside `hops` the way `terms` is, and rule 5 is the
+                # whole difference: navigation never suppresses, so a walk
+                # already sees the replaced document at every hop. The flag
+                # asks a walk for exactly what a walk already does, where
+                # terms handed to a walk would be searched by nobody.
+                superseded = bool(payload.get("include_superseded"))
                 if budget:
                     served = consult_walk_store(
                         sample, forest, vine, policy, binding, payload,
@@ -2087,7 +2309,8 @@ def build_app(
                     if served is None:
                         served = inference.forage(
                             scoped, question, binding, k=k, max_hops=budget,
-                            reply_tokens=reply, window=window)
+                            reply_tokens=reply, window=window,
+                            on_hop=lambda hop: publish(sample, "hop", hop))
                         whisper(vine, served.get("evidence")
                                 if isinstance(served, dict) else None)
                     # J.10.8 (v0.54): the clamp is reported — a caller who
@@ -2097,12 +2320,17 @@ def build_app(
                     return served
                 # The sweep's retrieval always runs — it is the cheap half,
                 # and its reading is what decides the hit (J.10.7 v0.35).
-                bundle = scoped.harvest(question, k=k,
+                bundle = scoped.harvest(question, terms=terms, k=k,
                                         since=payload.get("since"),
                                         until=payload.get("until"),
-                                        date_field=payload.get("date_field"))
+                                        date_field=payload.get("date_field"),
+                                        include_superseded=superseded)
                 if isinstance(bundle, dict) and "error" in bundle:
                     return bundle
+                # J.10.12: 19 ms in, against a reply 10 s out. The SAME
+                # object the response carries as `harvest` (rule 2: an event
+                # is a prefix of the answer, never a second rendering of it).
+                publish(sample, "retrieval", bundle)
                 # J.10.10 (v0.52): the floor, counted before the store is
                 # consulted and before the provider is called — so a refusal
                 # is never billed, never cached, and never a stored answer
@@ -2112,7 +2340,7 @@ def build_app(
                     return floor
                 served = serve_from_reading(
                     sample, forest, vine, policy, binding, payload,
-                    question, k, bundle, reply, window)
+                    question, k, bundle, reply, window, superseded)
                 if served is None:
                     if sample is not None and sample.get("defer_model"):
                         # J.10.11 (v0.57): the provider is not a lane. The
@@ -2943,7 +3171,7 @@ def build_app(
         if not setup_open():
             return _no_such_endpoint("/auth/setup")
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except json.JSONDecodeError:
             return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
         username = str(body.get("username") or "").strip()
@@ -2997,7 +3225,7 @@ def build_app(
         never what it may do.
         """
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except json.JSONDecodeError:
             return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
         username = str(body.get("username") or "").strip()
@@ -3045,7 +3273,7 @@ def build_app(
         use, so it never adds a capability and never outlives a revocation.
         """
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except json.JSONDecodeError:
             return _envelope(VineError(E_SCHEMA, "invalid JSON body"))
         username = str(body.get("username") or "").strip()
@@ -3138,7 +3366,7 @@ def build_app(
             return JSONResponse({"keys": registry.keys_of(visible),
                                  "principals": visible})
 
-        body = await request.json()
+        body = _json_object(await request.json())
         if body.get("revoke"):
             # Authorize BEFORE the effect. Revoking first and checking after
             # would answer 403 while the token was already dead — a refusal
@@ -3193,7 +3421,7 @@ def build_app(
         mask = mask_of(request)
         if mask is not None and "admin" not in mask:
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
-        body = await request.json()
+        body = _json_object(await request.json())
         target = str(body.get("principal") or "").strip()
         if not target or not administers_fully(principal, target):
             return _envelope(VineError(
@@ -3222,7 +3450,7 @@ def build_app(
         if err:
             return err
         forest = request.query_params.get("forest")
-        body = await request.json() if request.method == "POST" else {}
+        body = _json_object(await request.json() if request.method == "POST" else {})
         if not forest:
             forest = body.get("forest")
         if not is_admin(principal, forest, mask=mask_of(request)):
@@ -3316,7 +3544,7 @@ def build_app(
                 })
             return JSONResponse({"people": people, "forests": sorted(mine)})
 
-        body = await request.json()
+        body = _json_object(await request.json())
         target = str(body.get("principal") or "").strip()
         if not target:
             return _envelope(VineError(E_SCHEMA, "principal is required"))
@@ -3469,7 +3697,7 @@ def build_app(
             return _envelope(
                 VineError(E_FORBIDDEN, "creating a forest requires the 'admin' "
                                        "capability on an existing forest"), 403)
-        body = await request.json()
+        body = _json_object(await request.json())
         forest_id = str(body.get("id") or "").strip()
         title = str(body.get("title") or "").strip()
         if not FOREST_ID.match(forest_id):
@@ -3558,8 +3786,26 @@ def build_app(
         # Read off the request BEFORE the lane, like the MCP surface does:
         # the mask belongs to the credential and the lane never saw one.
         mask = mask_of(request)
-        result = await execute_call(principal, forest, name, payload,
-                                    clocks, mask)
+        # J.10.12: a caller may watch this call's progress. Claimed HERE, on
+        # the loop, because the record captures the loop a forest lane will
+        # later wake it from — and claimed before the call so the channel can
+        # be opened without racing the first event.
+        run_key = None
+        if name == "answer" and isinstance(payload.get("run"), str) and payload["run"]:
+            run_key = (principal, forest, payload["run"][:RUN_ID_MAX])
+            if not runs.claim(run_key):
+                return _envelope(VineError(
+                    E_SCHEMA, "that run id is already in flight",
+                    hint="A run identifies ONE call while it runs (J.10.12). "
+                         "Use a fresh id per question."))
+        try:
+            result = await execute_call(principal, forest, name, payload,
+                                        clocks, mask)
+        finally:
+            # The channel closes whatever happened — an errored call that
+            # left its watcher waiting would be a spinner with no end.
+            if run_key is not None:
+                runs.finish(run_key)
         timing = _server_timing(clocks)
         if result is None:
             response = _unknown_forest(forest)
@@ -3605,7 +3851,7 @@ def build_app(
         principal, err = require_principal(request)
         if err:
             return err
-        body = await request.json()
+        body = _json_object(await request.json())
         forest = body.get("forest")
         gate = admin_gate(principal, forest, request)
         if gate is not None:
@@ -3641,16 +3887,51 @@ def build_app(
                         "prefix": out["api_key"][:9]})
         return JSONResponse(out)
 
+    # J.4.2: the fields a row gained in v0.73. Emitted only when the row
+    # actually carries them — a row written by an older Station makes no
+    # claim about its cost, its refusal or its clock, and answering `0` on
+    # its behalf would invent one.
+    AUDIT_OPTIONAL = ("ms", "model_ms", "error_code", "usd", "tokens",
+                      "calls", "priced")
+
+    def audit_entry(row: dict) -> dict:
+        out = {k: v for k, v in row.items()
+               if k not in AUDIT_OPTIONAL or v is not None}
+        if "priced" in out:
+            out["priced"] = bool(out["priced"])
+        return out
+
     async def admin_audit(request: Request) -> JSONResponse:
+        """The access log, filtered and totalled (J.4, J.4.3).
+
+        Every filter is applied in SQL, before the page is cut, and the
+        totals are computed over the same filtered set rather than over the
+        page that came back. That is the whole difference between a summary
+        and a fact about the page size — and it is why the filter is built
+        in one place in the registry and read three ways from there.
+        """
         principal, err = require_principal(request)
         if err:
             return err
         if not is_admin(principal, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires the 'admin' capability"), 403)
-        limit = min(int(request.query_params.get("limit", 100)), 500)
-        # An audit entry records what somebody read. Same rule as J.3.2:
-        # over-fetch, then keep only the forests this caller governs, so a
-        # short page is a short page rather than a leak.
+        q = request.query_params
+        try:
+            limit = min(max(int(q.get("limit", 100)), 1), 500)
+        except (TypeError, ValueError):
+            return _envelope(VineError(
+                E_SCHEMA, f"limit must be an integer, got {q.get('limit')!r}"))
+        # C.13's rule, on the one route where being wrong about it is a
+        # false statement about who did what: a bound we cannot read is
+        # refused, never quietly dropped.
+        try:
+            window = normalize_window(q.get("since"), q.get("until"), None)
+        except VineError as e:
+            return _envelope(e)
+        # An audit entry records what somebody read. Same rule as J.3.2: the
+        # scope decides first, and since v0.73 it decides in SQL — a total
+        # over rows this caller may not read would be a finer size oracle
+        # than the page ever was.
         mine = administered(principal)
         # Governance rows belong to no forest, and they describe the whole
         # deployment: who was granted what, which keys exist, where the
@@ -3659,10 +3940,23 @@ def build_app(
         # J.3.2 corrected for content.
         if registry.is_owner(principal):
             mine = mine | {NO_FOREST}
-        entries = [e for e in registry.audit(
-            limit=limit * 4, principal=request.query_params.get("principal"))
-            if e["forest"] in mine]
-        return JSONResponse({"entries": entries[:limit]})
+        scope = {"forests": mine,
+                 "since": (window or {}).get("since"),
+                 "before": exclusive_end(window["until"])
+                 if window and window.get("until") else None}
+        filters = {**scope,
+                   "principal": q.get("principal"),
+                   "forest": q.get("forest"),
+                   "primitive": q.get("primitive"),
+                   "result": q.get("result"),
+                   "errors": q.get("errors") in ("1", "true", "yes")}
+        return JSONResponse({
+            "entries": [audit_entry(e) for e in registry.audit(limit=limit, **filters)],
+            "totals": registry.audit_totals(**filters),
+            # Narrowed by the scope and the window only: choosing a
+            # primitive must not empty the list of primitives (J.4.3).
+            "filters": registry.audit_facets(**scope),
+        })
 
     async def admin_providers(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
@@ -3681,7 +3975,7 @@ def build_app(
                 E_FORBIDDEN, "managing providers requires authority over every forest",
                 hint="A provider serves every forest; administering one of "
                      "several does not cover it."), 403)
-        body = await request.json()
+        body = _json_object(await request.json())
         try:
             if body.get("remove"):
                 registry.delete_provider(body["name"])
@@ -3723,7 +4017,7 @@ def build_app(
                      "several does not cover it."), 403)
         from monkeyllm_station import inference
 
-        body = await request.json()
+        body = _json_object(await request.json())
         secret = registry.provider_secret(body.get("name", ""))
         stored_endpoint = (secret or {}).get("endpoint")
         endpoint = body.get("endpoint") or stored_endpoint
@@ -3761,7 +4055,7 @@ def build_app(
             if not is_admin(principal, forest, mask=mask_of(request)):
                 return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
             return JSONResponse({"bindings": registry.bindings(forest)})
-        body = await request.json()
+        body = _json_object(await request.json())
         forest = body.get("forest")
         if not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
@@ -4014,7 +4308,7 @@ def build_app(
             })
 
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         if not isinstance(body, dict):
@@ -4087,7 +4381,7 @@ def build_app(
             return JSONResponse({"deleted": hook["id"]})
 
         try:
-            body = await request.json() if await request.body() else {}
+            body = _json_object(await request.json() if await request.body() else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         action = str(body.get("action") or "").strip()
@@ -4451,7 +4745,7 @@ def build_app(
                 E_FORBIDDEN, "'share' requires the 'read' capability",
                 hint=f"This principal holds: {sorted(policy.caps)}."), 403)
         try:
-            body = await request.json()
+            body = _json_object(await request.json())
         except Exception:
             body = None
         if not isinstance(body, dict) or not isinstance(body.get("node"), str) \
@@ -4619,7 +4913,7 @@ def build_app(
     def snapshot_dir(forest: str) -> Path:
         """Bundles are host state, beside the registry — never inside a forest.
 
-        A `.bundle` in the tree would be a binary where A.3.1 keeps binaries
+        A snapshot in the tree would be a binary where A.3.1 keeps binaries
         out, and the next snapshot would package the previous one.
         """
         return Path(registry_path).resolve().parent / "snapshots" / forest
@@ -4679,7 +4973,7 @@ def build_app(
         if err:
             return err
         try:
-            body = await request.json() if await request.body() else {}
+            body = _json_object(await request.json() if await request.body() else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
@@ -4742,7 +5036,7 @@ def build_app(
         if err:
             return err
         try:
-            body = await request.json() if await request.body() else {}
+            body = _json_object(await request.json() if await request.body() else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
@@ -4831,7 +5125,7 @@ def build_app(
             return err
         clearing = request.method == "POST"
         try:
-            body = await request.json() if (clearing and await request.body()) else {}
+            body = _json_object(await request.json() if (clearing and await request.body()) else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
@@ -4954,7 +5248,7 @@ def build_app(
         if err:
             return err
         try:
-            body = await request.json() if await request.body() else {}
+            body = _json_object(await request.json() if await request.body() else {})
         except json.JSONDecodeError as e:
             return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
         forest = str(body.get("forest") or request.query_params.get("forest") or "")
@@ -5000,7 +5294,7 @@ def build_app(
             forest = request.query_params.get("forest") or ""
         else:
             try:
-                body = await request.json() if await request.body() else {}
+                body = _json_object(await request.json() if await request.body() else {})
             except json.JSONDecodeError as e:
                 return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
             forest = str(body.get("forest") or "")
@@ -5080,7 +5374,7 @@ def build_app(
             forest = request.query_params.get("forest") or ""
         else:
             try:
-                body = await request.json() if await request.body() else {}
+                body = _json_object(await request.json() if await request.body() else {})
             except json.JSONDecodeError as e:
                 return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
             forest = str(body.get("forest") or "")
@@ -5090,13 +5384,20 @@ def build_app(
 
         directory = snapshot_dir(forest)
         if request.method == "GET":
-            bundles = sorted(directory.glob("*.bundle"), reverse=True) \
-                if directory.is_dir() else []
+            # J.13.1 (v0.74): one snapshot is one row. A container is that
+            # row on its own; a pre-v0.74 bundle keeps the second control
+            # for its sidecar, because those halves are real and hiding one
+            # would lose it.
+            taken = sorted(
+                [*directory.glob(f"*{CONTAINER_SUFFIX}"), *directory.glob("*.bundle")],
+                key=lambda f: f.stat().st_mtime, reverse=True,
+            ) if directory.is_dir() else []
             return JSONResponse({"snapshots": [
                 {"name": b.name, "bytes": b.stat().st_size,
                  "created": _iso(b.stat().st_mtime),
+                 "container": b.suffix == CONTAINER_SUFFIX,
                  "payloads": b.with_suffix(b.suffix + ".payloads.zip").is_file()}
-                for b in bundles]})
+                for b in taken]})
 
         def work():
             from monkeyllm.snapshot import create_snapshot
@@ -5112,15 +5413,17 @@ def build_app(
             # collision is resolved by counting rather than by borrowing
             # digits nobody wants — overwriting would silently destroy the
             # bundle somebody took a moment before doing something risky.
-            out = directory / f"{forest}-{stamp}.bundle"
+            out = directory / f"{forest}-{stamp}{CONTAINER_SUFFIX}"
             attempt = 2
             while out.exists():
-                out = directory / f"{forest}-{stamp}-{attempt}.bundle"
+                out = directory / f"{forest}-{stamp}-{attempt}{CONTAINER_SUFFIX}"
                 attempt += 1
             try:
+                # Part I (v0.74): payloads travel unless the caller says
+                # otherwise. A default that loses data is not a default.
                 return create_snapshot(
                     Path(vine.forest.root), out=out,
-                    with_payloads=bool(body.get("with_payloads")))
+                    with_payloads=body.get("with_payloads", True) is not False)
             except VineError as e:
                 return e.to_dict()
 
@@ -5131,14 +5434,16 @@ def build_app(
         registry.record(principal=principal, forest=forest, primitive="snapshot",
                         args={}, result="ok", size=result.get("bytes", 0))
         hooks.emit(forest, "snapshot.created", principal,
-                   {"name": Path(result["bundle"]).name,
+                   {"name": Path(result["snapshot"]).name,
                     "bytes": result["bytes"],
-                    "payloads": result.get("payloads")})
+                    "payloads": result.get("payloads"),
+                    "payloads_omitted": result.get("payloads_omitted")})
         # The absolute path is host detail; the caller gets the name it will
         # see in the listing.
-        return JSONResponse({"name": Path(result["bundle"]).name,
+        return JSONResponse({"name": Path(result["snapshot"]).name,
                              "bytes": result["bytes"],
-                             "payloads": result.get("payloads")})
+                             "payloads": result.get("payloads"),
+                             "payloads_omitted": result.get("payloads_omitted")})
 
     async def admin_snapshot_file(request: Request):
         """One bundle or sidecar, streamed out (J.13.1).
@@ -5171,7 +5476,8 @@ def build_app(
         plausible = (FOREST_ID.match(forest)
                      and "/" not in name and "\\" not in name
                      and not name.startswith(".")
-                     and (name.endswith(".bundle")
+                     and (name.endswith(CONTAINER_SUFFIX)
+                          or name.endswith(".bundle")
                           or name.endswith(".bundle.payloads.zip")))
         target = (directory / name).resolve() if plausible else None
         if target is None or target.parent != directory or not target.is_file():
@@ -5187,11 +5493,18 @@ def build_app(
     async def admin_snapshot_import(request: Request) -> JSONResponse:
         """A forest from a snapshot (J.13.2): J.7 creation, with content.
 
-        Owner-only: an imported bundle bypasses every converter, curation
+        Owner-only: an imported snapshot bypasses every converter, curation
         pass and review the J.8 surface imposes on bytes entering a forest —
-        a bundle is already forest and enters as-is. It arrives servable
+        a snapshot is already forest and enters as-is. It arrives servable
         (restore rebuilds the catalog) and arrives cold: no model call, no
         canopy — `locate` stays BM25-only until an operator asks (C.6).
+
+        The upload is a v0.74 container or a pre-v0.74 bundle, decided by
+        its CONTENT (Part I): the filename came with the request, so here it
+        is a claim by whoever is importing. The response says how many
+        passports name a payload the snapshot did not carry — importing a
+        bare bundle is allowed and produces exactly that, and the operator
+        is entitled to learn it now rather than from a 404 two days later.
         """
         principal, err = require_principal(request)
         if err:
@@ -5224,9 +5537,10 @@ def build_app(
                 hint="Lowercase letters, digits, '-' and '_'; up to 63 characters."))
         if bundle is None or isinstance(bundle, str):
             return _envelope(VineError(
-                E_SCHEMA, "a bundle file is required",
-                hint="Send multipart/form-data with the bundle in 'bundle' "
-                     "and, optionally, the payload sidecar in 'payloads'."))
+                E_SCHEMA, "a snapshot file is required",
+                hint="Send multipart/form-data with the snapshot in 'bundle'; "
+                     "a pre-v0.74 snapshot adds its payload sidecar in "
+                     "'payloads'."))
         target = pool.root / forest_id
         if target.exists():
             # Same rule as J.7 creation: adopting the existing forest because
@@ -5277,7 +5591,7 @@ def build_app(
                 except VineError as e:
                     shutil.rmtree(target, ignore_errors=True)
                     return e.to_dict()
-                except Exception as e:  # noqa: BLE001 — a corrupt bundle fails the clone
+                except Exception as e:  # noqa: BLE001 — a corrupt snapshot fails the clone
                     # A half-restored tree would be a forest nobody asked
                     # for, so it is removed rather than reported as a
                     # success with a hole in it (J.7).
@@ -5285,7 +5599,7 @@ def build_app(
                     return VineError(
                         E_SCHEMA, f"could not import '{forest_id}': {e}",
                         hint="Nothing was left behind; is this a Part I "
-                             "bundle?").to_dict()
+                             "snapshot?").to_dict()
 
             result = await in_forest_thread(forest_id, work)
         finally:
@@ -5306,11 +5620,13 @@ def build_app(
         registry.record(principal=principal, forest=forest_id,
                         primitive="snapshot-import",
                         args={"nodes": result.get("nodes"),
-                              "payloads": result.get("restored_payloads")},
+                              "payloads": result.get("restored_payloads"),
+                              "payloads_missing": result.get("payloads_missing")},
                         result="ok", size=uploaded, commit_sha=commit)
         return JSONResponse({"forest": {"id": forest_id, "commit": commit},
                              "nodes": result.get("nodes"),
                              "payloads": result.get("restored_payloads"),
+                             "payloads_missing": result.get("payloads_missing"),
                              "grants": registry.grants_of(principal)})
 
     # One instance: `/s/{token}` renders the same shell without going
@@ -5450,6 +5766,11 @@ def build_app(
         # matches in order, and `payload/...` would otherwise be read as a
         # map projection named "payload". `:path` because node ids carry
         # slashes.
+        # The progress channel (J.10.12) before the `{kind}` GET below, for
+        # the reason `payload` and `export` are: Starlette matches in order,
+        # and `answer/...` would otherwise read as a map projection.
+        Route("/v1/forests/{forest}/answer/{run}/events", answer_events,
+              methods=["GET"]),
         Route("/v1/forests/{forest}/payload/{node:path}", forest_payload,
               methods=["GET"]),
         # The document as text/markdown (J.14.1): same ordering reason and
@@ -5514,11 +5835,26 @@ def build_app(
             500,
         )
 
+    async def refused(request: Request, exc: VineError) -> JSONResponse:
+        """A `VineError` that reaches the top is still the caller's answer.
+
+        Without this, the only registered handler was `Exception`, so a
+        refusal raised outside a route's own try/except was re-labelled
+        `E_INTERNAL`/500 — telling the caller "this is a defect on the
+        server" about their own malformed argument. The code the refusal
+        already carries decides the status (C.12).
+        """
+        return _envelope(exc, STATUS_BY_CODE.get(exc.code, 400))
+
     app = Starlette(routes=routes, lifespan=lifespan,
-                    exception_handlers={Exception: unhandled},
+                    exception_handlers={VineError: refused,
+                                        Exception: unhandled},
                     middleware=[Middleware(SecurityHeaders, csp=studio_csp())])
     app.state.pool = pool
     app.state.registry = registry
+    # J.10.12: reachable for the same reason the job board is — a test, and
+    # a future console, ask the host what is in flight without a forest.
+    app.state.runs = runs
     app.state.ingest_roots = ingest_roots
     app.state.run_primitive = run_primitive
     # Exposing the pool without the threads it may be touched from was an

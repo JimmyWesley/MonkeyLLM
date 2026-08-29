@@ -62,7 +62,7 @@ const SAMPLE = {
   'access.denied': { primitive: 'plant', code: 'E_FORBIDDEN' },
   'grant.changed': { principal: 'maria', caps: ['read', 'query'], branches: 2 },
   'model.bound': { role: 'answer', provider: 'openrouter', model: 'anthropic/claude-sonnet-5', removed: false },
-  'snapshot.created': { name: 'demo-20260820-1402.bundle', bytes: 1843200, payloads: 4 },
+  'snapshot.created': { name: 'demo-20260820-1402.forest', bytes: 1843200, payloads: 4, payloads_omitted: 0 },
   'canopy.built': { embedded: 82, nodes: 82, stale: 0, model: 'text-embedding-3-large', refresh: false },
   'reindex.finished': { nodes: 82, ms: 143.2 },
   'recurate.finished': { scanned: 1877, changed: 41, derive: ['aliases'] },

@@ -213,18 +213,28 @@ function NodeList({ title, hint, ids, goto }) {
   )
 }
 
+/** Part I (v0.74): one snapshot is one file and one row.
+ *
+ *  The payload toggle starts ON. A snapshot without the payloads is the
+ *  only kind that loses data, and it used to be what an operator got by
+ *  not thinking about it; leaving them out is a decision now, and the card
+ *  says how many files that decision left behind — `0 payloads` otherwise
+ *  reads the same whether the forest has none or nobody asked. */
 function Snapshots({ forest, me }) {
   const { t } = useI18n()
-  const [payloads, setPayloads] = useState(false)
+  const [payloads, setPayloads] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [omitted, setOmitted] = useState(0)
   const list = useAsync(() => api.snapshots(forest), [forest])
 
   async function take() {
     setBusy(true)
     setError(null)
+    setOmitted(0)
     try {
-      await api.takeSnapshot(forest, payloads)
+      const r = await api.takeSnapshot(forest, payloads)
+      setOmitted(r?.payloads_omitted || 0)
       list.reload()
     } catch (e) { setError(e) } finally { setBusy(false) }
   }
@@ -244,6 +254,11 @@ function Snapshots({ forest, me }) {
       <button className="btn btn-primary btn-sm mt-3" onClick={take} disabled={busy}>
         {busy ? t('health.taking') : t('health.take')}
       </button>
+      {omitted > 0 && (
+        <div className="mt-3">
+          <Note tone="warn">{t('health.payloads_omitted', { count: omitted })}</Note>
+        </div>
+      )}
       <ErrorNote error={error} />
 
       <div className="mt-4">
@@ -270,7 +285,10 @@ function Snapshots({ forest, me }) {
                     <div className="mt-0.5 flex items-center gap-2 text-[11px] text-text-3">
                       <span>{(s.bytes / 1024).toFixed(1)} kB</span>
                       <span>{s.created?.slice(0, 16).replace('T', ' ')}</span>
-                      {s.payloads && (me?.owner
+                      {/* A container needs no second control. A snapshot
+                          taken before v0.74 keeps one, because its other
+                          half is a real file and hiding it would lose it. */}
+                      {!s.container && s.payloads && (me?.owner
                         ? <button className="badge hover:border-accent/40 hover:text-accent"
                                   title={t('health.download_payloads')}
                                   onClick={() => download(`${s.name}.payloads.zip`)}>

@@ -43,6 +43,7 @@ from monkeyllm.errors import (
     VineError,
 )
 from monkeyllm.fetch import PayloadCache, is_remote
+from monkeyllm.harvest import derive_terms
 from monkeyllm.forest import Forest, WriterLock
 from monkeyllm.gitops import GitRepo
 from monkeyllm.models import (
@@ -334,12 +335,24 @@ def _fold_char(o: int) -> int | str:
 # Built on first use, not at import: a `plant` or a `look` folds nothing.
 _FOLD_LIMIT = 0x30000
 _FOLD_TABLE: list[int | str] | None = None
+_FOLD_LOCK = threading.Lock()
 
 
 def _fold_table() -> list[int | str]:
+    """The fold table, built once per process (v0.62) under a lock (v0.69).
+
+    Building it walks `_FOLD_LIMIT` code points and costs ~180 ms. Without
+    the lock, N readers of the J.6.2 pool arriving before the first one
+    finishes each build their own copy: the result is identical so nothing
+    breaks, but the worst arrival pattern pays that cost N times. Still
+    never at import — `vine plant` folds nothing, and a 180 ms import taxes
+    the whole CLI to help one primitive (v0.62's rule, unchanged).
+    """
     global _FOLD_TABLE
     if _FOLD_TABLE is None:
-        _FOLD_TABLE = [_fold_char(o) for o in range(_FOLD_LIMIT)]
+        with _FOLD_LOCK:
+            if _FOLD_TABLE is None:  # another thread may have won the race
+                _FOLD_TABLE = [_fold_char(o) for o in range(_FOLD_LIMIT)]
     return _FOLD_TABLE
 
 
@@ -632,7 +645,27 @@ def _traced(fn):
 
     def wrapper(self: "Vine", *args, **kwargs):
         t0 = time.perf_counter()
-        result = fn(self, *args, **kwargs)
+        # The K.2 embed runs inside whichever primitive needed the vector,
+        # so its share is collected here and named on the event (Part D,
+        # v0.68). Save/restore, because a traced call inside another traced
+        # call must not hand its share to the outer frame.
+        outer_embed = self._embed_ms_pending
+        self._embed_ms_pending = None
+        # The dense scan is the OTHER half of the same bill (v0.71). v0.68
+        # named the provider round trip and stopped there, because the scan
+        # had been measured at 0.044 ms per dim-1024 dot product and read as
+        # free. Per comparison it still is; per CALL it is that number times
+        # the corpus, and at 1,877 nodes it is 68 ms — an order of magnitude
+        # more than the lexical `locate` it is charged to.
+        outer_dense = self._dense_ms_pending
+        self._dense_ms_pending = None
+        try:
+            result = fn(self, *args, **kwargs)
+            embed_ms = self._embed_ms_pending
+            dense_ms = self._dense_ms_pending
+        finally:
+            self._embed_ms_pending = outer_embed
+            self._dense_ms_pending = outer_dense
         elapsed = (time.perf_counter() - t0) * 1000
         node_id = kwargs.get("id") or (args[0] if takes_id and args else None)
         self.tracer.record(
@@ -641,6 +674,8 @@ def _traced(fn):
             tokens_in=estimate_tokens(json.dumps([str(a) for a in args]) + json.dumps(kwargs, default=str)),
             tokens_out=estimate_payload_tokens(result),
             elapsed_ms=elapsed,
+            embed_ms=embed_ms,
+            dense_ms=dense_ms,
         )
         return result
 
@@ -692,6 +727,10 @@ class Vine:
         self.hybrid_locate = hybrid_locate
         self._goal: list[float] | None = None
         self._goal_text: str | None = None
+        # What the K.2/K.6 embed cost inside the currently traced primitive
+        # (v0.68). `_traced` resets and collects it around every call.
+        self._embed_ms_pending: float | None = None
+        self._dense_ms_pending: float | None = None
 
     @property
     def commit_trailers(self) -> list[str]:
@@ -818,15 +857,23 @@ class Vine:
         come through here: the Canopy index is their home, and a second
         copy would be a second answer to "what is this node's vector".
         """
-        key = " ".join(str(text).split())
-        model = self.embedder.model
-        cached = self.catalog.embed_memo(model, key)
-        if cached is not None:
-            self.catalog.embed_memo_touch(model, key)
-            return cached
-        vec = self.embedder.embed([text])[0]
-        self.catalog.embed_memo_store(model, key, vec)
-        return vec
+        t0 = time.perf_counter()
+        try:
+            key = " ".join(str(text).split())
+            model = self.embedder.model
+            cached = self.catalog.embed_memo(model, key)
+            if cached is not None:
+                self.catalog.embed_memo_touch(model, key)
+                return cached
+            vec = self.embedder.embed([text])[0]
+            self.catalog.embed_memo_store(model, key, vec)
+            return vec
+        finally:
+            # Attributed to the primitive this ran inside (Part D, v0.68),
+            # memo hit and round trip alike — a hit's near-zero is the memo
+            # working, and only the named share can say so.
+            elapsed = (time.perf_counter() - t0) * 1000
+            self._embed_ms_pending = (self._embed_ms_pending or 0.0) + elapsed
 
     def refresh_canopy(self) -> dict:
         """Embed the nodes marked stale by plant/graft/ingest (J.13.4).
@@ -881,9 +928,16 @@ class Vine:
         would be forging the pheromone the Ranger later reads as evidence of
         where people went (Part D, Part H). Bodies are not touched either —
         that is the whole corpus off disk, which is a different trade.
+
+        The fold table (v0.69) joins on the same argument one step further:
+        it is ~180 ms of pure CPU, paid by whoever runs the first `sniff` of
+        the process, and building it here passes through no primitive, opens
+        no body and forges no pheromone. It is start-up cost being paid
+        before there is a first call, which is what this method is.
         """
         self.catalog.warm()
         self.trails.warm()
+        _fold_table()
 
     def close(self) -> None:
         if self._lock:
@@ -997,7 +1051,20 @@ class Vine:
         window = normalize_window(since, until, date_field)
         win_where, win_params = window_sql(window)
         cand = max(k * 5, 25)
-        rows = self.catalog.fts_search(query, limit=cand, where=win_where,
+        # C.1.2 (v0.70): the sentence is not the query. Every article and
+        # preposition in a question used to be a search term with a vote;
+        # `harvest` has always derived terms first and the entry search it
+        # calls did not. Measured on a 60-question set with headroom:
+        # recall@1 0.711 -> 0.778, five up and none down.
+        #
+        # Rule 2 is the load-bearing half: "api", "sql" and a sentence made
+        # of grammar all derive to NOTHING, and passing that through would
+        # answer nothing to a caller who typed one word — C.1.1's failure,
+        # manufactured. An empty derivation falls back to the raw query and
+        # the call is byte-identical to pre-v0.70.
+        derived = derive_terms(query)
+        rows = self.catalog.fts_search(" ".join(derived) if derived else query,
+                                       limit=cand, where=win_where,
                                        params=win_params)
         by_id = {r["id"]: r for r in rows}
 
@@ -1013,6 +1080,12 @@ class Vine:
             # vectors are refreshed by J.13.4, not by whoever asked next.
             qvec = self.embed_query(query)
             self._goal = qvec
+            # From here to the fusion is the dense layer's own work: the
+            # scan over every node vector, the rows it pulls back that BM25
+            # did not, and the fuse. Timed as one because they are one
+            # decision — turning the layer on — and reported apart from the
+            # embed because one is a provider and the other is this process.
+            dense_t0 = time.perf_counter()
             vec_hits = self.canopy.search(qvec, k=cand)
             for vid, _cos in vec_hits:
                 if vid not in by_id:
@@ -1029,6 +1102,8 @@ class Vine:
             fused = rrf_fuse(bm25_ids, vec_ids)
             top = max(fused.values()) if fused else 1.0
             strength_of = {i: (s / top if top else 0.0) for i, s in fused.items()}
+            self._dense_ms_pending = ((self._dense_ms_pending or 0.0)
+                                      + (time.perf_counter() - dense_t0) * 1000)
         else:
             best = min((r["rank"] for r in rows), default=0.0)  # bm25: lower=better (<=0)
             strength_of = {
@@ -2278,7 +2353,12 @@ class Vine:
                     [json.loads(lines) for lines in remembered])
             else:
                 try:
-                    text = self.forest.path_for(nid).read_text(encoding="utf-8")
+                    # C.6b.2 rule 2 (v0.69): `nid` came out of this forest's
+                    # own catalog, so containment is decided on the string.
+                    # `resolve()` here was a `realpath` walk per node in
+                    # scope — 72 ms of a ~230 ms cold scan over 1,877 nodes.
+                    text = self.forest.path_for(
+                        nid, trusted=True).read_text(encoding="utf-8")
                 except (VineError, OSError):
                     continue  # validate() reports broken nodes; sniff skips them
                 head, body = _split_raw(text)
@@ -3666,18 +3746,12 @@ class Vine:
         """C.17 rule 11 (v0.61): local payloads the passport names and the
         filesystem does not have.
 
-        One statement selects the nodes that declare a payload at all — a
-        handful beside the node count — and each is a stat, never an open,
-        so C.17 rule 1 stands. Remote payloads are skipped: their absence
-        is a fetch away and is not a fact the catalog holds.
+        Shared with Part I's restore since v0.74 — the same condition,
+        counted once, in `catalog.count_missing_payloads`.
         """
-        gone = 0
-        for node_id, payload in self.catalog.local_payloads(where, params):
-            if is_remote(payload):
-                continue
-            if not (self.forest.path_for(node_id).parent / payload).is_file():
-                gone += 1
-        return gone
+        from monkeyllm.catalog import count_missing_payloads
+
+        return count_missing_payloads(self.catalog, self.forest, where, params)
 
     def _root_where(self, root_id: str) -> tuple[list[str], list]:
         """A root as a predicate over the catalog (C.17 rule 3).
