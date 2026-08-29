@@ -228,9 +228,17 @@ def test_the_helicopter_stops_at_the_branch():
     assert re.search(r"out\.drop = channel\('graph-drop'", source), \
         "the flight has no colour of its own"
 
-    # The split rule itself: destination marked => the monkey's leg.
-    assert re.search(r"legOf = \(seg\) => \(marked\.has\(seg\.b\)", source), \
+    # The split rule: the flight draws every ancestry segment the WALK does
+    # not. On a sweep the walk IS the last ancestry step, so the flight
+    # yields it; on a walk the walk is the hop sequence and covers no
+    # ancestry, so the flight draws all of it. The first version of this
+    # check pinned the sweep case as if it were the rule, and the general
+    # rule broke underneath it: on a walk those segments were yielded to a
+    # line that never drew them and the address vanished from the map.
+    assert re.search(r"legOf = \(seg\) => \(!hopping && marked\.has\(seg\.b\)", source), \
         "nothing decides where the flight ends"
+    assert re.search(r"const hopping = routeRef\.current\.segments\.length > 0", source), \
+        "the flight cannot tell a sweep from a walk, so it yields on both"
     # A window after the anchor, not a brace match: the block is long and
     # counting braces from a regex is how a test starts failing for reasons
     # that have nothing to do with what it checks.

@@ -8669,8 +8669,18 @@ below exists to keep it that.
    them. That much is unchanged. What the chain is SPLIT into is new, and
    the rule is mechanical rather than editorial:
 
-   - **A segment whose destination is a marked node belongs to the walk.**
-   - **Every segment above it belongs to the flight.**
+   - **The walk draws the agent's own movement** (below).
+   - **The flight draws every ancestry segment the walk does not.**
+
+   On a sweep the walk is the last ancestry segment of each chain, so the
+   flight yields exactly that one and stops at the branch. On a walk the
+   walk is the hop sequence, which covers no ancestry at all, so the flight
+   draws the chain whole. Stated the other way round — "a segment whose
+   destination is a marked node belongs to the walk" — it describes the
+   sweep correctly and leaves those segments drawn by NOBODY on a walk: the
+   address disappears and the map becomes hop lines flying between distant
+   branches with no forest under them. The rule is about coverage, not
+   about the destination.
 
    The flight is where the entry search put the agent — base to the nearest
    branch — and it MUST NOT be drawn into the document. A single line for
@@ -11947,11 +11957,14 @@ except one naming a session that no longer exists. A method the Station does
 not serve is a JSON-RPC error under a 2xx status, and a test asks for one to
 prove it. Covered by tests.
 
-**F.151 (acceptance).** No segment drawn in the flight's colour ends on a
-marked node. Asserted on the rule that decides it, not on the canvas
-(F.137's boundary): the predicate is the destination's membership in the
-marked set, and a build in which the flight draws a leg the walk owns fails
-this.
+**F.151 (acceptance).** Every ancestry segment is drawn exactly once,
+by the flight or by the walk and never by neither. On a sweep no segment in
+the flight's colour ends on a marked node; on a walk, where the walk draws
+hops instead, the flight draws the chain whole. Asserted on the rule that
+decides it, not on the canvas (F.137's boundary): a build whose flight
+yields a segment on both modes fails this, and it fails it silently on the
+canvas — the segment is simply absent, which is why the criterion is
+written about coverage rather than about colour.
 
 **F.152 (acceptance).** Both lines animate, and the flight's legs share one
 progress value — a build that computes a leg's progress from its own depth

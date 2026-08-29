@@ -477,7 +477,15 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
            Every leg advances TOGETHER, not staggered by depth: several hits
            are several drops leaving the base at once, and revealing them
            one after another invented an order the retrieval never had. */
-    const legOf = (seg) => (marked.has(seg.b) ? 'walk' : 'fly')
+    // The flight draws every ancestry segment the WALK does not — which is
+    // the rule, and the earlier version was a special case of it that broke
+    // the general one. On a sweep the walk is the last ancestry step, so
+    // the flight yields it. On a walk the walk is the hop sequence, which
+    // covers no ancestry at all: yielding those segments anyway left them
+    // drawn by nobody, and the address vanished. The picture became hop
+    // lines flying between distant branches with no forest under them.
+    const hopping = routeRef.current.segments.length > 0
+    const legOf = (seg) => (!hopping && marked.has(seg.b) ? 'walk' : 'fly')
     const flown = clamp01(pos / Math.max(1, STAGES.length - 1))
     ctx.lineWidth = 1.9
     ctx.setLineDash(TRAIL_DASH)

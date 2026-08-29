@@ -86,11 +86,16 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   lost the moment the picture shows them landing ON. Two attempts to
   animate it made it worse first (marching dashes turned an address into
   footsteps down from the root; a depth-staggered reveal made several hits
-  look like several journeys taken in turn). The split is MECHANICAL, not
-  editorial: **a segment whose destination is a marked node belongs to the
-  walk, every segment above it is the flight** — so the flight is
-  structurally incapable of entering a document and the old claim cannot
-  come back by tuning. The walk is the agent's OWN movement and means that
+  look like several journeys taken in turn). The split is about COVERAGE, not about the
+  destination: **the flight draws every ancestry segment the walk does
+  not.** On a sweep the walk is the last ancestry step, so the flight
+  yields it and stops at the branch; on a walk the walk is the hop
+  sequence, which covers no ancestry, so the flight draws the chain whole.
+  Written the other way round — "destination marked => the walk's" — it
+  describes the sweep correctly and orphans those segments on a walk: drawn
+  by NOBODY, the address vanishes and the map becomes hop lines flying
+  between distant branches with no forest under them. That shipped, was
+  caught by looking at it, and is why F.151 is written about coverage. The walk is the agent's OWN movement and means that
   in both modes, which is what lets one legend line describe it: on a sweep
   the one step from branch into the opened file, on a walk the real hop
   sequence, where a hop naming ONE node (`move`/`pick`/`look`) is a
