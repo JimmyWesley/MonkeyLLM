@@ -63,11 +63,34 @@ def run_config(forest: Path, questions, *, embedder, repeats: int, label: str) -
         rr = []
         latencies = []
         per_q = []
+        # T17 (2026-08-28): a question MAY carry `class`, and a question whose
+        # `expected_nodes` is EMPTY asserts the opposite thing — that the
+        # forest does not hold this and `locate` should say so by returning
+        # nothing. Scored separately below, never mixed into recall: a
+        # silence and a hit are not the same event and averaging them hides
+        # both.
+        silence = {"n": 0, "quiet": 0, "per_q": []}
         for q in questions:
             t0 = time.perf_counter()
             ids = [r["id"] for r in vine.locate(q["question"], k=max(KS))["results"]]
             first_ms = (time.perf_counter() - t0) * 1000
             expected = set(q["expected_nodes"])
+            if not expected:
+                # The correct answer is nothing. Today `locate` ORs every
+                # term, so a natural-language question always matches SOME
+                # grammar word and this is essentially always 0 — which is
+                # the measurement, not a bug in the scorer.
+                silence["n"] += 1
+                if not ids:
+                    silence["quiet"] += 1
+                silence["per_q"].append({"id": q["id"], "returned": len(ids),
+                                         "top": ids[:3]})
+                for _ in range(repeats):
+                    t0 = time.perf_counter()
+                    vine.locate(q["question"], k=max(KS))
+                    latencies.append((time.perf_counter() - t0) * 1000)
+                latencies.append(first_ms)
+                continue
             rank = first_hit_rank(ids, expected)
             for k in KS:
                 if rank is not None and rank <= k:
@@ -81,15 +104,17 @@ def run_config(forest: Path, questions, *, embedder, repeats: int, label: str) -
                 q_lat.append((time.perf_counter() - t0) * 1000)
             latencies.extend(q_lat)
             per_q.append({
-                "id": q["id"], "first_hit_rank": rank, "top": ids[:max(KS)],
+                "id": q["id"], "class": q.get("class"),
+                "first_hit_rank": rank, "top": ids[:max(KS)],
                 "latency_ms": {"first": round(first_ms, 2),
                                "p50": round(pct(q_lat, 50), 2),
                                "p95": round(pct(q_lat, 95), 2)},
             })
-        n = len(questions)
+        n = len(per_q) or 1
         return {
             "label": label,
             "questions": n,
+            "silence": silence,
             "recall_at": {f"@{k}": round(recall[k] / n, 3) for k in KS},
             "mrr": round(sum(rr) / n, 3),
             "latency_ms": {
@@ -120,6 +145,46 @@ def print_report(reports):
         if r and r["latency_ms"]["p95"] >= budget:
             print(f"\n⚠ {r['label']}: locate p95 {r['latency_ms']['p95']}ms ≥ {budget}ms budget (spec F.6)")
 
+    # T17: per class, because an aggregate that hides one class going to zero
+    # is the same blindness the saturated sets had.
+    for r in reports:
+        if not r or not any(pq.get("class") for pq in r["per_question"]):
+            continue
+        by = {}
+        for pq in r["per_question"]:
+            d = by.setdefault(pq.get("class") or "(untagged)",
+                              {"n": 0, 1: 0, 3: 0, 5: 0, "rr": 0.0})
+            d["n"] += 1
+            rank = pq["first_hit_rank"]
+            if rank:
+                d["rr"] += 1.0 / rank
+                for k in KS:
+                    if rank <= k:
+                        d[k] += 1
+        print(f"\n-- per class [{r['label']}]")
+        print(f"   {'class':<18} {'n':>3} {'recall@1':>9} {'recall@3':>9} "
+              f"{'recall@5':>9} {'MRR':>6}")
+        for cls, d in sorted(by.items()):
+            n = d["n"]
+            print(f"   {cls:<18} {n:>3} {d[1]/n:>9.3f} {d[3]/n:>9.3f} "
+                  f"{d[5]/n:>9.3f} {d['rr']/n:>6.3f}")
+
+    # T17: the silence class. `quiet` is how often `locate` answered nothing
+    # when nothing was the right answer.
+    for r in reports:
+        sil = (r or {}).get("silence") or {}
+        if not sil.get("n"):
+            continue
+        print(f"\n-- silence [{r['label']}]  ({sil['quiet']}/{sil['n']} answered "
+              f"with nothing)")
+        if sil["quiet"] == 0:
+            print("   `locate` returned results for EVERY question the forest")
+            print("   cannot answer. It ORs each term, so any grammar word")
+            print("   matches something: an entry search essentially never")
+            print("   says 'I do not know' to a sentence. See C.1.1, which")
+            print("   fixed the empty path — the path this class shows is")
+            print("   almost never taken.")
+
     # per-question breakdown: where the helicopter landed and how long it took
     for r in reports:
         if not r:
@@ -139,6 +204,16 @@ def main() -> int:
     args = ap.parse_args()
 
     forest = Path(args.forest)
+    if not forest.is_dir():
+        # T17: `questions-locate-v1.json` is labelled against a corpus that
+        # lives outside this repo (`forests/` is gitignored and that one is
+        # an ingest of material we do not ship). A missing forest is a
+        # skip, not a crash — the question set is still the deliverable and
+        # whoever holds the corpus can run it.
+        print(f"forest not found: {forest}")
+        print("  Nothing to measure. Point --forest at a built forest, or")
+        print("  rebuild one with forests/scripts/build_fixture.py.")
+        return 0
     questions = json.loads(Path(args.questions).read_text(encoding="utf-8"))
 
     reports = [run_config(forest, questions, embedder=None, repeats=args.repeats, label="bm25")]
