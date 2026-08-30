@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.74.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.75.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,59 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **The tags a non-English forest never got to keep (spec G.4.2/G.4.3 +
+  A.3.2 + H.2.1/J.18 + J.13.6.1 + J.5.17/J.5.18, v0.75)**: four console
+  requests, and one of them unearthed the round's real bug — `_clean_tags`'
+  `^[a-z0-9][a-z0-9_-]*$` silently dropped every accented tag the Curator
+  wrote (`produção`, `segurança`): no error, no count, so a Portuguese
+  forest's "the model writes too few tags" was a filter, never a model. And
+  the rule bought nothing — `nodes_fts` is `unicode61 remove_diacritics 2`,
+  so a stored `produção` IS matched by `producao` (measured), while
+  `be-291`/`iso-27001`/`p95` always passed the regex and survived the
+  tokenizer: only the prompt's "single words" + cap 5 stood between a
+  document and its own ticket number. v0.52 taught the READER to keep
+  code-shaped tokens; the writer was still told to throw them away. Now ONE
+  tag rule in `models.py` (`validate_tag`/`tag_key`: Unicode categories,
+  ≤40, NFC+casefold dedup — fold decides uniqueness ONLY, never respells),
+  cap 12, every refusal counted (`tags_dropped`), prompt asking for
+  identifiers/names/categories/patterns; enforced at `plant`/`graft` with
+  exact-spelling grandfathering (reading is untouched — old forests still
+  open, and an editor round-trip still saves). The Curator also proposes
+  ALIASES from the document, guard structural: an alias must occur in the
+  body under the one exported `vine.fold` (never a second fold), and the
+  union never displaces a hand-written alias. `lang` (A.3.2): BCP-47,
+  absent is a real state, a model is NEVER a source (a guess in the shape
+  of a fact is G.2.7's rule), exact match by choice (`pt` ≠ `pt-BR`),
+  filter never a boost, counted by `coverage` — and `yaml.safe_load` reads
+  `lang: no` as False (`no` is Norwegian); a before-validator maps it back.
+  `derive: ["scent"]` (J.13.6.1) is the ONE `derive` member allowed a
+  model: a J.9 job, the bill stated before it is spent, summary REPLACED
+  but tags/aliases UNIONED, only `source: ingest` nodes (a person's summary
+  is curation a model may not delete), branches excluded (rollup is
+  G.4.4's), datasets included (the map is the body), and the principal
+  trailer set per STEP — a standing trailer would stamp the lane's other
+  calls. The vote (H.2.1/J.18): heat can DELETE a cold 0.3 proposal
+  (cold-prune at ≤0.5, both heats zero) and can never confirm one — "stays
+  at 0.3 forever" was FALSE and the spec was corrected mid-round. Accept →
+  1.0 and OUT of the managed population (0.8 would stay sweepable, and a
+  vote that can evaporate is not a vote); accept on 1.0 is `unchanged` (a
+  retried batch is not an error), reject on 1.0 refused; NO MCP tool — a
+  model must not confirm its own proposal, and F.165 asserts the absence
+  three ways. `links.py` owns the audited rewrite and `Ranger._rewrite_link`
+  is now a wrapper, so "same audited path" is structural, not a claim.
+  Consoles: hands (J.5.17 — `E_ANCHORED` rendered as navigable anchors,
+  `force` a second decision, no invented bulk delete), Links (accept a
+  GROUP via one POST, never accept-all over unread pages), tags (J.5.18 —
+  bulk UNIONS and never overwrites, vocabulary counted via `json_each` +
+  `count(DISTINCT id)` and NEVER from the FTS row, which would report
+  `producao` for a passport that says `produção`). Gotcha that cost a live
+  400: `ScopedVine` ENUMERATES its parameters — a new engine kwarg needs
+  its lines in `policy.py` + `mcp_surface.py` or the Station refuses what
+  the engine serves. F.162-F.169; **F.169's measurement is still pending**
+  (re-ingest with old vs new curator against
+  `bench/questions-locate-v1.json`, baseline recall@1 0.711 — needs the
+  local model), so the curator change is implemented and not yet measured.
 
 - **A snapshot that is not one file is not a snapshot (spec Part I +
   J.13.1/J.13.2, v0.74)**: Part I opens with "A forest snapshot is ONE
