@@ -41,6 +41,11 @@ dev = ["pytest>=8.0", "pytest-timeout>=2.3"]
 demo = ["huggingface_hub>=0.30"]
 # G.2 built-in converters that need a (MIT/BSD-clean) third-party reader
 ingest = ["openpyxl>=3.1", "python-docx>=1.1", "xlrd>=2.0"]
+# Part K dense layer. The scan is a matmul where numpy is present and a
+# Python loop where it is not: 67.7 ms -> 0.11 ms on a 1,877-node index.
+# Floor is 1.26, the first release with a Python 3.12 wheel (the engine
+# takes >=3.11) — and a version actually exercised: 1.26.4, 2.0.2, 2.5.2.
+canopy = ["numpy>=1.26"]
 
 [project.urls]
 Homepage      = "https://monkeyllm.com"

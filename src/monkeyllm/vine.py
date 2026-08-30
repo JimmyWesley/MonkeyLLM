@@ -707,6 +707,24 @@ class Vine:
         if writable:
             self._lock = WriterLock(self.forest.root)
             self._lock.acquire()
+        try:
+            self._build(embedder, hybrid_locate)
+        except BaseException:
+            # Anything raising after the acquire held the lock forever: the
+            # release lives in `close()`, and a constructor that raises
+            # never returns an object anybody can close. The forest then
+            # reads as having a LIVE foreign writer, so an operator who
+            # performs the repair the raising error asked for finds it
+            # still refusing to open — now blaming a writer that does not
+            # exist. Both reachable raisers are inside: the C.6b.2 reindex
+            # (a symlink out of the forest) and the C.6b.1 canopy guard.
+            if self._lock is not None:
+                self._lock.release()
+                self._lock = None
+            raise
+
+    def _build(self, embedder, hybrid_locate) -> None:
+        """The rest of construction, under the writer lock's cleanup."""
         if self.catalog.count() == 0:
             self.catalog.reindex()
         # Canopy (optional vector layer, Phase 1). BM25-only unless BOTH a

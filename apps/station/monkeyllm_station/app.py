@@ -1143,6 +1143,19 @@ def build_app(
                 opened.append(fid)
             except Exception as e:  # noqa: BLE001 — mirror warm_all
                 skipped[fid] = str(e)
+        for fid, why in skipped.items():
+            # J.6.1 says one forest that cannot open never stops the others;
+            # it does not say who finds out. Nothing serves this report —
+            # `/v1/health` counts the forest among `served` and the listing
+            # shows it exactly as it shows a cold one — so without this line
+            # a forest can be unreachable for the whole life of the process
+            # with every signal reading green. Same `station:` channel as
+            # the other boot refusals, and one line per forest at boot, never
+            # per request. Serving it over the API would add contract and is
+            # left to a spec cut; being unable to SEE it is not a contract
+            # question.
+            print(f"station: forest {fid!r} did not open: {why}",
+                  file=sys.stderr)
         return {"warmed": opened, "skipped": skipped}
 
     @asynccontextmanager
