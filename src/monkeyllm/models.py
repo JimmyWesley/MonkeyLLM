@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import unicodedata
 from itertools import islice
 from typing import Any, Literal
 
@@ -18,7 +19,7 @@ from monkeyllm.tokens import estimate_tokens
 
 IMMUTABLE_FIELDS = {"id", "type", "created"}
 MUTABLE_FRONTMATTER_FIELDS = {"title", "summary", "tags", "confidence",
-                              "aliases", "origin"}
+                              "aliases", "origin", "lang"}
 # C.8 (v0.54): aliases are graft-mutable so a curated name can be taught
 # after ingest, bounded like everything else that enters the FTS row.
 MAX_ALIASES = 16
@@ -43,6 +44,108 @@ def validate_origin(value: object) -> str:
             "origin must not contain spaces or control characters",
             hint="One URI (path, URL, commit ref); percent-encode spaces.")
     return value
+
+
+# A.3.2 (v0.75): the document's language, as a BCP-47 tag. The shape is
+# deliberately the STATED one and not the full grammar: a 2-3 letter
+# primary subtag, an optional 4-letter script and an optional region of two
+# letters or three digits. A vendored registry would refuse tags this
+# product has no opinion about and would go stale on its own schedule;
+# what the rule is actually for is telling `pt-BR` from `portuguese` and
+# from `pt BR`, and this shape does exactly that.
+#
+# Anything else is E_SCHEMA naming the field. Never coerced, never
+# truncated into something that looks valid — the absence of a `lang` means
+# *nobody has said*, and a value invented to avoid a null would be the one
+# state A.3.2 rule 2 exists to keep out of the passport.
+LANG_MAX_CHARS = 35
+_LANG_RE = re.compile(
+    r"^[A-Za-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|\d{3}))?$")
+
+
+def is_lang(value: object) -> bool:
+    """True for the shape A.3.2 rule 1 accepts. A predicate rather than a
+    second copy of the regex, because two readings of one rule agree only
+    where somebody compared them."""
+    return (isinstance(value, str) and len(value) <= LANG_MAX_CHARS
+            and bool(_LANG_RE.match(value)))
+
+
+def validate_lang(value: object) -> str:
+    """A.3.2 rule 1: one BCP-47 tag, or a refusal naming the field."""
+    if not isinstance(value, str) or not value.strip():
+        raise VineError(E_SCHEMA, "lang must be a non-empty string")
+    if len(value) > LANG_MAX_CHARS:
+        raise VineError(
+            E_SCHEMA, f"lang is over {LANG_MAX_CHARS} characters")
+    if not is_lang(value):
+        raise VineError(
+            E_SCHEMA,
+            f"lang is not a language tag I can read: {value!r}",
+            hint="One BCP-47 tag: a 2-3 letter language, optionally a "
+                 "4-letter script and a 2-letter or 3-digit region "
+                 "('pt', 'pt-BR', 'zh-Hans'). A language's NAME "
+                 "('portuguese') is not a tag.")
+    return value
+
+
+# G.4.2 rule 2 (v0.75): a tag is a token in the document's own language.
+# One spelling of the rule, because two participants apply it — the
+# Curator on the way out of a model, the engine on the way into a
+# passport — and two derivations of one rule agree only where somebody
+# compared them.
+TAG_MAX_CHARS = 40
+TAG_RULE = (
+    f"A tag is 1-{TAG_MAX_CHARS} characters of Unicode letters and digits "
+    "plus '-' and '_', starting with a letter or a digit, and carries no "
+    "whitespace (one token; a phrase is a summary). Diacritics are KEPT: "
+    "the index folds them at match time, so 'produção' is found by "
+    "'producao' (G.4.2 rule 2)."
+)
+
+
+def tag_key(tag: object) -> str:
+    """The comparison form of a tag (G.4.2 rule 2): NFC + case folding, so
+    two spellings of one word are one tag.
+
+    Never what gets written: a tag keeps the spelling it was given. This is
+    the key uniqueness is decided on and nothing else.
+    """
+    return unicodedata.normalize("NFC", str(tag)).casefold()
+
+
+def validate_tag(tag: object) -> str:
+    """G.4.2 rule 2: refuse a tag the rule refuses, naming it and the rule.
+
+    Letters and digits are read off the Unicode category, never off an
+    ASCII range — the range is what silently emptied the tags of every
+    forest that is not in English. A combining mark is admitted INSIDE a
+    tag because it is part of the letter it sits on: `produção` typed in
+    NFD and every Indic script would otherwise be refused for spelling one
+    letter in two code points. A tag still may not START with one.
+    """
+    if not isinstance(tag, str) or not tag:
+        raise VineError(
+            E_FRONTMATTER, f"tags: {tag!r} is not a non-empty string",
+            hint=TAG_RULE)
+    if len(tag) > TAG_MAX_CHARS:
+        raise VineError(
+            E_FRONTMATTER,
+            f"tags: '{tag}' is {len(tag)} characters (max {TAG_MAX_CHARS})",
+            hint=TAG_RULE)
+    if unicodedata.category(tag[0])[0] not in ("L", "N"):
+        raise VineError(
+            E_FRONTMATTER,
+            f"tags: '{tag}' must start with a letter or a digit",
+            hint=TAG_RULE)
+    for ch in tag[1:]:
+        if ch in "-_" or unicodedata.category(ch)[0] in ("L", "N", "M"):
+            continue
+        what = ("whitespace" if ch.isspace() else f"{ch!r}")
+        raise VineError(
+            E_FRONTMATTER, f"tags: '{tag}' contains {what}", hint=TAG_RULE)
+    return tag
+
 
 # C.7.1 dataset planting (spec v0.8): the model never writes DDL — the schema
 # is data, validated whole, and the Vine generates the CREATE TABLEs itself.
@@ -94,12 +197,29 @@ class Frontmatter(BaseModel):
     entity_kind: str | None = None
     aliases: list[str] = Field(default_factory=list)
     origin: str | None = None
+    # A.3.2 (v0.75): absent means nobody has said, never "English".
+    lang: str | None = None
     coverage: str | None = None  # branch only
 
     @field_validator("created", "updated", mode="before")
     @classmethod
     def _dates(cls, v: Any) -> dt.date:
         return _coerce_date(v)
+
+    @field_validator("lang", mode="before")
+    @classmethod
+    def _lang(cls, v: Any) -> Any:
+        """Undo YAML 1.1's one collision with a language tag (A.3.2).
+
+        `yaml.safe_load` reads a bare `no` as the boolean False, and `no`
+        is Norwegian — so a hand-edited passport saying `lang: no` would
+        arrive here as a bool and be refused, which is precisely the
+        "a rule that only misbehaves outside English" failure rule 6 exists
+        to make visible. Nothing this engine writes hits it (`safe_dump`
+        quotes the string), and the file is repaired the next time it is
+        written. `yes`/`on`/`off` are not language tags and stay refused.
+        """
+        return "no" if v is False else v
 
     @field_validator("confidence")
     @classmethod
@@ -452,6 +572,11 @@ class NodeSpec(BaseModel):
     entity_kind: str | None = None
     aliases: list[str] = Field(default_factory=list)
     origin: str | None = None
+    # A.3.2 (v0.75): the caller's own statement of the document's language.
+    # Declared rather than left to `extra="allow"` precisely so it is
+    # validated: a field that passes through unread is a field that stores
+    # `portuguese` in the shape of a tag.
+    lang: str | None = None
     # C.7.1: declarative dataset schema ("schema" on the wire; aliased because
     # pydantic reserves the bare name). Creation directive, not frontmatter.
     table_schema: dict[str, TableSchema] | None = Field(default=None, alias="schema")
@@ -485,6 +610,8 @@ class NodeSpec(BaseModel):
             fm["aliases"] = self.aliases
         if self.origin is not None:
             fm["origin"] = validate_origin(self.origin)
+        if self.lang is not None:
+            fm["lang"] = validate_lang(self.lang)
         # extra="allow": custom frontmatter fields pass through (e.g. the
         # Gardener's source_path/source_hash, spec G.1)
         for k, v in (self.model_extra or {}).items():

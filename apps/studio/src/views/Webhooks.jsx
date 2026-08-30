@@ -65,7 +65,14 @@ const SAMPLE = {
   'snapshot.created': { name: 'demo-20260820-1402.forest', bytes: 1843200, payloads: 4, payloads_omitted: 0 },
   'canopy.built': { embedded: 82, nodes: 82, stale: 0, model: 'text-embedding-3-large', refresh: false },
   'reindex.finished': { nodes: 82, ms: 143.2 },
-  'recurate.finished': { scanned: 1877, changed: 41, derive: ['aliases'] },
+  // Two passes fire this one and they do not carry the same fields: the
+  // J.13.6.1 scent re-curation runs as a J.9 job (so `job`) and calls a
+  // model per node (so `fallbacks`, the nodes where the Curator did not
+  // answer), while the G.2.6 alias re-derivation runs on the lane and does
+  // neither — its `data` is `{scanned, changed, derive}` alone. The sample
+  // shows the fuller one; a receiver must read the fields it needs rather
+  // than assume every field is there.
+  'recurate.finished': { scanned: 1877, changed: 41, fallbacks: 3, derive: ['scent'], job: 'ing-8f21ab04' },
   'auth.login.succeeded': { username: 'maria', host: '203.0.113.9' },
   'auth.login.failed': { username: 'maria', host: '203.0.113.9' },
   'pair.issued': { principal: 'maria', caps: ['ingest', 'read'], prefix: 'mk_7Fq2x', expires_in_days: 90 },

@@ -68,6 +68,7 @@ from monkeyllm.errors import (
     E_TIMEOUT,
     VineError,
 )
+from monkeyllm import links
 from monkeyllm.server import ForestPool
 from monkeyllm.signatures import validate_args
 from monkeyllm.snapshot import CONTAINER_SUFFIX
@@ -245,6 +246,31 @@ class PreparedIngest:
     principal: str = ""
     forest: str = ""
     payload: dict = field(default_factory=dict)
+
+
+# J.13.6.1: the job's `mode`, which is the caller's own word everywhere else
+# (J.9, v0.61). This caller is the recuration route, and this is its word —
+# never "sync", never "ingest": nothing is being read from a source, and a
+# console that labelled it so would offer the operator the wrong repair.
+RECURATE_MODE = "recurate"
+
+
+@dataclass
+class PreparedRecurate:
+    """An accepted scent recuration (J.13.6.1), handed from the forest lane
+    back to the event loop: the same construction as `PreparedIngest` and
+    for the same reason — one node per lane task, so the reads and writes
+    queued behind it get their turn between model calls."""
+
+    job: object
+    steps: object          # the scent step iterator (G.10's shape)
+    curator: object
+    vine: object
+    root: Path
+    before: str | None = None
+    principal: str = ""
+    forest: str = ""
+
 
 # The Studio is a React/Vite build: static files only, no server rendering,
 # so it stays a plain REST client with no privileged side-channel (J.5).
@@ -1125,6 +1151,121 @@ def build_app(
         hooks.emit(prep.forest, "ingest.started", prep.principal,
                    {"job": prep.job.id, "mode": prep.mode,
                     "total": prep.job.total})
+        return prep.job
+
+    # -- re-curating the scent (J.13.6.1) ------------------------------------
+
+    def _recurate_report(prep: PreparedRecurate) -> dict:
+        """On the forest lane: the pass's account, finished or partial.
+
+        The curation block is the ingest report's, verbatim — five states,
+        not two (G.4 rule 6): the Curator falls back silently by contract,
+        so "never answered" and "answered and was rejected" produce the same
+        nodes and need opposite fixes. A re-curation is the one run where
+        that distinction is the whole story, since a pass that fell back on
+        every node changed nothing and cost a model call each time.
+        """
+        from monkeyllm.gardener import scent_result
+
+        out = scent_result(prep.steps)
+        stats = dict(prep.curator.stats)
+        if prep.curator.last_error:
+            stats["error"] = prep.curator.last_error
+        if prep.curator.last_reject:
+            stats["rejected_because"] = prep.curator.last_reject
+            stats["last_reply"] = prep.curator.last_reply or ""
+        after = _git(prep.root, "rev-parse", "HEAD")
+        out.update({
+            "forest": prep.forest, "mode": RECURATE_MODE, "derive": ["scent"],
+            "curated": bool(stats.get("llm_summaries")),
+            "bound": True, "curation": stats,
+            "commit_before": prep.before,
+            # A pass that changed nothing moved no HEAD, and printing
+            # `abc → abc` would read as a commit that is not there.
+            "commit": (after or None) if after and after != prep.before else None,
+        })
+        return out
+
+    def _step_recurate(prep: PreparedRecurate):
+        """One node, with the principal on its commits (J.4).
+
+        The trailer is set and cleared around THIS step rather than held for
+        the life of the job: between steps the writer lane serves other
+        calls, and a trailer left standing would stamp somebody else's
+        `plant` with the name of whoever started the re-curation.
+        """
+        prep.vine.commit_trailers = [f"station-principal: {prep.principal}"]
+        try:
+            return _advance(prep.steps)
+        finally:
+            prep.vine.commit_trailers = []
+
+    def _record_recurate(prep: PreparedRecurate, final: dict, state: str) -> None:
+        registry.record(
+            principal=prep.principal, forest=prep.forest, primitive="recurate",
+            args={"derive": ["scent"], "job": prep.job.id, "state": state},
+            result="ok", size=int(final.get("changed", 0)),
+            commit_sha=final.get("commit"),
+        )
+
+    async def _drive_recurate(prep: PreparedRecurate) -> None:
+        """One node per lane task (J.9 fairness), so a 1,877-node pass never
+        holds this forest's writer lane for the length of 1,877 model calls.
+
+        Cancellation is honoured at step boundaries: a node is curated and
+        committed, or untouched — never half-written.
+        """
+        job, steps = prep.job, prep.steps
+        try:
+            while True:
+                if job.cancel_requested:
+                    final = await in_forest_thread(
+                        prep.forest, lambda: _recurate_report(prep))
+                    board.finish(job, "cancelled", report=final)
+                    readers.reset(prep.forest)
+                    _record_recurate(prep, final, "cancelled")
+                    return
+                step = await in_forest_thread(prep.forest,
+                                              lambda: _step_recurate(prep))
+                if step is None:
+                    final = await in_forest_thread(
+                        prep.forest, lambda: _recurate_report(prep))
+                    board.finish(job, "done", report=final)
+                    # J.6.2: a held-open reader view of a catalog that was
+                    # just rewritten under it is not trusted.
+                    readers.reset(prep.forest)
+                    _record_recurate(prep, final, "done")
+                    hooks.emit(prep.forest, "recurate.finished", prep.principal,
+                               {"scanned": final.get("scanned", 0),
+                                "changed": final.get("changed", 0),
+                                "fallbacks": final.get("fallbacks", 0),
+                                "derive": ["scent"], "job": job.id})
+                    return
+                board.note_step(job, step)
+        except Exception as e:  # noqa: BLE001 — a job must land somewhere
+            err = (e.to_dict() if isinstance(e, VineError)
+                   else VineError(E_SCHEMA,
+                                  f"re-curation failed: {e}"[:300]).to_dict())
+            try:
+                # A run that died still committed what it stepped through,
+                # and the operator reading the failure is the one who needs
+                # to know how much of it landed.
+                partial = _recurate_report(prep)
+            except Exception:  # noqa: BLE001 — the error is the report now
+                from monkeyllm.gardener import scent_result
+
+                partial = scent_result(steps)
+            board.finish(job, "error", report=partial,
+                         error=err.get("error", err))
+            registry.record(
+                principal=prep.principal, forest=prep.forest,
+                primitive="recurate",
+                args={"derive": ["scent"], "job": job.id}, result="error",
+                size=len(json.dumps(err)))
+
+    def _launch_recurate(prep: PreparedRecurate):
+        prep.job.task = asyncio.get_running_loop().create_task(
+            _drive_recurate(prep))
         return prep.job
 
     mcp_lifespan = None  # set below when the MCP surface is mounted
@@ -4726,6 +4867,252 @@ def build_app(
                 "Content-Disposition": f'attachment; filename="{leaf}.md"',
             })
 
+    # -- the tag vocabulary (J.5.18 rule 4) ----------------------------------
+
+    async def forest_tags(request: Request) -> JSONResponse:
+        """`GET /v1/forests/{forest}/tags`: the tags that actually occur,
+        with the number of nodes each carries (J.5.18 rule 4).
+
+        Reading, so a read-only Station serves it and it rides the reader
+        pool — a console browsing a vocabulary must not wait behind
+        somebody's plant.
+
+        `limit` cuts the LISTING and nothing else. Every count is computed
+        over the caller's whole scope in SQL, for J.4.3's reason: a total
+        assembled from the page on screen changes when somebody changes the
+        page size, and this number exists to make `invoice` beside
+        `invoices` visible — which it cannot do if it moves.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        unknown = [k for k in request.query_params if k != "limit"]
+        if unknown:
+            return _envelope(VineError(
+                E_SCHEMA, f"unknown query parameter {unknown[0]!r}",
+                hint="This route accepts: limit."))
+        raw_limit = request.query_params.get("limit")
+        limit = None
+        if raw_limit is not None:
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                return _envelope(VineError(
+                    E_SCHEMA, f"limit must be an integer, got {raw_limit!r}"))
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            return _unknown_forest(forest)
+        policy = policy.masked(mask_of(request))
+        if not policy.grants("read"):
+            return _envelope(VineError(
+                E_FORBIDDEN, "'tags' requires the 'read' capability",
+                hint=f"This principal holds: {sorted(policy.caps)}."), 403)
+
+        def work(vine=None):
+            try:
+                if vine is None:
+                    vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            try:
+                # C.13.3's rule: the policy's own prefixes as SQL, so the
+                # filtering happens inside the GROUP BY rather than after
+                # it — a vocabulary counted globally and trimmed afterwards
+                # would size regions nobody granted.
+                return vine.tags(
+                    policy_where=(None if policy.unrestricted
+                                  else policy.sql_scope()),
+                    limit=limit)
+            except VineError as e:
+                return e.to_dict()
+
+        slot = reader_slot(forest, "scan")
+        result = await in_lane(
+            forest, slot,
+            lambda: work(readers.vine(forest, slot)) if slot is not None else work())
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        registry.record(principal=principal, forest=forest, primitive="tags",
+                        args={"limit": limit}, result="ok",
+                        size=len(json.dumps(result, default=str)))
+        return JSONResponse(result)
+
+    # -- the uncertain links, read and voted on (J.18) -----------------------
+
+    def _vote_gate(principal: str, forest: str, request: Request):
+        """`write`, on the forest, at the caller's OWN scope (J.18).
+
+        Not `admin`: this is a per-node frontmatter edit, and a principal
+        who may write inside a branch may settle the proposals inside it.
+        The scope is not narrowed here either — it rides into the engine as
+        `visible`, exactly as `scan`'s does, so a link with an endpoint the
+        caller cannot see is absent rather than refused with a reason that
+        would name it (H.2.1 rule 6).
+        """
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            return None, _unknown_forest(forest)
+        policy = policy.masked(mask_of(request))
+        if not policy.grants("write"):
+            return None, _envelope(VineError(
+                E_FORBIDDEN, "settling a proposal requires the 'write' capability",
+                hint=f"This principal holds: {sorted(policy.caps)}."), 403)
+        return policy, None
+
+    async def links_uncertain(request: Request) -> JSONResponse:
+        """`GET /v1/forests/{forest}/links/uncertain` (J.18).
+
+        Reviewing what is pending is reading, so a read-only Station serves
+        it — and it rides the reader pool for the same reason Explore does:
+        an open review console must not wait behind somebody's plant.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        unknown = [k for k in request.query_params if k not in ("after", "limit")]
+        if unknown:
+            return _envelope(VineError(
+                E_SCHEMA, f"unknown query parameter {unknown[0]!r}",
+                hint="This route accepts: after, limit."))
+        raw_limit = request.query_params.get("limit")
+        limit = links.DEFAULT_GROUPS
+        if raw_limit is not None:
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                return _envelope(VineError(
+                    E_SCHEMA, f"limit must be an integer, got {raw_limit!r}"))
+        after = request.query_params.get("after")
+        policy, refusal = _vote_gate(principal, forest, request)
+        if refusal is not None:
+            return refusal
+
+        def work(vine=None):
+            try:
+                if vine is None:
+                    vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            try:
+                return links.uncertain_links(
+                    vine, after=after, limit=limit,
+                    visible=(None if policy.unrestricted else policy.in_scope))
+            except VineError as e:
+                return e.to_dict()
+
+        slot = reader_slot(forest, "scan")
+        result = await in_lane(
+            forest, slot,
+            lambda: work(readers.vine(forest, slot)) if slot is not None else work())
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        registry.record(principal=principal, forest=forest,
+                        primitive="links.uncertain",
+                        args={"after": after, "limit": limit},
+                        result="ok", size=len(json.dumps(result, default=str)))
+        return JSONResponse(result)
+
+    async def links_vote(request: Request) -> JSONResponse:
+        """`POST /v1/forests/{forest}/links/vote` (J.18, H.2.1).
+
+        Not all-or-nothing: each vote is its own `.md` commit, its own audit
+        row and its own `node.grafted`, and the response reports the outcome
+        of every vote sent. Failing fifty decisions because one target had
+        since been pruned would throw away work a person actually did.
+
+        There is deliberately no MCP twin (H.2.1 rule 5): the whole point of
+        a 0.3 link is that a model asserted it and something else has to
+        confirm it.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        try:
+            body = _json_object(await request.json() if await request.body() else {})
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        policy, refusal = _vote_gate(principal, forest, request)
+        if refusal is not None:
+            return refusal
+        if not writable:
+            # J.18: reviewing what is pending is reading; settling it is a
+            # commit inside the forest.
+            return _envelope(VineError(
+                E_READONLY, "this Station is read-only",
+                hint="Start it with --writable to settle proposals."), 403)
+        votes = body.get("votes")
+
+        def work():
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            # J.4 (v0.57): the acting principal is stamped INTO each commit,
+            # never amended on afterwards — the same seam every other hosted
+            # write uses.
+            vine.commit_trailers = [f"station-principal: {principal}"]
+            try:
+                return {"votes": links.vote(
+                    vine, votes,
+                    visible=(None if policy.unrestricted else policy.in_scope))}
+            except VineError as e:
+                return e.to_dict()
+            finally:
+                vine.commit_trailers = []
+
+        # The writer lane: a vote is a commit, and the pool's writer is where
+        # commits happen (J.6.2).
+        result = await in_forest_thread(forest, work)
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            registry.record(principal=principal, forest=forest, primitive="vote",
+                            args={"votes": len(votes) if isinstance(votes, list) else 0},
+                            result="error", size=0,
+                            error_code=result["error"].get("code"))
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+
+        counts: dict[str, int] = {}
+        for record in result["votes"]:
+            outcome = record["outcome"]
+            counts[outcome] = counts.get(outcome, 0) + 1
+            # J.4: one row per vote, because one vote is one decision about
+            # one node — a row per BATCH would make an access log that
+            # cannot say which link a principal settled.
+            registry.record(
+                principal=principal, forest=forest, primitive="vote",
+                args={"id": record["id"], "rel": record["rel"],
+                      "target": record["target"], "vote": record["vote"]},
+                result="ok" if outcome in ("accepted", "rejected", "unchanged")
+                       else "error",
+                size=len(json.dumps(record, default=str)),
+                commit_sha=record.get("commit"),
+                # `missing` is J.3's one answer for gone AND out of scope, so
+                # the row it writes is the same row for both.
+                error_code=(record.get("code") if outcome == "refused"
+                            else E_NOT_FOUND if outcome == "missing" else None),
+            )
+            if outcome in ("accepted", "rejected"):
+                # J.16: identity only — the two ids and the rel. A note and
+                # a summary are content and never leave with an event.
+                hooks.emit(forest, "node.grafted", principal, {
+                    "node": record["id"], "operations": ["vote"],
+                    "rel": record["rel"], "target": record["target"],
+                    "vote": record["vote"], "commit": record.get("commit"),
+                })
+        result["counts"] = counts
+        return JSONResponse(result)
+
     # -- shares (J.17): a share is a key with one room -----------------------
 
     # Failed token lookups share the login limiter's discipline (J.17 rule
@@ -5031,6 +5418,91 @@ def build_app(
                    {"nodes": result["nodes"], "ms": result["ms"]})
         return JSONResponse(result)
 
+    async def recurate_scent(principal: str, forest: str,
+                             policy) -> JSONResponse:
+        """`derive: ["scent"]` — re-curate the scent with the ingest model
+        (J.13.6.1). Reached only through `admin_recurate`, which has already
+        decided admin, writability and the unrestricted scope (rule 6).
+
+        G.4.2 and G.4.3 changed a derivation that is not arithmetic, so
+        every forest already ingested carries the old, thinner scent — and
+        the forests that need this most are the oldest ones. It is one model
+        call per node, so it is a J.9 job with everything a J.9 job has: the
+        record, the stage reporting, the cancel, and the one-batch-per-forest
+        lock it shares with ingest (a re-curation and an ingest write the
+        same passports).
+        """
+        from monkeyllm.gardener import Gardener
+        from monkeyllm_station import inference
+
+        # Rule 5, and it comes first: the count is the bill. A binding that
+        # is missing is decided before any of it — a job that would fall
+        # back on every node spends nothing and repairs nothing, and the
+        # operator would read a "done" with a forest unchanged.
+        binding = registry.binding(forest, "ingest")
+        if binding is None:
+            return _envelope(VineError(
+                E_SCHEMA,
+                f"no model is bound to '{forest}' for the 'ingest' role",
+                hint="Re-curating the scent is one model call per node, so "
+                     "with nothing bound it would fall back on every one of "
+                     "them and change nothing. Bind a model in Studio → "
+                     "Models, or POST /v1/admin/models."))
+        # The lock is claimed before anything is prepared, exactly as an
+        # ingest claims it: both write passports, and the second one to
+        # arrive must be refused rather than interleaved.
+        job = board.claim(forest, RECURATE_MODE, 0, principal)
+        if job is None:
+            running = board.running(forest)
+            return _envelope(VineError(
+                E_LOCKED,
+                "an ingest job is already running on this forest"
+                + (f": {running.id}" if running else ""),
+                hint="Watch it under GET /v1/forests/{forest}/jobs, cancel "
+                     "it, or wait for it to finish."), 409)
+
+        def prepare():
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            curator = inference.curator_from_binding(vine, policy, binding,
+                                                     propose=False)
+            if curator is None:  # defensive: `binding` was read above
+                return VineError(E_SCHEMA,
+                                 "the ingest binding could not be opened").to_dict()
+            gardener = Gardener(
+                vine, hooks=[curator],
+                on_stage=lambda f, st: board.note_stage(job, f, st))
+            try:
+                steps = gardener.recurate_scent_iter()
+            except VineError as e:
+                return e.to_dict()
+            return {"_prepared": PreparedRecurate(
+                job=job, steps=steps, curator=curator, vine=vine,
+                root=Path(vine.forest.root),
+                before=_git(Path(vine.forest.root), "rev-parse", "HEAD") or None,
+                principal=principal, forest=forest)}
+
+        prepared = await in_forest_thread(forest, prepare)
+        if prepared is None:
+            board.abandon(job)
+            return _unknown_forest(forest)
+        if isinstance(prepared.get("error"), dict):
+            board.abandon(job)
+            code = prepared["error"].get("code", E_SCHEMA)
+            return JSONResponse(prepared,
+                                status_code=STATUS_BY_CODE.get(code, 400))
+        prep = prepared["_prepared"]
+        job.total = prep.steps.total
+        _launch_recurate(prep)
+        # Rule 5: the number of nodes in scope, in the response that STARTS
+        # the job, because it is also the number of model calls the operator
+        # is about to pay for. J.10.8's rule applied to a batch — the budget
+        # is said whatever chose it.
+        return JSONResponse({"job": job.snapshot(), "nodes": job.total,
+                             "derive": ["scent"]}, status_code=202)
+
     async def admin_recurate(request: Request) -> JSONResponse:
         """Re-derive what ingest derives, from the passports (J.13.6).
 
@@ -5075,6 +5547,19 @@ def build_app(
             return _envelope(VineError(
                 E_SCHEMA, "derive must be a list of strings",
                 hint='e.g. {"derive": ["aliases"]}.'))
+        if "scent" in derive:
+            # J.13.6.1: a different contract behind the same route. The two
+            # members are not mixable and the refusal is the honest answer:
+            # `aliases` is arithmetic the caller waits for, `scent` is one
+            # model call per node and answers 202 with a job, and ONE
+            # response cannot be both. Asking twice costs nothing.
+            if len(set(derive)) > 1:
+                return _envelope(VineError(
+                    E_SCHEMA, "'scent' cannot be combined with another derivation",
+                    hint="`aliases` is passport arithmetic and the caller "
+                         "waits for it; `scent` is one model call per node "
+                         "and answers with a job. Send them as two calls."))
+            return await recurate_scent(principal, forest, policy)
 
         def work():
             from monkeyllm.gardener import Gardener
@@ -5790,6 +6275,17 @@ def build_app(
         # the same `:path` — node ids carry slashes.
         Route("/v1/forests/{forest}/export/{node:path}", forest_export,
               methods=["GET"]),
+        # J.5.18: literal before the catch-alls, and here it is not a
+        # formality — `{kind:str}` is a single segment, so an unregistered
+        # `/tags` would be read as a map projection and refused as one.
+        Route("/v1/forests/{forest}/tags", forest_tags, methods=["GET"]),
+        # J.18: literal before the catch-alls. `{kind}`/`{primitive}` are
+        # single segments, so these two could not be swallowed — but the
+        # ordering is the rule (J.13.6), not the accident of a slash.
+        Route("/v1/forests/{forest}/links/uncertain", links_uncertain,
+              methods=["GET"]),
+        Route("/v1/forests/{forest}/links/vote", links_vote,
+              methods=["POST"]),
         Route("/v1/forests/{forest}/{kind:str}", forest_map, methods=["GET"]),
         Route("/v1/forests/{forest}/{primitive}", primitive, methods=["POST"]),
     ]

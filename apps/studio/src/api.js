@@ -26,11 +26,19 @@ export const signOut = () => {
 }
 
 export class ApiError extends Error {
-  constructor(message, { code, hint, status } = {}) {
+  constructor(message, { code, hint, status, data } = {}) {
     super(message)
     this.code = code
     this.hint = hint
     this.status = status
+    // The envelope's own structured facts (C.12's `data` carrier): C.14
+    // puts `anchors`/`anchor_count` on an E_ANCHORED refusal and C.15 puts
+    // `moved_to` on an E_MOVED one, and those are the most useful thing
+    // either refusal says. Dropped here, the console could only render the
+    // sentence — which is exactly what J.5.17 rule 3 forbids. The whole
+    // error object rides: a field the engine adds next reaches its reader
+    // without a second edit here.
+    this.data = data || {}
   }
 }
 
@@ -69,7 +77,7 @@ async function request(path, { method = 'GET', body, timing = false } = {}) {
     // modern proxy: a failure with no envelope rendered as a blank message
     // and read as "no reason given" rather than as a server error.
     throw new ApiError(err.message || res.statusText || `HTTP ${res.status}`, {
-      code: err.code, hint: err.hint, status: res.status,
+      code: err.code, hint: err.hint, status: res.status, data: err,
     })
   }
   // Deliberately a separate return shape rather than a field grafted onto
@@ -206,6 +214,14 @@ export const api = {
     return res.text()
   },
 
+  // The tag vocabulary with counts (J.5.18 rule 4). `limit` cuts the
+  // LISTING and nothing else: every count is computed over the caller's
+  // whole scope in SQL, so it does not move when the page size does
+  // (J.4.3's reason). `truncated` says when the cap bit.
+  tags: (forest, { limit } = {}) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/tags`
+            + (limit ? `?limit=${encodeURIComponent(limit)}` : '')),
+
   // Shares (J.17): a share is a key with one room. The token rides once,
   // inside the URL the create answers with; the listing never carries it.
   createShare: (forest, node, days) =>
@@ -315,6 +331,24 @@ export const api = {
   // above, and a second definition silently replaced it: the Gate asks
   // `api.health()` whether a password door exists, got a 403 from this
   // endpoint instead, and stopped offering the password form entirely.
+  // The uncertain links, read and settled (J.18). `write` on the caller's
+  // own scope — not admin: a principal who may write inside a branch may
+  // settle the proposals inside it, and the host filters the listing by
+  // that same scope.
+  uncertainLinks: (forest, { after = '', limit } = {}) => {
+    const q = new URLSearchParams()
+    if (after) q.set('after', after)
+    if (limit) q.set('limit', String(limit))
+    const tail = q.toString()
+    return request(`/v1/forests/${encodeURIComponent(forest)}/links/uncertain`
+                   + (tail ? `?${tail}` : ''))
+  },
+  // Never all-or-nothing: the response reports the outcome of every vote
+  // sent, and one refused vote must not discard the rest of the review.
+  voteLinks: (forest, votes) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/links/vote`,
+            { method: 'POST', body: { votes } }),
+
   forestHealth: (forest) =>
     request(`/v1/admin/health?forest=${encodeURIComponent(forest)}`),
   // J.13.5: the C.9 lock, inspected and (when orphan) released. The

@@ -26,6 +26,8 @@
   "editor.rule_immutable": "Id, tipo y fecha de creación no cambian.",
   "editor.rule_summary": "El resumen se valida contra su presupuesto de tokens.",
   "editor.rules": "Lo que el motor va a validar",
+  "editor.scent": "Rastro",
+  "editor.scent_hint": "Título, resumen y etiquetas — los campos por los que locate ordena. Se guardan como un graft, la misma llamada que hace un agente.",
   "editor.section": "Sección",
   "editor.section_hint": "Una sección por commit, porque es lo que un graft reemplaza de forma atómica.",
   "editor.summary": "Resumen",

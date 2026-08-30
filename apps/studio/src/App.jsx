@@ -22,6 +22,7 @@ import Models from './views/Models.jsx'
 import People from './views/People.jsx'
 import Audit from './views/Audit.jsx'
 import Health from './views/Health.jsx'
+import Links from './views/Links.jsx'
 import Integrations from './views/Integrations.jsx'
 import Webhooks from './views/Webhooks.jsx'
 import Skills from './views/Skills.jsx'
@@ -32,7 +33,7 @@ const VIEWS = {
   overview: Overview, ask: Ask, explore: Explore, read: Read,
   playground: Playground,
   data: Data, ingest: Ingest, models: Models, people: People, audit: Audit,
-  health: Health, webhooks: Webhooks,
+  health: Health, webhooks: Webhooks, links: Links,
   integrations: Integrations,
   skills: Skills,
 }

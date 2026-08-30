@@ -26,6 +26,7 @@
   "health.release": "Liberar el lock huérfano",
   "health.releasing": "Liberando",
   "health.restore_note": "Restaurar sobre un bosque vivo sigue en la línea de comandos. Un snapshot viaja como un solo archivo: el owner puede descargarlo aquí e importarlo como bosque nuevo desde el selector de bosques.",
+  "health.review": "Revisarlos",
   "health.scoped": "Este informe cubre todo el bosque.",
   "health.scoped_hint": "Cuenta problemas en todas partes, así que exige un acceso de admin no limitado a una rama.",
   "health.snapshots": "Instantáneas",

@@ -543,6 +543,17 @@ export default function Ingest({ forest, grant, goto }) {
           <>
             <Rebuild forest={forest} />
             <Rederive forest={forest} />
+            {/* J.13.6.1: the model-backed one, below the two free repairs
+                it must not be confused with. The running job is handed to
+                it so the button cannot be pressed twice and the report
+                lands where the operator started it — the progress bar and
+                the full report are the page's, on the J.9 board. */}
+            <Rescent forest={forest} bound={bound}
+                     job={job && job.mode === 'recurate' ? job : null}
+                     onJob={(started) => {
+                       noteJob(forest, started)
+                       setJobId(started.id)
+                     }} />
             <Staging forest={forest} />
             <DenseLayer forest={forest} />
           </>
@@ -1095,6 +1106,79 @@ function Rederive({ forest }) {
         <button type="button" className="btn" disabled={state.busy} onClick={run}>
           <Refresh size={14} />
           {state.busy ? t('ingest.rederive_running') : t('ingest.rederive_start')}
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+/** The scent every node carries, written again by the model (J.13.6.1).
+ *
+ *  The fourth repair in this tab and the odd one out, which is why the card
+ *  has to say so in its first two lines. Its neighbours are free and
+ *  mechanical: `reindex` rebuilds what finds the content, `Re-derive` reads
+ *  passports and does arithmetic on them. This one spends ONE MODEL CALL
+ *  PER NODE, and what it rewrites is what a node SAYS about itself — the
+ *  summary an agent navigates by. Both facts are the operator's to weigh
+ *  before pressing anything, so the count in scope is shown as the stated
+ *  cost (J.13.6.1 rule 5) and the button never runs without it.
+ *
+ *  The job itself is the console's ordinary machinery: it goes on the J.9
+ *  board like an ingest batch, so the progress bar and the report below
+ *  belong to the page and not to this card. */
+function Rescent({ forest, bound, job, onJob }) {
+  const { t } = useI18n()
+  const [state, setState] = useState({})
+  const running = job && job.state === 'running'
+  const report = job && job.state !== 'running' ? job.report : null
+
+  const run = async () => {
+    setState({ busy: true })
+    try {
+      const started = await api.recurate(forest, ['scent'])
+      setState({ nodes: started.nodes })
+      if (started.job) onJob(started.job)
+    } catch (error) {
+      setState({ error })
+    }
+  }
+
+  return (
+    <Card title={t('ingest.rescent_title')} subtitle={t('ingest.rescent_sub')}
+          icon={Pencil}>
+      {/* The two things that separate it from its neighbours, first and in
+          its own tone — a repair that costs money must not read like the
+          three free ones stacked above it. */}
+      <Note tone="warn">{t('ingest.rescent_cost')}</Note>
+      <div className="mt-3"><Note>{t('ingest.rescent_hint')}</Note></div>
+      {bound === null && (
+        <div className="mt-3"><Note tone="warn">{t('ingest.rescent_unbound')}</Note></div>
+      )}
+      {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
+      {state.nodes !== undefined && (
+        <div className="mt-3">
+          <Note tone="info">{t('ingest.rescent_scope', { n: state.nodes })}</Note>
+        </div>
+      )}
+      {report && (
+        <div className="mt-3">
+          <Note>
+            {t('ingest.rescent_done', {
+              n: report.changed || 0,
+              unchanged: (report.unchanged || []).length,
+            })}
+            {report.fallbacks > 0
+              && ` ${t('ingest.rescent_fallbacks', { n: report.fallbacks })}`}
+          </Note>
+        </div>
+      )}
+      <div className="mt-4 flex justify-end">
+        <button type="button" className="btn"
+                disabled={state.busy || running || bound === null}
+                onClick={run}>
+          <Pencil size={14} />
+          {running || state.busy
+            ? t('ingest.rescent_running') : t('ingest.rescent_start')}
         </button>
       </div>
     </Card>

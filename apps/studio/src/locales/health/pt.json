@@ -26,6 +26,7 @@
   "health.release": "Liberar o lock órfão",
   "health.releasing": "Liberando",
   "health.restore_note": "Restaurar por cima de uma floresta viva continua na linha de comando. Um snapshot viaja como um arquivo só: o owner pode baixá-lo aqui e importá-lo como floresta nova pelo seletor de florestas.",
+  "health.review": "Revisar",
   "health.scoped": "Este relatório cobre a floresta inteira.",
   "health.scoped_hint": "Ele conta problemas em toda parte, então exige um acesso de admin que não esteja limitado a um galho.",
   "health.snapshots": "Snapshots",

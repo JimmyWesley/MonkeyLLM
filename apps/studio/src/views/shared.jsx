@@ -5,6 +5,7 @@
  * into nine subtly different ideas of "loading" or "you may not do this". */
 import { useCallback, useEffect, useState } from 'react'
 import { hrefFor, linkTo } from '../router.js'
+import { branchIdFor, branchOf } from '../nodes.js'
 import { useI18n } from '../i18n.jsx'
 import { Card, Empty, ErrorNote, Field, Modal, Select, TextArea } from '../design/ui.jsx'
 import { Access, Plus } from '../design/icons.jsx'
@@ -27,9 +28,11 @@ export const has = (grant, cap) =>
 export const rootsOf = (grant) =>
   grant?.roots?.length ? grant.roots : ['_index']
 
-/** A branch id (`projects/_index`) as the branch itself (`projects`). */
-export const branchOf = (id) =>
-  id === '_index' ? '' : id.replace(/\/?_index$/, '')
+/* The address algebra lives in `nodes.js` — plain JS, so the console's own
+ * checker can import it (J.5.17). Re-exported here because every view
+ * already reaches for these through this module, and two import paths to
+ * one function is how a second copy of it eventually appears. */
+export { branchIdFor, branchOf, slugOf } from '../nodes.js'
 
 export function useAsync(fn, deps = [], { skip = false } = {}) {
   const [state, setState] = useState({ busy: !skip, data: null, error: null })
@@ -252,27 +255,6 @@ export function useForestTree(forest, grant, call, { skip = false } = {}) {
  * Everything that makes a branch a branch — the id living under its parent,
  * the entry grafted into the parent's `## Sub-branches`, the commit, the
  * audit row — is the engine's, exactly as it is for an agent. */
-
-/** A name as the path segment it becomes. Mirrors the Gardener's `slugify`
- *  closely enough that a folder and a hand-made branch of the same name
- *  land on the same id — an operator who mirrors `Contracts` later should
- *  not get `contracts` beside `Contracts`. */
-export function slugOf(name) {
-  return (name || '')
-    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')  // strip diacritics
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 63)
-}
-
-/** The id a branch would get under `parent` (`_index` = forest root). */
-export function branchIdFor(parent, name) {
-  const slug = slugOf(name)
-  if (!slug) return null
-  const under = branchOf(parent || '_index')
-  return under ? `${under}/${slug}/_index` : `${slug}/_index`
-}
 
 /** The A.5 skeleton, so a new branch reads like every other one from the
  *  first moment instead of growing headings when something lands in it. */

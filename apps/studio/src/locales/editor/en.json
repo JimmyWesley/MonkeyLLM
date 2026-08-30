@@ -26,6 +26,8 @@
   "editor.rule_immutable": "Id, type and creation date cannot change.",
   "editor.rule_summary": "The summary is validated against its token budget.",
   "editor.rules": "What the engine will check",
+  "editor.scent": "Scent",
+  "editor.scent_hint": "Title, summary and tags — the fields locate ranks by. Saved as one graft, the same call an agent makes.",
   "editor.section": "Section",
   "editor.section_hint": "One section per commit, because that is what a graft replaces atomically.",
   "editor.summary": "Summary",

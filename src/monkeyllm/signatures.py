@@ -72,6 +72,9 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "since": _param("string"),
         "until": _param("string"),
         "date_field": _param("string"),
+        # A.3.2 rule 5 (v0.75): the document's language as a filter, never
+        # a boost. Absent, the call behaves exactly as it did before.
+        "lang": _param("string"),
         # K.3: the entry-search switch, read and removed by the host before
         # the primitive is called. Declared so it is not an unknown key.
         "hybrid": _param("boolean"),
@@ -123,6 +126,9 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "since": _param("string"),
         "until": _param("string"),
         "date_field": _param("string"),
+        # A.3.2 rule 5 (v0.75): the document's language as a filter, never
+        # a boost. Absent, the call behaves exactly as it did before.
+        "lang": _param("string"),
     },
     "calendar": {
         "scope": _param("string"),
@@ -181,6 +187,9 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "since": _param("string"),
         "until": _param("string"),
         "date_field": _param("string"),
+        # A.3.2 rule 5 (v0.75): the document's language as a filter, never
+        # a boost. Absent, the call behaves exactly as it did before.
+        "lang": _param("string"),
         # C.6c.4 (v0.58): the history view — restores what a live
         # `supersedes` edge excludes by default.
         "include_superseded": _param("boolean"),

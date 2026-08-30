@@ -346,7 +346,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                      type_filter: str | None = None,
                      include: list[str] | None = None,
                      since: str | None = None, until: str | None = None,
-                     date_field: str | None = None):
+                     date_field: str | None = None,
+                     lang: str | None = None):
         """Drop near the answer: ranked entry points over curated metadata —
         titles, summaries and tags, never bodies. Each result carries
         `body_tokens`, so you can size what you are about to open;
@@ -359,10 +360,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         search to when nodes were created — `date_field="updated"` for when
         they last changed. Call `calendar` first to see which periods hold
         anything: an empty window says so explicitly rather than looking
-        like an empty forest."""
+        like an empty forest. `lang` filters by the node's declared
+        language tag (A.3.2), exact match — a node that declares none is
+        in no language filter."""
         return await call(forest, "locate", query=query, k=k, scope=scope,
                           type_filter=type_filter, include=include,
-                          since=since, until=until, date_field=date_field)
+                          since=since, until=until, date_field=date_field,
+                          lang=lang)
 
     @mcp.tool()
     async def look(forest: str, id: str | list[str],
@@ -458,20 +462,23 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
     async def sniff(forest: str, terms: list[str], scope: str | None = None,
                     k: int = 5, since: str | None = None,
                     until: str | None = None,
-                    date_field: str | None = None):
+                    date_field: str | None = None,
+                    lang: str | None = None):
         """Literal search inside bodies — the facts summaries do not carry.
 
         `since`/`until` bound it by date, and here that is also the cheapest
         thing you can do: a windowed sniff opens the files of those days and
         no others."""
         return await call(forest, "sniff", terms=terms, scope=scope, k=k,
-                          since=since, until=until, date_field=date_field)
+                          since=since, until=until, date_field=date_field,
+                          lang=lang)
 
     @mcp.tool()
     async def harvest(forest: str, query: str, terms: list[str] | None = None,
                       k: int = 3, since: str | None = None,
                       until: str | None = None,
                       date_field: str | None = None,
+                      lang: str | None = None,
                       include_superseded: bool = False):
         """One-shot retrieval: ranked evidence with exact snippets, no hops.
         `since`/`until` bound both of its legs to a period.
@@ -483,6 +490,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         `include_superseded=true` brings the history back."""
         return await call(forest, "harvest", query=query, terms=terms, k=k,
                           since=since, until=until, date_field=date_field,
+                          lang=lang,
                           **({"include_superseded": True}
                              if include_superseded else {}))
 

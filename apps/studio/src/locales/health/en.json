@@ -26,6 +26,7 @@
   "health.release": "Release the stale lock",
   "health.releasing": "Releasing",
   "health.restore_note": "Restoring over a live forest stays on the command line. A snapshot travels as one file: the owner can download it here and import it as a new forest from the forest switcher.",
+  "health.review": "Review them",
   "health.scoped": "This report covers the whole forest.",
   "health.scoped_hint": "It counts problems everywhere, so it needs an admin grant that is not limited to a branch.",
   "health.snapshots": "Snapshots",

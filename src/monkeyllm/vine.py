@@ -51,6 +51,7 @@ from monkeyllm.models import (
     MAX_ALIASES,
     MUTABLE_FRONTMATTER_FIELDS,
     NOTES_SECTION,
+    TAG_RULE,
     GraftPatch,
     Link,
     NodeSpec,
@@ -59,8 +60,10 @@ from monkeyllm.models import (
     validate_dataset_rows,
     validate_dataset_schema,
     validate_frontmatter,
+    validate_lang,
     validate_origin,
     validate_summary,
+    validate_tag,
 )
 from monkeyllm.parser import (
     ParsedNode,
@@ -118,6 +121,12 @@ MAX_HISTORY = 50
 # never do — a coverage report whose total was clipped would be the failure
 # it exists to prevent.
 BUDGET_COVERAGE = 800
+
+# J.5.18 rule 4: how many distinct tags one read of the vocabulary may name.
+# A ceiling rather than a budget — the payload is a word and a number per
+# entry, so what this bounds is a person's ability to read the list, not a
+# model's context window. Stated, and `truncated` says when it bit.
+TAG_VOCABULARY_CAP = 500
 # C.4.1: paragraph blocks — the page unit. Each block keeps its trailing
 # blank run, so `"".join(blocks) == body` holds by construction and pages
 # reassemble byte-identically (F.80).
@@ -170,7 +179,7 @@ SCAN_FIELDS = frozenset({
     "id", "kind", "type", "title", "summary", "tags", "aliases", "created",
     "updated", "confidence", "source", "entity_kind", "payload_type",
     "parent", "trail", "coverage", "body_tokens", "outline", "heat",
-    "origin",
+    "origin", "lang",
 })
 NEIGHBOR_SUMMARY_TOKENS = 25
 MAX_EDGES_SHOWN = 12
@@ -366,6 +375,14 @@ def _fold(text: str) -> str:
     return text.lower() if text.isascii() else text.translate(_fold_table())
 
 
+# C.6b's fold has more than one reader: `sniff` matches with it, and G.4.3
+# decides with it whether an alias a model proposed occurs in the document
+# it was given. Exported under a public name so the second reader imports
+# the first one's decision — a second fold would be a second rule, and the
+# two would agree only where somebody compared them.
+fold = _fold
+
+
 # G.7: cheap detector for non-inline nodes (frontmatter `content:` marker);
 # a body-text false positive only costs one harmless re-read via the parser
 _CONTENT_MARKER_RE = re.compile(r"^content: (cached|reference)\s*$", re.MULTILINE)
@@ -525,6 +542,27 @@ def _sniff_body(body: str, folded_terms: list[str]) -> tuple[list[list], set[int
             continue
         matches.append([line_no, section, first_pos, line])
     return matches, terms_hit
+
+
+def lang_sql(lang: str | None) -> tuple[list[str], list]:
+    """A.3.2 rule 5: the language as a predicate over the catalog column.
+
+    C.13.1's discipline, for the same reason: a **bare comparison on the
+    indexed column**, applied where the candidates are chosen. A filter
+    that ran over the ranked top-k would return fewer than `k` while the
+    forest still holds matches in that language, and the caller would read
+    a scarcity the implementation invented.
+
+    Exact match on the stored tag: `pt` and `pt-BR` are different values,
+    because a document that says `pt-BR` said something more specific than
+    `pt` and a filter is not the place to decide they are the same. A
+    malformed value is refused here rather than silently matching nothing —
+    a filter that quietly holds for no node is a lie about what was
+    searched (C.13.1 rule 4's rule, on a different facet).
+    """
+    if lang is None:
+        return [], []
+    return ["{n}lang = ?"], [validate_lang(lang)]
 
 
 def _common_prefix(lo: str | None, hi: str | None) -> str | None:
@@ -1043,6 +1081,7 @@ class Vine:
         since: str | None = None,
         until: str | None = None,
         date_field: str | None = None,
+        lang: str | None = None,
     ) -> dict:
         if include is not None:
             unknown = [i for i in include if i not in LOCATE_INCLUDE]
@@ -1068,6 +1107,12 @@ class Vine:
         # scarcity the implementation invented.
         window = normalize_window(since, until, date_field)
         win_where, win_params = window_sql(window)
+        # A.3.2 rule 5: same discipline, same place. Ranking is untouched —
+        # a node's language decides whether it is a candidate, never what
+        # it scores once it is one.
+        lang_where, lang_params = lang_sql(lang)
+        win_where = win_where + lang_where
+        win_params = win_params + lang_params
         cand = max(k * 5, 25)
         # C.1.2 (v0.70): the sentence is not the query. Every article and
         # preposition in a question used to be a search term with a vote;
@@ -1110,10 +1155,12 @@ class Vine:
                     extra = self.catalog.get(vid)
                     # The dense half meets the same window as the lexical
                     # one: a filter that holds for only one of two fused
-                    # rankings is not a filter (C.13.1 rule 2).
+                    # rankings is not a filter (C.13.1 rule 2). A.3.2's
+                    # language rides here for the identical reason.
                     if extra is not None and (
                             window is None
-                            or in_window(extra[window["date_field"]], window)):
+                            or in_window(extra[window["date_field"]], window)
+                    ) and (lang is None or extra["lang"] == lang):
                         by_id[vid] = extra
             bm25_ids = [r["id"] for r in rows]
             vec_ids = [vid for vid, _ in vec_hits]
@@ -1324,6 +1371,10 @@ class Vine:
         if "origin" in row.keys() and row["origin"]:
             # A.3 (v0.57): provenance toward the world outside the forest.
             digest["origin"] = row["origin"]
+        if "lang" in row.keys() and row["lang"]:
+            # A.3.2 (v0.75): present only when somebody said it — the
+            # absence is the state, so there is no null to emit.
+            digest["lang"] = row["lang"]
 
         edges_out = []
         for e in self.catalog.edges_out(id):
@@ -2259,6 +2310,13 @@ class Vine:
                 # origin answers neither.
                 if not row["origin"] or not str(row["origin"]).startswith(str(want)):
                     return False
+            elif key == "lang":
+                # A.3.2 rule 5: exact match on the stored tag, and a value
+                # the engine cannot read is refused rather than quietly
+                # matching nothing — `{"lang": "portuguese"}` returning an
+                # empty listing reads as "this branch holds no Portuguese".
+                if row["lang"] != validate_lang(want):
+                    return False
             elif key == "kind":
                 # C.6 (v0.56): the filter MUST match what the field emits —
                 # a filter that only matched the storage spelling would make
@@ -2286,6 +2344,7 @@ class Vine:
         since: str | None = None,
         until: str | None = None,
         date_field: str | None = None,
+        lang: str | None = None,
     ) -> dict:
         if isinstance(terms, str):
             terms = [terms]
@@ -2329,6 +2388,12 @@ class Vine:
         win_where, win_params = window_sql(window)
         where.extend(win_where)
         params.extend(win_params)
+        # A.3.2 rule 5: chosen with the candidates, so `k` is still met
+        # inside the filter — and here it also decides which bodies are
+        # opened at all, which is the same saving the window makes.
+        lang_where, lang_params = lang_sql(lang)
+        where.extend(lang_where)
+        params.extend(lang_params)
         # C.6b.1 (v0.59): what the memo already knows, asked for in the shape
         # the answer needs. The matching lines are a handful; the nodes it
         # has NOT covered are usually none. Everything else in scope was
@@ -2745,6 +2810,15 @@ class Vine:
             validate_frontmatter(fm, self.forest.dialect)
         except VineError as e:
             refuse(e)
+        # G.4.2 rule 6 (v0.75): the tag rule is enforced where writes enter,
+        # never where nodes are read — a rule that strands every pre-v0.75
+        # node behind its own editor is not a repair. Per tag rather than by
+        # the list, so a rehearsal (C.7.3) names every one it would refuse.
+        for tag in fm.get("tags") or []:
+            try:
+                validate_tag(tag)
+            except VineError as e:
+                refuse(e)
         if self.forest.exists(spec.id) or (pending and spec.id in pending):
             if if_absent:
                 # C.7.2 (v0.52): "make sure this exists". Nothing is written,
@@ -3075,10 +3149,31 @@ class Vine:
                     hint="Aliases are curated names locate indexes beside "
                          "the title (C.8, G.2.6).",
                 )
+        if "tags" in patch.set_frontmatter:
+            # G.4.2 rule 6 (v0.75): a write may keep what it found, never
+            # add what the rule refuses. The node's own tags are
+            # grandfathered by their exact spelling, so an editor that read
+            # a pre-v0.75 node can send them back untouched; anything else
+            # in the list is a new tag and answers to the rule.
+            tags = patch.set_frontmatter["tags"]
+            if not isinstance(tags, list):
+                raise VineError(E_SCHEMA, "tags must be a list of strings",
+                                hint=TAG_RULE)
+            carried = {t for t in (node.frontmatter.get("tags") or [])
+                       if isinstance(t, str)}
+            for tag in tags:
+                if isinstance(tag, str) and tag in carried:
+                    continue
+                validate_tag(tag)
         if "origin" in patch.set_frontmatter:
             # A.3 (v0.57): one bounded URI, never prose; `None` clears it.
             if patch.set_frontmatter["origin"] is not None:
                 validate_origin(patch.set_frontmatter["origin"])
+        if "lang" in patch.set_frontmatter:
+            # A.3.2 (v0.75): one BCP-47 tag; `None` clears it (origin's
+            # rule, and for the same reason — absence is a real state).
+            if patch.set_frontmatter["lang"] is not None:
+                validate_lang(patch.set_frontmatter["lang"])
 
         fm = dict(node.frontmatter)
         body = node.body
@@ -3090,6 +3185,9 @@ class Vine:
             if fm.get("origin") is None:
                 # `origin: null` is a clearing, not a value (A.3, v0.57).
                 fm.pop("origin", None)
+            if fm.get("lang") is None:
+                # `lang: null` is a clearing, not a value (A.3.2, v0.75).
+                fm.pop("lang", None)
             file_changed = True
 
         links = [Link.model_validate(l) for l in (fm.get("links") or [])]
@@ -3694,6 +3792,14 @@ class Vine:
             # of the listing index, branch or leaf, so the accounting closes.
             roots = [r["id"] for r in self.catalog.children(listing)]
 
+        # A.3.2 rule 6: the number that makes a mixed forest visible. Asked
+        # once, up front, because it also decides whether the block is
+        # emitted at all — a forest where nobody has said anything about
+        # language answers exactly as it did before v0.75, and a `{}`
+        # beside a full count of unlabelled nodes would be a report about
+        # a field nobody uses.
+        total_langs = self.catalog.group_counts("lang", scoped, scoped_params)
+
         out = []
         for root_id in roots:
             row = self.catalog.get(root_id)
@@ -3721,6 +3827,18 @@ class Vine:
                 # C.17 rule 5: a root where nine nodes in ten know their
                 # source is not a root with an origin.
                 entry["without_origin"] = stats["without_origin"]
+            if total_langs:
+                # A.3.2 rule 6: languages per root, and the nodes carrying
+                # none as their own group. Both omitted where there is
+                # nothing to say — a root with no labelled node at all
+                # reports neither, and the forest-wide `without_lang`
+                # already accounts for it.
+                langs = self.catalog.group_counts(
+                    "lang", where + scoped, params + scoped_params)
+                if langs:
+                    entry["languages"] = langs
+                    if stats["without_lang"]:
+                        entry["without_lang"] = stats["without_lang"]
             gone = self._count_missing_payloads(
                 where + scoped, params + scoped_params)
             if gone:
@@ -3745,6 +3863,16 @@ class Vine:
                 scoped + undated, scoped_params),
             "system": self.catalog.count_nodes(scoped + system, scoped_params),
         }
+        if total_langs:
+            # A.3.2 rule 6 in the totals. `without_lang` is the group the
+            # rule names explicitly: a forest reporting `pt: 40` while
+            # saying nothing about the other 1,800 nodes has described its
+            # labelled corner and called it the corpus.
+            payload["languages"] = total_langs
+            unlabelled = self.catalog.count_nodes(
+                scoped + ["({n}lang IS NULL OR {n}lang = '')"], scoped_params)
+            if unlabelled:
+                payload["without_lang"] = unlabelled
         gone_total = self._count_missing_payloads(scoped, scoped_params)
         if gone_total:
             payload["payload_missing"] = gone_total
@@ -3758,6 +3886,48 @@ class Vine:
         found = len(out)
         payload = shrink_list_to_budget(payload, "roots", BUDGET_COVERAGE)
         payload["truncated"] = len(payload["roots"]) < found
+        return payload
+
+    def tags(self, *, policy_where: tuple[list[str], list] | None = None,
+             limit: int | None = None) -> dict:
+        """The forest's tag vocabulary, with counts (J.5.18 rule 4).
+
+        Not a primitive: `locate` and `scan` are what an agent searches tags
+        with, and this is the console's map of the vocabulary those searches
+        run over — free text (A.3), so it drifts, and `invoice` beside
+        `invoices` is only visible as a list with numbers on it.
+
+        Counted over the WHOLE scope in SQL and never over a page (J.4.3's
+        reason): a total assembled from what a reader is looking at moves
+        when they change the page size, which makes it a number about the
+        console rather than about the forest. `limit` therefore cuts the
+        LISTING and never the arithmetic — every count returned is the
+        count over the whole scope, whatever `limit` was.
+
+        `limit` is CLAMPED into `[1, TAG_VOCABULARY_CAP]` rather than
+        refused, and the effective value comes back as `cap`: the answer
+        says what it did, so a caller that asked for more than the ceiling
+        reads the ceiling instead of guessing why the list stopped.
+
+        `policy_where` is the host's, keyword-only and unreachable from the
+        wire (G.2.5's construction), for the reason C.13.3 gives: a global
+        vocabulary would name and size regions nobody granted.
+        """
+        cap = TAG_VOCABULARY_CAP if limit is None else limit
+        cap = min(max(1, int(cap)), TAG_VOCABULARY_CAP)
+        pol_where, pol_params = policy_where or ([], [])
+        rows, distinct = self.catalog.tag_counts(pol_where, pol_params, cap)
+        payload = {
+            "tags": [{"tag": tag, "nodes": n} for tag, n in rows],
+            "returned": len(rows),
+            "cap": cap,
+            # C.6.2's pattern: never clipped in silence. `total` is the
+            # number of distinct tags in scope, which is only worth a second
+            # pass when the cap actually cut something — otherwise it is the
+            # length of the list the caller is holding.
+            "truncated": distinct is not None,
+            "total": len(rows) if distinct is None else distinct,
+        }
         return payload
 
     def _count_missing_payloads(self, where: list[str], params: list) -> int:

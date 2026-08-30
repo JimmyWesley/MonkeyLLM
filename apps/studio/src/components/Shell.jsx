@@ -37,6 +37,11 @@ export const CONSOLES = [
   // who may read the forest is the person whose AI may learn to.
   { key: 'skills', group: 'use', cap: 'read' },
   { key: 'ingest', group: 'build', cap: 'ingest' },
+  // J.18: settling a model's link proposals is `write`, never admin —
+  // a principal who may write inside a branch may decide the proposals
+  // inside it. It sits in `build` because it shapes the forest, and
+  // the Health console's `uncertain_links` count links here.
+  { key: 'links', group: 'build', cap: 'write' },
   { key: 'models', group: 'build', cap: 'admin' },
   // J.16. The build group is the three directions a forest moves in:
   // what comes in, who reads it, what goes out.
