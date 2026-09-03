@@ -1243,6 +1243,17 @@ class Vine:
         if not scope:
             return where, params
         scope = scope.strip().strip("/")
+        if scope == "_meta":
+            # C.6b (v0.77): the dialect's directory is not a branch and holds
+            # no content to grep. The refusal says what a scope IS — "node
+            # not found: _meta/_index" named an id the caller never typed.
+            raise VineError(
+                E_SCHEMA,
+                "'_meta/' is the dialect, not content",
+                hint="scope is a branch id (e.g. 'notes') or a node id, exactly "
+                     "as scan/look name it; omit it to search the whole forest. "
+                     "The dialect is read with pick('_meta/schema').",
+            )
         row = self.catalog.get(scope)
         if row is not None and row["kind"] == "banana":
             where.append("{n}id = ?")
@@ -1250,7 +1261,21 @@ class Vine:
             return where, params
         scope_id = (scope if scope == "_index" or scope.endswith("/_index")
                     else f"{scope}/_index")
-        self._row_or_raise(scope_id)
+        try:
+            self._row_or_raise(scope_id)
+        except VineError as e:
+            if e.code != E_NOT_FOUND:
+                raise
+            # Same code, same visibility rule (an out-of-scope branch and an
+            # absent one arrive here alike): only the sentence changes, and
+            # it names the string the caller sent, not the `_index` derived
+            # from it.
+            raise VineError(
+                E_NOT_FOUND,
+                f"scope not found: {scope}",
+                hint="scope is a branch id (e.g. 'notes') or a node id, exactly "
+                     "as scan/look name it; omit it to search the whole forest.",
+            ) from None
         if scope_id != "_index":
             prefix = scope_id[: -len("_index")]  # "<branch>/_index" -> "<branch>/"
             # substr, not LIKE: '_' is a single-character wildcard there and
@@ -1439,6 +1464,22 @@ class Vine:
                                       or row["coverage"])
         else:
             digest["outline"] = json.loads(row["outline"])
+
+        payload_named = node.frontmatter.get("payload")
+        if row["type"] != "dataset" and (row["type"] == "media" or payload_named):
+            # C.2.2 rule 6 (v0.77): the flag a dataset carries, for the other
+            # node whose worth is a file. `view` answers a payload-less media
+            # node with the missing-node envelope ON PURPOSE (C.6d rule 1),
+            # so this digest is the one place a caller can learn, before
+            # spending the call, whether the bytes are in the forest and
+            # what they are. A stat, never an open.
+            if not payload_named or self._local_payload_missing(node):
+                digest["payload_missing"] = True
+            else:
+                digest["payload_type"] = row["payload_type"] or ""
+                if not is_remote(payload_named):
+                    digest["payload_bytes"] = (
+                        self.forest.payload_path(node).stat().st_size)
 
         if row["type"] == "dataset" and row["payload_type"] == "sqlite":
             # Each of these opens the payload, so a caller that named its
@@ -2773,6 +2814,36 @@ class Vine:
         if spec.payload_type != "sqlite":
             raise VineError(E_SCHEMA, "schema requires payload_type: sqlite")
 
+    def _media_payload_problems(self, spec: NodeSpec) -> list[VineError]:
+        """C.7.5 (v0.77): a media node's worth is its bytes, and `plant`
+        carries none.
+
+        A passport naming no payload — or naming one the volume does not
+        hold — is refused HERE, where the caller can still act on it,
+        instead of surfacing three calls later as `view`'s deliberately
+        anonymous `E_NOT_FOUND` (C.6d rule 1). Decided with a stat, before
+        the first write, so it rehearses (C.7.3) and refuses a batch (C.7.4)
+        like every other problem of a node. A remote URI (G.9) is accepted
+        as written.
+        """
+        hint = ("plant carries no bytes. Send the file through ingest(mode="
+                "'upload', files=[{name, b64}]): the Gardener plants the media "
+                "node, keeps the bytes under _assets/ and writes the "
+                "description. Plant a media node yourself only to reference "
+                "a payload already sitting in the forest.")
+        payload = spec.payload
+        if not payload:
+            return [VineError(E_SCHEMA, "a media node needs a payload", hint=hint)]
+        if is_remote(payload):
+            return []
+        root = Path(self.forest.root).resolve()
+        target = (self.forest.path_for(spec.id).parent / str(payload)).resolve()
+        if not target.is_relative_to(root):
+            return [VineError(E_SCHEMA, "payload escapes the forest", hint=hint)]
+        if not target.is_file():
+            return [VineError(E_SCHEMA, f"payload not found: {payload}", hint=hint)]
+        return []
+
     def _plant(self, spec: NodeSpec, *, adopted: bool = False,
                if_absent: bool = False, dry_run: bool = False,
                pending: dict[str, str] | None = None,
@@ -2845,6 +2916,12 @@ class Vine:
                 f"id '{spec.id}' does not live under parent '{spec.parent}' "
                 f"(expected parent: {expected_parent})",
             ))
+        # C.7.5 (v0.77). The Gardener is exempt (`adopted`, G.2.5's
+        # construction): under `archive: never` it references bytes that stay
+        # at the source, which is G.7's tier and not this failure.
+        if not adopted and fm.get("type") == "media":
+            for err in self._media_payload_problems(spec):
+                refuse(err)
         if dry_run and spec.table_schema is not None and spec.payload:
             # The one refusal left between here and the first write: rehearse
             # it read-only, in the real path's own order.

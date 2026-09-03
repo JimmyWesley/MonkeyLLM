@@ -328,7 +328,8 @@ Authorization: Bearer mk_…`} />
                      code={`curl -sX POST ${origin}/v1/forests/handbook/ingest \\
   -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
   -d '{"mode": "upload", "dest": "policies",
-       "files": [{"name": "expenses.md", "text": "# Expenses…"}]}'`} />
+       "files": [{"name": "expenses.md", "text": "# Expenses…"},
+                 {"name": "receipt.jpg", "b64": "<base64 of the file>"}]}'`} />
           <H>{t('integrations.api.errors')}</H>
           <P>{t('integrations.api.errors_p')}</P>
           <CodeBlock title="json" code={`{

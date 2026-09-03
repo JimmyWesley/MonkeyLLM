@@ -128,7 +128,7 @@
   "integrations.tool.forests": "Lista as florestas que esta chave pode usar, com capacidades e raízes de partida.",
   "integrations.tool.graft": "Edita um nó.",
   "integrations.tool.harvest": "Recuperação em uma chamada: evidência ranqueada com trechos exatos, sem saltos.",
-  "integrations.tool.ingest": "Coloca documentos na floresta através do Gardener.",
+  "integrations.tool.ingest": "Coloca documentos na floresta pelo Gardener: texto, ou qualquer outro arquivo como bytes em b64 (uma imagem ou um áudio vira um nó media).",
   "integrations.tool.locate": "Pontos de entrada ranqueados sobre metadados curados onde cair na floresta.",
   "integrations.tool.look": "Resumo barato de um nó: sumário, arestas, filhos, stats.",
   "integrations.tool.move": "Vizinhos de um nó ao longo de arestas tipadas.",

@@ -294,11 +294,13 @@ curl -sX POST https://station.example.com/v1/forests/handbook/harvest \
 ```
 
 ```bash
-# upload documents
+# upload documents: text as "text", any other file as "b64"
+# (an image or audio file lands as a media node; view serves its bytes)
 curl -sX POST https://station.example.com/v1/forests/handbook/ingest \
   -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d '{"mode": "upload", "dest": "policies",
-       "files": [{"name": "expenses.md", "text": "# Expenses…"}]}'
+       "files": [{"name": "expenses.md", "text": "# Expenses…"},
+                 {"name": "receipt.jpg", "b64": "<base64 of the file>"}]}'
 ```
 
 Falhas são um único envelope, mapeado em códigos HTTP, e o `hint` é escrito

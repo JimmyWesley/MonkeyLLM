@@ -138,6 +138,11 @@ ok('F.127 every generated dest is a branch address', dests.length > 0
 ok('F.127 the saving block names source_url as an upload\'s origin',
    all.some((f) => f.path.endsWith('saving.md')
                 && f.text.includes('source_url') && f.text.includes('`origin`')))
+ok('F.171 the saving block teaches bytes: b64, what media becomes, plant carries none',
+   all.some((f) => f.path.endsWith('saving.md')
+                && f.text.includes('b64') && f.text.includes('`type: media`')
+                && f.text.includes('view(forest, id)')
+                && f.text.includes('`plant` carries no')))
 ok('F.127 the core states the min_score pairing',
    core1.includes('below_min_score') && core1.includes('min_evidence: 1'))
 ok('F.127 two selections, two names',

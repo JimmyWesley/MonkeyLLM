@@ -43,6 +43,18 @@ def _plant_media(vine, node_id="shot", payload="_assets/shot.png",
     })
 
 
+def _repoint(passport, payload: str) -> None:
+    """Hand-edit a passport's `payload` after the plant: C.7.5 (v0.77)
+    refuses a media node BORN pointing at nothing, so the states these
+    tests exercise now arise the way they do in the field — a file that
+    vanished, or a passport somebody edited by hand."""
+    import re
+    text = passport.read_text(encoding="utf-8")
+    text, n = re.subn(r"(?m)^payload:.*$", f"payload: {payload}", text)
+    assert n == 1, "one payload line to repoint"
+    passport.write_text(text, encoding="utf-8")
+
+
 def _envelope(exc: VineError) -> tuple:
     return (exc.code, exc.message, getattr(exc, "hint", None))
 
@@ -77,8 +89,8 @@ class TestView:
         assert a[0] == b[0] and a[2] == b[2]
 
     def test_missing_file_answers_exactly_as_missing_node(self, vine):
-        _plant_media(vine, node_id="gone", payload="_assets/gone.png",
-                     data=None)
+        _plant_media(vine, node_id="gone", payload="_assets/gone.png")
+        (vine.forest.root / "_assets" / "gone.png").unlink()
         with pytest.raises(VineError) as exc:
             vine.view("gone")
         assert exc.value.code == E_NOT_FOUND
@@ -106,8 +118,8 @@ class TestView:
     def test_a_payload_escaping_the_forest_is_refused(self, vine, tmp_path):
         outside = tmp_path / "outside.png"
         outside.write_bytes(PNG_BYTES)
-        _plant_media(vine, node_id="escape", payload="../outside.png",
-                     data=None)
+        _plant_media(vine, node_id="escape", payload="_assets/escape.png")
+        _repoint(vine.forest.root / "escape.md", "../outside.png")
         with pytest.raises(VineError) as exc:
             vine.view("escape")
         assert exc.value.code == E_SCHEMA
