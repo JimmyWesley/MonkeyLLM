@@ -18,6 +18,7 @@ import {
 import ForestGraph from './graph.jsx'
 import ForestFiles, { PayloadImage } from './files.jsx'
 import NodeEditor from './editor.jsx'
+import NodeHands from './hands.jsx'
 
 /** One console, three ways of looking at the same forest (spec J.5.4).
  *
@@ -68,6 +69,11 @@ export default function Explore({ forest, grant, node, setNode, goto }) {
     ['tree', Tree, t('explore.mode_tree')],
   ]
 
+  // The selected node as the projection describes it — `type` decides
+  // whether a transplant is even offered (C.15 is leaf-only), and both are
+  // already in hand from the map the graph and the files are drawn from.
+  const selected = (map.data?.nodes || []).find((n) => n.id === node)
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -82,10 +88,26 @@ export default function Explore({ forest, grant, node, setNode, goto }) {
         {node && (
           <span className="nodeid truncate text-[12px]">{node}</span>
         )}
-        {has(grant, 'write') && node && mode !== 'tree' && (
-          <button className="btn btn-sm ml-auto" onClick={() => setEditing(node)}>
-            <Pencil size={13} /> {t('files.edit')}
-          </button>
+        {node && mode !== 'tree' && (
+          /* The editor and the two hands, side by side (J.5.4, J.5.17): one
+             row of what can be done to the node the address names, each
+             absent rather than disabled where the grant does not reach. */
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {has(grant, 'write') && (
+              <button className="btn btn-sm" onClick={() => setEditing(node)}>
+                <Pencil size={13} /> {t('files.edit')}
+              </button>
+            )}
+            <NodeHands
+              forest={forest} grant={grant} id={node}
+              type={selected?.type} title={selected?.title}
+              onNavigate={setNode}
+              /* J.5.17 rule 6: the id in the address no longer resolves, so
+                 it leaves the address — and the projection is re-read,
+                 because the map still draws the node the commit removed. */
+              onPruned={() => { setNode(null); map.reload() }}
+              onMoved={(next) => { setNode(next); map.reload() }} />
+          </div>
         )}
       </div>
 
@@ -224,7 +246,7 @@ function BrowseAndSearch({ forest, grant, current, setNode, goto }) {
         </div>
 
         <NodeDetail forest={forest} grant={grant} id={current} digest={digest}
-                    setNode={setNode} goto={goto} />
+                    setNode={setNode} goto={goto} onChanged={tree.reload} />
       </div>
 
       <NewBranch
@@ -239,7 +261,7 @@ function BrowseAndSearch({ forest, grant, current, setNode, goto }) {
   )
 }
 
-function NodeDetail({ forest, grant, id, digest, setNode, goto }) {
+function NodeDetail({ forest, grant, id, digest, setNode, goto, onChanged }) {
   const { t } = useI18n()
   const [body, setBody] = useState(null)
   const crumbs = useCrumbs(id, grant)
@@ -280,6 +302,10 @@ function NodeDetail({ forest, grant, id, digest, setNode, goto }) {
                   {t('explore.open_read')}
                 </button>
               )}
+              <NodeHands forest={forest} grant={grant} id={d.id} type={d.type}
+                         title={d.title} onNavigate={setNode}
+                         onPruned={() => { setNode(null); onChanged?.() }}
+                         onMoved={(next) => { setNode(next); onChanged?.() }} />
             </>}>
         <p className="text-[14px] leading-relaxed text-text">{d.summary}</p>
 

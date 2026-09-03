@@ -38,7 +38,8 @@ from monkeyllm import indexer
 from monkeyllm.errors import E_SCHEMA, VineError
 from monkeyllm.models import (
     MANUAL_SECTION, MAX_ALIASES, SAMPLE_ROWS, SAMPLE_SECTION,
-    dataset_map, rows_label, validate_summary,
+    dataset_map, rows_label, validate_frontmatter, validate_summary,
+    validate_tag,
 )
 from monkeyllm.parser import (
     append_section, extract_section, replace_section, serialize_node,
@@ -795,7 +796,13 @@ class IngestReport:
     drafts: list[dict] = field(default_factory=list)
     # G.2.6 (v0.56): derived alias forms that no longer fit the 16-alias
     # cap beside hand-added ones — dropped, and said, never silently.
+    # G.4.3 (v0.75) adds the Curator's overflowing proposals to the same
+    # count: one condition, one number.
     aliases_clipped: int = 0
+    # G.4.2 rule 1 (v0.75): tags the Curator's validator refused or the
+    # passport budget clipped. Zero on a run that dropped nothing, so
+    # "the model wrote no tags" and "a filter ate them" are distinguishable.
+    tags_dropped: int = 0
     # J.8 (v0.61): sources the caller declared disposable and that became a
     # node, removed after they landed. Empty on every ordinary run.
     consumed: list[str] = field(default_factory=list)
@@ -821,6 +828,34 @@ _STEP_ACTIONS = (("planted", "planted"), ("updated", "updated"),
                  ("errors", "error"), ("stale", "stale"), ("drafts", "planted"))
 
 
+# G.4.2 rule 1 / G.4.3 rule 3 (v0.75): the counters a curation hook may
+# keep and the report knows how to read. A hook is an arbitrary callable
+# (G.4 rule 3), so the report reads only the names it declares here, and
+# reads them as a DELTA — one Curator serves a whole batch, and its stats
+# are a running total across every document in it.
+_HOOK_COUNTS = ("tags_dropped", "aliases_clipped")
+
+
+def _hook_counts(hook) -> dict[str, int] | None:
+    stats = getattr(hook, "stats", None)
+    if not isinstance(stats, dict):
+        return None
+    return {k: stats.get(k, 0) for k in _HOOK_COUNTS}
+
+
+def _collect_hook_counts(hook, before: dict[str, int] | None,
+                         report: IngestReport) -> None:
+    if before is None:
+        return
+    stats = getattr(hook, "stats", None)
+    if not isinstance(stats, dict):
+        return
+    for name in _HOOK_COUNTS:
+        grew = stats.get(name, 0) - before[name]
+        if grew > 0:
+            setattr(report, name, getattr(report, name) + grew)
+
+
 def _counts(report: IngestReport) -> dict:
     return {attr: len(getattr(report, attr)) for attr, _ in _STEP_ACTIONS}
 
@@ -839,6 +874,41 @@ def _drain(steps: "IngestSteps") -> dict:
     for _ in steps:
         pass
     return steps.result
+
+
+def _scent_dict(report: IngestReport, stats: dict) -> dict:
+    """J.13.6.1's report: what the pass touched, and what it did not.
+
+    `fallbacks` and `skipped` are separate on purpose. A fallback is a model
+    that failed, refused or answered invalidly (rule 4) — a node left
+    byte-identical for a reason somebody may want to fix. A skip is a node
+    with no body this pass may read, which is not a failure of anything and
+    has no fix. Reported as one number they would send an operator to debug
+    a model that was never asked, which is J.8's own lesson.
+    """
+    out = report.as_dict()
+    out.update({
+        "derived": ["scent"],
+        "scanned": (len(report.updated) + len(report.unchanged)
+                    + len(report.errors)),
+        "changed": len(report.updated),
+        "fallbacks": int(stats.get("fallbacks", 0)),
+        "skipped": int(stats.get("skipped", 0)),
+    })
+    return out
+
+
+def scent_result(steps: "IngestSteps") -> dict:
+    """The scent pass's report, finished or partial (J.13.6.1).
+
+    A cancelled run has a report too — it committed everything it stepped
+    through — and the caller that cancelled it is exactly the one who needs
+    to read what it managed to do.
+    """
+    if steps.result is not None:
+        return dict(steps.result)
+    return _scent_dict(steps.report,
+                       getattr(steps, "scent_stats", {}) or {})
 
 
 class IngestSteps:
@@ -1162,12 +1232,14 @@ class Gardener:
             if tag not in draft["tags"]:
                 draft["tags"].append(tag)
         for hook in self.hooks:
+            before = _hook_counts(hook)
             try:
                 result = hook(draft)
                 if isinstance(result, dict):
                     draft = result
-            except Exception as e:  # G.4.3: a broken hook never aborts ingest
+            except Exception as e:  # G.4 r3: a broken hook never aborts ingest
                 report.errors.append(f"on_curate hook {getattr(hook, '__name__', hook)!r}: {e}")
+            _collect_hook_counts(hook, before, report)
         return draft
 
     # -- stage 0: archive ----------------------------------------------------
@@ -1516,7 +1588,15 @@ class Gardener:
 
     # -- J.13.6 re-derivation (v0.61) ---------------------------------------
 
-    DERIVABLE = ("aliases",)
+    # J.13.6 rule 5: the closed list. `aliases` (v0.61) is arithmetic on
+    # committed material; `scent` (J.13.6.1, v0.75) is the one member
+    # allowed a model call, and it says so here rather than quietly
+    # widening rule 1.
+    DERIVABLE = ("aliases", "scent")
+    # …and the half `recurate()` itself can answer. `scent` is one model
+    # call per node, so it is a J.9 job with its own entry point
+    # (`recurate_scent_iter`) and never a synchronous wait.
+    SYNCHRONOUS = ("aliases",)
 
     def recurate(self, derive: list[str] | None = None) -> dict:
         """J.13.6: re-derive from the forest's own passports.
@@ -1550,6 +1630,19 @@ class Gardener:
                 hint=f"`derive` accepts: {', '.join(self.DERIVABLE)}. "
                      "`origin` is the source file's own address, which this "
                      "pass does not have and must not guess (G.2.7 rule 2).")
+        deferred = [d for d in wanted if d not in self.SYNCHRONOUS]
+        if deferred:
+            # Rule 1 is a guarantee about THIS method: passport arithmetic,
+            # no model, no network. `scent` is the member that is allowed a
+            # model call, so it does not run here — folding it in would
+            # make rule 1 a sentence about a method that no longer holds it.
+            raise VineError(
+                E_SCHEMA,
+                f"'{deferred[0]}' is not derived from the passports",
+                hint="Re-curating the scent (J.13.6.1) is one model call per "
+                     "node, so it is a J.9 job: use `recurate_scent_iter` "
+                     "(the Station serves it on the same route, answering "
+                     "202 with a job record).")
         report = IngestReport()
         scanned = 0
         for rel, info in sorted(self._passports().items()):
@@ -1576,6 +1669,248 @@ class Gardener:
         out["scanned"] = scanned
         out["changed"] = len(report.updated)
         return out
+
+    # -- J.13.6.1 re-curating the scent (v0.75) -----------------------------
+
+    def scent_scope(self) -> list[str]:
+        """The nodes a `derive: ["scent"]` pass would visit, in order.
+
+        Eager and cheap — one indexed catalog read, no body opened — because
+        J.13.6.1 rule 5 makes this count the STARTING response's job: it is
+        the number of model calls the operator is about to pay for, and a
+        cost stated after it is spent is not a cost that was stated.
+
+        Three exclusions, each for its own reason:
+
+        * `_meta/` — the forest's own schema and configuration are not
+          material anybody navigates by scent.
+        * **branches** — a branch's summary is G.4.4's rollup, computed
+          bottom-up from its children's ENTRY LINES and never from a body.
+          Curating one from the index render would put a document's
+          machinery where a region's answer belongs, and it would fight the
+          rollup on the next ingest.
+        * **nodes the Gardener did not plant** (`source != "ingest"`). This
+          pass REPLACES the summary (rule 3), and a summary somebody typed
+          is curation a human wrote — the very thing rule 3 protects tags
+          and aliases from. G.4.4 draws the same line for the same reason
+          ("the Gardener rewrites what the Gardener planted, nothing else").
+
+        Datasets are IN, and deliberately: G.4.6 curates a dataset from its
+        G.2.3 map, the map is the passport's own body, and re-reading it
+        costs the same few hundred tokens whether the payload is 5 MB or
+        5 GB. Nothing here writes a dataset's body — the two generated
+        sections stay the Gardener's (G.4.6 rule 3).
+        """
+        rows = self.vine.catalog.conn.execute(
+            "SELECT id FROM nodes WHERE kind != 'branch' AND source = 'ingest' "
+            "ORDER BY id").fetchall()
+        return [r[0] for r in rows if not r[0].startswith("_meta/")]
+
+    def recurate_scent_iter(self) -> IngestSteps:
+        """J.13.6.1: re-curate every in-scope node, one model call per step.
+
+        The shape is an ingest's, because it IS an ingest-shaped run: the
+        scope is walked eagerly so `total` is known before the first model
+        call, each `next()` is one whole node, and a consumer that stops
+        stepping leaves everything already committed committed.
+
+        What it reads is the node's OWN stored body (rule 1) — inline or
+        the `_derived/` cache — never a source tree, never a converter and
+        never the network beyond the model itself. A `content: reference`
+        body lives in the source tree by definition, so it is skipped
+        rather than fetched.
+        """
+        ids = self.scent_scope()
+        report = IngestReport()
+        stats = {"fallbacks": 0, "skipped": 0}
+
+        def steps():
+            for i, node_id in enumerate(ids):
+                before = _counts(report)
+                self._recurate_scent(node_id, report, stats)
+                yield _step(node_id, i + 1, len(ids), report, before)
+            return _scent_dict(report, stats)
+
+        out = IngestSteps(len(ids), steps(), report)
+        # Read by `scent_result` so a CANCELLED run can still be accounted
+        # for: the report is live, and these two counters are the half of it
+        # the report has no field for.
+        out.scent_stats = stats
+        return out
+
+    def recurate_scent(self) -> dict:
+        """`recurate_scent_iter`, drained — the library's own entry point."""
+        return _drain(self.recurate_scent_iter())
+
+    def _stored_body(self, node) -> str | None:
+        """The text curation gets, from the forest and nowhere else (rule 1).
+
+        G.7's tiers decide where a body lives: inline is the passport's own,
+        `cached` is `_derived/bodies/` (still the forest), and `reference`
+        is the SOURCE FILE — which this pass may not open, so it yields
+        None and the node is skipped rather than quietly re-read.
+        """
+        mode = node.frontmatter.get("content")
+        if mode == "reference":
+            return None
+        if mode == "cached":
+            cached = self.forest.body_cache_path(node.id)
+            if not cached.is_file():
+                return None
+            return cached.read_text(encoding="utf-8") or None
+        return node.body or None
+
+    def _curator_fallbacks(self) -> int:
+        """G.4's fallback count across the hooks, read as a running total.
+
+        A hook is an arbitrary callable (G.4 rule 3), so this reads only the
+        name it declares and reads it as a DELTA per node: one Curator
+        serves the whole pass, and its stats never reset.
+        """
+        total = 0
+        for hook in self.hooks:
+            stats = getattr(hook, "stats", None)
+            if isinstance(stats, dict):
+                total += int(stats.get("fallbacks", 0) or 0)
+        return total
+
+    def _recurate_scent(self, node_id: str, report: IngestReport,
+                        stats: dict) -> None:
+        """One node: curate from its own body, then summary REPLACED and
+        tags/aliases UNIONED (J.13.6.1 rule 3).
+
+        The union is not the Curator's politeness — it is enforced here, on
+        the values that were on disk before the call. Tags and aliases may
+        have been corrected by a person or taught by the operator's
+        `aliases:` map, and a model must not delete curation a human wrote;
+        removing a bad tag stays a human act with a human's authority
+        behind it.
+        """
+        try:
+            node = self.forest.read(node_id)
+        except VineError as e:
+            report.errors.append(f"{node_id}: {e.message}")
+            return
+        body = self._stored_body(node)
+        if body is None:
+            # Nothing for a model to read: the node keeps what it has and
+            # nothing is billed for it.
+            stats["skipped"] += 1
+            report.unchanged.append(node_id)
+            return
+        fm = node.frontmatter
+        was = {
+            "summary": str(fm.get("summary") or ""),
+            "tags": [t for t in (fm.get("tags") or []) if isinstance(t, str)],
+            "aliases": [a for a in (fm.get("aliases") or [])
+                        if isinstance(a, str)],
+        }
+        draft = {
+            "id": node_id,
+            "title": str(fm.get("title") or ""),
+            "type": str(fm.get("type") or "note"),
+            "summary": was["summary"],
+            "tags": list(was["tags"]),
+            "aliases": list(was["aliases"]),
+            "body": body,
+        }
+        if fm.get("lang"):
+            # A.3.2 rule 4: where the node states a language, the prompt
+            # states it. The passport already carries what ingest inferred,
+            # so a re-curation must not ask the model to infer it again and
+            # answer in a different one.
+            draft["lang"] = fm["lang"]
+        self._stage(node_id, STAGE_CURATE)
+        spent = self._curator_fallbacks()
+        draft = self._curate(draft, report)
+        if self._curator_fallbacks() > spent:
+            # Rule 4: a model that fails, refuses or answers invalidly leaves
+            # the node exactly as it was. A re-curation pass must not be able
+            # to leave a forest worse than it found it.
+            stats["fallbacks"] += 1
+            report.unchanged.append(node_id)
+            return
+
+        patch: dict = {}
+        summary = str(draft.get("summary") or "")
+        if summary and summary != was["summary"]:
+            patch["summary"] = summary
+        tags = list(was["tags"])
+        held = set(tags)
+        fresh: list[str] = []
+        for tag in draft.get("tags") or []:
+            if isinstance(tag, str) and tag not in held:
+                held.add(tag)
+                tags.append(tag)
+                fresh.append(tag)
+        if fresh:
+            try:
+                # G.4.2 rule 6: the rule is enforced where writes enter. The
+                # node's own tags are grandfathered by their exact spelling
+                # (`was`); anything a hook added is new and answers to it.
+                for tag in fresh:
+                    validate_tag(tag)
+            except VineError as e:
+                report.errors.append(f"{node_id}: {e.message}")
+                return
+            patch["tags"] = tags
+        aliases = [a for a in (draft.get("aliases") or []) if isinstance(a, str)]
+        for alias in was["aliases"]:
+            if alias not in aliases:  # union: a hook may add, never displace
+                aliases.append(alias)
+        if aliases != was["aliases"]:
+            patch["aliases"] = aliases[:MAX_ALIASES]
+
+        if not patch:
+            report.unchanged.append(node_id)
+            return
+        if self.dry_run:
+            report.updated.append(node_id)
+            return
+        self._stage(node_id, STAGE_PLANT)
+        try:
+            self._write_scent(node, patch)
+        except VineError as e:
+            report.errors.append(f"{node_id}: {e.message}")
+            return
+        except Exception as e:  # noqa: BLE001 — one node never fails the pass
+            report.errors.append(f"{node_id}: {e}")
+            return
+        report.updated.append(node_id)
+
+    def _write_scent(self, node, patch: dict) -> None:
+        """One `.md` commit per changed node, subject `recurate(scent): <id>`.
+
+        A summary is replicated VERBATIM into every index that lists this
+        node (A.5), so the passport is not the only file the write touches —
+        a passport rewritten alone would leave the parent index answering
+        with the old scent, which is exactly the layer navigation reads
+        first. Every touched file is restored on failure: the pass may leave
+        a node unchanged, never half-changed.
+        """
+        assert node.path is not None
+        fm = dict(node.frontmatter)
+        fm.update(patch)
+        fm["updated"] = dt.date.today().isoformat()
+        validate_frontmatter(fm, self.forest.dialect, strict_summary=False)
+        content = serialize_node(fm, node.body)
+        touched: list[tuple[Path, str]] = [
+            (node.path, node.path.read_text(encoding="utf-8"))]
+        paths = [node.path]
+        try:
+            node.path.write_text(content, encoding="utf-8", newline="\n")
+            if "summary" in patch:
+                paths += self.vine._propagate_summary(
+                    node.id, str(patch["summary"]), touched)
+            self.vine.git.commit(paths, f"recurate(scent): {node.id}")
+        except Exception:
+            for path, original in reversed(touched):
+                path.write_text(original, encoding="utf-8", newline="\n")
+            raise
+        self.vine.catalog.upsert_node(self.forest.read(node.id))
+        for path in paths[1:]:
+            self.vine.catalog.upsert_node(
+                self.forest.read(self.forest.id_for(path)))
 
     def unrecorded_sources(self, root: str | Path) -> list[tuple[str, int]]:
         """Files under `root` that no live passport records (J.8, v0.61).

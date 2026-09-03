@@ -198,7 +198,7 @@ def build_server(
 
     @mcp.tool()
     def harvest(query: str, terms: list[str] | None = None, k: int = 3,
-                include_superseded: bool = False,
+                lang: str | None = None, include_superseded: bool = False,
                 forest: str | None = None) -> dict:
         """One-shot retrieval (zero LLM server-side): ranked notes with body or
         matched sections + exact snippets. Use it when you want evidence in a
@@ -207,12 +207,16 @@ def build_server(
 
         A result that a live node `supersedes` is left out and the seat
         refilled — `superseded_excluded` says which and by what;
-        `include_superseded=True` brings the history back (spec C.6c.4)."""
+        `include_superseded=True` brings the history back (spec C.6c.4).
+
+        `lang` (a BCP-47 tag) filters BOTH halves of the sweep, so the
+        evidence is in the language the response says it is."""
         from monkeyllm.harvest import harvest as _harvest
 
         try:
             return in_vine_thread(
                 lambda: _harvest(pool.get(forest), query, terms=terms, k=k,
+                                 lang=lang,
                                  include_superseded=include_superseded)
             )
         except VineError as e:
@@ -222,7 +226,7 @@ def build_server(
     def locate(query: str, k: int = 5, scope: str = "all",
                type_filter: str | None = None, include: list[str] | None = None,
                since: str | None = None, until: str | None = None,
-               date_field: str | None = None,
+               date_field: str | None = None, lang: str | None = None,
                forest: str | None = None) -> dict:
         """Find entry points (the helicopter). scope: all|branches|notes.
 
@@ -230,22 +234,26 @@ def build_server(
         section headers. An empty result says how many nodes were searched
         and points at sniff(), which is what searches bodies.
         since/until (YYYY, YYYY-MM or YYYY-MM-DD, inclusive) bound the search
-        by when nodes were created; calendar() says which periods hold any."""
+        by when nodes were created; calendar() says which periods hold any.
+        lang is a BCP-47 tag ("pt-BR"): a filter on what the node declares,
+        never a boost — coverage() says which languages the forest holds."""
         return guarded("locate", forest, query, k=k, scope=scope,
                        type_filter=type_filter, include=include, since=since,
-                       until=until, date_field=date_field)
+                       until=until, date_field=date_field, lang=lang)
 
     @mcp.tool()
     def sniff(terms: str | list[str], scope: str | None = None, k: int = 5,
               type_filter: str | None = None, since: str | None = None,
               until: str | None = None, date_field: str | None = None,
+              lang: str | None = None,
               forest: str | None = None) -> dict:
         """Literal grep over node bodies (the tracker): exact terms -> node +
         section + snippet. since/until bound it by date, which is also the
-        cheapest filter here: a windowed sniff opens those days' files only."""
+        cheapest filter here: a windowed sniff opens those days' files only.
+        lang narrows it to the nodes declaring that language tag."""
         return guarded("sniff", forest, terms, scope=scope, k=k,
                        type_filter=type_filter, since=since, until=until,
-                       date_field=date_field)
+                       date_field=date_field, lang=lang)
 
     @mcp.tool()
     def calendar(scope: str | None = None, date_field: str = "created",
@@ -341,7 +349,9 @@ def build_server(
         _meta/schema — pick("_meta/schema") before your first write),
         `title`, `summary` (1-3 sentences, <= 60 tokens — it is how every
         search finds this node), `parent` (the branch _index id). Optional:
-        `body` (markdown), `tags`, `aliases` (the findability lever — the
+        `body` (markdown), `tags` (one token each: letters and digits plus
+        `-`/`_`, no spaces, accents kept — `iso-27001`, `produção`),
+        `aliases` (the findability lever — the
         names people will actually type: a code, a short name; locate reads
         curated metadata, never bodies), `links` ([{rel, target}], rels from
         _meta/schema), `origin` (one URI: where this document came from),

@@ -64,7 +64,11 @@ CREATE TABLE IF NOT EXISTS nodes (
     outline TEXT NOT NULL DEFAULT '[]',
     stale INTEGER NOT NULL DEFAULT 0,
     body_hash TEXT NOT NULL DEFAULT '',
-    origin TEXT
+    origin TEXT,
+    -- A.3.2 (v0.75): a facet, never scent. It is a column and MUST NOT
+    -- enter the FTS row: a language is what a result is filtered BY, and
+    -- a tag indexed beside the title would make `pt` a word that ranks.
+    lang TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent);
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
@@ -154,6 +158,18 @@ class Catalog:
             r[1] for r in self.conn.execute("PRAGMA table_info(nodes)")
         }:
             self.conn.execute("ALTER TABLE nodes ADD COLUMN origin TEXT")
+        # Same bargain again for `lang` (A.3.2, v0.75).
+        if "lang" not in {
+            r[1] for r in self.conn.execute("PRAGMA table_info(nodes)")
+        }:
+            self.conn.execute("ALTER TABLE nodes ADD COLUMN lang TEXT")
+        # A.3.2 rule 5: the filter is a bare comparison on an INDEXED
+        # column, which is the whole reason it can be applied where
+        # candidates are chosen instead of after the cut. Created here
+        # rather than in SCHEMA_SQL because on a pre-v0.75 catalog the
+        # column does not exist until the ALTER above has run.
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nodes_lang ON nodes(lang)")
         self.conn.commit()
 
     def close(self) -> None:
@@ -225,7 +241,8 @@ class Catalog:
         are omitted rather than bucketed under a made-up name: a column with
         no value is not a category.
         """
-        if column not in ("type", "source", "kind", "entity_kind", "payload_type"):
+        if column not in ("type", "source", "kind", "entity_kind",
+                          "payload_type", "lang"):
             raise ValueError(f"not a groupable column: {column}")
         clauses = [f"{column} IS NOT NULL", f"{column} != ''"]
         clauses += [c.format(n="") for c in (where or [])]
@@ -233,6 +250,62 @@ class Catalog:
             f"SELECT {column}, count(*) FROM nodes WHERE "
             + " AND ".join(clauses) + f" GROUP BY {column} ORDER BY count(*) DESC",
             params or []).fetchall()}
+
+    def tag_counts(self, where: list[str], params: list,
+                   limit: int) -> tuple[list[tuple[str, int]], int | None]:
+        """The tag vocabulary with counts, grouped by SQLite (J.5.18 rule 4).
+
+        `limit` has no default here on purpose: the ceiling is stated once,
+        in `vine.TAG_VOCABULARY_CAP`, and a second spelling of it in this
+        signature would be a number two files could disagree about while
+        both looked right.
+
+        Returns `(rows, distinct)` where `rows` is at most `limit` pairs of
+        `(tag, nodes)` ordered by count then name, and `distinct` is how many
+        distinct tags the scope really holds — asked only when the cap
+        actually clipped, so the ordinary answer costs one pass.
+
+        Read off the stored `tags` array and NEVER off the FTS row's
+        space-joined copy: `nodes_fts` is tokenized `unicode61
+        remove_diacritics 2`, so a vocabulary read there would report
+        `producao` for a passport that says `produção` — the exact spelling
+        G.4.2 rule 2 exists to keep.
+
+        The counting happens in C, for J.4.3's reason restated by J.5.18:
+        a total computed from what is on screen changes when somebody
+        changes the page size, and this one is the number a person uses to
+        see that `invoice` and `invoices` are the same intent spelled twice.
+        `count(DISTINCT nodes.id)`, because a passport carrying one tag
+        twice is one node carrying it.
+
+        The predicate is formatted with `nodes.` rather than the bare column
+        `{n}` gets elsewhere: `json_each` brings its own `id` column into
+        scope, and an unqualified one in a policy's `substr(id, 1, ?)` is
+        ambiguous to SQLite rather than wrong to a reader.
+        """
+        clauses = [c.format(n="nodes.") for c in (where or [])]
+        # A `tags` column the parser could not have written (hand-edited
+        # `_derived`, a truncated file) must not take the whole vocabulary
+        # down with it: json_each raises on malformed JSON, and it raises
+        # while producing rows, so no WHERE clause can guard it.
+        source = ("json_each(CASE WHEN json_valid(nodes.tags) "
+                  "THEN nodes.tags ELSE '[]' END)")
+        sql = (f"SELECT json_each.value AS tag, count(DISTINCT nodes.id) AS n "
+               f"FROM nodes, {source}")
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " GROUP BY tag ORDER BY n DESC, tag ASC LIMIT ?"
+        # One more than the cap, so "there was more" is read off the query
+        # rather than guessed from a full page.
+        rows = [(str(r[0]), int(r[1])) for r in
+                self.conn.execute(sql, [*(params or []), max(1, limit) + 1])]
+        if len(rows) <= limit:
+            return rows, None
+        count_sql = f"SELECT count(DISTINCT json_each.value) FROM nodes, {source}"
+        if clauses:
+            count_sql += " WHERE " + " AND ".join(clauses)
+        distinct = int(self.conn.execute(count_sql, params or []).fetchone()[0])
+        return rows[:limit], distinct
 
     def subtree_stats(self, field: str, where: list[str],
                       params: list | None = None) -> dict:
@@ -257,13 +330,17 @@ class Catalog:
             "sum(CASE WHEN kind = 'branch' THEN 1 ELSE 0 END), "
             f"min(NULLIF({field}, '')), max(NULLIF({field}, '')), "
             "min(NULLIF(origin, '')), max(NULLIF(origin, '')), "
-            "sum(CASE WHEN origin IS NULL OR origin = '' THEN 1 ELSE 0 END) "
+            "sum(CASE WHEN origin IS NULL OR origin = '' THEN 1 ELSE 0 END), "
+            # A.3.2 rule 6: the nodes carrying no language are their own
+            # group, counted in the pass that was already running.
+            "sum(CASE WHEN lang IS NULL OR lang = '' THEN 1 ELSE 0 END) "
             "FROM nodes WHERE " + " AND ".join(clauses),
             params or []).fetchone()
         return {"nodes": int(row[0] or 0), "branches": int(row[1] or 0),
                 "first": row[2], "last": row[3],
                 "origin_min": row[4], "origin_max": row[5],
-                "without_origin": int(row[6] or 0)}
+                "without_origin": int(row[6] or 0),
+                "without_lang": int(row[7] or 0)}
 
     def local_payloads(self, where: list[str],
                        params: list | None = None) -> list[tuple[str, str]]:
@@ -505,8 +582,8 @@ class Catalog:
             """INSERT INTO nodes (id, kind, type, title, summary, tags, aliases,
                 created, updated, confidence, source, entity_kind, payload,
                 payload_type, payload_hash, parent, trail, coverage, body_tokens,
-                outline, stale, body_hash, origin)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)""",
+                outline, stale, body_hash, origin, lang)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
             (
                 node.id,
                 kind,
@@ -530,6 +607,7 @@ class Catalog:
                 json.dumps(node.outline, ensure_ascii=False),
                 body_hash,
                 fm.get("origin"),
+                fm.get("lang"),
             ),
         )
         self.conn.execute(
@@ -631,6 +709,23 @@ class Catalog:
     def edges_in(self, node_id: str) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT src, rel FROM edges WHERE dst = ?", (node_id,)
+        ).fetchall()
+
+    def uncertain_edges(self) -> list[sqlite3.Row]:
+        """H.2's managed population, off the index instead of every file.
+
+        The Ranger walks the passports once a cycle because it has to write
+        them; a console asking "what is pending" must not, and `confidence`
+        is indexed on this table for exactly that (it is what separates a
+        proposal from an assertion). Ordered by (src, rel, dst) so a page is
+        not reshuffled by another principal's vote mid-review (J.18).
+
+        The files stay the truth: whoever reads this then reads the
+        passports of the page's own sources.
+        """
+        return self.conn.execute(
+            "SELECT src, rel, dst, confidence FROM edges WHERE confidence < 1.0 "
+            "ORDER BY src, rel, dst"
         ).fetchall()
 
     def has_edge(self, src: str, rel: str, dst: str) -> bool:

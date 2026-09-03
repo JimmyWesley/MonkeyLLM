@@ -43,6 +43,7 @@ import {
 import { Highlighted } from '../design/highlight.jsx'
 import { Check, ChevronLeft, Code2, Mic, Pencil, Save, Undo } from '../design/icons.jsx'
 import { has, useAsync } from './shared.jsx'
+import { parseTags } from '../tags.js'
 
 /* Markdown is what the forest stores; the rich editor speaks HTML. The
  * pair is kept in one place so a round trip cannot drift between two
@@ -67,8 +68,146 @@ const richLossy = (md) => /^\s*\|.*\|/m.test(md || '') || /^\s*<\w+/m.test(md ||
 
 /** The engine's own budget for a summary (models.validate_summary): 60
  *  tokens, counted the way the parser counts them — whitespace-separated. */
-const SUMMARY_TOKENS = 60
-const countTokens = (s) => String(s || '').split(/\s+/).filter(Boolean).length
+export const SUMMARY_TOKENS = 60
+export const countTokens = (s) => String(s || '').split(/\s+/).filter(Boolean).length
+
+/* -- the scent, extracted (spec J.5.18 rule 1) ----------------------------
+ *
+ * Title, summary and tags are the fields a reader is best placed to fix,
+ * precisely because they are reading — so the Read console offers them too
+ * (J.5.18 rule 1). What it does NOT get is a second implementation: the
+ * form's shape, the diff that becomes the patch and the fields themselves
+ * live here, once, and both consoles mount them. One door for humans and
+ * agents was already the rule (J.5.4); this keeps one door for the two
+ * screens too.
+ *
+ * Mounting the whole `NodeEditor` from Read was the other option and it is
+ * the wrong one: that editor's subject is the BODY — two grains, a rich
+ * surface, a markdown surface, a section picker — and Read is a page
+ * somebody is reading. Offering the body editor there would replace the
+ * document with Explore's screen, which is the thing rule 1 complains
+ * about, pointed the other way.
+ */
+
+/** The form as the digest hands it over. Tags become the comma-separated
+ *  field a person edits; nothing else is touched. */
+export const scentForm = (d) => ({
+  title: d?.title || '',
+  summary: d?.summary || '',
+  tags: (d?.tags || []).join(', '),
+})
+
+/** The `set_frontmatter` this form implies — derived, never accumulated:
+ *  exactly the difference between what was read and what is on screen, so
+ *  opening a node and saving it untouched is a no-op.
+ *
+ *  The tags go through `parseTags`, which trims the separator's whitespace
+ *  and changes nothing else (J.5.18 rule 5): what the engine refuses, the
+ *  engine says, naming the tag. A console that quietly lowercased a tag
+ *  into something acceptable would be rewriting what somebody typed. */
+export function scentFrontmatter(form, d) {
+  const out = {}
+  if (!form || !d) return out
+  const tags = parseTags(form.tags)
+  if (form.title !== d.title) out.title = form.title
+  if (form.summary !== d.summary) out.summary = form.summary
+  if (JSON.stringify(tags) !== JSON.stringify(d.tags || [])) out.tags = tags
+  return out
+}
+
+/** The three fields, laid out the same way wherever they are mounted. */
+export function ScentFields({ form, setForm }) {
+  const { t } = useI18n()
+  const tokens = countTokens(form?.summary)
+  return (
+    <>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label={t('editor.title')} value={form?.title || ''}
+               onChange={(e) => setForm({ ...form, title: e.target.value })} />
+        <Field label={t('editor.tags')} value={form?.tags || ''}
+               hint={t('editor.tags_hint')}
+               onChange={(e) => setForm({ ...form, tags: e.target.value })} />
+      </div>
+      <div className="mt-3">
+        <Field as="textarea" rows={2} label={t('editor.summary')}
+               value={form?.summary || ''}
+               error={tokens > SUMMARY_TOKENS ? t('editor.summary_long') : undefined}
+               hint={t('editor.summary_count', { n: tokens, max: SUMMARY_TOKENS })}
+               onChange={(e) => setForm({ ...form, summary: e.target.value })} />
+      </div>
+    </>
+  )
+}
+
+/** The scent editor the Read console mounts (J.5.18 rule 1).
+ *
+ *  The same `graft` an agent makes over MCP, on the same three fields, and
+ *  nothing else — no body, no sections. `digest` is the `look` the page
+ *  already ran, so this panel costs no second read; `onSaved` hands the
+ *  fresh result back so the page can re-read what the engine actually
+ *  stored rather than trusting the local copy.
+ */
+export function ScentEditor({ forest, grant, id, digest, onSaved }) {
+  const { t } = useI18n()
+  const [form, setForm] = useState(() => scentForm(digest))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const [done, setDone] = useState(null)
+
+  // A different node is a different scent: the form follows the subject.
+  useEffect(() => {
+    setForm(scentForm(digest))
+    setError(null)
+    setDone(null)
+  }, [id, digest])
+
+  // J.5.4 / J.5.17 rule 1: absent rather than disabled where the grant does
+  // not carry the capability.
+  if (!has(grant, 'write')) return null
+
+  const frontmatter = scentFrontmatter(form, digest)
+  const dirty = Object.keys(frontmatter).length > 0
+  const tooLong = countTokens(form?.summary) > SUMMARY_TOKENS
+
+  async function save() {
+    setSaving(true)
+    setError(null)
+    try {
+      const result = await api.call(forest, 'graft',
+                                    { id, patch: { set_frontmatter: frontmatter } })
+      setDone(result)
+      onSaved?.(result)
+    } catch (e) { setError(e); setDone(null) } finally { setSaving(false) }
+  }
+
+  return (
+    <Card title={t('editor.scent')} subtitle={t('editor.scent_hint')} icon={Pencil}
+          bodyClass="p-3">
+      <ScentFields form={form} setForm={setForm} />
+      <div className="mt-3 flex items-center gap-2">
+        <button className="btn btn-primary btn-sm" onClick={save}
+                disabled={!dirty || saving || tooLong}>
+          {saving ? t('common.saving') : t('editor.commit')}
+        </button>
+        <button className="btn btn-sm" disabled={!dirty || saving}
+                onClick={() => { setForm(scentForm(digest)); setDone(null) }}>
+          <Undo size={13} /> {t('editor.discard')}
+        </button>
+      </div>
+      {/* The engine's refusal, rendered as the engine wrote it — it is the
+          one thing that names the tag it would not take (J.5.18 rule 5). */}
+      <ErrorNote error={error} />
+      {done && (
+        <Note tone="ok">
+          <span className="inline-flex items-center gap-1.5">
+            <Check size={14} />
+            {t('editor.committed', { commit: (done.commit || '').slice(0, 7) })}
+          </span>
+        </Note>
+      )}
+    </Card>
+  )
+}
 
 /** Sections of a markdown body, `## Header` down. The section grain offers
  *  these because `replace_section` addresses exactly them. */
@@ -126,11 +265,7 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
   // The passport form loads once the digest lands.
   useEffect(() => {
     if (!digest.data || form) return
-    setForm({
-      title: digest.data.title || '',
-      summary: digest.data.summary || '',
-      tags: (digest.data.tags || []).join(', '),
-    })
+    setForm(scentForm(digest.data))
   }, [digest.data, form])
 
   // Whole-note mode: the body lands in the surface that can hold it.
@@ -168,19 +303,13 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
   if (body.error) return <Card><ErrorNote error={body.error} onRetry={body.reload} /></Card>
 
   const d = digest.data
-  const tags = form?.tags.split(',').map((s) => s.trim()).filter(Boolean) || []
 
   /* The patch is derived, never accumulated: what is sent is exactly the
      difference between what was read and what is on screen. In rich mode
      the comparison runs against the round-tripped original, so opening a
      note and saving it untouched stays a no-op. */
   const patch = {}
-  const frontmatter = {}
-  if (form && form.title !== d.title) frontmatter.title = form.title
-  if (form && form.summary !== d.summary) frontmatter.summary = form.summary
-  if (form && JSON.stringify(tags) !== JSON.stringify(d.tags || [])) {
-    frontmatter.tags = tags
-  }
+  const frontmatter = scentFrontmatter(form, d)
   if (Object.keys(frontmatter).length) patch.set_frontmatter = frontmatter
 
   if (whole && mode === 'rich' && editor) {
@@ -247,10 +376,7 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
   }
 
   function discard() {
-    setForm({
-      title: d.title || '', summary: d.summary || '',
-      tags: (d.tags || []).join(', '),
-    })
+    setForm(scentForm(d))
     if (whole) {
       setSrc(orig)
       if (editor && mode === 'rich') editor.commands.setContent(toHtml(orig))
@@ -268,21 +394,7 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
                   <ChevronLeft size={14} /> {t('editor.back')}
                 </button>
               }>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={t('editor.title')} value={form?.title || ''}
-                   onChange={(e) => setForm({ ...form, title: e.target.value })} />
-            <Field label={t('editor.tags')} value={form?.tags || ''}
-                   hint={t('editor.tags_hint')}
-                   onChange={(e) => setForm({ ...form, tags: e.target.value })} />
-          </div>
-          <div className="mt-3">
-            <Field as="textarea" rows={2} label={t('editor.summary')}
-                   value={form?.summary || ''}
-                   error={summaryTooLong ? t('editor.summary_long') : undefined}
-                   hint={t('editor.summary_count', { n: summaryTokens,
-                                                     max: SUMMARY_TOKENS })}
-                   onChange={(e) => setForm({ ...form, summary: e.target.value })} />
-          </div>
+          <ScentFields form={form} setForm={setForm} />
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] uppercase tracking-[0.06em] text-text-3">
               {t('editor.locked')}

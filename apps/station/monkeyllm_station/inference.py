@@ -627,7 +627,8 @@ def _teach_datasets(scoped_vine, entry: dict) -> None:
     a note that cannot be read must not cost the walk its entry points.
     """
     for result in (entry.get("results") if isinstance(entry, dict) else None) or []:
-        if not isinstance(result, dict) or result.get("type") != "dataset":
+        # C.2.1 rule 6 — datasets, and (v0.78) media: the uploader's notes.
+        if not isinstance(result, dict) or result.get("type") not in ("dataset", "media"):
             continue
         node_id = result.get("id")
         if not isinstance(node_id, str):
@@ -805,7 +806,8 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
             "evidence": opened[:k], "exhausted": True}
 
 
-def curator_from_binding(vine, policy, binding: dict | None):
+def curator_from_binding(vine, policy, binding: dict | None, *,
+                         propose: bool = True):
     """The Gardener's `on_curate` hook, driven by the forest's ingest model.
 
     Returns None when nothing is bound, and that is a supported state, not a
@@ -819,6 +821,13 @@ def curator_from_binding(vine, policy, binding: dict | None):
     so an unfiltered list would publish out-of-scope ids to whoever may read
     that node — the leak would arrive through curation rather than retrieval,
     but it would be the same leak.
+
+    `propose=False` builds the same Curator with G.4.2.1 switched off. The
+    scent recuration (J.13.6.1) asks for it: that pass rewrites summary,
+    tags and aliases and writes nothing else, so an edge proposal it made
+    would be a navigational link nobody asked for — and, since the model is
+    asked for one per node, a second model call per node under a bill the
+    starting response already stated (rule 5).
     """
     if not binding:
         return None
@@ -832,6 +841,9 @@ def curator_from_binding(vine, policy, binding: dict | None):
     if cfg.is_file():
         loaded = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
         directives = (loaded.get("curation") or {}).get("directives") or ""
+
+    if not propose:
+        return Curator(chat, directives=directives)
 
     wide = make_candidates(vine, limit=CANDIDATE_LIMIT * 4)
 

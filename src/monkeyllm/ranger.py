@@ -23,6 +23,7 @@ import yaml
 
 from monkeyllm import indexer
 from monkeyllm.errors import VineError
+from monkeyllm.links import managed_links, rewrite_link
 from monkeyllm.parser import extract_section, replace_section, serialize_node
 from monkeyllm.tokens import estimate_tokens
 from monkeyllm.vine import Vine
@@ -69,13 +70,13 @@ class Ranger:
     # -- H.2 promotion and pruning -------------------------------------------
 
     def _managed_links(self, fm: dict) -> list[dict]:
-        """Only links born as proposals (link-level confidence < 1.0)."""
-        out = []
-        for link in fm.get("links") or []:
-            if isinstance(link, dict) and isinstance(link.get("confidence"), (int, float)) \
-                    and link["confidence"] < 1.0:
-                out.append(link)
-        return out
+        """Only links born as proposals (link-level confidence < 1.0).
+
+        H.2's scope rule lives in `links.is_managed` since v0.75, because
+        the vote (H.2.1) has to draw the same boundary and two readings of
+        one population agree only where somebody compared them.
+        """
+        return managed_links(fm)
 
     def tend_links(self) -> dict:
         promoted: list[str] = []
@@ -104,31 +105,16 @@ class Ranger:
 
     def _rewrite_link(self, node_id: str, link: dict, *, confidence: float | None = None,
                       remove: bool = False) -> None:
-        """Audited write path (like tend/gardener): only the `.md` is committed."""
-        node = self.forest.read(node_id)  # re-read: previous action may have written
-        fm = dict(node.frontmatter)
-        links = list(fm.get("links") or [])
-        key = (link["rel"], link["target"])
-        kept = []
-        for l in links:
-            if isinstance(l, dict) and (l.get("rel"), l.get("target")) == key:
-                if remove:
-                    continue
-                l = dict(l)
-                l["confidence"] = confidence
-            kept.append(l)
-        if kept:
-            fm["links"] = kept
-        else:
-            fm.pop("links", None)
-        fm["updated"] = dt.date.today().isoformat()
-        assert node.path is not None
-        node.path.write_text(serialize_node(fm, node.body), encoding="utf-8", newline="\n")
-        action = "prune" if remove else "promote"
-        detail = f"{link['rel']}->{link['target']}" + ("" if remove else f" {confidence}")
-        self.vine.git.commit([node.path], f"ranger({action}): {node_id} {detail}")
-        self.vine.catalog.upsert_node(self.forest.read(node_id))
-        self.vine.catalog.mark_stale(node_id)
+        """Audited write path (like tend/gardener): only the `.md` is committed.
+
+        The body moved to `links.rewrite_link` in v0.75: H.2.1 rule 1 sends
+        the human vote through THIS path, and a second implementation of it
+        would be a second definition of what promoting a link means. `by`
+        picks the commit subject and nothing else — the Ranger's remains
+        `ranger(promote|prune)`, to the byte.
+        """
+        rewrite_link(self.vine, node_id, link, confidence=confidence,
+                     remove=remove, by="ranger")
 
     # -- H.7 landmarks refresh (v0.13) ----------------------------------------
 

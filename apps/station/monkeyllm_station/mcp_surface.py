@@ -187,11 +187,13 @@ INSTRUCTIONS = (
     "or page a large body with after=<next>; "
     "move(forest, id) follows typed edges; scan(forest, parent_id) lists "
     "a branch — pass after=\"\" and follow `next` to enumerate a whole "
-    "forest; sniff(forest, terms) greps exact terms inside bodies; "
+    "forest; sniff(forest, terms, scope?) greps exact terms inside bodies "
+    "(scope is a branch id or a node id); "
     "calendar(forest) maps where material sits in time; "
     "coverage(forest) says what the forest holds — the roots, their sizes "
     "and their sources — so a silence can be told from an absence; "
-    "view(forest, id) shows the image behind a type:media node; "
+    "view(forest, id) shows the image behind a type:media node whose bytes "
+    "are in the forest (look() says payload_missing when they are not); "
     "history(forest, id) says what happened to a node and who did it; "
     "query(forest, id, sql) runs read-only SQL on type:dataset nodes. "
     "Write, per capability: plant(forest, node) creates (a LIST of nodes "
@@ -200,9 +202,12 @@ INSTRUCTIONS = (
     "(force=true also strips its backlinks), "
     "transplant(forest, id, new_id) moves one to a new address and leaves "
     "the old id as a waymark, tend(forest, id, sql) is "
-    "single-statement dataset DML, ingest(forest, ...) sends documents "
-    "through the Gardener. Anything outside your scope reports "
-    "E_NOT_FOUND, exactly as a missing node does."
+    "single-statement dataset DML, ingest(forest, mode=\"upload\", "
+    "files=[{name, text|b64}]) sends documents through the Gardener — b64 "
+    "for any file that is not text; an image or audio file becomes a "
+    "type:media node and its bytes are what view() serves. plant() carries "
+    "no bytes: a media node planted without a payload is refused. Anything "
+    "outside your scope reports E_NOT_FOUND, exactly as a missing node does."
 )
 
 
@@ -346,7 +351,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                      type_filter: str | None = None,
                      include: list[str] | None = None,
                      since: str | None = None, until: str | None = None,
-                     date_field: str | None = None):
+                     date_field: str | None = None,
+                     lang: str | None = None):
         """Drop near the answer: ranked entry points over curated metadata —
         titles, summaries and tags, never bodies. Each result carries
         `body_tokens`, so you can size what you are about to open;
@@ -359,10 +365,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         search to when nodes were created — `date_field="updated"` for when
         they last changed. Call `calendar` first to see which periods hold
         anything: an empty window says so explicitly rather than looking
-        like an empty forest."""
+        like an empty forest. `lang` filters by the node's declared
+        language tag (A.3.2), exact match — a node that declares none is
+        in no language filter."""
         return await call(forest, "locate", query=query, k=k, scope=scope,
                           type_filter=type_filter, include=include,
-                          since=since, until=until, date_field=date_field)
+                          since=since, until=until, date_field=date_field,
+                          lang=lang)
 
     @mcp.tool()
     async def look(forest: str, id: str | list[str],
@@ -379,7 +388,11 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         budget does clip, the clipped fields are NAMED in
         `truncated_fields` — an empty edge list without that flag really
         is empty, and `stats.degree` is the arithmetic truth either
-        way."""
+        way. For a type:media node (or any node naming a `payload`) the
+        digest says whether the bytes are in the forest: `payload_type`
+        and `payload_bytes` when they are, `payload_missing: true` when
+        they are not — ask this BEFORE view(), which answers a node
+        without bytes exactly as it answers a missing node."""
         return await call(forest, "look", id=id, fields=fields)
 
     @mcp.tool()
@@ -415,7 +428,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         of the image; view() hands your model the pixels themselves —
         images only, local payloads only, bounded at 6 MiB. Returns a JSON
         header (id, media_type, size, payload_hash) beside the image block.
-        Out-of-scope answers E_NOT_FOUND, exactly as a missing node does."""
+        Out-of-scope answers E_NOT_FOUND, exactly as a missing node does —
+        and so does a media node whose bytes are not in the forest, on
+        purpose (spec C.6d): ask look() first, a viewable node carries
+        `payload_type` and `payload_bytes`, one without bytes carries
+        `payload_missing`. Bytes reach a media node only through
+        ingest(mode="upload", files=[{name, b64}]); plant() cannot attach
+        them, and `origin` is a pointer the forest never follows."""
         meta = await run(forest, "view", id=id)
         if not isinstance(meta, dict) or "error" in meta or "path" not in meta:
             return done(meta)
@@ -458,20 +477,25 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
     async def sniff(forest: str, terms: list[str], scope: str | None = None,
                     k: int = 5, since: str | None = None,
                     until: str | None = None,
-                    date_field: str | None = None):
+                    date_field: str | None = None,
+                    lang: str | None = None):
         """Literal search inside bodies — the facts summaries do not carry.
 
-        `since`/`until` bound it by date, and here that is also the cheapest
-        thing you can do: a windowed sniff opens the files of those days and
-        no others."""
+        `scope` is a branch id ("notes") or a node id, exactly as scan/look
+        name it; omit it to search the whole forest. `_meta/` is the
+        dialect, not content — pick("_meta/schema") reads it. `since`/`until`
+        bound it by date, and here that is also the cheapest thing you can
+        do: a windowed sniff opens the files of those days and no others."""
         return await call(forest, "sniff", terms=terms, scope=scope, k=k,
-                          since=since, until=until, date_field=date_field)
+                          since=since, until=until, date_field=date_field,
+                          lang=lang)
 
     @mcp.tool()
     async def harvest(forest: str, query: str, terms: list[str] | None = None,
                       k: int = 3, since: str | None = None,
                       until: str | None = None,
                       date_field: str | None = None,
+                      lang: str | None = None,
                       include_superseded: bool = False):
         """One-shot retrieval: ranked evidence with exact snippets, no hops.
         `since`/`until` bound both of its legs to a period.
@@ -483,6 +507,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         `include_superseded=true` brings the history back."""
         return await call(forest, "harvest", query=query, terms=terms, k=k,
                           since=since, until=until, date_field=date_field,
+                          lang=lang,
                           **({"include_superseded": True}
                              if include_superseded else {}))
 
@@ -609,7 +634,11 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         target}], rels from `_meta/schema`), `origin` (one URI: where
         this document came from), `source`, `confidence`. For
         type:dataset pass `schema` and the Vine births the SQLite payload
-        (spec C.7.1).
+        (spec C.7.1). For type:media, `payload` is REQUIRED and must name
+        a file already in the forest (spec C.7.5): plant carries no bytes.
+        To add an image or audio file, do not plant — send it through
+        ingest(mode="upload", files=[{name, b64}]), which plants the media
+        node, keeps the bytes and writes the description for you.
 
         A duplicate id is refused, so a write that timed out cannot simply
         be repeated — pass `if_absent=true` to make the call idempotent by
@@ -690,8 +719,17 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                      dest: str | None = None, wait: bool = True):
         """Put documents into the forest (needs the 'ingest' capability).
 
-        `upload` sends the documents themselves as [{name, text}]; `adopt`
-        and `sync` mirror a directory the Station host can read and
+        `upload` sends the documents themselves as [{name, text}] — or
+        [{name, b64}] for ANY file that is not text (the raw bytes, base64):
+        this is the one path bytes take into a forest. What a file becomes
+        is decided by its extension: .md/.txt land as notes; .csv/.json/
+        .xlsx/.xls/.db/.sqlite as datasets; .docx as a document (when the
+        deployment carries that converter); .png/.jpg/.jpeg/.gif/.webp and
+        .mp3/.wav/.m4a/.ogg/.flac as type:media nodes whose bytes are kept
+        in the forest — view() shows an image, and a vision model writes
+        its description when one is bound. A file no converter claims is
+        named in the job report as `unsupported` and nothing is planted.
+        `adopt` and `sync` mirror a directory the Station host can read and
         additionally need 'admin'. Converters, summarisation and commits are
         the Gardener's, so an agent ingests exactly as an operator does.
         A batch runs as a job (spec J.9); by default this call waits for it
@@ -702,6 +740,17 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         "notes/_index" are the same destination. An upload entry may carry
         `source_url` — for an uploaded document that IS its `origin`, and
         nothing else fills it.
+
+        An upload entry may also carry `passport: {title?, summary?, tags?,
+        aliases?, links?: [{target, note?}], notes?}` — the scent YOU already
+        know for what the bytes become (a screenshot you have seen, a file
+        you wrote). Bytes alone are a picture nobody can find; a passport is
+        what locate() searches. An entry with a passport is never sent to
+        the curation model: what you declare is what is planted, after the
+        same checks a reviewed draft gets (summary within the A.4 budget,
+        tags cleaned, links `related-to` only, to existing in-scope nodes,
+        at most 3). `notes` becomes the node's `## Notes` section. A
+        malformed passport is refused before any byte stages.
         """
         return await call(forest, "ingest", mode=mode, files=files,
                           path=path, dest=dest, wait=wait)

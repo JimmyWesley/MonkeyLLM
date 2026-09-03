@@ -38,5 +38,7 @@
   "graph.timeline": "Timeline",
   "graph.tip_stats": "{degree} trails · heat {heat}",
   "graph.truncated": "Showing the most connected nodes only",
-  "graph.view": "View"
+  "graph.view": "View",
+  "graph.window_end": "Window end",
+  "graph.window_start": "Window start"
 }

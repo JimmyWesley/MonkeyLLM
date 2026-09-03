@@ -383,6 +383,38 @@ default, and it is the whole path:
 
       files: [{name: "pricing-page.md", text: "...",
                source_url: "https://example.com/pricing"}]
+- **A file that is not text goes as bytes.** The entry carries \`b64\`
+  (the raw file, base64) instead of \`text\` — this is the one path bytes
+  take into a forest:
+
+      files: [{name: "print-template.jpg", b64: "<base64 of the file>"}]
+
+  An image (png, jpg, gif, webp) or audio file (mp3, wav, m4a, ogg, flac)
+  becomes a \`type: media\` node: the Gardener keeps the bytes in the forest
+  and writes the description, and \`view(forest, id)\` later shows the image
+  itself. Spreadsheets, csv, json and sqlite become datasets; docx becomes a
+  document where that converter is installed; anything else comes back in
+  the job report as \`unsupported\` and is not planted. \`plant\` carries no
+  bytes — a media node planted without a payload is refused — and
+  \`origin\` is a pointer for people that the forest never follows.
+- **Send the scent with the bytes.** Bytes alone are a picture nobody can
+  find. When you already know what the file is — a screenshot you looked
+  at, a document you wrote — put it in the entry's \`passport\`: it is
+  planted as the node's own title, summary, tags, aliases, \`related-to\`
+  links and \`## Notes\`, in the same commit, and that entry is never sent
+  to the curation model:
+
+      files: [{name: "print-template.jpg", b64: "<base64 of the file>",
+               passport: {title: "Templates library — first screen",
+                          summary: "The templates library as shipped: filter bar, three cards per row.",
+                          tags: ["templates", "screenshot"],
+                          links: [{target: "tasks/front-end/031-templates"}],
+                          notes: "Taken on staging; the third card is a placeholder."}}]
+
+  Links are \`related-to\` only, to nodes that exist (at most three; a link
+  that fails the check is dropped, the node still lands). A malformed
+  passport is refused before any byte stages.
+
 - **The name is part of the document.** A file called \`note.md\` gives the
   curator nothing to work with; \`2026-08-sso-decision.md\` gives it a date and
   a subject.

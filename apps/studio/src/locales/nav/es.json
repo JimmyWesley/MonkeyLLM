@@ -19,6 +19,8 @@
   "nav.ingest.blurb": "Mete tus documentos en el bosque",
   "nav.integrations": "MCP / API / Integraciones",
   "nav.integrations.blurb": "Conecta agentes, apps y despliegues a esta Station",
+  "nav.links": "Propuestas",
+  "nav.links.blurb": "Vínculos que un modelo propuso: acepta los buenos, descarta el resto",
   "nav.menu": "Menú",
   "nav.models": "Modelos",
   "nav.models.blurb": "Qué modelo lee este bosque y cuál resume lo que entra",

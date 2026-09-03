@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.74.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.78.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,138 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **The passport travels with the bytes (spec J.8.4, v0.78)**: the agent
+  that followed v0.77's path uploaded a screenshot it had already looked
+  at, and the scent it knew had nowhere to go until a second call and a
+  second commit, with a window where the node existed with a stub summary
+  no `locate` finds. An `upload` entry may now carry `passport: {title,
+  summary, tags, aliases, links, notes}`: shape-checked for every entry
+  BEFORE the first byte stages (a batch with one bad passport stages
+  nothing — same rule as `source_url`), applied at curation by
+  `compose.PassportGate` under exactly the reviewed-draft rules of J.8.1
+  (`fit_summary`, `_clean_tags`, `_links`), `notes` appended as the C.2.1
+  `## Notes`. An entry WITH a passport is never sent to the curation
+  model; the rest of the batch keeps the bound curator — one gate,
+  decided per draft, with its OWN counters merged over the curator's so
+  `tags_dropped`/`aliases_clipped` count a passport's refusals too (the
+  first cut used `_clean_tags`, which throws the count away — the same
+  flaw sat in J.8.1's `approval_hook`, fixed with it). A re-sent file is
+  refreshed and its passport NOT applied (a refresh never curates); the
+  report names it in `passports_ignored`, computed in `_finish_ingest`
+  off `gate.applied` (staged rel names) — never left silent. C.2.1 now
+  carries `notes` for `type: media` in `look`, the sweep and the walk's
+  entry (the first cut's spec claimed `look` carried it "everywhere";
+  it was datasets only). The describer still runs on a passported entry
+  where `vision` is bound — the body is its, the passport has none.
+  `adopt`/`sync`, `origin`, `view`, `plant` unchanged. F.172 in
+  `tests/test_v078_upload_passport.py`; the skill's passport paragraph
+  is checked by `check-skill.mjs`.
+
+- **The path was there and nothing named it (spec J.1.2 r7 + C.7.5 +
+  C.2.2 r6 + C.6b + J.5.12, v0.77)**: an agent planted a `type: media`
+  node "with" an image (an `origin` naming its harness's file store),
+  got `created: true`, got `E_NOT_FOUND` from `view`, saw its client
+  render the envelope as "tool call failed", and filed that the product
+  cannot store a binary. `ingest(mode: "upload", files: [{name, b64}])`
+  has done exactly that since v0.48 — and the tool description said
+  `[{name, text}]`, the skill taught text, `plant` accepted a media
+  passport naming no bytes, `look` could not say whether bytes existed,
+  and `sniff(scope: "_meta")` refused naming `_meta/_index`, an id the
+  caller never typed. None of the report's fixes is taken (the channel
+  exists; a fourth `view` code breaks J.3's oracle; A.3 forbids
+  dereferencing `origin`). Taken: every tool description names the
+  neighbour that does what it refuses (r7, asserted off the SERVED
+  descriptions); wire `plant` of `media` requires a `payload` that is
+  contained and exists (`_media_payload_problems`, stat before the first
+  write, `adopted=` exempt because G.7 `archive: never` legitimately
+  references bytes at the source); `look` carries `payload_missing` or
+  `payload_type`+`payload_bytes` for media (stat, never open — the one
+  place "will view work?" is answerable before the call); `_scope_where`
+  refuses bare `_meta` as `E_SCHEMA` and an unknown scope as `scope not
+  found: <what the caller sent>`. `view`'s envelope is deliberately
+  UNCHANGED (absent, out-of-scope and payload-less stay byte-identical;
+  a distinct hint on one path is an oracle). J.1.2 r2 (`isError`) stays:
+  the agent's client reads the flag alone, v0.54's client read the body
+  alone. Tests that planted media passports pointing at nothing now
+  plant real bytes and then delete or hand-edit them. F.171 in
+  `tests/test_v077_mcp_clarity.py` (MCP ingest b64 → look → view →
+  prune, one test).
+
+- **The timeline had one end (spec J.5.4, v0.76)**: Explore's docked
+  timeline was a single-thumb scrubber — "the forest as it stood on that
+  day" — and the question a fed forest asks is what arrived BETWEEN two
+  days. Now a start beside the end on one `created` scale, a node shown
+  iff its rank is in `[start, end)`; the start at its origin is the v0.38
+  picture unchanged. The trap is the obvious filter: hide the outside
+  nodes the way the replay hides the unborn (out of the physics too) and
+  the survivors — leaves whose branch is a year older — have no spring
+  left and fold into the centre under the centring pull, so the picture
+  answers "what" and lies about "where". The window is therefore a PAINT
+  split, never a physics one: `n.on` stays the simulated set (filters +
+  born), `n.shown = n.on && bornRank >= s.from` is what draw / hit-test /
+  `fit` / heat read, and `step()` never reads `shown`. Play from a window
+  replays from its own start and does not reseed (the reseed belongs to
+  the origin). Two overlaid native ranges (`.graph-window-thumb`) over one
+  drawn track, the thumb nearest the pointer raised whole (`is-front`) so
+  a track click moves the nearest end; the window is never empty except at
+  the origin (start ≤ end-1), which is what keeps both thumbs reachable.
+  Never persisted (the `query` rule), never in the address. F.170 is
+  `apps/studio/check-window.mjs`, static on F.137's boundary, run from
+  `tests/test_v076_window.py`.
+
+- **The tags a non-English forest never got to keep (spec G.4.2/G.4.3 +
+  A.3.2 + H.2.1/J.18 + J.13.6.1 + J.5.17/J.5.18, v0.75)**: four console
+  requests, and one of them unearthed the round's real bug — `_clean_tags`'
+  `^[a-z0-9][a-z0-9_-]*$` silently dropped every accented tag the Curator
+  wrote (`produção`, `segurança`): no error, no count, so a Portuguese
+  forest's "the model writes too few tags" was a filter, never a model. And
+  the rule bought nothing — `nodes_fts` is `unicode61 remove_diacritics 2`,
+  so a stored `produção` IS matched by `producao` (measured), while
+  `be-291`/`iso-27001`/`p95` always passed the regex and survived the
+  tokenizer: only the prompt's "single words" + cap 5 stood between a
+  document and its own ticket number. v0.52 taught the READER to keep
+  code-shaped tokens; the writer was still told to throw them away. Now ONE
+  tag rule in `models.py` (`validate_tag`/`tag_key`: Unicode categories,
+  ≤40, NFC+casefold dedup — fold decides uniqueness ONLY, never respells),
+  cap 12, every refusal counted (`tags_dropped`), prompt asking for
+  identifiers/names/categories/patterns; enforced at `plant`/`graft` with
+  exact-spelling grandfathering (reading is untouched — old forests still
+  open, and an editor round-trip still saves). The Curator also proposes
+  ALIASES from the document, guard structural: an alias must occur in the
+  body under the one exported `vine.fold` (never a second fold), and the
+  union never displaces a hand-written alias. `lang` (A.3.2): BCP-47,
+  absent is a real state, a model is NEVER a source (a guess in the shape
+  of a fact is G.2.7's rule), exact match by choice (`pt` ≠ `pt-BR`),
+  filter never a boost, counted by `coverage` — and `yaml.safe_load` reads
+  `lang: no` as False (`no` is Norwegian); a before-validator maps it back.
+  `derive: ["scent"]` (J.13.6.1) is the ONE `derive` member allowed a
+  model: a J.9 job, the bill stated before it is spent, summary REPLACED
+  but tags/aliases UNIONED, only `source: ingest` nodes (a person's summary
+  is curation a model may not delete), branches excluded (rollup is
+  G.4.4's), datasets included (the map is the body), and the principal
+  trailer set per STEP — a standing trailer would stamp the lane's other
+  calls. The vote (H.2.1/J.18): heat can DELETE a cold 0.3 proposal
+  (cold-prune at ≤0.5, both heats zero) and can never confirm one — "stays
+  at 0.3 forever" was FALSE and the spec was corrected mid-round. Accept →
+  1.0 and OUT of the managed population (0.8 would stay sweepable, and a
+  vote that can evaporate is not a vote); accept on 1.0 is `unchanged` (a
+  retried batch is not an error), reject on 1.0 refused; NO MCP tool — a
+  model must not confirm its own proposal, and F.165 asserts the absence
+  three ways. `links.py` owns the audited rewrite and `Ranger._rewrite_link`
+  is now a wrapper, so "same audited path" is structural, not a claim.
+  Consoles: hands (J.5.17 — `E_ANCHORED` rendered as navigable anchors,
+  `force` a second decision, no invented bulk delete), Links (accept a
+  GROUP via one POST, never accept-all over unread pages), tags (J.5.18 —
+  bulk UNIONS and never overwrites, vocabulary counted via `json_each` +
+  `count(DISTINCT id)` and NEVER from the FTS row, which would report
+  `producao` for a passport that says `produção`). Gotcha that cost a live
+  400: `ScopedVine` ENUMERATES its parameters — a new engine kwarg needs
+  its lines in `policy.py` + `mcp_surface.py` or the Station refuses what
+  the engine serves. F.162-F.169; **F.169's measurement is still pending**
+  (re-ingest with old vs new curator against
+  `bench/questions-locate-v1.json`, baseline recall@1 0.711 — needs the
+  local model), so the curator change is implemented and not yet measured.
 
 - **A snapshot that is not one file is not a snapshot (spec Part I +
   J.13.1/J.13.2, v0.74)**: Part I opens with "A forest snapshot is ONE

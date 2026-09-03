@@ -244,8 +244,10 @@ class ScopedVine:
                type_filter: str | None = None,
                include: list[str] | None = None,
                since: str | None = None, until: str | None = None,
-               date_field: str | None = None) -> dict:
-        win = {"since": since, "until": until, "date_field": date_field}
+               date_field: str | None = None,
+               lang: str | None = None) -> dict:
+        win = {"since": since, "until": until, "date_field": date_field,
+               "lang": lang}
         if self.policy.unrestricted:
             return self._vine.locate(query, k=k, scope=scope,
                                      type_filter=type_filter, include=include,
@@ -281,10 +283,12 @@ class ScopedVine:
 
     def sniff(self, terms, scope: str | None = None, k: int = 5,
               type_filter: str | None = None, since: str | None = None,
-              until: str | None = None, date_field: str | None = None) -> dict:
+              until: str | None = None, date_field: str | None = None,
+              lang: str | None = None) -> dict:
         if scope is not None:
             self._gate(scope)
-        win = {"since": since, "until": until, "date_field": date_field}
+        win = {"since": since, "until": until, "date_field": date_field,
+               "lang": lang}
         if self.policy.unrestricted:
             return self._vine.sniff(terms, scope=scope, k=k,
                                     type_filter=type_filter, **win)
@@ -433,7 +437,7 @@ class ScopedVine:
 
     def harvest(self, query: str, terms: list[str] | None = None, k: int = 3,
                 since: str | None = None, until: str | None = None,
-                date_field: str | None = None,
+                date_field: str | None = None, lang: str | None = None,
                 include_superseded: bool = False) -> dict:
         from monkeyllm.harvest import harvest as _harvest
 
@@ -441,7 +445,7 @@ class ScopedVine:
         # surface. `visible` is C.6c.4 rule 6 — a successor the caller
         # cannot see cannot suppress what they can (scan's construction).
         return _harvest(self, query, terms=terms, k=k, since=since,
-                        until=until, date_field=date_field,
+                        until=until, date_field=date_field, lang=lang,
                         include_superseded=bool(include_superseded),
                         visible=(None if self.policy.unrestricted
                                  else self.policy.in_scope))

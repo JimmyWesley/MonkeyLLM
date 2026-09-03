@@ -77,6 +77,17 @@ def _plant_media(client, head, forest_dir: Path, node_id: str, payload: str,
     assert r.status_code == 200, r.text
 
 
+def _repoint(passport: Path, payload: str) -> None:
+    """C.7.5 (v0.77): a media node cannot be BORN pointing at nothing, so
+    the passport is edited by hand after the plant — which is how the
+    state these tests serve arises in the field."""
+    import re
+    text = passport.read_text(encoding="utf-8")
+    text, n = re.subn(r"(?m)^payload:.*$", f"payload: {payload}", text)
+    assert n == 1
+    passport.write_text(text, encoding="utf-8")
+
+
 def _get(client, head, node_id: str):
     return client.get(f"/v1/forests/{FOREST}/payload/{node_id}", headers=head)
 
@@ -170,7 +181,8 @@ def test_a_payload_escaping_the_forest_is_refused_never_followed(station):
     outside.write_text("host bytes the forest must not serve",
                        encoding="utf-8")
     _plant_media(client, head, forest_dir, "notes/f49-escape",
-                 "../../f49-outside.txt")
+                 "_assets/f49-escape.txt", data=b"inside, at first")
+    _repoint(forest_dir / "notes" / "f49-escape.md", "../../f49-outside.txt")
 
     r = _get(client, head, "notes/f49-escape")
     assert r.status_code == 400, r.text
@@ -196,7 +208,8 @@ def test_bytes_missing_on_disk_answer_the_not_found_envelope(station):
     client, registry, forest_dir = station
     head = _key(registry, caps=("read", "write"))
     _plant_media(client, head, forest_dir, "notes/f49-gone",
-                 "_assets/f49-gone.png")  # passport only, no file written
+                 "_assets/f49-gone.png", data=b"here, then gone")
+    (forest_dir / "notes" / "_assets" / "f49-gone.png").unlink()
 
     gone = _get(client, head, "notes/f49-gone")
     absent = _get(client, head, "notes/f49-never-was")

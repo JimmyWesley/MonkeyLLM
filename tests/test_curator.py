@@ -59,13 +59,16 @@ class TestCurator:
         out = c(dict(DRAFT))
         assert out["summary"].startswith("Discount policy 2026")
         validate_summary(out["summary"])
-        # tags: cleaned (lowercase slug only), deduped, merged after defaults
+        # tags: validated (G.4.2 rule 2), deduped, merged after defaults —
+        # and `Policy!!` is refused by the rule, which is now COUNTED
+        # rather than dropped in silence (rule 1).
         assert out["tags"] == ["adopted", "sales", "discounts"]
         assert c.stats == {"llm_summaries": 1, "fallbacks": 0, "retries": 0,
                            "skipped": 0,
                            "links_proposed": 0, "proposal_fallbacks": 0,
                            "branch_rollups": 0, "branch_fallbacks": 0,
-                           "transport_errors": 0, "rejected": 0, "repaired": 0}
+                           "transport_errors": 0, "rejected": 0, "repaired": 0,
+                           "tags_dropped": 1, "aliases_clipped": 0}
         assert c.last_error is None and c.last_reject is None
 
     def test_retry_then_accept(self):

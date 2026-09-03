@@ -176,6 +176,20 @@ export const Files = (p) => (
 export const Database = (p) => (
   <S {...p}><ellipse cx="12" cy="6" rx="7.5" ry="3" /><path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6" /><path d="M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" /></S>
 )
+/* A move, not a delete: the file leaves one branch for another and the old
+   address stays behind as a waymark (C.15), so the arrow crosses INTO a
+   folder rather than pointing away from one. */
+export const Move = (p) => (
+  <S {...p}><path d="M3 7A1.5 1.5 0 014.5 5.5h3.2L9.3 7.5H13" />
+    <path d="M3 9v8.5A1.5 1.5 0 004.5 19h8" />
+    <path d="M13 12.5h8m0 0l-3-3m3 3l-3 3" /></S>
+)
+/* A luggage tag: the shape a person already reads as "a label somebody
+   attached", which is exactly what a tag is (A.3 — the vocabulary is
+   free, so it is written by hand and not chosen from a list). */
+export const Tag = (p) => (
+  <S {...p}><path d="M3.5 11.2V4.7A1.2 1.2 0 014.7 3.5h6.5a1.2 1.2 0 01.85.35l8 8a1.2 1.2 0 010 1.7l-6.5 6.5a1.2 1.2 0 01-1.7 0l-8-8a1.2 1.2 0 01-.35-.85z" /><circle cx="7.8" cy="7.8" r="1.3" /></S>
+)
 export const Pencil = (p) => (
   <S {...p}><path d="M4 20l4.5-1.2L20 7.3a2 2 0 00-2.8-2.8L5.7 15.9z" /><path d="M15.5 6.2l2.8 2.8" /></S>
 )
@@ -216,4 +230,5 @@ export const CONSOLE_ICON = {
   playground: Playground,
   data: Data, skills: Sparkle, ingest: Ingest, models: Models, people: Users,
   audit: Audit, integrations: Plug, health: Health, webhooks: Webhook,
+  links: Link,
 }

@@ -15,6 +15,7 @@
 import { useState } from 'react'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
+import { hrefFor, linkTo } from '../router.js'
 import {
   Badge, Card, Empty, ErrorNote, Note, Skeleton, Toggle,
 } from '../design/ui.jsx'
@@ -32,13 +33,13 @@ export default function Health({ forest, grant, goto, me }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-      <Report forest={forest} goto={goto} />
+      <Report forest={forest} grant={grant} goto={goto} />
       <Snapshots forest={forest} me={me} />
     </div>
   )
 }
 
-function Report({ forest, goto }) {
+function Report({ forest, grant, goto }) {
   const { t } = useI18n()
   const report = useAsync(() => api.forestHealth(forest), [forest])
 
@@ -99,9 +100,18 @@ function Report({ forest, goto }) {
                 hint={t('health.needs_description_hint')}
                 ids={d.needs_description} goto={goto} />
 
+      {/* J.18: this count is the screen that makes an operator ask the
+          question the review console answers, so the count is the way in.
+          A real anchor, and only when the grant can actually settle one —
+          an entry that always refuses teaches nothing (J.5.1). */}
       {proposals.length > 0 && (
         <Card title={t('health.uncertain')} subtitle={t('health.uncertain_hint')}
-              icon={Link}>
+              icon={Link}
+              actions={has(grant, 'write')
+                ? <a className="btn btn-sm" {...linkTo(hrefFor(forest, 'links'))}>
+                    {t('health.review')}
+                  </a>
+                : null}>
           <div className="flex flex-wrap gap-2">
             {/* `0.5` and `1` side by side read as one number, so the count
                 is labelled rather than merely spaced. */}
