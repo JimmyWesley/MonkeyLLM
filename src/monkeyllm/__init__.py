@@ -6,5 +6,5 @@
 from monkeyllm.errors import VineError
 from monkeyllm.vine import Vine
 
-__version__ = "0.74.0"
+__version__ = "0.78.0"
 __all__ = ["Vine", "VineError", "__version__"]
