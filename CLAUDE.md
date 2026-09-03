@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.77.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.78.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,33 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **The passport travels with the bytes (spec J.8.4, v0.78)**: the agent
+  that followed v0.77's path uploaded a screenshot it had already looked
+  at, and the scent it knew had nowhere to go until a second call and a
+  second commit, with a window where the node existed with a stub summary
+  no `locate` finds. An `upload` entry may now carry `passport: {title,
+  summary, tags, aliases, links, notes}`: shape-checked for every entry
+  BEFORE the first byte stages (a batch with one bad passport stages
+  nothing — same rule as `source_url`), applied at curation by
+  `compose.PassportGate` under exactly the reviewed-draft rules of J.8.1
+  (`fit_summary`, `_clean_tags`, `_links`), `notes` appended as the C.2.1
+  `## Notes`. An entry WITH a passport is never sent to the curation
+  model; the rest of the batch keeps the bound curator — one gate,
+  decided per draft, with its OWN counters merged over the curator's so
+  `tags_dropped`/`aliases_clipped` count a passport's refusals too (the
+  first cut used `_clean_tags`, which throws the count away — the same
+  flaw sat in J.8.1's `approval_hook`, fixed with it). A re-sent file is
+  refreshed and its passport NOT applied (a refresh never curates); the
+  report names it in `passports_ignored`, computed in `_finish_ingest`
+  off `gate.applied` (staged rel names) — never left silent. C.2.1 now
+  carries `notes` for `type: media` in `look`, the sweep and the walk's
+  entry (the first cut's spec claimed `look` carried it "everywhere";
+  it was datasets only). The describer still runs on a passported entry
+  where `vision` is bound — the body is its, the passport has none.
+  `adopt`/`sync`, `origin`, `view`, `plant` unchanged. F.172 in
+  `tests/test_v078_upload_passport.py`; the skill's passport paragraph
+  is checked by `check-skill.mjs`.
 
 - **The path was there and nothing named it (spec J.1.2 r7 + C.7.5 +
   C.2.2 r6 + C.6b + J.5.12, v0.77)**: an agent planted a `type: media`
