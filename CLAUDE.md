@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.75.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.76.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,28 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **The timeline had one end (spec J.5.4, v0.76)**: Explore's docked
+  timeline was a single-thumb scrubber — "the forest as it stood on that
+  day" — and the question a fed forest asks is what arrived BETWEEN two
+  days. Now a start beside the end on one `created` scale, a node shown
+  iff its rank is in `[start, end)`; the start at its origin is the v0.38
+  picture unchanged. The trap is the obvious filter: hide the outside
+  nodes the way the replay hides the unborn (out of the physics too) and
+  the survivors — leaves whose branch is a year older — have no spring
+  left and fold into the centre under the centring pull, so the picture
+  answers "what" and lies about "where". The window is therefore a PAINT
+  split, never a physics one: `n.on` stays the simulated set (filters +
+  born), `n.shown = n.on && bornRank >= s.from` is what draw / hit-test /
+  `fit` / heat read, and `step()` never reads `shown`. Play from a window
+  replays from its own start and does not reseed (the reseed belongs to
+  the origin). Two overlaid native ranges (`.graph-window-thumb`) over one
+  drawn track, the thumb nearest the pointer raised whole (`is-front`) so
+  a track click moves the nearest end; the window is never empty except at
+  the origin (start ≤ end-1), which is what keeps both thumbs reachable.
+  Never persisted (the `query` rule), never in the address. F.170 is
+  `apps/studio/check-window.mjs`, static on F.137's boundary, run from
+  `tests/test_v076_window.py`.
 
 - **The tags a non-English forest never got to keep (spec G.4.2/G.4.3 +
   A.3.2 + H.2.1/J.18 + J.13.6.1 + J.5.17/J.5.18, v0.75)**: four console
