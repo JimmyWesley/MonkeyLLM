@@ -1480,6 +1480,17 @@ class Vine:
                 if not is_remote(payload_named):
                     digest["payload_bytes"] = (
                         self.forest.payload_path(node).stat().st_size)
+            if row["type"] == "media" and (not fields or "notes" in fields):
+                # C.2.1 rule 2 (v0.78): what the uploader wrote about the
+                # picture rides where a picture is read. The path to a media
+                # node is `look` then `view`, the same shape as a dataset's
+                # `look` then `query`, with the same gap: a note only `pick`
+                # reaches is a note nobody reads.
+                notes, clipped = self._dataset_notes(node)
+                if notes:
+                    digest["notes"] = notes
+                    if clipped:
+                        digest["truncated"] = True
 
         if row["type"] == "dataset" and row["payload_type"] == "sqlite":
             # Each of these opens the payload, so a caller that named its
@@ -1678,7 +1689,8 @@ class Vine:
         return None
 
     def _dataset_notes(self, node: ParsedNode) -> tuple[str, bool]:
-        """C.2.1: the operator's `## Notes`, clipped to its own budget.
+        """C.2.1: the operator's `## Notes`, clipped to its own budget —
+        a dataset's, and (v0.78) a media node's.
 
         Clipped here rather than left to the digest's overall check so the
         cut is stated instead of the whole section vanishing, and so a long

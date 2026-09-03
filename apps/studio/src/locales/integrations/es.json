@@ -128,7 +128,7 @@
   "integrations.tool.forests": "Lista los bosques que esta clave puede usar, con capacidades y raíces de partida.",
   "integrations.tool.graft": "Edita un nodo.",
   "integrations.tool.harvest": "Recuperación en una llamada: evidencia clasificada con fragmentos exactos, sin saltos.",
-  "integrations.tool.ingest": "Pone documentos en el bosque a través del Gardener: texto, o cualquier otro archivo como bytes en b64 (una imagen o un audio se convierte en un nodo media).",
+  "integrations.tool.ingest": "Pone documentos en el bosque a través del Gardener: texto, o cualquier otro archivo como bytes en b64 (una imagen o un audio se convierte en un nodo media). Un `passport` en la entrada lleva el rastro que ya conoces: título, resumen, tags, enlaces, notas.",
   "integrations.tool.locate": "Puntos de entrada clasificados sobre metadatos curados dónde caer en el bosque.",
   "integrations.tool.look": "Resumen barato de un nodo: sumario, aristas, hijos, stats.",
   "integrations.tool.move": "Vecinos de un nodo a lo largo de aristas tipadas.",

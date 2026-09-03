@@ -128,7 +128,7 @@
   "integrations.tool.forests": "Lists the forests this key may use, with capabilities and starting roots.",
   "integrations.tool.graft": "Edits a node.",
   "integrations.tool.harvest": "One-shot retrieval: ranked evidence with exact snippets, no hops.",
-  "integrations.tool.ingest": "Puts documents into the forest through the Gardener: text, or any other file as b64 bytes (an image or audio file becomes a media node).",
+  "integrations.tool.ingest": "Puts documents into the forest through the Gardener: text, or any other file as b64 bytes (an image or audio file becomes a media node). A `passport` on an entry carries the scent you already know: title, summary, tags, links, notes.",
   "integrations.tool.locate": "Ranked entry points over curated metadata where to drop into the forest.",
   "integrations.tool.look": "Cheap digest of one node: summary, edges, children, stats.",
   "integrations.tool.move": "Neighbours of a node along typed edges.",

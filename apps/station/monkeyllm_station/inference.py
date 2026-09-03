@@ -627,7 +627,8 @@ def _teach_datasets(scoped_vine, entry: dict) -> None:
     a note that cannot be read must not cost the walk its entry points.
     """
     for result in (entry.get("results") if isinstance(entry, dict) else None) or []:
-        if not isinstance(result, dict) or result.get("type") != "dataset":
+        # C.2.1 rule 6 — datasets, and (v0.78) media: the uploader's notes.
+        if not isinstance(result, dict) or result.get("type") not in ("dataset", "media"):
             continue
         node_id = result.get("id")
         if not isinstance(node_id, str):

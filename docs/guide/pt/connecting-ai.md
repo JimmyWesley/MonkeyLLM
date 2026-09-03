@@ -296,6 +296,7 @@ curl -sX POST https://station.example.com/v1/forests/handbook/harvest \
 ```bash
 # upload documents: text as "text", any other file as "b64"
 # (an image or audio file lands as a media node; view serves its bytes)
+# (add "passport": {title, summary, tags, ...} when you already know the scent)
 curl -sX POST https://station.example.com/v1/forests/handbook/ingest \
   -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d '{"mode": "upload", "dest": "policies",

@@ -241,6 +241,10 @@ class PreparedIngest:
     curator: object | None
     mode: str
     staged: list = field(default_factory=list)
+    # J.8.4 (v0.78): the upload's passports by staged rel name, and the gate
+    # that pinned them — what the finisher compares to name the unapplied.
+    passports: dict = field(default_factory=dict)
+    gate: object | None = None
     root: Path | None = None
     before: str | None = None
     principal: str = ""
@@ -1055,6 +1059,14 @@ def build_app(
         ingest had not happened until now (J.9)."""
         report = (prep.steps.report.as_dict() if cancelled
                   else prep.steps.result)
+        if prep.passports:
+            # J.8.4: bytes re-sent for a node that already existed were
+            # refreshed and their passport was NOT applied — a refresh never
+            # curates (G.3). The caller is told, by entry, so the next move
+            # is `graft` and not a second look at scent that did not change.
+            applied = getattr(prep.gate, "applied", None) or set()
+            report = {**(report or {}), "passports_ignored":
+                      sorted(name for name in prep.passports if name not in applied)}
         # A cancelled batch spends no further model calls: the rollup
         # describes branches somebody just decided not to finish filling.
         rollup = (prep.gardener.rollup(prep.curator)
@@ -2563,7 +2575,7 @@ def build_app(
         return url
 
     def stage_upload(root: Path,
-                     files: list) -> tuple[Path, list[str], dict[str, str]]:
+                     files: list) -> tuple[Path, list[str], dict[str, str], dict[str, dict]]:
         """Write uploaded documents into the forest's staging directory.
 
         Each name is resolved and then checked to still be *under* the
@@ -2582,19 +2594,31 @@ def build_app(
         upload->sync flip. Validated for EVERY entry before the first byte
         lands — a bad third entry must not leave two staged files behind
         for the next batch's hash-diff to mistake for changed documents.
+
+        And the passport map (J.8.4, v0.78): staged rel name -> the entry's
+        validated `passport`, the scent the caller already knows for the
+        node these bytes become. Same key, same rule — shape-checked for
+        every entry before anything stages.
         """
+        from monkeyllm_station.compose import validate_passport
+
         staging = root.joinpath(*UPLOAD_DIR)
         staging.mkdir(parents=True, exist_ok=True)
         staging_root = staging.resolve()
-        for entry in files:
+        validated: dict[int, dict] = {}
+        for i, entry in enumerate(files):
             if isinstance(entry, dict):
                 upload_source_url(entry)  # E_SCHEMA before anything stages
+                if entry.get("passport") is not None:
+                    validated[i] = validate_passport(
+                        str(entry.get("name") or "?"), entry["passport"])
         written = []
         provenance: dict[str, str] = {}
-        for entry in files:
+        passports: dict[str, dict] = {}
+        for i, entry in enumerate(files):
             if not isinstance(entry, dict):
                 raise VineError(E_SCHEMA, "each file must be an object "
-                                          "{name, text|b64}")
+                                          "{name, text|b64, source_url?, passport?}")
             name = str(entry.get("name") or "").strip()
             if not name:
                 raise VineError(E_SCHEMA, "each file needs a name")
@@ -2629,7 +2653,9 @@ def build_app(
                 # `source_path` — not by the raw entry name, whose
                 # separators the resolve may have normalised.
                 provenance[target.relative_to(staging_root).as_posix()] = url
-        return staging, written, provenance
+            if i in validated:
+                passports[target.relative_to(staging_root).as_posix()] = validated[i]
+        return staging, written, provenance, passports
 
     def run_ingest(principal, forest, vine, policy, _name, payload) -> dict:
         """The Gardener over REST (J.8), with the host's three additions:
@@ -2791,9 +2817,11 @@ def build_app(
                     hint="Watch it under GET /v1/forests/{forest}/jobs, "
                          "cancel it, or wait for it to finish.").to_dict()
         provenance: dict[str, str] = {}
+        passports: dict[str, dict] = {}
+        gate = None
         try:
             if mode == "upload":
-                source, staged, provenance = stage_upload(root, payload["files"])
+                source, staged, provenance, passports = stage_upload(root, payload["files"])
 
             curator = inference.curator_from_binding(
                 vine, policy, registry.binding(forest, "ingest"))
@@ -2814,6 +2842,13 @@ def build_app(
             hooks = discover_hooks()
             if approved is not None:
                 hooks.append(compose.approval_hook(approved, vine, policy))
+            elif passports:
+                # J.8.4: an entry that came with its passport is never shown
+                # to the curation model — the caller declared knowing more
+                # than a model would guess — while the rest of the batch
+                # keeps the bound curator. One gate, decided per draft.
+                gate = compose.passport_gate(passports, vine, policy, curator)
+                hooks.append(gate)
             elif curator is not None:
                 hooks.append(curator)
             # G.10.1: the Gardener names the phase it is in and the job
@@ -2889,7 +2924,7 @@ def build_app(
                     job=job, steps=steps, gardener=gardener, curator=curator,
                     mode=mode, staged=staged, root=root,
                     before=before or None, principal=principal, forest=forest,
-                    payload=payload)}
+                    payload=payload, passports=passports, gate=gate)}
 
             # compose answers in place (J.9): one document, and the J.8.1
             # review is a conversation, not a batch.

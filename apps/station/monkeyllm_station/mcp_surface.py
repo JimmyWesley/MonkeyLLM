@@ -740,6 +740,17 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         "notes/_index" are the same destination. An upload entry may carry
         `source_url` — for an uploaded document that IS its `origin`, and
         nothing else fills it.
+
+        An upload entry may also carry `passport: {title?, summary?, tags?,
+        aliases?, links?: [{target, note?}], notes?}` — the scent YOU already
+        know for what the bytes become (a screenshot you have seen, a file
+        you wrote). Bytes alone are a picture nobody can find; a passport is
+        what locate() searches. An entry with a passport is never sent to
+        the curation model: what you declare is what is planted, after the
+        same checks a reviewed draft gets (summary within the A.4 budget,
+        tags cleaned, links `related-to` only, to existing in-scope nodes,
+        at most 3). `notes` becomes the node's `## Notes` section. A
+        malformed passport is refused before any byte stages.
         """
         return await call(forest, "ingest", mode=mode, files=files,
                           path=path, dest=dest, wait=wait)

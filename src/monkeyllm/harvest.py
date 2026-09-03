@@ -296,13 +296,14 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
             item["supersedes"] = sorted(set(succ_of[nid]))
         if nid in pred_of:
             item["superseded_by"] = sorted(set(pred_of[nid]))
-        # C.2.1 (v0.46): a dataset's notes travel with it. The sweep is
-        # `locate` + `sniff` + the matched sections — it never calls `look`,
-        # so a teaching that only rides in the digest reaches the walk and
-        # not the console's ordinary ask. And whether the notes section
-        # happens to match the question's terms is not a good reason to
-        # withhold what a person wrote about how to read this data.
-        if meta.get("type") == "dataset":
+        # C.2.1 (v0.46): a dataset's notes travel with it — and (v0.78) a
+        # media node's, what its uploader wrote about the picture. The sweep
+        # is `locate` + `sniff` + the matched sections — it never calls
+        # `look`, so a teaching that only rides in the digest reaches the
+        # walk and not the console's ordinary ask. And whether the notes
+        # section happens to match the question's terms is not a good reason
+        # to withhold what a person wrote about how to read this data.
+        if meta.get("type") in ("dataset", "media"):
             notes = vine.look(nid, fields=["notes"]).get("notes")
             if notes:
                 item["notes"] = notes
