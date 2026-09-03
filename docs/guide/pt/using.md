@@ -104,8 +104,11 @@ o tipo do nó ou o galho onde ele mora, tamanho e brilho seguem o calor (o
 feromônio que as leituras depositam), e um link proposto um que o
 Ranger administra, ainda não promovido é desenhado diferente de uma
 trilha curada. A linha do tempo reproduz o crescimento da floresta na
-ordem de plantio. Arraste um nó, role para dar zoom, clique para
-selecionar, dê dois cliques para abri-lo em Arquivos.
+ordem de plantio, e tem duas pontas: arraste o início para a frente para
+ver só o que foi plantado entre dois dias, cada nó ainda onde a floresta
+inteira o colocou. **Agora** traz a floresta inteira de volta. Arraste um
+nó, role para dar zoom, clique para selecionar, dê dois cliques para
+abri-lo em Arquivos.
 
 Em **Arquivos**, um nó abre como o que ele é. A visão **Leitura**
 renderiza o markdown; **Fonte** mostra com honestidade as duas metades

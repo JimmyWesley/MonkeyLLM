@@ -98,8 +98,11 @@ On the **graph**, every visual channel is a fact the forest holds:
 colour is the node's type or home branch, size and glow follow heat (the
 pheromone reads deposit), and a proposed link one the Ranger manages,
 not yet promoted is drawn differently from a curated trail. The
-timeline replays the forest's growth in planting order. Drag a node,
-scroll to zoom, click to select, double-click to open it in Files.
+timeline replays the forest's growth in planting order, and it has two
+ends: drag the start forward to see only what was planted between two
+days, each node still where the whole forest put it. **Now** brings the
+whole forest back. Drag a node, scroll to zoom, click to select,
+double-click to open it in Files.
 
 In **Files**, a node opens as what it is. The **Reading** view renders
 the markdown; **Source** shows the two stored halves honestly the

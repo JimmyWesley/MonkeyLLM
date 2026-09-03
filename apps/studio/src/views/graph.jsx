@@ -34,7 +34,14 @@
  *    motion it is a scrubber, not an animation — and the scrubber is
  *    docked under the canvas at all times: drag back to see the forest as
  *    it stood on a day, press play to watch it grow, and "now" is simply
- *    the right end of the slider.
+ *    the right end of the slider. The slider has a left end too (J.5.4
+ *    v0.76): a start beside the end on the same `created` scale shows
+ *    only what arrived between two days. A node outside the window leaves
+ *    the PICTURE and never the physics — `on` is the simulated set,
+ *    `shown` the painted one — because a window's survivors are leaves
+ *    whose branch was planted long before it; take the branch out of the
+ *    springs and they fall into the centre, and the map then says what
+ *    arrived while lying about where it landed.
  * 6. **The forest wakes, it is never spat out.** A fresh build starts with
  *    the camera already framing the seeded layout and births the nodes in
  *    `created` order over a couple of seconds while the camera eases
@@ -321,7 +328,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   const { resolved } = useTheme()
   const canvas = useRef(null)
   const box = useRef(null)
-  const sim = useRef({ nodes: [], springs: [], index: {}, order: [],
+  const sim = useRef({ nodes: [], springs: [], index: {}, order: [], from: 0,
                        alpha: 0, alphaTarget: 0, active: false, autoFit: false,
                        wake: null, rand: Math.random })
   const view = useRef({ x: 0, y: 0, k: 1 })
@@ -330,9 +337,14 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   const [settings, setSettings] = useState(() => loadSettings(forest))
   const [panel, setPanel] = useState(false)
   const [hover, setHover] = useState(null)
-  // The docked timeline: t counts born nodes, and Infinity means "now"
-  // until the first build says how many nodes now holds.
-  const [timeline, setTimeline] = useState({ t: Infinity, playing: false })
+  // The docked timeline: `from` and `t` count born nodes — the window is
+  // the ranks in [from, t) — and Infinity means "now" until the first
+  // build says how many nodes now holds. Never persisted and never in the
+  // address (J.5.4 v0.76): the quick search's rule, for the same reason.
+  const [timeline, setTimeline] = useState({ from: 0, t: Infinity, playing: false })
+  // Which of the two thumbs is raised: the one nearest the pointer.
+  const [front, setFront] = useState('to')
+  const grabbing = useRef(false)
   const [hitCount, setHitCount] = useState(null)
 
   const calm = typeof matchMedia === 'function'
@@ -456,7 +468,11 @@ export default function ForestGraph({ forest, data, selected, onSelect,
         && n.heat >= p.minHeat
         && (keep === null || keep.has(n.id))
         && n.bornRank < s.alive
-      if (n.on && n.heat > 0.05) s.hasHeat = true
+      // The window's start is a paint split, never a physics one (J.5.4
+      // v0.76): a node before it is stepped and not shown, so it goes on
+      // holding the structure that positions what IS shown.
+      n.shown = n.on && n.bornRank >= s.from
+      if (n.shown && n.heat > 0.05) s.hasHeat = true
     }
     for (const spring of s.springs) {
       spring.on = s.nodes[spring.a].on && s.nodes[spring.b].on
@@ -520,7 +536,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     if (!el) return
     let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity
     for (const n of s.nodes) {
-      if (!n.on) continue
+      if (!n.shown) continue
       if (n.x < x0) x0 = n.x
       if (n.y < y0) y0 = n.y
       if (n.x > x1) x1 = n.x
@@ -558,7 +574,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
         * Math.PI * 2,
       seedGroup: groupOf(n.id, 2),
       r0: 2.4 + Math.min(8, Math.sqrt(n.degree || 0) * 1.7),
-      on: true, bornRank: 0, bornAt: 0, fx: null, fy: null,
+      on: true, shown: true, bornRank: 0, bornAt: 0, fx: null, fy: null,
       x: 0, y: 0, vx: 0, vy: 0,
     }))
     const index = Object.fromEntries(nodes.map((n, i) => [n.id, i]))
@@ -602,7 +618,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     order.forEach((nodeIdx, rank) => { nodes[nodeIdx].bornRank = rank })
 
     const s = {
-      nodes, springs, index, order,
+      nodes, springs, index, order, from: 0,
       alive: nodes.length, lastAlive: nodes.length,
       alpha: 1, alphaTarget: 0, active: true, autoFit: true, wake: null,
       rand: Math.random,
@@ -621,7 +637,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     }
     applyFilters(s)
     applyColors(s)
-    setTimeline({ t: nodes.length, playing: false })
+    setTimeline({ from: 0, t: nodes.length, playing: false })
     if (calm) { settle(400); s.autoFit = false; fit(); drawRef.current() }
     needsDraw.current = true
   }, [data, links, calm, applyFilters, applyColors, settle, fit])
@@ -674,19 +690,26 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     const s = sim.current
     if (!el || !s.nodes.length) return
     s.wake = null
-    if (timelineRef.current.t >= s.nodes.length) {
-      // From "now" the story restarts: reseed, so the forest grows outward
-      // from its nuclei instead of assembling into the settled layout.
-      seed(s, el.clientWidth || 720, el.clientHeight || 520)
-      s.alive = 0
-      s.lastAlive = 0
-      s.alpha = 1
-      s.active = true
-      s.autoFit = false // the playing branch of the loop drives the camera
-      applyFilters(s)
-      setTimeline({ t: 0, playing: true })
+    const tl = timelineRef.current
+    const from = Math.max(0, Math.min(s.nodes.length, Math.floor(tl.from)))
+    if (tl.t >= s.nodes.length) {
+      if (from === 0) {
+        // From "now" the story restarts: reseed, so the forest grows outward
+        // from its nuclei instead of assembling into the settled layout.
+        seed(s, el.clientWidth || 720, el.clientHeight || 520)
+        s.alive = 0
+        s.lastAlive = 0
+        s.alpha = 1
+        s.active = true
+        s.autoFit = false // the playing branch of the loop drives the camera
+        applyFilters(s)
+      }
+      // A window replays from its own start and is not restaged (J.5.4
+      // v0.76): what stands before it keeps the layout the whole forest
+      // gave it, and the timeline effect un-births the rest.
+      setTimeline({ from, t: from, playing: true })
     } else {
-      setTimeline((tl) => ({ ...tl, playing: true }))
+      setTimeline((cur) => ({ ...cur, playing: true }))
     }
     needsDraw.current = true
   }, [applyFilters])
@@ -697,13 +720,21 @@ export default function ForestGraph({ forest, data, selected, onSelect,
 
   const toNow = useCallback(() => {
     sim.current.wake = null
-    setTimeline({ t: sim.current.nodes.length, playing: false })
+    // "Now" is the forest as it stands: the end at the present AND the
+    // start at the origin — a window that merely ends today is not that.
+    setTimeline({ from: 0, t: sim.current.nodes.length, playing: false })
   }, [])
 
   useEffect(() => {
     const s = sim.current
     if (!s.nodes.length || s.wake) return
     const count = Math.max(0, Math.min(s.nodes.length, Math.floor(timeline.t)))
+    const from = Math.max(0, Math.min(count, Math.floor(timeline.from)))
+    // The start moves the picture and nothing else: no birth, no reheat —
+    // the nodes it hides stay in the physics (J.5.4 v0.76), so the layout
+    // under the window is the layout of the whole forest.
+    const windowMoved = from !== s.from
+    s.from = from
     if (count !== s.alive) {
       // While playing, a node is born where its parent stands: the forest
       // grows outward the way it actually grew. A hand-scrub instead keeps
@@ -731,6 +762,8 @@ export default function ForestGraph({ forest, data, selected, onSelect,
       s.alpha = Math.max(s.alpha, 0.25)
       s.active = true
       if (calm) settle(60)
+    } else if (windowMoved) {
+      applyFilters(s)
     }
     s.alphaTarget = timeline.playing ? 0.13 : 0
     if (timeline.playing) s.active = true
@@ -795,7 +828,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     for (const e of links) {
       const a = nodes[index[e.src]]
       const b = nodes[index[e.dst]]
-      if (!a || !b || !a.on || !b.on) continue
+      if (!a || !b || !a.shown || !b.shown) continue
       if (!inView(a) && !inView(b)) continue
       const shortcut = e.rel === 'discovered-shortcut'
       const proposal = !e.structure && !shortcut && e.confidence < 1
@@ -855,7 +888,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     ctx.font = `${labelBase}px ui-sans-serif, system-ui, sans-serif`
     ctx.textAlign = 'center'
     for (const n of nodes) {
-      if (!n.on || !inView(n)) continue
+      if (!n.shown || !inView(n)) continue
       const dim = near && !near.has(n.id)
       // A newborn eases in over a third of a second — visible growth, not
       // a teleport. Wake, replay and scrub all stamp `bornAt`; a node that
@@ -958,9 +991,9 @@ export default function ForestGraph({ forest, data, selected, onSelect,
           const total = Math.max(6000, Math.min(30000, s.nodes.length * 14))
           const nextT = tl.t + (dt / total) * s.nodes.length
           if (nextT >= s.nodes.length) {
-            setTimeline({ t: s.nodes.length, playing: false })
+            setTimeline((cur) => ({ ...cur, t: s.nodes.length, playing: false }))
           } else {
-            setTimeline({ t: nextT, playing: true })
+            setTimeline((cur) => ({ ...cur, t: nextT, playing: true }))
           }
           fit(0.05) // the camera pulls back as the forest grows
         }
@@ -1015,7 +1048,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
     let best = null
     let bd = 15 / view.current.k
     for (const n of sim.current.nodes) {
-      if (!n.on) continue
+      if (!n.shown) continue
       const d = Math.hypot(n.x - p.x, n.y - p.y)
       if (d < bd) { bd = d; best = n }
     }
@@ -1185,13 +1218,24 @@ export default function ForestGraph({ forest, data, selected, onSelect,
   // docked timeline honest for that one frame.
   const total = s.nodes.length || data.nodes.length
   const shown = Math.min(total, Math.floor(timeline.t))
+  const from = Math.max(0, Math.min(shown, Math.floor(timeline.from)))
   const atNow = shown >= total
+  // The window is the whole forest only when BOTH ends sit at their
+  // extremes: a window that merely ends today is not the forest as it
+  // stands, so "now" stays awake for it.
+  const whole = atNow && from === 0
+  const windowed = from > 0
   const newest = shown > 0 && s.nodes.length
     ? s.nodes[s.order[shown - 1]] : null
+  const oldest = windowed && from < shown && s.nodes.length
+    ? s.nodes[s.order[from]] : null
   // The passport's `created` is a date (models: dt.date) — the day is the
   // finest truth the forest holds, so the day is what the balloon says.
-  const stamp = newest?.created || newest?.updated || '—'
+  const dayOf = (n) => n?.created || n?.updated || '—'
+  const stamp = dayOf(newest)
+  const fromStamp = dayOf(oldest)
   const pct = total ? shown / total : 0
+  const pctFrom = total ? from / total : 0
   const toggleIn = (key, value) => set({
     [key]: settings[key].includes(value)
       ? settings[key].filter((x) => x !== value)
@@ -1288,35 +1332,73 @@ export default function ForestGraph({ forest, data, selected, onSelect,
             {timeline.playing ? <Pause size={13} /> : <Play size={13} />}
           </button>
         )}
-        <div className="relative min-w-0 flex-1">
-          <input type="range" className="graph-range block w-full" min={0}
-                 max={total} step={1} value={shown}
-                 aria-label={t('graph.timeline')}
+        {/* Two thumbs on one track (J.5.4 v0.76): the start and the end of
+            the window, each a real range for the keyboard. Whichever thumb
+            is nearer the pointer is raised whole, so a click on the track
+            moves the nearest end the way a single range would; the choice
+            is frozen while a thumb is held, so a drag never changes hands.
+            The window is never empty except at the origin (start ≤ end-1),
+            which is what keeps both thumbs reachable at every position. */}
+        <div className="graph-window min-w-0 flex-1" role="group"
+             aria-label={t('graph.timeline')}
+             onPointerDownCapture={() => {
+               // Released on the window, not on the strip: a thumb let go
+               // past the edge of the row must still hand the choice back.
+               grabbing.current = true
+               const release = () => { grabbing.current = false }
+               window.addEventListener('pointerup', release, { once: true })
+               window.addEventListener('pointercancel', release, { once: true })
+             }}
+             onPointerMove={(ev) => {
+               if (grabbing.current) return
+               const r = ev.currentTarget.getBoundingClientRect()
+               const x = r.width ? (ev.clientX - r.left) / r.width : 0
+               const nearest = x < (pctFrom + pct) / 2 ? 'from' : 'to'
+               if (nearest !== front) setFront(nearest)
+             }}>
+          <div className="graph-window-track" aria-hidden="true">
+            <div className="graph-window-fill"
+                 style={{ left: `${pctFrom * 100}%`,
+                          width: `${Math.max(0, pct - pctFrom) * 100}%` }} />
+          </div>
+          <input type="range"
+                 className={`graph-window-thumb ${front === 'from' ? 'is-front' : ''}`}
+                 min={0} max={total} step={1} value={from}
+                 aria-label={t('graph.window_start')}
                  onChange={(ev) => {
                    sim.current.wake = null
-                   setTimeline({ t: Number(ev.target.value), playing: false })
+                   const next = Math.min(Number(ev.target.value), Math.max(0, shown - 1))
+                   setTimeline((cur) => ({ ...cur, from: next, playing: false }))
                  }} />
-          {/* The day under the thumb, floated as an overlay: it rides the
-              scrub without ever pushing the row around. Hidden at "now",
-              where the readout already says everything. */}
-          {!atNow && (
-            <div className="pointer-events-none absolute bottom-full mb-1.5
-                            -translate-x-1/2 whitespace-nowrap rounded-lg
-                            border border-line bg-bg-elev/95 px-2 py-1
-                            font-mono text-[11px] text-text-2 shadow-pop
-                            backdrop-blur"
-                 style={{ left: `calc(${pct * 100}% + ${(0.5 - pct) * 16}px)` }}>
-              {stamp}
-            </div>
+          <input type="range"
+                 className={`graph-window-thumb ${front === 'to' ? 'is-front' : ''}`}
+                 min={0} max={total} step={1} value={shown}
+                 aria-label={t('graph.window_end')}
+                 onChange={(ev) => {
+                   sim.current.wake = null
+                   const next = Math.max(Number(ev.target.value), from > 0 ? from + 1 : 0)
+                   setTimeline((cur) => ({ ...cur, t: next, playing: false }))
+                 }} />
+          {/* The day under each thumb, floated as an overlay: it rides the
+              scrub without ever pushing the row around. Hidden at the
+              thumb's own extreme, where the readout already says everything;
+              two thumbs close together share one balloon. */}
+          {windowed && !atNow && pct - pctFrom < 0.14 ? (
+            <Balloon at={(pct + pctFrom) / 2}>{fromStamp} → {stamp}</Balloon>
+          ) : (
+            <>
+              {windowed && <Balloon at={pctFrom}>{fromStamp}</Balloon>}
+              {!atNow && <Balloon at={pct}>{stamp}</Balloon>}
+            </>
           )}
         </div>
         <span className="min-w-[9.5rem] text-right font-mono text-[11px] text-text-3">
-          {stamp} · {shown}/{total}
+          {windowed ? `${fromStamp} → ${stamp}` : stamp} · {shown - from}/{total}
         </span>
         {/* Always in the row, merely asleep at the present: a button that
             comes and goes reflows the strip under the operator's hand. */}
         <button type="button" className="btn btn-sm btn-ghost" onClick={toNow}
-                disabled={atNow}>
+                disabled={whole}>
           {t('graph.now')}
         </button>
       </div>
@@ -1539,6 +1621,21 @@ function Range({ label, value, onChange, min, max, step, display }) {
              step={step} value={value}
              onChange={(ev) => onChange(Number(ev.target.value))} />
     </label>
+  )
+}
+
+/** The day under a thumb, floated over the track: `at` is the thumb's
+ *  position as a fraction of the track, and the pixel term compensates
+ *  the thumb's own width so the balloon stays centred on it at the ends. */
+function Balloon({ at, children }) {
+  return (
+    <div className="pointer-events-none absolute bottom-full mb-1.5
+                    -translate-x-1/2 whitespace-nowrap rounded-lg border
+                    border-line bg-bg-elev/95 px-2 py-1 font-mono text-[11px]
+                    text-text-2 shadow-pop backdrop-blur"
+         style={{ left: `calc(${at * 100}% + ${(0.5 - at) * 14}px)` }}>
+      {children}
+    </div>
   )
 }
 

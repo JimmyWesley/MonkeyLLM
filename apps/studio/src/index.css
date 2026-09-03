@@ -344,6 +344,60 @@
     accent-color: rgb(var(--accent));
   }
 
+  /* The docked timeline is a window (J.5.4 v0.76): two native ranges laid
+     over one drawn track, so the keyboard and assistive technology get two
+     real sliders while the eye gets one scale. Each input is inert except
+     for its thumb; the one nearest the pointer is raised whole, so a click
+     on the track moves the nearest end, as a single range would. */
+  .graph-window { @apply relative h-4; }
+  .graph-window-track {
+    @apply pointer-events-none absolute inset-x-0 top-1/2 h-[3px]
+           -translate-y-1/2 rounded-full bg-line;
+  }
+  .graph-window-fill {
+    @apply absolute inset-y-0 rounded-full;
+    background: rgb(var(--accent));
+  }
+  .graph-window-thumb {
+    @apply absolute inset-0 m-0 h-full w-full cursor-pointer bg-transparent;
+    -webkit-appearance: none;
+    appearance: none;
+    pointer-events: none;
+  }
+  .graph-window-thumb.is-front { pointer-events: auto; }
+  .graph-window-thumb::-webkit-slider-runnable-track {
+    height: 100%;
+    background: transparent;
+  }
+  .graph-window-thumb::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    pointer-events: auto;
+    margin-top: 1px;
+    height: 14px;
+    width: 14px;
+    border-radius: 9999px;
+    border: 2px solid rgb(var(--bg-elev));
+    background: rgb(var(--accent));
+    box-shadow: 0 0 0 1px rgb(var(--line));
+  }
+  .graph-window-thumb::-moz-range-track { height: 100%; background: transparent; }
+  .graph-window-thumb::-moz-range-thumb {
+    pointer-events: auto;
+    height: 14px;
+    width: 14px;
+    border-radius: 9999px;
+    border: 2px solid rgb(var(--bg-elev));
+    background: rgb(var(--accent));
+    box-shadow: 0 0 0 1px rgb(var(--line));
+  }
+  .graph-window-thumb:focus-visible { outline: none; }
+  .graph-window-thumb:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 3px rgb(var(--accent) / 0.35);
+  }
+  .graph-window-thumb:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 3px rgb(var(--accent) / 0.35);
+  }
+
   .tree-row {
     @apply flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left
            text-[12.5px] text-text-2 transition hover:bg-surface-2;

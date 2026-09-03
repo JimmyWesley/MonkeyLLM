@@ -38,5 +38,7 @@
   "graph.timeline": "Línea de tiempo",
   "graph.tip_stats": "{degree} senderos · calor {heat}",
   "graph.truncated": "Mostrando solo los nodos más conectados",
-  "graph.view": "Vista"
+  "graph.view": "Vista",
+  "graph.window_end": "Fin de la ventana",
+  "graph.window_start": "Inicio de la ventana"
 }

@@ -106,9 +106,11 @@ color es el tipo del nodo o su rama de origen, el tamaño y el brillo
 siguen al calor (lo que depositan las lecturas de feromona), y un enlace
 propuesto uno que el Ranger administra, aún no promovido se dibuja
 distinto de un sendero curado. La línea de tiempo reproduce el
-crecimiento del bosque en orden de plantado. Arrastra un nodo, haz zoom
-con el scroll, clic para seleccionar, doble clic para abrirlo en
-Archivos.
+crecimiento del bosque en orden de plantado, y tiene dos extremos:
+arrastra el inicio hacia adelante para ver solo lo plantado entre dos
+días, cada nodo aún donde el bosque entero lo puso. **Ahora** devuelve el
+bosque entero. Arrastra un nodo, haz zoom con el scroll, clic para
+seleccionar, doble clic para abrirlo en Archivos.
 
 En **Archivos**, un nodo se abre como lo que es. La vista **Lectura**
 renderiza el markdown; **Fuente** muestra con honestidad las dos mitades

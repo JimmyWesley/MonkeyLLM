@@ -38,5 +38,7 @@
   "graph.timeline": "Linha do tempo",
   "graph.tip_stats": "{degree} trilhas · calor {heat}",
   "graph.truncated": "Mostrando apenas os nós mais conectados",
-  "graph.view": "Exibição"
+  "graph.view": "Exibição",
+  "graph.window_end": "Fim da janela",
+  "graph.window_start": "Início da janela"
 }
