@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.76.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.77.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,36 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **The path was there and nothing named it (spec J.1.2 r7 + C.7.5 +
+  C.2.2 r6 + C.6b + J.5.12, v0.77)**: an agent planted a `type: media`
+  node "with" an image (an `origin` naming its harness's file store),
+  got `created: true`, got `E_NOT_FOUND` from `view`, saw its client
+  render the envelope as "tool call failed", and filed that the product
+  cannot store a binary. `ingest(mode: "upload", files: [{name, b64}])`
+  has done exactly that since v0.48 — and the tool description said
+  `[{name, text}]`, the skill taught text, `plant` accepted a media
+  passport naming no bytes, `look` could not say whether bytes existed,
+  and `sniff(scope: "_meta")` refused naming `_meta/_index`, an id the
+  caller never typed. None of the report's fixes is taken (the channel
+  exists; a fourth `view` code breaks J.3's oracle; A.3 forbids
+  dereferencing `origin`). Taken: every tool description names the
+  neighbour that does what it refuses (r7, asserted off the SERVED
+  descriptions); wire `plant` of `media` requires a `payload` that is
+  contained and exists (`_media_payload_problems`, stat before the first
+  write, `adopted=` exempt because G.7 `archive: never` legitimately
+  references bytes at the source); `look` carries `payload_missing` or
+  `payload_type`+`payload_bytes` for media (stat, never open — the one
+  place "will view work?" is answerable before the call); `_scope_where`
+  refuses bare `_meta` as `E_SCHEMA` and an unknown scope as `scope not
+  found: <what the caller sent>`. `view`'s envelope is deliberately
+  UNCHANGED (absent, out-of-scope and payload-less stay byte-identical;
+  a distinct hint on one path is an oracle). J.1.2 r2 (`isError`) stays:
+  the agent's client reads the flag alone, v0.54's client read the body
+  alone. Tests that planted media passports pointing at nothing now
+  plant real bytes and then delete or hand-edit them. F.171 in
+  `tests/test_v077_mcp_clarity.py` (MCP ingest b64 → look → view →
+  prune, one test).
 
 - **The timeline had one end (spec J.5.4, v0.76)**: Explore's docked
   timeline was a single-thumb scrubber — "the forest as it stood on that
