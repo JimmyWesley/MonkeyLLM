@@ -83,7 +83,8 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
               binding: dict, policy, head: str | None = None,
               reply_tokens: int | None = None,
               window: dict | None = None,
-              include_superseded: bool = False) -> str:
+              include_superseded: bool = False,
+              today: str | None = None) -> str:
     """The closed list of J.10.7 — and nothing off it.
 
     Every component here can change the answer; nothing else may enter,
@@ -103,6 +104,11 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
     that same reason: the flag decides whether a replaced document is in the
     material at all, so the history view and the current view are two
     questions — and off, which is the default, keys exactly as before.
+    `today` (J.10.5 rule 3, v0.79) is the walk's alone: its prompt states
+    the host's date, so a hunt asked on two days is two hunts and an entry
+    served across midnight would answer "today" with yesterday's walk. A
+    sweep passes None — its prompt states no date, and a date in its key
+    would expire every stored answer nightly for nothing.
     """
     material = json.dumps({
         "question": normalize(question),
@@ -130,6 +136,7 @@ def build_key(*, question: str, terms, k: int, hops, hybrid: bool,
                        "date_field": window.get("date_field")}}
            if window else {}),
         **({"include_superseded": True} if include_superseded else {}),
+        **({"today": str(today)} if today else {}),
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 

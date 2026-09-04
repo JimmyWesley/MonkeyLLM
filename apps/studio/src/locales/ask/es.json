@@ -31,7 +31,9 @@
   "ask.history_title": "Preguntas ya hechas",
   "ask.history_today": "Hoy",
   "ask.history_unavailable": "Este navegador no está guardando ejecuciones: el almacenamiento no está disponible (una ventana privada, o el almacenamiento desactivado). Las respuestas no se ven afectadas.",
+  "ask.history_window": "con período",
   "ask.history_yesterday": "Ayer",
+  "ask.hop_buckets": "{n} período(s)",
   "ask.hop_children": "{n} hijo(s)",
   "ask.hop_edges": "{n} arista(s)",
   "ask.hop_error": "rechazado · {code}",
@@ -90,6 +92,12 @@
   "ask.trail_sub": "Por dónde pasó esta pregunta, en el bosque del que salió.",
   "ask.trail_view_hint": "Use la rueda para acercar, arrastre para mover, doble clic para encuadrar",
   "ask.trail_waiting": "Buscando — las primeras etapas aparecen antes que la respuesta.",
+  "ask.window": "Período",
+  "ask.window_clear": "Bosque entero (quitar el período)",
+  "ask.window_hint": "Acota la pregunta al material creado entre estas fechas; cualquiera de los extremos puede quedar abierto. Solo se busca lo que llegó dentro de la ventana, y la respuesta dice la ventana realmente usada. Es parte de la pregunta, no una preferencia: viaja con el enlace y no se recuerda.",
+  "ask.window_since": "Creado desde",
+  "ask.window_until": "Creado hasta",
+  "ask.window_used": "Ventana usada: {since} → {until}",
   "ask.working_hops": "Forrajeando buscando, leyendo, decidiendo a dónde ir…",
   "ask.working_sweep": "Buscando en el bosque…"
 }

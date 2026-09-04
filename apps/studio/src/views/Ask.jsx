@@ -14,7 +14,7 @@ import {
 import { Markdown } from '../design/markdown.jsx'
 import {
   Ask as AskIcon, Clock, Collapse, Download, Expand, Eye, Graph as GraphIcon,
-  Printer, Sparkle, Trash,
+  Printer, Sparkle, Trash, X,
 } from '../design/icons.jsx'
 import { PayloadImage } from './files.jsx'
 import { evidenceFromHops, mergeEvidence } from '../trailmap.js'
@@ -75,6 +75,16 @@ export default function Ask({ forest, grant, me, goto }) {
   // once at mount; typing never writes it back.
   const [question, setQuestion] = useState(
     () => new URLSearchParams(window.location.search).get('q') || '')
+  // J.5.19: the question has a period. `since`/`until` are PART of the
+  // question, not a taste — so they ride the address beside `q` (a shared
+  // link asks the same bounded question), are read exactly as `q` is (once
+  // at mount, nothing fires, typing writes nothing back), and go through
+  // loadPrefs/savePrefs NEVER: a window remembered from yesterday opens
+  // tomorrow's forest empty, which is v0.76's lesson in J.5.4 applied here.
+  const [since, setSince] = useState(
+    () => new URLSearchParams(window.location.search).get('since') || '')
+  const [until, setUntil] = useState(
+    () => new URLSearchParams(window.location.search).get('until') || '')
   const [k, setK] = useState(3)
   // J.10.8: how long an answer this person likes. Restored from the saved
   // preference at mount; dragging the slider is what writes it back.
@@ -208,8 +218,13 @@ export default function Ask({ forest, grant, me, goto }) {
         // draws — and a current one pays for no extra read at all.
         fallback = setTimeout(() => {
           if (arrived) return
+          // The window rides here too: the fallback draws what the answer
+          // WILL see (J.5.15 rule 1), and a sweep bounded to June drawn
+          // from an unbounded harvest is a picture of a retrieval that
+          // never ran — rule 3's invention, one panel over.
           api.call(forest, 'harvest',
-                   { query: q, k, ...(hybrid ? { hybrid: true } : {}) })
+                   { query: q, k, ...(hybrid ? { hybrid: true } : {}),
+                     ...(since ? { since } : {}), ...(until ? { until } : {}) })
             .then((data) => { if (!arrived) setPreview(data) })
             .catch(() => {})
         }, CHANNEL_GRACE_MS)
@@ -223,6 +238,13 @@ export default function Ask({ forest, grant, me, goto }) {
       ...(reply ? { reply_tokens: reply } : {}),
       ...(hybrid ? { hybrid: true } : {}), ...(hops ? { hops: true } : {}),
       ...(cache ? {} : { cache: false }),
+      // J.5.19: C.13.1's own parameters, sent only when set, so a call
+      // without them is byte-identical to the console's before this
+      // version. `date_field` is never sent — the console asks when
+      // material ARRIVED, which is `created`, the engine's default. And
+      // nothing is validated here: an unparseable bound is the engine's
+      // E_SCHEMA (C.13.1 rule 4), rendered like any other refusal.
+      ...(since ? { since } : {}), ...(until ? { until } : {}),
     }
     const t0 = performance.now()
     try {
@@ -265,6 +287,12 @@ export default function Ask({ forest, grant, me, goto }) {
     setHybrid(!!run.params?.hybrid)
     setHops(!!run.params?.hops)
     setCache(run.params?.cache !== false)
+    // The run's own window (J.5.19): a record of a bounded question put
+    // back unbounded would make "ask again" ask a different question.
+    // This is the record's, never a preference — a run with no window
+    // clears the inputs, exactly as it clears `hops`.
+    setSince(run.params?.since || '')
+    setUntil(run.params?.until || '')
     setPreview(null); setLive(null)
     setResult(run.result)
     setRestored({ ts: run.ts, model: run.result?.model })
@@ -284,6 +312,9 @@ export default function Ask({ forest, grant, me, goto }) {
     ...(reply ? { reply_tokens: reply } : {}),
     ...(hybrid ? { hybrid: true } : {}), ...(hops ? { hops: true } : {}),
     ...(cache ? {} : { cache: false }),
+    // J.5.19: the window is carried because everything else the form
+    // would send is.
+    ...(since ? { since } : {}), ...(until ? { until } : {}),
   })}'`
 
   return (
@@ -326,6 +357,36 @@ export default function Ask({ forest, grant, me, goto }) {
                 <Segmented value={k} onChange={setK} options={[
                   { value: 2, label: '2' }, { value: 3, label: '3' }, { value: 6, label: '6' },
                 ]} />
+              </div>
+              {/* J.5.19: the question's period. Two dates on `created` —
+                  when material ARRIVED, J.5.4's window one console over —
+                  beside the depth because both decide what retrieval may
+                  reach. Deliberately NOT a Toggle in the flags list below
+                  and NOT a preference like the slider beside it: a shared
+                  link must ask the same bounded question, and a window
+                  remembered from yesterday is wrong tomorrow. The inputs
+                  validate nothing (a bad bound is the engine's refusal),
+                  and the answer is labelled by the engine's echo, never by
+                  these strings. */}
+              <div className="flex items-center gap-1.5" role="group"
+                   aria-label={t('ask.window')} title={t('ask.window_hint')}>
+                <span className="text-[11.5px] text-text-3">{t('ask.window')}</span>
+                <input type="date" className="field !w-auto !py-1 text-[12px]"
+                       value={since} aria-label={t('ask.window_since')}
+                       onChange={(e) => setSince(e.target.value)} />
+                <span className="text-[11px] text-text-3">→</span>
+                <input type="date" className="field !w-auto !py-1 text-[12px]"
+                       value={until} aria-label={t('ask.window_until')}
+                       onChange={(e) => setUntil(e.target.value)} />
+                {/* A way back to the whole forest that does not depend on
+                    the browser's own date widget having one. */}
+                {(since || until) && (
+                  <button type="button" className="btn btn-sm btn-ghost !px-1"
+                          title={t('ask.window_clear')} aria-label={t('ask.window_clear')}
+                          onClick={() => { setSince(''); setUntil('') }}>
+                    <X size={13} />
+                  </button>
+                )}
               </div>
               {/* J.10.8: dragged per person, remembered per person. "Auto"
                   sends nothing — the forest binding's own size rules. */}
@@ -454,6 +515,19 @@ export default function Ask({ forest, grant, me, goto }) {
                     <span title={result.cached_at ? when(result.cached_at, lang) : undefined}>
                       <Badge tone="warn">{t('ask.cached')}</Badge>
                     </span>
+                  )}
+                  {/* J.5.19: the label is the ECHO (C.13.1 rule 6), never
+                      the inputs. The engine expands `2026-08` to the two
+                      dates it actually searched, a restored run's window
+                      is the run's and not the form's, and an open end is
+                      shown as open rather than filled in by the console. */}
+                  {result.window && (
+                    <Badge title={`date_field: ${result.window.date_field || 'created'}`}>
+                      {t('ask.window_used', {
+                        since: result.window.since || '—',
+                        until: result.window.until || '—',
+                      })}
+                    </Badge>
                   )}
                   <Badge>{t('common.elapsed', { ms: result.ms })}</Badge>
                   {/* Reading is the point; the instruments can wait. Widening
@@ -601,6 +675,11 @@ function downloadMarkdown(result, question, forest) {
     '---', '',
     `- Forest: \`${forest}\``,
     `- Model: \`${result.model}\``,
+    // J.5.19: a bounded answer leaves labelled — the echo, as on screen.
+    ...(result.window
+      ? [`- Window: ${result.window.since || '—'} → ${result.window.until || '—'}`
+         + ` (${result.window.date_field || 'created'})`]
+      : []),
     ...(result.hops?.length
       ? [`- Hops: ${result.hops.map((h) => `${h.tool}${h.id ? `(${h.id})` : ''}`).join(' → ')}`]
       : []),
@@ -760,6 +839,15 @@ function History({ open, onClose, principal, forest, onPick }) {
                           </span>
                           {run.params?.hops && <Badge>{t('ask.history_hops')}</Badge>}
                           {run.params?.hybrid && <Badge>{t('ask.history_hybrid')}</Badge>}
+                          {/* J.5.19: two runs of one question with different
+                              windows are two runs. The badge reads what was
+                              SENT (the row's rule); the echo lives on the
+                              restored panel. */}
+                          {(run.params?.since || run.params?.until) && (
+                            <Badge title={`${run.params.since || '—'} → ${run.params.until || '—'}`}>
+                              {t('ask.history_window')}
+                            </Badge>
+                          )}
                           {run.model && <span className="font-mono">{run.model}</span>}
                           {/* No stopwatch on the row: the client's round trip
                               is not the cost of the call (J.10.6), and the
@@ -1012,13 +1100,26 @@ function Path({ hops }) {
                                 ['tokens', 'ask.hop_tokens'], ['nodes', 'ask.hop_nodes'],
                                 ['neighbors', 'ask.hop_neighbors'],
                                 ['children', 'ask.hop_children'],
-                                ['edges', 'ask.hop_edges']]) {
+                                ['edges', 'ask.hop_edges'],
+                                // v0.79: `calendar` joined the walk's
+                                // whitelist and reports its C.13.3 buckets.
+                                ['buckets', 'ask.hop_buckets']]) {
       if (out[key] != null) return t(label, { n: out[key] })
     }
     return ''
   }
+  /* J.10.5 (v0.79): the hop record names the argument that decided it, and
+     not every one is a scalar — `filter` is an object ({"type": "media"}),
+     `recursive` a boolean. A generic `${v}` prints an object as
+     "[object Object]", which says a filter was set and hides what it was:
+     the one thing the record was extended to say. Compact JSON, so the
+     panel shows the argument as the model wrote it. */
+  const argValue = (v) => (
+    Array.isArray(v) ? v.join(', ')
+    : v !== null && typeof v === 'object' ? JSON.stringify(v)
+    : String(v))
   const args = (a = {}) => Object.entries(a)
-    .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(', ') : v}`).join(' · ')
+    .map(([k, v]) => `${k}=${argValue(v)}`).join(' · ')
 
   return (
     <div className="mt-6 border-t border-line pt-4">

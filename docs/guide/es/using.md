@@ -57,6 +57,18 @@ Unos pocos controles acompañan la caja de pregunta:
   al instante, sin pagar el modelo otra vez. Apágalo para comprar una
   ejecución nueva y reemplazar la guardada.
 
+**La pregunta puede llevar un período.** Dos fechas junto a los controles,
+*desde* y *hasta*, acotan la pregunta al material creado entre ellas
+(cualquiera de los extremos puede quedar abierto). Solo se busca lo que
+llegó dentro de la ventana, en cada salto cuando el modelo salta, y la
+respuesta muestra la ventana realmente usada: las fechas que aplicó el
+motor, no el texto que escribiste. El período es parte de la pregunta, no
+una preferencia: viaja en el enlace junto a la propia pregunta
+(`?since=…&until=…`, así que una dirección compartida hace la misma
+pregunta acotada) y no se recuerda entre visitas. Una fecha que el motor
+no puede leer se rechaza, como cualquier otro argumento inválido (spec
+J.5.19).
+
 **Las respuestas servidas lo dicen.** Una respuesta servida lleva la
 insignia **Del banco**, y el costo registrado nunca se vuelve a cobrar.
 No es un caché tonto: la recuperación corre igual en cada pregunta, y la

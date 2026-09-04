@@ -31,7 +31,9 @@
   "ask.history_title": "Questions already asked",
   "ask.history_today": "Today",
   "ask.history_unavailable": "This browser is not keeping runs: storage is unavailable (a private window, or storage turned off). Answers are unaffected.",
+  "ask.history_window": "windowed",
   "ask.history_yesterday": "Yesterday",
+  "ask.hop_buckets": "{n} period(s)",
   "ask.hop_children": "{n} child(ren)",
   "ask.hop_edges": "{n} edge(s)",
   "ask.hop_error": "refused · {code}",
@@ -90,6 +92,12 @@
   "ask.trail_sub": "Where this question went, on the forest it came out of.",
   "ask.trail_view_hint": "Scroll to zoom, drag to pan, double-click to fit",
   "ask.trail_waiting": "Searching — the first stages appear before the reply does.",
+  "ask.window": "Period",
+  "ask.window_clear": "Whole forest (clear the period)",
+  "ask.window_hint": "Bounds the question to material created between these dates; either end may be left open. Only what arrived inside the window is searched, and the answer names the window actually used. Part of the question, not a preference: it travels with the link and is not remembered.",
+  "ask.window_since": "Created from",
+  "ask.window_until": "Created until",
+  "ask.window_used": "Window used: {since} → {until}",
   "ask.working_hops": "Foraging searching, reading, deciding where next…",
   "ask.working_sweep": "Searching the forest…"
 }
