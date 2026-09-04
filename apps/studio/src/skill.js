@@ -273,7 +273,10 @@ after:`)}
   the concatenated pages are the body, byte for byte. \`look\` also says who
   and when: \`source\`, \`created\`, \`updated\`, \`aliases\`, \`origin\`.
 - \`sniff(forest, terms)\` — literal text search inside bodies (substring,
-  not regex).
+  not regex). A KIND of node is a filter, not a word: \`type_filter: "media"\`
+  on \`locate\`/\`sniff\`, \`filter: {"type": "media"}\` on \`scan\` (with
+  \`recursive: true\` to reach every branch). Sniffing for the word "media"
+  greps bodies for that word and returns every document that mentions it.
 - \`scan(forest, parent_id)\`, \`move(forest, id)\` — list a branch's nodes by
   metadata; follow a node's typed edges. \`scan(forest, "_index",
   recursive: true)\` maps a whole forest cheaply; to walk one completely,

@@ -367,7 +367,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         anything: an empty window says so explicitly rather than looking
         like an empty forest. `lang` filters by the node's declared
         language tag (A.3.2), exact match — a node that declares none is
-        in no language filter."""
+        in no language filter. `type_filter` narrows to one node type: the
+        pictures are `type_filter="media"`, not a query for the word."""
         return await call(forest, "locate", query=query, k=k, scope=scope,
                           type_filter=type_filter, include=include,
                           since=since, until=until, date_field=date_field,
@@ -467,7 +468,11 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         id/type/summary/body_tokens) — and it is the PAGE lever: the token
         budget cuts the page, so fewer fields per item means more items
         per page (`fields=["id"]` enumerates a large forest in a fraction
-        of the calls). `since`/`until` bound it by date."""
+        of the calls). `filter` matches passport fields: `{"type": "media"}`
+        lists the pictures, `{"source": "agent"}` what agents wrote. Without
+        `recursive` only the DIRECT children are listed, and a root's direct
+        children are its branches, not its documents. `since`/`until` bound
+        it by date."""
         return await call(forest, "scan", parent_id=parent_id, filter=filter,
                           fields=fields, recursive=recursive, limit=limit,
                           after=after, since=since,
@@ -475,7 +480,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
 
     @mcp.tool()
     async def sniff(forest: str, terms: list[str], scope: str | None = None,
-                    k: int = 5, since: str | None = None,
+                    k: int = 5, type_filter: str | None = None,
+                    since: str | None = None,
                     until: str | None = None,
                     date_field: str | None = None,
                     lang: str | None = None):
@@ -485,8 +491,14 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         name it; omit it to search the whole forest. `_meta/` is the
         dialect, not content — pick("_meta/schema") reads it. `since`/`until`
         bound it by date, and here that is also the cheapest thing you can
-        do: a windowed sniff opens the files of those days and no others."""
+        do: a windowed sniff opens the files of those days and no others.
+
+        A KIND of node — the pictures, the datasets, the decisions — is
+        `type_filter` ("media", "dataset", "note"), never a term: sniffing
+        for the word "media" greps bodies for that word and returns every
+        document that mentions it, and not one picture."""
         return await call(forest, "sniff", terms=terms, scope=scope, k=k,
+                          type_filter=type_filter,
                           since=since, until=until, date_field=date_field,
                           lang=lang)
 

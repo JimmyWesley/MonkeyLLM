@@ -315,6 +315,58 @@ def test_a_walk_stored_yesterday_is_not_served_today(cached_station, scripted,
     assert "Today is 2026-01-02" in _system(seen)
 
 
+# -- the MCP surface teaches the same (J.1.2 rule 7) ---------------------------
+
+
+MCP_HEADERS = {"Accept": "application/json, text/event-stream",
+               "Content-Type": "application/json"}
+
+
+@pytest.fixture()
+def mcp_station(forage_root, tmp_path):
+    from starlette.testclient import TestClient
+
+    from monkeyllm_station.app import build_app
+
+    app = build_app(root=forage_root, registry_path=tmp_path / "mcp.db",
+                    mcp=True)
+    with TestClient(app) as client:
+        yield client, app.state.registry
+
+
+def _rpc(client, key, method, params=None):
+    headers = {**MCP_HEADERS, "Authorization": f"Bearer {key}"}
+    r = client.post("/mcp/", headers=headers, json={
+        "jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}})
+    assert r.status_code == 200, r.text
+    return r.json()["result"]
+
+
+def test_the_served_descriptions_teach_the_type_filter(mcp_station):
+    """The walk is not on the MCP surface (`answer` there has no `hops`),
+    but the walk's failure is: an agent asked for the pictures that sniffs
+    for the word "media" gets four task documents. The wire table and
+    C.6b's signature carried `type_filter` on `sniff`; the served tool did
+    not, and no description named it."""
+    client, registry = mcp_station
+    key = registry.issue_key("alice")
+    registry.grant("alice", FOREST, {"read"})
+    tools = _rpc(client, key, "tools/list")["tools"]
+    desc = {t["name"]: t["description"] for t in tools}
+    props = {t["name"]: t["inputSchema"]["properties"] for t in tools}
+    assert "type_filter" in props["sniff"] and "type_filter" in props["locate"]
+    assert "type_filter" in desc["sniff"] and "type_filter" in desc["locate"]
+    assert '{"type": "media"}' in desc["scan"] and "recursive" in desc["scan"]
+    # And the parameter is live, not only described: a typed sniff over the
+    # fixture answers through the scope like any other.
+    out = _rpc(client, key, "tools/call", {
+        "name": "sniff", "arguments": {"forest": FOREST, "terms": ["the"],
+                                        "type_filter": "dataset", "k": 3}})
+    body = json.loads(out["content"][0]["text"])
+    assert "error" not in body, body
+    assert all(r.get("type") in (None, "dataset") for r in body.get("results", []))
+
+
 # -- the console (J.5.19) -----------------------------------------------------
 
 
