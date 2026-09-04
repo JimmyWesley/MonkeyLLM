@@ -147,6 +147,8 @@ ok('F.172 the saving block teaches the passport beside the bytes',
    all.some((f) => f.path.endsWith('saving.md')
                 && f.text.includes('passport:') && f.text.includes('`## Notes`')
                 && f.text.includes('never sent')))
+ok('F.173 the core teaches that a kind of node is a filter, not a word',
+   core1.includes('type_filter: "media"') && core1.includes('filter: {"type": "media"}'))
 ok('F.127 the core states the min_score pairing',
    core1.includes('below_min_score') && core1.includes('min_evidence: 1'))
 ok('F.127 two selections, two names',

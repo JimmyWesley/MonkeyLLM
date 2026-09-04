@@ -52,6 +52,16 @@ A few controls sit beside the ask box:
   instantly, without paying the model again. Turn it off to buy a fresh
   run and replace the stored one.
 
+**The question can carry a period.** Two dates beside the controls, *from*
+and *until*, bound the question to material created between them (either
+end may be left open). Only what arrived inside the window is searched, on
+every hop when the model hops, and the answer shows the window actually
+used: the dates the engine applied, not the strings you typed. The period
+is part of the question, not a preference: it rides the link beside the
+question itself (`?since=…&until=…`, so a shared address asks the same
+bounded question) and is not remembered between visits. A date the engine
+cannot read is refused, like any other bad argument (spec J.5.19).
+
 **Cached answers say so.** A served answer carries a **From the store**
 badge, and the recorded cost is never re-billed. This is not a dumb
 cache: retrieval still runs on every ask, and the stored reply is served

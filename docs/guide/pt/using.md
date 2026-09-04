@@ -55,6 +55,17 @@ Alguns controles ficam ao lado da caixa de pergunta:
   hora, sem pagar o modelo de novo. Desligue para comprar uma execução
   nova e substituir a guardada.
 
+**A pergunta pode ter um período.** Duas datas ao lado dos controles, *de*
+e *até*, limitam a pergunta ao material criado entre elas (qualquer uma das
+pontas pode ficar aberta). Só o que chegou dentro da janela é buscado, em
+todo salto quando o modelo salta, e a resposta mostra a janela de fato
+usada: as datas que o motor aplicou, não o texto que você digitou. O
+período é parte da pergunta, não uma preferência: viaja no link ao lado da
+própria pergunta (`?since=…&until=…`, então um endereço compartilhado faz
+a mesma pergunta delimitada) e não fica lembrado entre visitas. Uma data
+que o motor não consegue ler é recusada, como qualquer outro argumento
+inválido (spec J.5.19).
+
 **Respostas servidas do banco dizem que são.** Uma resposta servida
 carrega o selo **Do banco**, e o custo registrado nunca é cobrado de
 novo. Não é um

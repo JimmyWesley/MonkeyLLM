@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.78.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.79.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,38 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **The walk had no clock and no window (spec J.10.5 r3/r4 + C.13.1 r7 +
+  C.13.3 + J.10.7 + J.5.19, v0.79)**: an operator asked a walk for "the two
+  screenshots I uploaded today"; `coverage` counted two media nodes in hop
+  1, the walk then read the root, scanned it FLAT (0), grepped every body
+  for the literal word "media" (four task docs) and answered that the
+  product keeps no pictures. Nothing was missing on the wire: `since`/
+  `until`/`date_field` on `locate`/`sniff`/`scan`, `type_filter`,
+  `filter: {type}`, `recursive` all existed and the loop forwards the
+  model's args verbatim — the MENU named none of them (v0.67's rule about
+  tools, applied to arguments), `calendar` was not on the whitelist, and
+  NO prompt said what day it was, so "hoje" was unresolvable with every
+  window parameter in the world. Now: `FORAGE_TOOLS` gains `calendar`
+  (bounded by the caller's window like the searching calls; `coverage`
+  stays unbounded), the menu names every parameter, `FORAGE_CLOCK` states
+  `host_today()` — `date.today()`, the SAME clock that stamps
+  `created`/`updated`, never a second one — and that date enters the
+  WALK's J.10.7 key only (`build_key(today=)`; the sweep's prompt states
+  no date and a date in its key would expire every stored answer
+  nightly). The caller's bound lands LAST (`{**args, **bounds}`), so a
+  model-authored `since` is replaced, not merged, and the prompt says so;
+  the record shows the NORMALISED bound (`2020-01-01`, C.13.1 r6). `HOP_ARGS`
+  gains `filter`/`type_filter`/`since`/`until`/`date_field`/`recursive`/
+  `granularity` — the arguments that decide whether a listing is EMPTY,
+  which the console could not show; `_outcome` reports `buckets` for
+  `calendar`. Gotcha: `consult_walk_store` is a closure that never
+  imported `inference` — a bare name there is a 400 "answer failed: name
+  'inference' is not defined" on every walk, caught by the store suite.
+  Ask console (J.5.19): two date inputs, `since`/`until` sent only when
+  set, read from the ADDRESS at mount like `q` and never a browser
+  preference (v0.76's lesson), answer labelled by the response's
+  `window` echo, history badges a bounded run. F.173 in
+  `tests/test_v079_walk_window.py` (+ `apps/studio/check-ask-window.mjs`).
 - **The passport travels with the bytes (spec J.8.4, v0.78)**: the agent
   that followed v0.77's path uploaded a screenshot it had already looked
   at, and the scent it knew had nowhere to go until a second call and a

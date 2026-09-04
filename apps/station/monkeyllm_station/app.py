@@ -2157,18 +2157,23 @@ def build_app(
             return None
         from monkeyllm.harvest import derive_terms
 
+        from monkeyllm_station import inference
+
         t0 = time.perf_counter()
         head = _git(Path(vine.forest.root), "rev-parse", "HEAD")
         # The walk's `k` is not capped by C.6c and keys as given. Its
         # effective terms are the derived ones and can be nothing else:
         # `terms` beside `hops` is refused before this point (J.10.3), so
         # this IS the "or the sweep derived them" half of J.10.7 rule 2.
+        # J.10.5 rule 3 (v0.79): the walk's prompt states the host's date,
+        # so the date is part of what the model was asked — read off the
+        # same clock the prompt reads, never a second one.
         key = answer_store.build_key(
             question=question, terms=derive_terms(question),
             k=k, hops=budget, window=window,
             hybrid=bool(getattr(vine, "hybrid_locate", False)),
             binding=binding, policy=policy, head=head,
-            reply_tokens=reply_tokens)
+            reply_tokens=reply_tokens, today=inference.host_today())
         store = answer_store.AnswerStore(Path(vine.forest.root))
         sample["cache_store"] = {"store": store, "key": key,
                                  "question": question,

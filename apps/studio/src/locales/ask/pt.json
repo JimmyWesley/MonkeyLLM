@@ -31,7 +31,9 @@
   "ask.history_title": "Perguntas já feitas",
   "ask.history_today": "Hoje",
   "ask.history_unavailable": "Este navegador não está guardando execuções: o armazenamento não está disponível (janela anônima, ou armazenamento desligado). As respostas seguem funcionando.",
+  "ask.history_window": "com período",
   "ask.history_yesterday": "Ontem",
+  "ask.hop_buckets": "{n} período(s)",
   "ask.hop_children": "{n} filho(s)",
   "ask.hop_edges": "{n} aresta(s)",
   "ask.hop_error": "recusado · {code}",
@@ -90,6 +92,12 @@
   "ask.trail_sub": "Por onde esta pergunta passou, na floresta de onde ela saiu.",
   "ask.trail_view_hint": "Role para dar zoom, arraste para mover, duplo clique para enquadrar",
   "ask.trail_waiting": "Buscando — as primeiras etapas aparecem antes da resposta.",
+  "ask.window": "Período",
+  "ask.window_clear": "Floresta inteira (limpar o período)",
+  "ask.window_hint": "Limita a pergunta ao material criado entre estas datas; qualquer uma das pontas pode ficar aberta. Só o que chegou dentro da janela é buscado, e a resposta diz a janela de fato usada. É parte da pergunta, não uma preferência: viaja com o link e não fica lembrada.",
+  "ask.window_since": "Criado a partir de",
+  "ask.window_until": "Criado até",
+  "ask.window_used": "Janela usada: {since} → {until}",
   "ask.working_hops": "Forrageando buscando, lendo, decidindo para onde ir…",
   "ask.working_sweep": "Buscando na floresta…"
 }

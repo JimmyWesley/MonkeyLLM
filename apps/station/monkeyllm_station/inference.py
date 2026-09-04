@@ -15,6 +15,7 @@ callable, and answering composes `harvest` — both public surfaces.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import time
@@ -356,8 +357,38 @@ def answer(scoped_vine, question: str, binding: dict, k: int = 3,
 # decide to call it, which left a walk with no move but to read one document
 # and describe the corpus from it. Nothing widens: it opens no body (C.17
 # rule 1) and every number in it is the calling policy's own (rule 7).
+#
+# `calendar` joined in v0.79 (J.10.5) for the same reason: a question with a
+# period in it — today, this week, since the last release — is decided by
+# where the material sits in time, and C.13.3 is the read built for that:
+# periods and counts off the catalog, no body opened, every count the
+# calling policy's own. Without it a walk asked for "today" could only guess
+# a date, or read the whole forest to find one.
 FORAGE_TOOLS = ("locate", "sniff", "look", "move", "pick", "scan", "query",
-                "coverage")
+                "coverage", "calendar")
+
+
+def host_today() -> str:
+    """The host's date, as the loop's prompt states it (J.10.5 rule 3).
+
+    One clock, deliberately: `date.today()` is what stamps `created` and
+    `updated` on every node this host writes, so "today" in the question
+    and "today" in the passports are one day. The walk's store key reads
+    the same function (J.10.7, v0.79), never a second clock.
+    """
+    return dt.date.today().isoformat()
+
+
+# J.10.5 rule 3 (v0.79). A model holding every window parameter there is can
+# write `since` and has nothing to write in it: no prompt said what day it
+# was, so "today" was unresolvable. Appended per call, because the constant
+# below is served for as long as the process lives.
+FORAGE_CLOCK = (
+    "\n\nToday is {today} — the host's date, the same clock that stamps "
+    "`created` and `updated` on every node this host writes. Resolve a "
+    "relative period in the question (today, yesterday, this week, last "
+    "month) against it, and pass the result as `since`/`until`."
+)
 
 MAX_HOPS = 16
 
@@ -365,16 +396,24 @@ FORAGE_SYSTEM = """You are a navigator in a knowledge forest. Answer the \
 question using ONLY the tools below. Never invent facts: navigate, read, answer.
 
 Always respond with a SINGLE JSON object, nothing else:
-- {"tool": "locate", "args": {"query": "...", "k": 5}} -> entry points by curated metadata
-- {"tool": "sniff", "args": {"terms": ["..."], "scope": null}} -> literal grep on BODIES: an exact
-  term (code, name, number) -> node + section + snippet. `scope` restricts to a branch or node.
+- {"tool": "locate", "args": {"query": "...", "k": 5, "type_filter": null, "since": null,
+  "until": null}} -> entry points by curated metadata (titles, summaries, tags; never bodies)
+- {"tool": "sniff", "args": {"terms": ["..."], "scope": null, "type_filter": null, "since": null,
+  "until": null}} -> literal grep on BODIES: an exact term (code, name, number) -> node + section
+  + snippet. `scope` restricts to a branch or node.
 - {"tool": "look", "args": {"id": "..."}} -> cheap digest of a node: summary, neighbours, outline
 - {"tool": "move", "args": {"id": "...", "rel": null}} -> neighbours ("children" lists a branch's)
 - {"tool": "pick", "args": {"id": "...", "section": null}} -> the body, or one section of it
-- {"tool": "scan", "args": {"parent_id": "...", "filter": {}}} -> filter children by metadata
+- {"tool": "scan", "args": {"parent_id": "...", "filter": {"type": "media"}, "recursive": false,
+  "since": null, "until": null}} -> list a branch's children by metadata. `filter` keys are
+  passport fields (type, tags, ...); `recursive: true` walks the whole subtree — without it only
+  the DIRECT children are listed, and a root's direct children are its branches, not documents.
 - {"tool": "query", "args": {"id": "...", "sql": "SELECT ..."}} -> read-only SQL on type:dataset nodes
 - {"tool": "coverage", "args": {}} -> what this forest HOLDS: every root with its node count, date
   range and source, plus totals by type. Counts and curated metadata, no search and no bodies.
+- {"tool": "calendar", "args": {"granularity": "month", "scope": null, "since": null,
+  "until": null}} -> which periods hold material and how much (day|week|month|year), most recent
+  first; every bucket carries the exact `since`/`until` a search takes. Counts only, no bodies.
 - {"tool": "answer", "args": {"text": "...", "answer_nodes": ["full/id"]}} -> the final answer
 
 Strategy: an exact rare term (code, proper name, number)? sniff first — it lands in the section and
@@ -388,6 +427,16 @@ Rules:
   dropped, never that they failed the filter: never present a truncated result as the complete
   set, and never state a count from one. Read the "hint" and ask again, narrower.
 - Repeating the same call with the same arguments returns the same result. Change tool or terms.
+- Time: `since`/`until` on locate, sniff, scan and calendar take YYYY, YYYY-MM or YYYY-MM-DD
+  (inclusive) and bound by each node's `created` date (`"date_field": "updated"` for the other).
+  A question about a period — today, this week, last month, since X — is a window: resolve it
+  from the date stated below, use calendar when you need to see which periods hold anything, and
+  pass the window on the searching calls. An empty windowed read says whether the window was the
+  reason (`matched_window`), so read that before concluding nothing exists.
+- A KIND of node — the pictures, the datasets, the decisions — is found by its filter:
+  `type_filter` on locate/sniff, `filter: {"type": "..."}` on scan (with `recursive: true` when
+  it may sit anywhere in the branch). Sniffing for the type's NAME is not that: it greps bodies
+  for a word and returns every document that merely mentions it.
 - type:dataset nodes answer through SQL: read the manual in look, then query. Aggregates are not
   in the prose. A "notes" field on a dataset is what its operator wrote about how to read it —
   follow it. Never `SELECT *` on a wide table: results are token-budgeted, so name the columns
@@ -444,8 +493,15 @@ def json_block(text: str) -> str | None:
 # What a hop is allowed to report about itself. Small scalars the model
 # chose, so a reader can see the *decision*, not just the tool name — "sniff"
 # says nothing; `sniff terms=[architecture]` says what it was thinking.
+# J.10.5 (v0.79): the second row is the arguments that decide whether a
+# listing is EMPTY. Without them `scan _index -> 0 node(s)` read on a console
+# as an empty root, when it was a flat scan with a type filter over five
+# branches — the record was hiding the one argument that explained it. An
+# argument the model did not set is absent, never a default written in.
 HOP_ARGS = ("query", "terms", "sql", "section", "rel", "scope", "parent_id",
-            "direction", "k")
+            "direction", "k",
+            "filter", "type_filter", "since", "until", "date_field",
+            "recursive", "granularity")
 
 
 def _hop_args(args: dict) -> dict:
@@ -521,6 +577,10 @@ def _outcome(tool: str, result: dict) -> dict:
         # under the field a reader already knows, rather than as a word only
         # this one tool would ever emit.
         return {"nodes": result.get("total")}
+    if tool == "calendar":
+        # C.13.3's answer is periods, not nodes: the number that says what
+        # came back is how many buckets hold anything.
+        return {"buckets": len(result.get("buckets") or [])}
     if tool == "pick":
         return {"tokens": result.get("body_tokens")}
     if tool == "query":
@@ -654,7 +714,7 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
     the hunt — a deadline turn forces an answer from what was already read.
     """
     max_hops = max(1, min(int(max_hops or 1), MAX_HOPS))
-    system = FORAGE_SYSTEM
+    system = FORAGE_SYSTEM + FORAGE_CLOCK.format(today=host_today())
     # J.10.8 (amended v0.63): the cap bounds every turn and the note aims at
     # the answer, which is the turn it exists for. A navigating turn is short;
     # the ANSWER turn is an object carrying the text AND `answer_nodes`, and
@@ -678,7 +738,8 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
             f"{bounds.get('since') or 'the beginning'} … "
             f"{bounds.get('until') or 'now'} "
             f"({bounds.get('date_field', 'created')} date). Material outside "
-            "that window is not available to you; say so if the answer needs it.")
+            "that window is not available to you; say so if the answer needs it. "
+            "That bound replaces any since/until you send.")
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content":
@@ -757,11 +818,15 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
         asked.add(key)
 
         h0 = time.perf_counter()
-        # The searching calls, and only those: `coverage` takes no window
-        # (C.17 counts a whole scope, and `date_field` is the caller's, not
-        # the hunt's), and `harvest` is not on the whitelist — it was refused
-        # above long before this line could ever see it.
-        if bounds and tool in ("locate", "sniff", "scan"):
+        # The searching calls and the map, and only those: `coverage` takes
+        # no window (C.17 counts a whole scope, and `date_field` is the
+        # caller's, not the hunt's), and `harvest` is not on the whitelist —
+        # it was refused above long before this line could ever see it.
+        # `calendar` IS bounded (v0.79): the map the model sees must be the
+        # map of what it may reach. The caller's bound lands LAST, so a
+        # window the model authored on the same call is replaced, not
+        # merged — C.13.1 rule 7, and the prompt says so.
+        if bounds and tool in ("locate", "sniff", "scan", "calendar"):
             args = {**args, **bounds}
         result = scoped_vine.call(tool, **args)
         hop_ms = (time.perf_counter() - h0) * 1000
