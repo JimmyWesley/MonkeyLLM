@@ -13,6 +13,8 @@
   "nav.expand": "Expandir el menú",
   "nav.explore": "Explorar",
   "nav.explore.blurb": "Recorre el árbol y lee lo que guarda cada nodo",
+  "nav.extensions": "Extensiones",
+  "nav.extensions.blurb": "Nuevas capacidades: conversores, herramientas, paneles",
   "nav.health": "Salud",
   "nav.health.blurb": "Lo que ve el Ranger, y toma una instantánea",
   "nav.ingest": "Ingesta",

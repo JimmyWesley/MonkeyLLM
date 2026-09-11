@@ -189,6 +189,23 @@ class ScopedVine:
         self.policy = policy
 
     @property
+    def ext_registry(self):
+        """The forest's extension view, read through to the engine (L.3).
+
+        A property rather than a stored copy, and read-only: like `catalog`,
+        it is here so the seams that live above the engine (`prompt`) reach
+        the same object the engine's own seams (`ranking`) do. Not
+        dispatchable from the wire — `ScopedVine` enumerates its parameters,
+        and this is not one of them.
+        """
+        return getattr(self._vine, "ext_registry", None)
+
+    @property
+    def vine(self):
+        """The engine underneath, for the host's own instrumentation only."""
+        return self._vine
+
+    @property
     def catalog(self):
         """The engine's catalog, read-through (C.6c.3, v0.57).
 

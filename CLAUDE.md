@@ -77,6 +77,57 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **A capability the deployment does not have (spec Part L + J.4.2/J.10/
+  J.5, v0.80)**: Part G's line "UIs and bots are MCP/library clients, not
+  plugins" drew the boundary correctly and left a whole class of work with
+  nowhere to stand — a transcriber, a converter for a format nobody here
+  has heard of, an OCR pass — each arriving with a dependency that
+  `LICENSING.md`'s Apache/AGPL split cannot pin without making this project
+  their distributor. Now an **extension** is a package that contributes at
+  named seams (L.3: `converters` read by the Gardener above
+  `extra_converters` and below an operator's own command hook, `curation`
+  after the host's hooks, `events` on the ONE emitter that decides
+  webhooks, `tools` on the MCP menu, `routes` under `/v1/ext/<id>/`, `jobs`
+  pulled and never scheduled, `ranking` inside `harvest` before the budget,
+  `prompt`, `roles`) and never patches. `register(api)` is ENUMERATED like
+  `ScopedVine`: a new engine capability needs its own line before an
+  extension can reach it. A `heavy` handler runs in the extension's own
+  venv and process (L.5) so the motivating dependency never enters the
+  process that serves the forest. **This project distributes nothing**:
+  four sources (index, git, archive, local file) through one resolver, and
+  whatever the source it resolves to an IMMUTABLE artifact before it is
+  validated (a git ref becomes a SHA; a moving ref is allowed and marked
+  `tracking`, `unverified` by construction); tiers `verified` / `signed` /
+  `unverified`; resolving `requirements.txt` executes third-party build
+  code, so the conformance kit runs before anything is REGISTERED and never
+  before third-party code runs — say it in those words. Mechanism is the
+  engine's, governance the Station's (L.12): global install under
+  `MONKEYLLM_EXT_HOME`, per-forest enablement a line in `_meta/` (versioned,
+  travels in a snapshot, `validate` reports an extension a forest expects
+  and does not have; `_meta` declares expectation and never grants it). A
+  contribution the host cannot serve is inert and named, never an error
+  (L.10); the config schema is the source of truth and a panel is decoration
+  over it; the console surface is declarative (L.11) because J.5.13 admits
+  no third-party script. Audit rows gain **`via`** (`ext:<id>`, nullable,
+  absent on older rows) while `principal` stays whoever ASKED; roles gain
+  `kind` (`chat`/`embed`/`vision`/`transcribe`/`rerank`) and an extension
+  registers a role and never holds a key — `api.models` hands it a bound
+  caller; quota is per extension per forest and exhaustion is a refusal.
+  Three gotchas that cost a round: the loader executed a module TWICE
+  (once for `register`, once per handler) so any module-level state split
+  in half with no error — import once per installed TREE, not per id (a
+  process may hold two installs of one id); the extension list was gated
+  on "has a grant" where it meant "is admin", caught by
+  `test_station_admin_scope`'s route canary, which is why a route added
+  today is swept today; and the MCP `tools/list` filter's fallback
+  returned the UNFILTERED list on an SDK shape it did not recognise — a
+  visibility filter fails CLOSED (fewer tools is a degradation, more is a
+  disclosure). CLI `vine ext install|update|list|remove|config|enable|
+  disable`; `MONKEYLLM_EXT_INDEX`, `MONKEYLLM_EXT_WORKER_TIMEOUT`. First
+  real extension: `extensions/whisper` (registers `transcribe`, adds no
+  package to the engine). F.174-F.198 in `tests/test_v080_*.py`; **F.194
+  (signed-tag verification against the forge's keys) is implemented and
+  not measured**, and the curated index is not published yet.
 - **The walk had no clock and no window (spec J.10.5 r3/r4 + C.13.1 r7 +
   C.13.3 + J.10.7 + J.5.19, v0.79)**: an operator asked a walk for "the two
   screenshots I uploaded today"; `coverage` counted two media nodes in hop

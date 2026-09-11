@@ -296,6 +296,27 @@ export const api = {
     request(`/v1/forests/${encodeURIComponent(forest)}/webhooks/${encodeURIComponent(id)}`,
             { method: 'DELETE' }),
 
+  // Extensions (Part L). Two authorities on one resource: any forest admin
+  // may LIST (they are choosing what to enable), only the deployment's
+  // authority may change what exists — the route decides, and the console
+  // reads `may_install` rather than deciding for itself.
+  extensions: () => request('/v1/admin/extensions'),
+  extensionAction: (body) =>
+    request('/v1/admin/extensions', { method: 'POST', body }),
+  extensionEnablement: (forest) =>
+    request(`/v1/admin/extensions/enablement?forest=${encodeURIComponent(forest)}`),
+  setExtensionEnablement: (body) =>
+    request('/v1/admin/extensions/enablement', { method: 'POST', body }),
+  extensionConfig: (ext) =>
+    request(`/v1/admin/extensions/config?ext=${encodeURIComponent(ext)}`),
+  saveExtensionConfig: (body) =>
+    request('/v1/admin/extensions/config', { method: 'POST', body }),
+  extensionQuota: (ext, forest) =>
+    request(`/v1/admin/extensions/quota?ext=${encodeURIComponent(ext)}`
+            + `&forest=${encodeURIComponent(forest)}`),
+  setExtensionQuota: (body) =>
+    request('/v1/admin/extensions/quota', { method: 'POST', body }),
+
   // governance
   principals: () => request('/v1/admin/principals'),
   grant: (body) => request('/v1/admin/grant', { method: 'POST', body }),

@@ -1,0 +1,14 @@
+{
+  "title": "Whisper",
+  "blurb": "Audio you ingest becomes a transcript the forest can search. The recording itself is kept.",
+  "sections": [
+    {
+      "title": "Transcription",
+      "fields": ["language", "vocabulary", "heading"]
+    }
+  ],
+  "notes": [
+    "Bind the `transcribe` role in Models before ingesting audio: without a binding the file lands as a media node with no transcript, and a later sync fills it in.",
+    "Files over 25 MB are refused. Split a long recording, or transcribe it elsewhere and ingest the text."
+  ]
+}

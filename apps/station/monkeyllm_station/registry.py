@@ -86,7 +86,13 @@ CREATE TABLE IF NOT EXISTS audit (
     usd        REAL,      -- what the provider's catalogue prices this at
     tokens     INTEGER,   -- prompt + completion, the provider's own count
     calls      INTEGER,   -- provider round trips inside this one call
-    priced     INTEGER    -- 1 when a catalogue answered; 0 = tokens, no price
+    priced     INTEGER,   -- 1 when a catalogue answered; 0 = tokens, no price
+    -- L.7 rule 3 (v0.80): who acted on the principal's behalf, `ext:<id>`.
+    -- `principal` keeps its meaning to the byte — whoever CAUSED the act —
+    -- because the question an access log exists to answer is who asked for
+    -- this, and an extension is not an answer to it. Absent on every row
+    -- an extension was not in, and on every row written before v0.80.
+    via        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_principal ON audit(principal);
@@ -180,6 +186,43 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_hook
 -- J.17 (v0.56): a share is a key with one room — one node, read-only,
 -- expiring, revocable. The token is stored HASHED exactly as API keys are;
 -- the URL is the secret, shown once at creation and returned by nothing.
+-- Part L (v0.80). The engine owns the mechanism — manifests, sources,
+-- tiers, the loader, the kit — and these three tables are the governance:
+-- where a secret lives, where an extension is allowed to act, and what it
+-- is allowed to spend. See `extensions.py` for the accessors.
+CREATE TABLE IF NOT EXISTS extension_config (
+    ext      TEXT NOT NULL,
+    key      TEXT NOT NULL,
+    value    TEXT,
+    secret   INTEGER NOT NULL DEFAULT 0,
+    set_at   TEXT NOT NULL,
+    PRIMARY KEY (ext, key)
+);
+
+-- The forest's own `_meta/extensions.yaml` is the authority a snapshot
+-- carries; this is the deployment's index over it, so a console answers
+-- "where is this enabled" without opening every forest on the volume. On
+-- disagreement the forest wins — it is the versioned copy.
+CREATE TABLE IF NOT EXISTS extension_enablement (
+    ext        TEXT NOT NULL,
+    forest     TEXT NOT NULL,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    by         TEXT,
+    at         TEXT NOT NULL,
+    PRIMARY KEY (ext, forest)
+);
+
+CREATE TABLE IF NOT EXISTS extension_quota (
+    ext        TEXT NOT NULL,
+    forest     TEXT NOT NULL,
+    ceiling    REAL,
+    period     TEXT NOT NULL DEFAULT 'month',
+    spent      REAL NOT NULL DEFAULT 0,
+    calls      INTEGER NOT NULL DEFAULT 0,
+    window_key TEXT,
+    PRIMARY KEY (ext, forest)
+);
+
 CREATE TABLE IF NOT EXISTS shares (
     id         TEXT PRIMARY KEY,
     token_hash TEXT NOT NULL UNIQUE,
@@ -210,6 +253,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_single_owner
 # `embed` is not a chat model: it builds the Canopy and points the
 # Gauntlet (Part K). Absent, navigation is unchanged.
 ROLES = ("ingest", "answer", "vision", "embed")
+
+# L.6 (v0.80): an extension REGISTERS a role, and the operator then binds it
+# in the same console as every other. The set is therefore not closed at
+# import — but it is never open either: a role reaches it only by being
+# declared in a LOADED extension's manifest, which is why the caller passes
+# the addition rather than the registry guessing at one.
 
 # One-time DATA repairs, applied in order and stamped in `PRAGMA
 # user_version`. A repair that ran on every open would fight the operator:
@@ -255,7 +304,9 @@ MIGRATIONS = {
     # design — see the table above.
     "audit": {"ms": "REAL", "model_ms": "REAL", "error_code": "TEXT",
               "usd": "REAL", "tokens": "INTEGER", "calls": "INTEGER",
-              "priced": "INTEGER"},
+              "priced": "INTEGER",
+              # L.7 rule 3 (v0.80)
+              "via": "TEXT"},
 }
 
 # A login is good for a working day. Long enough not to nag, short enough
@@ -676,14 +727,38 @@ class Registry:
             )
         ]
 
+    # -- extensions (Part L) -----------------------------------------------
+
+    @property
+    def ext_config(self):
+        from monkeyllm_station.extensions import Config
+        return Config(self.conn)
+
+    @property
+    def ext_enablement(self):
+        from monkeyllm_station.extensions import Enablement
+        return Enablement(self.conn)
+
+    @property
+    def ext_quota(self):
+        from monkeyllm_station.extensions import Quota
+        return Quota(self.conn)
+
     # -- audit (J.4) --------------------------------------------------------
 
     def record(self, *, principal: str, forest: str, primitive: str, args: dict,
                result: str, size: int = 0, commit_sha: str | None = None,
                ms: float | None = None, model_ms: float | None = None,
-               error_code: str | None = None, cost: dict | None = None) -> None:
+               error_code: str | None = None, cost: dict | None = None,
+               via: str | None = None) -> None:
         """Access log. Arguments are digested, never stored verbatim: the log
         records who read what, not the content they read.
+
+        `via` is L.7 rule 3 (v0.80): `ext:<id>` when an extension was in the
+        path, absent otherwise, and it NEVER displaces `principal`. Without
+        it an extension's model spend is attributed to whoever triggered the
+        ingest — the same quiet misattribution J.4.2's other columns exist
+        to end.
 
         `ms`, `model_ms`, `error_code` and `cost` are J.4.2 (v0.73). Every
         one of them is optional and stored as NULL when the caller does not
@@ -708,15 +783,17 @@ class Registry:
                 + int(cost.get("completion_tokens") or 0)
         self.conn.execute(
             "INSERT INTO audit (ts, principal, forest, primitive, args, result, "
-            "  size, commit_sha, ms, model_ms, error_code, usd, tokens, calls, priced) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "  size, commit_sha, ms, model_ms, error_code, usd, tokens, calls, "
+            "  priced, via) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (_now(), principal, forest, primitive,
              json.dumps(digest, ensure_ascii=False), result, size, commit_sha,
              None if ms is None else round(float(ms), 3),
              None if model_ms is None else round(float(model_ms), 3),
              error_code or None,
              cost.get("usd"), tokens, cost.get("calls"),
-             None if not cost else int(bool(cost.get("priced")))),
+             None if not cost else int(bool(cost.get("priced"))),
+             via or None),
         )
         self.conn.commit()
 
@@ -985,9 +1062,11 @@ class Registry:
         return out
 
     def bind_model(self, forest: str, role: str, provider: str, model: str,
-                   max_tokens: int = 1500, reasoning: str = "off") -> None:
-        if role not in ROLES:
-            raise ValueError(f"role must be one of {list(ROLES)}")
+                   max_tokens: int = 1500, reasoning: str = "off",
+                   *, extra_roles=None) -> None:
+        known = set(ROLES) | set(extra_roles or ())
+        if role not in known:
+            raise ValueError(f"role must be one of {sorted(known)}")
         if not self.conn.execute("SELECT 1 FROM providers WHERE name = ?",
                                  (provider,)).fetchone():
             raise ValueError(f"unknown provider: {provider}")

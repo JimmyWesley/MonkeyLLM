@@ -697,13 +697,20 @@ def _traced(fn):
         # more than the lexical `locate` it is charged to.
         outer_dense = self._dense_ms_pending
         self._dense_ms_pending = None
+        # L.3 (v0.80): which extensions shaped this call. Same save/restore
+        # for the same reason — a nested traced call must not hand its
+        # attributions to the frame above it.
+        outer_via = self._ext_via_pending
+        self._ext_via_pending = None
         try:
             result = fn(self, *args, **kwargs)
             embed_ms = self._embed_ms_pending
             dense_ms = self._dense_ms_pending
+            ext_via = self._ext_via_pending
         finally:
             self._embed_ms_pending = outer_embed
             self._dense_ms_pending = outer_dense
+            self._ext_via_pending = outer_via
         elapsed = (time.perf_counter() - t0) * 1000
         node_id = kwargs.get("id") or (args[0] if takes_id and args else None)
         self.tracer.record(
@@ -714,6 +721,7 @@ def _traced(fn):
             elapsed_ms=elapsed,
             embed_ms=embed_ms,
             dense_ms=dense_ms,
+            via=ext_via,
         )
         return result
 
@@ -787,6 +795,15 @@ class Vine:
         # (v0.68). `_traced` resets and collects it around every call.
         self._embed_ms_pending: float | None = None
         self._dense_ms_pending: float | None = None
+        # Part L (v0.80): extensions whose `ranking` or `prompt` contribution
+        # shaped the call in progress. A list rather than a flag, because
+        # more than one can, and `None` rather than `[]` so an untouched
+        # call's event is byte-identical to a pre-v0.80 one.
+        self._ext_via_pending: list | None = None
+        # L.3: the registry view a host loaded for THIS forest, or None.
+        # Host-supplied and never dispatched, the G.2.5 construction — an
+        # agent must not be able to name the contributions it is ranked by.
+        self.ext_registry = None
 
     @property
     def commit_trailers(self) -> list[str]:

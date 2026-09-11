@@ -595,19 +595,30 @@ def builtin_converters() -> list:
     return convs
 
 
-def discover_converters(config: dict, extra: list | None = None) -> list:
-    """G.2 order: config command hooks > injected extras (G.5.1) > entry
-    points > built-ins.
+def discover_converters(config: dict, extra: list | None = None,
+                        registry=None) -> list:
+    """G.2/L.3 order: config command hooks > extensions (install order) >
+    injected extras (G.5.1) > entry points > built-ins.
 
     `extra` is the seam a host uses to inject converters it holds (the
     vision describer): AFTER the operator's command hooks — an operator who
     configured their own `.png` hook keeps it — and BEFORE entry points and
     built-ins, so everyone else gets the injected converter over the stub.
+
+    `registry` is Part L's seam (v0.80): an extension the operator installed
+    and enabled on this forest outranks anything this project ships,
+    because installing it was a deliberate act and the built-in is the
+    fallback. It sits below a command hook for exactly the reason `extra`
+    does — the operator's own `_meta/gardener.yaml` is the most local
+    statement of intent there is.
     """
     convs: list = [
         CommandConverter(ext, tpl)
         for ext, tpl in (config.get("converters") or {}).items()
     ]
+    if registry is not None:
+        from monkeyllm.extensions.converters import from_registry
+        convs.extend(from_registry(registry))
     convs.extend(extra or [])
     for ep in entry_points(group="monkeyllm.converters"):
         try:
@@ -955,6 +966,7 @@ class Gardener:
                  hooks: list[Callable] | None = None, *, dry_run: bool = False,
                  on_stage: Callable[[str, str], None] | None = None,
                  extra_converters: list | None = None,
+                 ext_registry=None,
                  provenance: dict[str, str] | None = None):
         self.vine = vine
         self.forest = vine.forest
@@ -968,6 +980,12 @@ class Gardener:
         # relative posix paths `source_path` records; the URL is data, not
         # vocabulary, so nothing here reads it.
         self.provenance = dict(provenance or {})
+        # L.3 seam (v0.80): the extension registry a host loaded for this
+        # forest. Keyword-only and host-supplied, the G.2.5 construction —
+        # an agent must never be able to name the converters it is judged
+        # by. `None` is a host that runs no extensions, which is every
+        # engine-only caller that has not asked for them.
+        self.ext_registry = ext_registry
         # G.5.1 seam: `extra_converters` joins discovery between the
         # operator's command hooks and everything else. An explicit
         # `converters` list bypasses discovery entirely (tests do this),
@@ -975,7 +993,8 @@ class Gardener:
         # exactly what runs.
         self.converters = (converters if converters is not None
                            else discover_converters(self.config,
-                                                    extra=extra_converters))
+                                                    extra=extra_converters,
+                                                    registry=ext_registry))
         self.hooks = hooks if hooks is not None else discover_hooks()
         self.dry_run = bool(dry_run)
         self.on_stage = on_stage

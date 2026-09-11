@@ -35,6 +35,7 @@ class Tracer:
         elapsed_ms: float,
         embed_ms: float | None = None,
         dense_ms: float | None = None,
+        via: list[str] | None = None,
     ) -> None:
         event = {
             "ts": time.time(),
@@ -58,6 +59,16 @@ class Tracer:
             # this process, and an operator tuning the wrong one wastes a
             # week.
             event["dense_ms"] = round(dense_ms, 3)
+        if via:
+            # L.3 (v0.80): the extensions whose contribution shaped this
+            # call. Only `ranking` and `prompt` reach here, and they reach
+            # it because they change WHAT THE PRODUCT ANSWERS: an operator
+            # comparing a bad answer against a good one has no other way to
+            # learn that a third party was between them. Absent when no such
+            # contribution ran, which is every call on a deployment with no
+            # extensions — the event is then byte-identical to a pre-v0.80
+            # one.
+            event["via"] = sorted(via)
         self.events.append(event)
         with self.trace_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
