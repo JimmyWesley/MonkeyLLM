@@ -76,6 +76,7 @@ from monkeyllm.windows import exclusive_end, normalize_window
 from monkeyllm_station import answer_store, runs as runs_mod, vision, webhooks
 from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
+from monkeyllm_station.extensions import Runtime as ExtensionRuntime
 from monkeyllm_station.registry import Registry
 
 log = logging.getLogger("monkeyllm_station")
@@ -804,6 +805,15 @@ def build_app(
               file=sys.stderr)
     registry = Registry(registry_path)
     registry.adopt_env_providers(providers_from_env())
+    # Part L: load every installed extension once, here, before anything can
+    # ask for one. `host_surfaces` says what THIS host can serve — a Station
+    # draws panels, so it names one; a contribution it cannot serve stays
+    # inert and named rather than being an error (L.10).
+    ext_runtime = ExtensionRuntime(root, host_surfaces={"panel"},
+                                   registry=registry).load()
+    for failure in ext_runtime.failed:
+        print(f"station: extension {failure.get('id')} did not load: "
+              f"{failure.get('message')}", file=sys.stderr)
     super_admin = super_admin_from_env()
     if super_admin:
         registry.ensure_super_admin(
@@ -1043,15 +1053,29 @@ def build_app(
 
     board = JobBoard()
 
-    def _advance(steps):
+    def _advance(steps, forest: str | None = None,
+                 principal: str | None = None):
         """One G.10 step, shaped for the executor: `next` raising
         StopIteration through a Future would poison the awaiting
         coroutine, so exhaustion is `None` and the report is read off
-        `steps.result`."""
+        `steps.result`.
+
+        The step runs an extension's converter (L.3), and that converter
+        reaches its model through a role bound PER FOREST — so the context
+        has to be set around the step, not around the request. Without it a
+        transcriber asks for "the binding on forest `-`", gets nothing,
+        raises, and the file lands as a stub with nobody told: the failure
+        looks exactly like a provider being down.
+        """
+        from monkeyllm_station.extensions import EXT_CONTEXT
+
+        token = EXT_CONTEXT.set({"forest": forest, "principal": principal})
         try:
             return next(steps)
         except StopIteration:
             return None
+        finally:
+            EXT_CONTEXT.reset(token)
 
     def _finish_ingest(prep: PreparedIngest, cancelled: bool) -> dict:
         """On the forest lane: the tail every v0.31 ingest ran — rollup,
@@ -1115,7 +1139,8 @@ def build_app(
                                 **ingest_counts(final)})
                     return
                 step = await in_forest_thread(
-                    prep.forest, lambda: _advance(steps))
+                    prep.forest,
+                    lambda: _advance(steps, prep.forest, prep.principal))
                 if step is None:
                     final = await in_forest_thread(
                         prep.forest, lambda: _finish_ingest(prep, cancelled=False))
@@ -1208,7 +1233,7 @@ def build_app(
         """
         prep.vine.commit_trailers = [f"station-principal: {prep.principal}"]
         try:
-            return _advance(prep.steps)
+            return _advance(prep.steps, prep.forest, prep.principal)
         finally:
             prep.vine.commit_trailers = []
 
@@ -1729,6 +1754,12 @@ def build_app(
         policy = policy.masked(caps_mask)
         try:
             vine = get_vine() if get_vine is not None else pool.get(forest)
+            # L.3: the seams that live INSIDE the engine (`ranking`) and the
+            # ones that live above it (`prompt`) must see the same set, so
+            # the view is attached to the Vine and `ScopedVine` reads it
+            # through. Set per call because enablement can change between
+            # two calls while the loaded set cannot.
+            vine.ext_registry = _ext_registry_for(forest)
         except VineError as e:
             # Past the policy check the forest's existence is no longer a
             # secret from this caller — they hold a grant on it and
@@ -2867,9 +2898,23 @@ def build_app(
             # that flip is why this is a map and not a curation hook: a
             # refresh re-converts the body, and curation never runs on
             # refreshes (J.8 v0.48).
+            # L.3 `curation`: every extension hook runs, in install order,
+            # AFTER the host's own — an operator's approval hook (J.8.1) is
+            # the last word on a draft, and a contribution must not be able
+            # to run after it.
+            ext_view = _ext_registry_for(forest)
+            if ext_view is not None:
+                hooks = list(hooks or []) + [
+                    c.handler for c in ext_view.for_seam("curation")]
             gardener = Gardener(
                 vine, hooks=hooks, dry_run=stage,
                 extra_converters=([describer] if describer else None),
+                # L.3: an extension the operator installed and enabled on
+                # THIS forest outranks anything this project ships — the
+                # install was a deliberate act and the built-in is the
+                # fallback. Below the operator's own command hooks, which
+                # are the most local statement of intent there is.
+                ext_registry=ext_view,
                 provenance=(provenance or None),
                 on_stage=(None if watched is None
                           else lambda f, st: board.note_stage(watched, f, st)))
@@ -5643,6 +5688,551 @@ def build_app(
     # number an operator acts on; the names are so they can recognise them.
     STAGING_NAMES_SHOWN = 50
 
+    # ======================================================================
+    # Part L extensions (v0.80) — the governance half
+    # ======================================================================
+
+    def _ext_registry_for(forest: str):
+        """L.7 rule 2 — the share of the loaded registry this forest enables.
+
+        A VIEW over the one runtime, never a second load: an extension
+        loaded twice is one extension with two module instances and two
+        answers to "is it registered". `None` when nothing is enabled here,
+        which is byte-identical to a deployment with no extensions at all.
+        """
+        root = _lock_root(forest)
+        if root is None:
+            return None
+        try:
+            return ext_runtime.for_forest(forest, root)
+        except Exception:
+            # L.7 rule 5: an extension may fail to help and may not fail the
+            # act. An ingest with a broken extension is an ingest.
+            return None
+
+    def _ext_enabled_forests(principal: str, ext_id: str) -> list[str]:
+        """Where this principal can actually reach this extension.
+
+        Both halves matter: a forest the key does not reach is not in the
+        answer, and a forest that has not enabled the extension is not
+        either. This is what the MCP menu is built from (L.7 rule 2).
+        """
+        out = []
+        for grant in registry.grants_of(principal):
+            forest = grant["forest"]
+            root = _lock_root(forest)
+            if root is None:
+                continue
+            if ext_id in ext_runtime.enabled_for(forest, root):
+                out.append(forest)
+        return out
+
+    def _ext_store():
+        from monkeyllm.extensions.store import Store
+        return Store()
+
+    def _ext_deployment_gate(principal: str, request: Request):
+        """L.7 rule 1 — installing puts third-party code in this process.
+
+        The code reaches every forest on the volume, so the authority has to
+        cover every forest: J.10.2's reach rule, unchanged. A forest admin
+        who is not that may ENABLE what exists and may not decide what
+        exists — a local decision with a global effect is not a local
+        decision.
+        """
+        if governs_deployment(principal, mask_of(request)):
+            return None
+        return _envelope(VineError(
+            E_FORBIDDEN,
+            "installing an extension requires authority over the whole "
+            "deployment",
+            hint="Extension code runs in this host's process and reaches "
+                 "every forest it serves, so the owner (or an administrator "
+                 "of every forest) decides what is installed. Enabling one "
+                 "on a forest needs only that forest's 'admin'."), 403)
+
+    def _ext_summary(record, store, *, detailed: bool) -> dict:
+        out = {"id": record.id, "version": record.version,
+               "tier": record.tier,
+               "enabled_on": registry.ext_enablement.forests_for(record.id)}
+        if record.tracking:
+            # L.2 rule 2: the ref travels with the id, on every surface.
+            out["tracking"] = record.tracking
+        if record.license:
+            out["license"] = record.license
+        try:
+            from monkeyllm.extensions.loader import read_manifest
+            manifest = read_manifest(store.tree(record.id))
+            out["description"] = manifest.description
+            out["contributes"] = sorted(
+                seam for seam in ("converters", "curation", "events", "jobs",
+                                  "tools", "routes", "ranking", "prompt")
+                if getattr(manifest.contributes, seam))
+            if manifest.contributes.panel:
+                out["contributes"].append("panel")
+            out["registers_roles"] = [r.model_dump()
+                                      for r in manifest.models.registers]
+        except VineError as exc:
+            out["broken"] = exc.message
+        if detailed:
+            out.update({"source": record.source, "kind": record.kind,
+                        "revision": record.revision,
+                        "identity": record.identity,
+                        "reason": record.reason,
+                        "permissions": record.permissions,
+                        "installed_at": record.installed_at})
+        return out
+
+    async def extension_route(request: Request) -> JSONResponse:
+        """L.3 `routes` — an extension's own endpoint, under its own prefix.
+
+        Namespaced by construction: `/v1/ext/{ext}/{path}` cannot collide
+        with a primitive's route or another extension's, so the whole class
+        of "an extension took a name the product needed" does not exist.
+
+        The forest is named the way every other route names it, and the same
+        two questions are asked in the same order: does this caller reach the
+        forest, and has that forest enabled this extension. A handler that
+        raises is contained (L.7 rule 5) — it answers a refusal, never a 500
+        that reads as a defect in the Station.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        ext_id = request.path_params.get("ext") or ""
+        tail = request.path_params.get("path") or ""
+        forest = str(request.query_params.get("forest") or "")
+        if not forest:
+            try:
+                body = _json_object(await request.json()
+                                    if await request.body() else {})
+            except json.JSONDecodeError:
+                body = {}
+            forest = str(body.get("forest") or "")
+        else:
+            body = {}
+        if not forest:
+            return _envelope(VineError(
+                E_SCHEMA, "parameter 'forest' is required",
+                hint="Name the forest: ?forest=<id>, or \"forest\" in the body."))
+        policy = registry.policy_for(principal, forest)
+        if policy is None:
+            # J.3: a forest this caller does not reach is a forest that does
+            # not exist, and an extension route is not an exception to that.
+            return _envelope(VineError(E_NOT_FOUND,
+                                       f"unknown forest: {forest}"))
+        view = _ext_registry_for(forest)
+        claims = view.for_seam("routes") if view is not None else []
+        claim = next((c for c in claims
+                      if c.ext_id == ext_id
+                      and str(c.spec.get("name") or "").rstrip("/")
+                      in (tail, f"{ext_id}/{tail}")), None)
+        if claim is None:
+            return _envelope(VineError(
+                E_NOT_FOUND, f"no such extension route: {ext_id}/{tail}"))
+        from monkeyllm_station.extensions import EXT_CONTEXT
+        token = EXT_CONTEXT.set({"forest": forest, "principal": principal,
+                                 "ext": ext_id})
+        try:
+            payload = dict(body or {})
+            payload.update({k: v for k, v in request.query_params.items()
+                            if k != "forest"})
+            result = await in_forest_thread(
+                forest, lambda: claim.handler(forest=forest, **payload))
+        except VineError as exc:
+            return _envelope(exc)
+        except Exception as exc:
+            return _envelope(VineError(
+                "E_EXT_WORKER", f"{ext_id}: {tail} failed",
+                hint=f"{type(exc).__name__}: {exc}"), 502)
+        finally:
+            EXT_CONTEXT.reset(token)
+        registry.record(principal=principal, forest=forest,
+                        primitive=f"ext.{ext_id}.{tail}", args={},
+                        result="ok", via=f"ext:{ext_id}")
+        return JSONResponse(result if isinstance(result, dict)
+                            else {"result": result})
+
+    async def admin_extensions(request: Request) -> JSONResponse:
+        """What is installed, and what installs one (spec Part L).
+
+        Two authorities on one resource, because they are two questions: any
+        forest administrator may SEE what is installed (they are choosing
+        what to enable), and only the deployment's authority may change it.
+        The detail — where it came from, who signed it, what it may reach —
+        rides the second one.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        from monkeyllm import extensions as engine_ext
+        usable, why = engine_ext.available()
+        if not usable:
+            return _envelope(VineError(
+                E_SCHEMA, "this host cannot run extensions",
+                hint=why or "install monkeyllm[extensions]"), 501)
+
+        deployment = governs_deployment(principal, mask_of(request))
+        if request.method == "GET":
+            # `admin` on at least one forest, never merely a grant on one:
+            # this is an /v1/admin/ route, and the person choosing what may
+            # act on a forest's material is the person who administers it.
+            mask = mask_of(request)
+            may_read = deployment or any(
+                is_admin(principal, f, mask=mask)
+                for f in registry.forests_for(principal))
+            if not may_read:
+                return _envelope(VineError(
+                    E_FORBIDDEN, "requires the 'admin' capability on at "
+                                 "least one forest"), 403)
+            store = _ext_store()
+            return JSONResponse({
+                "extensions": [_ext_summary(r, store, detailed=deployment)
+                               for r in store.list()],
+                "may_install": deployment,
+                "quarantine": store.list_quarantine() if deployment else [],
+            })
+
+        gate = _ext_deployment_gate(principal, request)
+        if gate is not None:
+            return gate
+        if not writable:
+            return _envelope(VineError(
+                E_READONLY, "this Station is read-only",
+                hint="Start it with --writable to install extensions."), 403)
+        try:
+            body = _json_object(await request.json()
+                                if await request.body() else {})
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+
+        action = str(body.get("action") or "install")
+        store = _ext_store()
+        # L.1: `station_compat` is judged against the version this host
+        # publishes in `forests()` — the same number an author reads when
+        # they choose their range. Two versions here would let an extension
+        # be compatible with the list and not with the check.
+        from monkeyllm_station.mcp_surface import package_version
+        host_version = package_version()
+        try:
+            if action == "plan":
+                from monkeyllm.extensions.installer import plan
+                import shutil as _shutil
+                prepared, tmp = plan(str(body.get("source") or ""),
+                                     host_version,
+                                     verify=body.get("verify", True) is not False)
+                try:
+                    return JSONResponse(prepared.to_dict())
+                finally:
+                    _shutil.rmtree(tmp, ignore_errors=True)
+            if action in ("install", "update"):
+                from monkeyllm.extensions.installer import install, update
+                acknowledged = bool(body.get("acknowledge"))
+                if action == "install":
+                    result = install(str(body.get("source") or ""),
+                                     host_version, store=store,
+                                     acknowledge_unverified=acknowledged,
+                                     verify=body.get("verify", True) is not False)
+                else:
+                    result = update(str(body.get("id") or ""), host_version,
+                                    store=store,
+                                    acknowledge_unverified=acknowledged)
+                registry.record(principal=principal, forest="-",
+                                primitive=f"extension.{action}",
+                                args={"id": result["id"],
+                                      "tier": result["tier"]},
+                                result="ok")
+                return JSONResponse(result, status_code=201)
+            if action == "remove":
+                from monkeyllm.extensions.installer import (dialect_impact,
+                                                            uninstall)
+                ext_id = str(body.get("id") or "")
+                impact = dialect_impact(ext_id, store)
+                # L.8: what will START BEING REFUSED is named BEFORE the act.
+                if impact["losing"] and not body.get("acknowledge"):
+                    return _envelope(VineError(
+                        "E_EXT_INSTALL",
+                        f"removing {ext_id!r} un-declares "
+                        f"{', '.join(impact['losing'])}",
+                        hint="A write using one of those will be refused by "
+                             "A.2 afterwards. Send acknowledge: true to "
+                             "accept that.",
+                        data={"reason": "dialect", **impact}), 409)
+                result = uninstall(ext_id, store=store)
+                registry.ext_enablement.forget(ext_id)
+                registry.ext_quota.forget(ext_id)
+                registry.record(principal=principal, forest="-",
+                                primitive="extension.remove",
+                                args={"id": ext_id}, result="ok")
+                return JSONResponse(result)
+        except VineError as exc:
+            registry.record(principal=principal, forest="-",
+                            primitive=f"extension.{action}",
+                            args={"source": body.get("source") or
+                                  body.get("id") or ""},
+                            result="error", error_code=exc.code)
+            return _envelope(exc)
+        return _envelope(VineError(
+            E_SCHEMA, f"unknown action: {action!r}",
+            hint="plan, install, update or remove"))
+
+    async def admin_extension_jobs(request: Request) -> JSONResponse:
+        """L.3 `jobs` — an extension's maintenance, run when asked.
+
+        Deliberately PULLED rather than scheduled inside the Station. A
+        scheduler here would be a second Ranger with a second failure mode,
+        and an operator who already runs `ranger` on a timer has the timer;
+        what they lack is a way to reach an extension's own upkeep. GET
+        lists what this forest's extensions offer, POST runs one.
+
+        On the forest's lane, like every other write-shaped repair, and
+        contained: an extension's upkeep may fail without failing the
+        Station (L.7 rule 5).
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        try:
+            body = _json_object(await request.json()
+                                if (request.method == "POST"
+                                    and await request.body()) else {})
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        forest = str(body.get("forest")
+                     or request.query_params.get("forest") or "")
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+        view = _ext_registry_for(forest)
+        claims = view.for_seam("jobs") if view is not None else []
+
+        if request.method == "GET":
+            return JSONResponse({"forest": forest, "jobs": [
+                {"ext": c.ext_id, "name": c.spec.get("name"),
+                 "description": c.spec.get("description", "")}
+                for c in claims]})
+
+        if not writable:
+            return _envelope(VineError(E_READONLY,
+                                       "this Station is read-only"), 403)
+        name = str(body.get("job") or "")
+        claim = next((c for c in claims if c.spec.get("name") == name), None)
+        if claim is None:
+            return _envelope(VineError(
+                E_NOT_FOUND, f"no such extension job on this forest: {name}"))
+        from monkeyllm_station.extensions import EXT_CONTEXT
+        token = EXT_CONTEXT.set({"forest": forest, "principal": principal,
+                                 "ext": claim.ext_id})
+        try:
+            result = await in_forest_thread(
+                forest, lambda: claim.handler(forest=forest))
+        except Exception as exc:
+            registry.record(principal=principal, forest=forest,
+                            primitive=f"ext.job.{name}", args={},
+                            result="error", error_code="E_EXT_WORKER",
+                            via=f"ext:{claim.ext_id}")
+            return _envelope(VineError(
+                "E_EXT_WORKER", f"{claim.ext_id}: {name} failed",
+                hint=f"{type(exc).__name__}: {exc}"), 502)
+        finally:
+            EXT_CONTEXT.reset(token)
+        registry.record(principal=principal, forest=forest,
+                        primitive=f"ext.job.{name}", args={}, result="ok",
+                        via=f"ext:{claim.ext_id}")
+        return JSONResponse({"forest": forest, "job": name,
+                             "result": result if isinstance(result, dict)
+                             else {"result": result}})
+
+    async def admin_extension_enablement(request: Request) -> JSONResponse:
+        """L.7 rules 1-2 — the forest's admin decides what acts on it.
+
+        The write lands in the forest's own `_meta/extensions.yaml` FIRST
+        (that is the versioned copy a snapshot carries) and in the registry
+        index second. If they ever disagree, the forest wins: this table is
+        an index, not a second authority.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        try:
+            body = _json_object(await request.json()
+                                if (request.method == "POST"
+                                    and await request.body()) else {})
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        forest = str(body.get("forest")
+                     or request.query_params.get("forest") or "")
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+
+        from monkeyllm import extensions as engine_ext
+        from monkeyllm.extensions import forestcfg
+        root = _lock_root(forest)
+        if root is None:
+            return _envelope(VineError(E_NOT_FOUND, f"no such forest: {forest}"))
+
+        if request.method == "GET":
+            store = _ext_store()
+            installed = {r.id for r in store.list()}
+            enabled = forestcfg.enabled(root)
+            return JSONResponse({
+                "forest": forest,
+                "enabled": enabled,
+                # L.12 / F.187: an expectation this deployment cannot meet is
+                # SAID. Silence here is an .mp3 quietly converted by the stub.
+                "expected_but_absent": [e for e in enabled
+                                        if e not in installed],
+                "available": sorted(installed - set(enabled)),
+            })
+
+        if not writable:
+            return _envelope(VineError(
+                E_READONLY, "this Station is read-only"), 403)
+        ext_id = str(body.get("ext") or "")
+        store = _ext_store()
+        try:
+            store.require(ext_id)
+        except VineError as exc:
+            return _envelope(exc)
+        enabled = body.get("enabled", True) is not False
+        try:
+            if enabled:
+                forestcfg.enable(root, ext_id)
+            else:
+                forestcfg.disable(root, ext_id)
+        except VineError as exc:
+            return _envelope(exc)
+        registry.ext_enablement.set(ext_id, forest, enabled, principal)
+        # The runtime caches which extensions a forest enables; the write
+        # just changed that answer.
+        ext_runtime.invalidate(forest)
+        registry.record(principal=principal, forest=forest,
+                        primitive="extension.enable" if enabled
+                        else "extension.disable",
+                        args={"ext": ext_id}, result="ok")
+        return JSONResponse({"forest": forest, "ext": ext_id,
+                             "enabled": enabled,
+                             # L.8: stated, never implied.
+                             "restart_required": True,
+                             "enabled_now": forestcfg.enabled(root)})
+
+    async def admin_extension_config(request: Request) -> JSONResponse:
+        """L.7 rule 4 — the host's custody, and a secret that never returns.
+
+        The providers table's discipline, applied to extensions: a value
+        declared `secret` in the manifest goes in and comes back only as
+        `has_value`. `null` means "leave it alone", which is the only way an
+        editor that cannot READ a value can avoid destroying it.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        gate = _ext_deployment_gate(principal, request)
+        if gate is not None:
+            return gate
+        try:
+            body = _json_object(await request.json()
+                                if (request.method == "POST"
+                                    and await request.body()) else {})
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        ext_id = str(body.get("ext") or request.query_params.get("ext") or "")
+        if not ext_id:
+            return _envelope(VineError(E_SCHEMA,
+                                       "parameter 'ext' is required"))
+        store = _ext_store()
+        try:
+            store.require(ext_id)
+            from monkeyllm.extensions.loader import read_manifest
+            manifest = read_manifest(store.tree(ext_id))
+        except VineError as exc:
+            return _envelope(exc)
+
+        if request.method == "GET":
+            declared = {k: {"type": f.type, "required": f.required,
+                            "secret": f.secret, "default": f.default,
+                            "description": f.description}
+                        for k, f in manifest.config.items()}
+            return JSONResponse({"ext": ext_id, "declares": declared,
+                                 "values": registry.ext_config.readable(ext_id)})
+
+        if not writable:
+            return _envelope(VineError(E_READONLY,
+                                       "this Station is read-only"), 403)
+        values = body.get("values")
+        if not isinstance(values, dict):
+            return _envelope(VineError(E_SCHEMA,
+                                       "'values' must be an object"))
+        unknown = sorted(set(values) - set(manifest.config))
+        if unknown:
+            return _envelope(VineError(
+                E_SCHEMA,
+                f"{ext_id} declares no setting(s): {', '.join(unknown)}",
+                hint=f"it declares: {', '.join(sorted(manifest.config)) or '(none)'}"))
+        for key, value in values.items():
+            if value is None:
+                continue          # null keeps what is there
+            registry.ext_config.set(ext_id, key, value,
+                                    secret=manifest.config[key].secret)
+        registry.record(principal=principal, forest="-",
+                        primitive="extension.config",
+                        args={"ext": ext_id, "keys": ",".join(sorted(values))},
+                        result="ok")
+        return JSONResponse({"ext": ext_id,
+                             "values": registry.ext_config.readable(ext_id)})
+
+    async def admin_extension_quota(request: Request) -> JSONResponse:
+        """L.7 rule 6 — a ceiling on what an extension may spend on a forest.
+
+        Reading is that forest's admin (it is their spend); SETTING is the
+        deployment's, because a ceiling raised on one forest is money out of
+        one shared provider key.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        try:
+            body = _json_object(await request.json()
+                                if (request.method == "POST"
+                                    and await request.body()) else {})
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        forest = str(body.get("forest")
+                     or request.query_params.get("forest") or "")
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+        ext_id = str(body.get("ext") or request.query_params.get("ext") or "")
+        if not ext_id:
+            return _envelope(VineError(E_SCHEMA,
+                                       "parameter 'ext' is required"))
+        if request.method == "GET":
+            return JSONResponse({
+                "ext": ext_id, "forest": forest,
+                **registry.ext_quota.state(ext_id, forest).to_dict()})
+        deployment_gate = _ext_deployment_gate(principal, request)
+        if deployment_gate is not None:
+            return deployment_gate
+        if not writable:
+            return _envelope(VineError(E_READONLY,
+                                       "this Station is read-only"), 403)
+        ceiling = body.get("ceiling")
+        try:
+            registry.ext_quota.set_ceiling(
+                ext_id, forest,
+                None if ceiling is None else float(ceiling),
+                str(body.get("period") or "month"))
+        except VineError as exc:
+            return _envelope(exc)
+        registry.record(principal=principal, forest=forest,
+                        primitive="extension.quota",
+                        args={"ext": ext_id, "ceiling": str(ceiling)},
+                        result="ok")
+        return JSONResponse({
+            "ext": ext_id, "forest": forest,
+            **registry.ext_quota.state(ext_id, forest).to_dict()})
+
     async def admin_staging(request: Request) -> JSONResponse:
         """What is in the upload staging area that is not a document (J.8).
 
@@ -6273,6 +6863,20 @@ def build_app(
         Route("/v1/admin/cache", admin_cache, methods=["GET", "POST"]),
         Route("/v1/admin/reindex", admin_reindex, methods=["POST"]),
         Route("/v1/admin/recurate", admin_recurate, methods=["POST"]),
+        # L.3 `routes`: namespaced by the path itself, so a contribution
+        # can never take a name the product needs.
+        Route("/v1/ext/{ext}/{path:path}", extension_route,
+              methods=["GET", "POST"]),
+        Route("/v1/admin/extensions", admin_extensions,
+              methods=["GET", "POST"]),
+        Route("/v1/admin/extensions/enablement", admin_extension_enablement,
+              methods=["GET", "POST"]),
+        Route("/v1/admin/extensions/config", admin_extension_config,
+              methods=["GET", "POST"]),
+        Route("/v1/admin/extensions/quota", admin_extension_quota,
+              methods=["GET", "POST"]),
+        Route("/v1/admin/extensions/jobs", admin_extension_jobs,
+              methods=["GET", "POST"]),
         Route("/v1/admin/staging", admin_staging, methods=["GET", "POST"]),
         Route("/v1/admin/locks", admin_locks),
         Route("/v1/admin/unlock", admin_unlock, methods=["POST"]),
@@ -6335,7 +6939,8 @@ def build_app(
 
         mcp_app, mcp_lifespan = build_mcp_mount(pool, registry, in_forest_thread,
                                                 run_primitive, _launch_ingest,
-                                                execute=execute_call)
+                                                execute=execute_call,
+                                                extensions=ext_runtime)
         if mcp_app is not None:
             routes.append(Mount("/mcp", app=mcp_app))
             mcp_state["enabled"] = True
@@ -6401,6 +7006,39 @@ def build_app(
                     middleware=[Middleware(SecurityHeaders, csp=studio_csp())])
     app.state.pool = pool
     app.state.registry = registry
+    # Part L (v0.80): every installed extension, loaded ONCE. Installing
+    # requires a restart (L.8), so the loaded set is fixed for the life of
+    # this process and enablement is a use-time question, not a load-time
+    # one. A failure here never stops the Station: an extension may fail to
+    # help and may not fail the act (L.7 rule 5).
+    app.state.extensions = ext_runtime
+
+    # L.3 `events`: one observer on the emitter, dispatching to the
+    # extensions the FOREST enabled. Registered here rather than inside the
+    # runtime so there is exactly one place where an event becomes an
+    # extension call, and it is the same place a webhook is decided.
+    def _ext_observe(forest, event, principal, data, metadata):
+        view = _ext_registry_for(forest)
+        if view is None:
+            return
+        from monkeyllm_station.extensions import EXT_CONTEXT
+        for claim in view.for_seam("events"):
+            wanted = claim.spec.get("events")
+            if wanted and event not in wanted:
+                continue
+            token = EXT_CONTEXT.set({"forest": forest, "principal": principal,
+                                     "ext": claim.ext_id})
+            try:
+                claim.handler(event=event, forest=forest, principal=principal,
+                              data=dict(data), metadata=dict(metadata))
+            except Exception:
+                # L.7 rule 5: an extension may fail to help and may not fail
+                # the act. The emitter logs it.
+                raise
+            finally:
+                EXT_CONTEXT.reset(token)
+
+    hooks.observe(_ext_observe)
     # J.10.12: reachable for the same reason the job board is — a test, and
     # a future console, ask the host what is in flight without a forest.
     app.state.runs = runs

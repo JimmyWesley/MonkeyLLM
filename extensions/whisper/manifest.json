@@ -1,0 +1,42 @@
+{
+  "id": "whisper",
+  "version": "1.0.0",
+  "station_compat": ">=0.79,<1.0",
+  "license": "Apache-2.0",
+  "description": "Turns an audio file into a transcript the forest can search, through any OpenAI-compatible /audio/transcriptions endpoint.",
+  "permissions": {
+    "network": [],
+    "filesystem": "read",
+    "capabilities": ["ingest"]
+  },
+  "models": {
+    "requires": [],
+    "registers": [{ "role": "transcribe", "kind": "transcribe" }]
+  },
+  "contributes": {
+    "converters": [
+      {
+        "extensions": [".mp3", ".m4a", ".wav", ".ogg", ".flac"],
+        "handler": "main:convert"
+      }
+    ],
+    "panel": "ui/panel.json"
+  },
+  "config": {
+    "language": {
+      "type": "string",
+      "default": "",
+      "description": "BCP-47 hint for the transcriber (pt, en, es). Empty lets it detect."
+    },
+    "vocabulary": {
+      "type": "string",
+      "default": "",
+      "description": "Names, jargon and acronyms the recording uses, comma separated. Spelling the transcriber cannot guess."
+    },
+    "heading": {
+      "type": "string",
+      "default": "Transcript",
+      "description": "The heading the transcript is written under."
+    }
+  }
+}

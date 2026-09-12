@@ -82,6 +82,38 @@ class GitRepo:
         self._run("commit", "--quiet", "-m", message)
         return self._run("rev-parse", "HEAD").stdout.strip()
 
+    def commit_meta(self, paths: list[Path], message: str) -> str:
+        """Commit the forest's own configuration under `_meta/` (spec L.12).
+
+        A SECOND door, deliberately narrow, rather than a wider `commit`.
+        A.3.1's guard there says only `.md` is versioned and it exists to
+        keep binaries out of forest git; loosening it for a convenience is
+        how a guard stops meaning anything. This one admits `.yaml` and
+        `.md` **under `_meta/` only**, which is text the forest is
+        configured by — and it is what makes Part L's per-forest enablement
+        actually travel in a Part I snapshot instead of merely sitting in a
+        versioned directory untracked.
+        """
+        root = self.root.resolve()
+        rels = []
+        for path in paths:
+            resolved = path.resolve()
+            rel = resolved.relative_to(root)
+            if rel.parts[:1] != ("_meta",) or \
+                    resolved.suffix.lower() not in (".yaml", ".yml", ".md"):
+                raise ValueError(
+                    f"commit_meta only versions _meta/*.yaml|md, not {rel}")
+            rels.append(str(rel))
+        if not rels:
+            raise ValueError("nothing to commit")
+        if self.trailers:
+            message = message.rstrip() + "\n\n" + "\n".join(self.trailers)
+        self._run("add", "--", *rels)
+        if not self._run("status", "--porcelain", "--", *rels).stdout.strip():
+            return self._run("rev-parse", "HEAD").stdout.strip()
+        self._run("commit", "--quiet", "-m", message)
+        return self._run("rev-parse", "HEAD").stdout.strip()
+
     def file_history(self, rel_path: str, limit: int = 20) -> list[dict]:
         """C.16 (v0.58): one file's commits, newest first, through renames.
 

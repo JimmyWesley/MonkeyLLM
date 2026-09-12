@@ -190,6 +190,38 @@ def clamp_k(k: int) -> int:
     return min(max(1, int(k)), harvest_max_k())
 
 
+def _apply_ranking(vine, query: str, results: list) -> list:
+    """L.3 — an extension's ordering contribution, or the input untouched.
+
+    Three properties, and each of them is a way the obvious version is
+    wrong: a contribution may not INVENT a result (anything it returns that
+    was not handed to it is dropped, which is G.4.2.1's rule about
+    hallucinated targets applied to ordering); a contribution that RAISES
+    leaves the original order (L.7 rule 5); and a contribution that runs is
+    NAMED on the trace, because an operator comparing a bad answer against a
+    good one has no other way to learn a third party was between them.
+    """
+    registry = getattr(vine, "ext_registry", None)
+    if registry is None or not results:
+        return results
+    claim = registry.first("ranking")
+    if claim is None:
+        return results
+    try:
+        ordered = claim.handler(query=query, results=list(results))
+    except Exception:
+        return results
+    if not isinstance(ordered, list):
+        return results
+    seen = {id(r): r for r in results}
+    kept = [r for r in ordered if id(r) in seen]
+    if not kept:
+        return results
+    pending = getattr(vine, "_ext_via_pending", None) or []
+    vine._ext_via_pending = sorted(set(pending) | {f"ext:{claim.ext_id}"})
+    return kept
+
+
 def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
             since: str | None = None, until: str | None = None,
             date_field: str | None = None, lang: str | None = None,
@@ -319,6 +351,14 @@ def harvest(vine, query: str, terms: list[str] | None = None, k: int = 3,
     excluded = max(loc.get("undated_excluded", 0), sn.get("undated_excluded", 0))
     if excluded:
         payload["undated_excluded"] = excluded
+    # L.3 `ranking` (v0.80): first claimant wins, and it is APPLIED here —
+    # before the budget, so what an extension promoted is what survives the
+    # cut rather than being reordered inside a set somebody else chose. It
+    # may reorder and drop; it may not invent, so anything it returns that
+    # was not in the input is discarded. Every call is attributed on the
+    # Part D event: this is the one seam whose effect an operator cannot
+    # otherwise see.
+    payload["results"] = _apply_ranking(vine, query, payload["results"])
     # budget: drop whole tail results, never slice a body silently (C.6c)
     payload = shrink_list_to_budget(payload, "results", BUDGET_HARVEST)
     if not payload["results"]:

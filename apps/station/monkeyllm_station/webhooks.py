@@ -207,6 +207,9 @@ class Dispatcher:
 
     def __init__(self, registry, authority, *, audit=None,
                  client_factory=None):
+        # Part L: in-process listeners, kept beside the webhook rows so
+        # there is ONE list of who hears an event.
+        self._observers: list = []
         self._registry = registry
         self._authority = authority
         self._audit = audit
@@ -291,12 +294,29 @@ class Dispatcher:
         merged per webhook: it is what the ACT already knew, never
         something this call goes and reads.
         """
+        # L.3 `events` (v0.80): an in-process observer runs FIRST and under
+        # different rules from a webhook. J.16.1 rations a delivery because
+        # it leaves the Station's authority behind; an extension handler
+        # never leaves it, so it receives what the act already knew. Like
+        # everything else here it must not be able to fail the act.
+        for observe in self._observers:
+            try:
+                observe(forest, event, principal, data or {}, metadata or {})
+            except Exception:  # noqa: BLE001 — L.7 rule 5
+                log.warning("an event observer raised on %s/%s", forest,
+                            event, exc_info=True)
         try:
             if not self._subscribed(forest, event):
                 return
             self._enqueue(forest, event, principal, data or {}, metadata or {})
         except Exception:  # noqa: BLE001 — J.16.4: never fail the act
             log.warning("could not emit %s on %s", event, forest, exc_info=True)
+
+    def observe(self, fn) -> None:
+        """Register an in-process observer (Part L). Kept on the emitter so
+        there is ONE list of who hears an event, rather than a second
+        emission point that could drift from this one."""
+        self._observers.append(fn)
 
     def _enqueue(self, forest: str, event: str, principal: str,
                  data: dict, metadata: dict) -> None:

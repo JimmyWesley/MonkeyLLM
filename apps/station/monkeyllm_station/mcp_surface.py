@@ -212,7 +212,7 @@ INSTRUCTIONS = (
 
 
 def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
-                    launch_ingest=None, execute=None):
+                    launch_ingest=None, execute=None, extensions=None):
     """Returns `(asgi_app, session_lifespan)`.
 
     The session manager is started by the *parent* app's lifespan: a mounted
@@ -226,6 +226,11 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
     `execute` (J.6.2/J.10.11, v0.57) is the host's routed door — reader
     lanes for reads, the writer lane for writes, the three-phase sweep
     `answer`. When absent, calls take the writer lane as they always did.
+
+    `extensions` (Part L, v0.80) is the loaded runtime. Its `tools` claims
+    are published here, and the menu is filtered per key — see
+    `_extension_tools` below for why that filter is the contract and not a
+    refinement of it.
     """
     try:
         from mcp.server.mcpserver import MCPServer
@@ -766,6 +771,161 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         """
         return await call(forest, "ingest", mode=mode, files=files,
                           path=path, dest=dest, wait=wait)
+
+    # ======================================================================
+    # Part L — extension tools (L.3, L.7 rule 2)
+    # ======================================================================
+    #
+    # `tools/list` is per CONNECTION and enablement is per FOREST, so the
+    # menu a key sees is **the union of the extensions enabled on the
+    # forests that key reaches**. Two consequences are deliberate: two keys
+    # on one deployment can see different menus, and an extension enabled
+    # nowhere the key reaches is invisible rather than merely refusing —
+    # a tool that only ever refuses costs every session its description and
+    # teaches nothing (v0.60's rule about what a menu is for).
+    #
+    # The per-call check is separate and is the real gate: listing is about
+    # what is worth showing, calling is about what is allowed.
+
+    EXTENSION_TOOLS: dict[str, object] = {}
+
+    def _ext_forests_for(principal: str, ext_id: str) -> list[str]:
+        """Forests this principal reaches where this extension is enabled."""
+        if extensions is None or principal is None:
+            return []
+        out = []
+        for grant in registry.grants_of(principal):
+            forest = grant["forest"]
+            root = pool.root / forest if pool.root is not None else None
+            if root is None or not root.is_dir():
+                continue
+            try:
+                if ext_id in extensions.enabled_for(forest, root):
+                    out.append(forest)
+            except Exception:
+                continue
+        return out
+
+    def _make_extension_tool(claim, name):
+        _claim_id = claim.ext_id
+        """One tool, closed over its claim.
+
+        A closure factory rather than default arguments: the SDK reads the
+        signature to build the tool's schema and refuses a parameter whose
+        name starts with `_`, so the carrying trick would make the tool
+        unregistrable. It also resolves annotations against the MODULE's
+        globals, which is why nothing here is annotated with a name imported
+        inside this factory.
+        """
+
+        async def handler(forest: str, args: dict = None):
+            principal = PRINCIPAL.get()
+            if principal is None:
+                return done(UNAUTHENTICATED)
+            # The gate, and it is separate from the menu on purpose: listing
+            # is about what is worth showing, calling is about what is
+            # allowed. An extension not enabled on THIS forest is not an
+            # extension this call may reach, whatever the menu said.
+            if forest not in _ext_forests_for(principal, claim.ext_id):
+                return done({"error": {
+                    "code": "E_NOT_FOUND",
+                    "message": f"unknown tool on this forest: {name}",
+                    "hint": "An extension acts where an administrator "
+                            "enabled it. forests() lists what this key "
+                            "may use."}})
+            try:
+                # L.6: the handler's model access resolves the forest and
+                # the principal from here — `register(api)` ran once at boot
+                # and could know neither.
+                from monkeyllm_station.extensions import EXT_CONTEXT
+
+                def _run():
+                    token = EXT_CONTEXT.set({"forest": forest,
+                                             "principal": principal,
+                                             "ext": _claim_id})
+                    try:
+                        return claim.handler(**(args or {}))
+                    finally:
+                        EXT_CONTEXT.reset(token)
+
+                value = await in_forest_thread(forest, _run)
+            except Exception as exc:
+                # L.7 rule 5: contained, named, and never a host failure.
+                return done({"error": {
+                    "code": "E_EXT_WORKER",
+                    "message": f"{claim.ext_id}: {name} failed",
+                    "hint": f"{type(exc).__name__}: {exc}"}})
+            return done(value if isinstance(value, dict)
+                        else {"result": value})
+
+        handler.__name__ = name
+        handler.__doc__ = (str(claim.spec.get("description") or "").strip()
+                           or f"Contributed by the {claim.ext_id} extension.")
+        return handler
+
+    def _register_extension_tools() -> None:
+        if extensions is None or extensions.registry is None:
+            return
+        for claim in extensions.registry.tools():
+            name = str(claim.spec.get("name") or "")
+            if not name:
+                continue
+            EXTENSION_TOOLS[name] = claim
+            try:
+                mcp.tool()(_make_extension_tool(claim, name))
+            except Exception as exc:
+                # An extension that cannot be published must not stop the
+                # ones that can, nor the Station (L.7 rule 5).
+                EXTENSION_TOOLS.pop(name, None)
+                log.warning("extension tool %s could not be published: %s",
+                            name, exc)
+
+    _register_extension_tools()
+
+    if EXTENSION_TOOLS:
+        # Filter the menu per key. Wrapping the handler rather than keeping
+        # a second tool table: the SDK owns the list, and a copy of it here
+        # would be a second description of one surface.
+        _entry = mcp._lowlevel_server._request_handlers.get("tools/list")
+
+        if _entry is not None:
+            # The registry holds a `HandlerEntry` (handler + params_type),
+            # not a bare callable: replacing it with a function makes the
+            # runner fail on `params_type`. So the ENTRY is rebuilt around a
+            # wrapped handler, and the SDK keeps owning the list itself — a
+            # second tool table here would be a second description of one
+            # surface.
+            _list_tools = _entry.handler
+
+            async def _filtered_list_tools(*args, **kwargs):
+                # Signature taken as given: the runner calls the handler
+                # with (ctx, params) at this era, and pinning that shape
+                # here would break on the next one for no benefit.
+                result = await _list_tools(*args, **kwargs)
+                principal = PRINCIPAL.get()
+                visible = {
+                    name for name, claim in EXTENSION_TOOLS.items()
+                    if _ext_forests_for(principal, claim.ext_id)
+                }
+                tools = getattr(result, "tools", None)
+                if tools is None:  # pragma: no cover - the SDK shape moved
+                    # Fail CLOSED. This filter decides what a key is shown,
+                    # so a shape we no longer recognise must publish fewer
+                    # tools, never more — and it must say so, because a
+                    # silently unfiltered menu is the failure itself.
+                    log.warning("tools/list has an unfamiliar shape; "
+                                "extension tools are withheld")
+                    return result
+                result.tools = [
+                    t for t in tools
+                    if t.name not in EXTENSION_TOOLS or t.name in visible
+                ]
+                return result
+
+            import dataclasses as _dc
+
+            mcp._lowlevel_server._request_handlers["tools/list"] = \
+                _dc.replace(_entry, handler=_filtered_list_tools)
 
     # Transport options belong to the app factory in mcp 2.x, not the
     # constructor. streamable_http_path="/" because this app gets mounted

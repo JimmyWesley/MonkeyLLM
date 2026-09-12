@@ -50,6 +50,11 @@ export const CONSOLES = [
   { key: 'audit', group: 'govern', cap: 'admin' },
   { key: 'health', group: 'govern', cap: 'admin' },
   { key: 'integrations', group: 'govern', cap: 'admin' },
+  // Part L. In `govern` rather than `build`: enabling one decides
+  // what third-party code acts on this forest's material, which is
+  // the same kind of question as who may read it. `admin` is the
+  // floor to SEE the list; the route alone decides who may install.
+  { key: 'extensions', group: 'govern', cap: 'admin' },
 ]
 
 const GROUPS = ['use', 'build', 'govern']

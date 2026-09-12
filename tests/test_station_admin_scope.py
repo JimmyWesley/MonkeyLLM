@@ -92,6 +92,19 @@ def test_the_route_table_is_what_we_think_it_is(station):
         ("/v1/admin/audit", "GET"),
         ("/v1/admin/cache", "GET"), ("/v1/admin/cache", "POST"),
         ("/v1/admin/canopy", "GET"), ("/v1/admin/canopy", "POST"),
+        # Part L (v0.80). The list is `admin` on at least one forest — the
+        # person choosing what may act on a forest administers it — and
+        # every mutation is the deployment's authority, so the sweeps below
+        # cover them exactly as they cover the owner-only routes.
+        ("/v1/admin/extensions", "GET"), ("/v1/admin/extensions", "POST"),
+        ("/v1/admin/extensions/config", "GET"),
+        ("/v1/admin/extensions/config", "POST"),
+        ("/v1/admin/extensions/enablement", "GET"),
+        ("/v1/admin/extensions/enablement", "POST"),
+        ("/v1/admin/extensions/jobs", "GET"),
+        ("/v1/admin/extensions/jobs", "POST"),
+        ("/v1/admin/extensions/quota", "GET"),
+        ("/v1/admin/extensions/quota", "POST"),
         ("/v1/admin/forests", "POST"),
         ("/v1/admin/grant", "POST"),
         ("/v1/admin/health", "GET"),

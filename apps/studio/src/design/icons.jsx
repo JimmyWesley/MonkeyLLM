@@ -225,10 +225,21 @@ export const Webhook = (p) => (
   <S {...p}><circle cx="12" cy="6" r="2.6" /><circle cx="5.5" cy="17.5" r="2.6" /><circle cx="18.5" cy="17.5" r="2.6" /><path d="M10.1 7.9l-2.7 7.2M13.9 7.9l2.7 7.2" /></S>
 )
 
+/* A capability that fits into the product from outside (Part L). A puzzle
+   piece rather than a plug: the console already has a plug for
+   Integrations, and that one means "connect something to this", while this
+   one means "add something to this". Two different acts deserve two
+   different shapes. */
+export const Puzzle = (p) => (
+  <S {...p}>
+    <path d="M9.6 4.6a2.1 2.1 0 014.2 0V6H17a1 1 0 011 1v3.2h-1.4a2.1 2.1 0 100 4.2H18V17a1 1 0 01-1 1h-3.2v-1.4a2.1 2.1 0 10-4.2 0V18H7a1 1 0 01-1-1v-3.2h1.4a2.1 2.1 0 100-4.2H6V7a1 1 0 011-1h2.6z" />
+  </S>
+)
+
 export const CONSOLE_ICON = {
   overview: Overview, ask: Ask, explore: Explore, read: Book,
   playground: Playground,
   data: Data, skills: Sparkle, ingest: Ingest, models: Models, people: Users,
   audit: Audit, integrations: Plug, health: Health, webhooks: Webhook,
-  links: Link,
+  links: Link, extensions: Puzzle,
 }

@@ -26,6 +26,7 @@ import Links from './views/Links.jsx'
 import Integrations from './views/Integrations.jsx'
 import Webhooks from './views/Webhooks.jsx'
 import Skills from './views/Skills.jsx'
+import Extensions from './views/Extensions.jsx'
 import Read from './views/Read.jsx'
 import SharedRead from './views/SharedRead.jsx'
 
@@ -36,6 +37,7 @@ const VIEWS = {
   health: Health, webhooks: Webhooks, links: Links,
   integrations: Integrations,
   skills: Skills,
+  extensions: Extensions,
 }
 
 export default function App() {

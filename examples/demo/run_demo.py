@@ -50,6 +50,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "src"))
 
 from monkeyllm import Vine, VineError  # noqa: E402
+from monkeyllm.signatures import SIGNATURES  # noqa: E402
 
 DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 MAX_STEPS = 14
@@ -242,18 +243,70 @@ def make_llm():
 
 
 def parse_action(text: str) -> dict | None:
-    """Extract the first JSON object from the model output."""
+    """Extract the first JSON object from the model output — or, failing
+    that, the model's own native tool syntax (`_parse_native_call`)."""
     m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        for candidate in (m.group(0), text):
+            try:
+                obj = json.loads(candidate)
+                if isinstance(obj, dict) and "tool" in obj:
+                    return obj
+            except json.JSONDecodeError:
+                continue
+    return _parse_native_call(text)
+
+
+# MiniCPM5's native function-call syntax. Measured 2026-09-11 on the 2B
+# (Q8_0, Ollama, temperature 0.1): asked for one JSON object per turn it
+# answers in JSON on most turns and on some — q04/q06/q07 of a 10-question
+# run, q03 on a replay — falls back into the format it was trained on:
+#   <function name="locate"><param name="query">mixer-lang</param></function>
+# The reasoning beside it picks the right tool and the right branch; only
+# the spelling is wrong, and bouncing it with "Invalid format" makes the
+# model repeat that spelling until the step budget is gone (7/10, all three
+# misses with zero tool calls). So translate it instead. Values arrive as
+# text; the type each parameter DECLARES (the engine's own C.12 table, never
+# a second list) decides whether the text is read as JSON (a `k`, a `terms`
+# list, a `filter` object) or kept as the string it is — `query="2026"`
+# must stay a string. A value that cannot be read as its declared type is
+# left as text for the primitive to refuse in the ordinary way (C.12: a
+# value is never coerced; the demo only chooses the reading).
+_NATIVE_CALL_RE = re.compile(r'<function\s+name="([^"]+)"\s*>(.*?)</function>', re.DOTALL)
+_NATIVE_PARAM_RE = re.compile(r'<param\s+name="([^"]+)"\s*>(.*?)</param>', re.DOTALL)
+_CDATA_RE = re.compile(r"^\s*<!\[CDATA\[(.*?)\]\]>\s*$", re.DOTALL)
+# The closing action is the demo's, not a primitive, so the table does not
+# declare it; these are the fields SYSTEM_PROMPT teaches.
+_ANSWER_TYPES = {"text": "string", "proof": "string",
+                 "answer_nodes": "string[]", "confidence": "number"}
+
+
+def _parse_native_call(text: str) -> dict | None:
+    m = _NATIVE_CALL_RE.search(text)
     if not m:
         return None
-    for candidate in (m.group(0), text):
-        try:
-            obj = json.loads(candidate)
-            if isinstance(obj, dict) and "tool" in obj:
-                return obj
-        except json.JSONDecodeError:
+    tool = m.group(1)
+    declared = _ANSWER_TYPES if tool == "answer" else {
+        name: p["type"] for name, p in SIGNATURES.get(tool, {}).items()}
+    args: dict = {}
+    for name, raw in _NATIVE_PARAM_RE.findall(m.group(2)):
+        c = _CDATA_RE.match(raw)
+        value = (c.group(1) if c else raw).strip()
+        kind = declared.get(name, "string")
+        if value == "null":  # the prompt's own spelling of "not set"
+            args[name] = None
             continue
-    return None
+        if kind == "string" or (kind == "string|string[]" and value[:1] != "["):
+            args[name] = value  # the text IS the value (`terms`, `id`, `section` take both)
+            continue
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = value
+        if kind == "string[]" and isinstance(parsed, str):
+            parsed = [parsed]  # one member written bare
+        args[name] = parsed
+    return {"tool": tool, "args": args}
 
 
 SEARCH_TOOLS = {"locate", "sniff"}

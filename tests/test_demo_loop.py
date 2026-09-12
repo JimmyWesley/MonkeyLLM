@@ -41,6 +41,30 @@ class TestParseAction:
         text = 'Let me look at the index.\n{"tool": "locate", "args": {"query": "sales"}}\nDone.'
         assert parse_action(text)["tool"] == "locate"
 
+    def test_native_function_syntax(self):
+        # MiniCPM5 2B answers some turns in the format it was trained on
+        # (measured 2026-09-11: three of ten questions, zero tool calls each);
+        # the parser translates it, typed by the engine's signature table
+        text = ('<function name="locate"><param name="query">'
+                '<![CDATA[R&D workstation GPU VRAM]]></param>'
+                '<param name="k">5</param></function>')
+        assert parse_action(text) == {
+            "tool": "locate", "args": {"query": "R&D workstation GPU VRAM", "k": 5}}
+        sniff = parse_action('<function name="sniff"><param name="terms">'
+                             '["mixer-lang"]</param><param name="scope">null</param>'
+                             '</function>')
+        assert sniff == {"tool": "sniff", "args": {"terms": ["mixer-lang"], "scope": None}}
+        # a string parameter keeps its text even when it looks like a number
+        digits = parse_action('<function name="locate"><param name="query">2026</param></function>')
+        assert digits["args"]["query"] == "2026"
+        # the closing action is typed by the demo itself
+        ans = parse_action('<function name="answer"><param name="text">Recife.</param>'
+                           '<param name="answer_nodes">["people/jimmy-wesley"]</param>'
+                           '<param name="confidence">0.9</param></function>')
+        assert ans["args"] == {"text": "Recife.", "answer_nodes": ["people/jimmy-wesley"],
+                               "confidence": 0.9}
+        assert parse_action('<function name="locate"><param name="query">open') is None
+
     def test_garbage_returns_none(self):
         assert parse_action("no idea what to do") is None
 

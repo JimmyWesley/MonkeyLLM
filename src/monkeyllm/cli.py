@@ -36,6 +36,49 @@ def main(argv: list[str] | None = None) -> int:
     p_validate.add_argument("--forest", default=".")
     p_validate.add_argument("--strict", action="store_true", help="warnings also fail")
 
+    # Part L (v0.80): extensions. Global install is a host-level directory;
+    # per-forest enablement is a line in the forest's `_meta/`. Only the
+    # forest-facing verbs take --forest, which is what keeps "installed" and
+    # "enabled" two different questions at the command line too.
+    p_ext = sub.add_parser("ext", help="extensions: install, enable, inspect (spec Part L)")
+    ext_sub = p_ext.add_subparsers(dest="action", required=True)
+
+    p_ext_install = ext_sub.add_parser("install", help="install from an index id, a git URL, a .zip URL or a path")
+    p_ext_install.add_argument("source")
+    p_ext_install.add_argument("--yes", action="store_true",
+                               help="acknowledge an unverified source, a tier downgrade or a changed identity")
+    p_ext_install.add_argument("--no-verify", action="store_true",
+                               help="skip signature verification (the install is then unverified)")
+    p_ext_install.add_argument("--no-deps", action="store_true",
+                               help="do not build the extension's environment")
+
+    p_ext_update = ext_sub.add_parser("update", help="re-resolve an install's own source")
+    p_ext_update.add_argument("id")
+    p_ext_update.add_argument("--yes", action="store_true")
+
+    ext_sub.add_parser("list", help="what is installed (offline: never a network call)")
+    ext_sub.add_parser("outdated", help="what a tracked ref has moved past (costs a fetch)")
+    ext_sub.add_parser("quarantine", help="config kept from uninstalled extensions")
+
+    p_ext_show = ext_sub.add_parser("show", help="one extension in full")
+    p_ext_show.add_argument("id")
+
+    p_ext_rm = ext_sub.add_parser("remove", help="uninstall (config is quarantined)")
+    p_ext_rm.add_argument("id")
+    p_ext_rm.add_argument("--yes", action="store_true")
+
+    p_ext_cfg = ext_sub.add_parser("config", help="read or set an extension's settings")
+    p_ext_cfg.add_argument("id")
+    p_ext_cfg.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
+
+    p_ext_en = ext_sub.add_parser("enable", help="enable on one forest")
+    p_ext_en.add_argument("id")
+    p_ext_en.add_argument("--forest", default=".")
+
+    p_ext_dis = ext_sub.add_parser("disable", help="disable on one forest")
+    p_ext_dis.add_argument("id")
+    p_ext_dis.add_argument("--forest", default=".")
+
     p_canopy = sub.add_parser("canopy", help="build the optional vector layer (Phase 1)")
     p_canopy.add_argument("action", choices=["build", "status"])
     p_canopy.add_argument("--forest", default=".")
@@ -104,7 +147,11 @@ def main(argv: list[str] | None = None) -> int:
     # written by `init` — its absence means "not a forest", not "empty one".
     _needs_existing_forest = args.command not in ("init",) and not (
         args.command == "snapshot" and args.action == "restore"
-    ) and not (args.command == "serve" and args.root)
+    ) and not (args.command == "serve" and args.root) and not (
+        # L.12: installing is a host-level act and has no forest. Only
+        # enable/disable touch one, and they carry their own --forest.
+        args.command == "ext" and args.action not in ("enable", "disable")
+    )
     if _needs_existing_forest:
         _check_root = forest_root if forest_root is not None else Path(".").resolve()
         if not (_check_root / "_meta" / "schema.md").is_file():
@@ -154,7 +201,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"reindexed {n} nodes -> {forest_root / '_derived' / 'catalog.db'}")
         return 0
 
+    if args.command == "ext":
+        from monkeyllm.cli_ext import run_ext
+
+        return run_ext(args, forest_root, parser)
+
     if args.command == "validate":
+        from monkeyllm import extensions as ext
         from monkeyllm.forest import Forest
         from monkeyllm.lint import lint_forest
 
@@ -163,6 +216,15 @@ def main(argv: list[str] | None = None) -> int:
             print(issue)
         errors = sum(1 for i in issues if i.level == "error")
         warnings = len(issues) - errors
+        # L.12 / F.187: a forest carries which extensions it expects, so an
+        # absent one is SAID. Without this line the file is converted by the
+        # built-in stub, the node is planted, nothing raises, and nobody
+        # learns that the extension meant to read it is not installed.
+        absent = ext.expected_but_absent(forest_root)
+        for ext_id in absent:
+            print(f"warning: this forest expects extension {ext_id!r} and it "
+                  f"is not installed")
+        warnings += len(absent)
         print(f"\n{errors} error(s), {warnings} warning(s)")
         if errors or (args.strict and warnings):
             return 1

@@ -18,7 +18,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import os
 import time
+from pathlib import Path
 
 from monkeyllm.errors import E_SCHEMA, VineError
 
@@ -187,6 +189,96 @@ def chat_from_binding(binding: dict, *, timeout: float = 180.0,
     return chat, model
 
 
+# L.6 (v0.80): transcription is not `/chat/completions`.
+#
+# The path is the OpenAI-compatible `/audio/transcriptions`, which every
+# serious provider of this shape implements — OpenAI itself, Groq, a local
+# whisper.cpp server, faster-whisper behind an OpenAI-compatible wrapper. So
+# the binding stays a binding: an endpoint, a key the host keeps, and a
+# model name.
+TRANSCRIBE_PATH = "/audio/transcriptions"
+
+# A ceiling, and it is stated rather than assumed: this call runs inside a
+# Gardener step, and a step holds the forest's ONE lane (J.9) — every read
+# on that forest waits behind it. A meeting recording is minutes of audio
+# and can be tens of seconds of upload plus processing, so 60 (the vision
+# describer's number) is too tight and no ceiling at all would let one file
+# freeze a forest for as long as a provider felt like taking.
+TRANSCRIBE_TIMEOUT = float(
+    os.environ.get("MONKEYLLM_TRANSCRIBE_TIMEOUT", "300"))
+
+# OpenAI refuses over 25 MB and answers slowly on the way to refusing.
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
+
+_AUDIO_MIME = {
+    ".mp3": "audio/mpeg", ".mpga": "audio/mpeg", ".mpeg": "audio/mpeg",
+    ".m4a": "audio/mp4", ".mp4": "audio/mp4",
+    ".wav": "audio/wav", ".webm": "audio/webm",
+    ".ogg": "audio/ogg", ".flac": "audio/flac",
+}
+
+
+def transcribe_from_binding(binding: dict, audio, *, language: str | None = None,
+                            prompt: str | None = None,
+                            timeout: float | None = None) -> tuple[str, dict]:
+    """Audio to text through one binding. Returns (text, usage).
+
+    Usage is best effort: the transcription APIs report tokens
+    inconsistently and some report none at all, so an absent figure is
+    ABSENT — never zero. J.4.2's rule about columns that lie by omission
+    applies to a bill the provider did not send.
+    """
+    import httpx
+
+    path = Path(audio)
+    if not path.is_file():
+        raise VineError(E_SCHEMA, f"no such audio file: {path.name}")
+    size = path.stat().st_size
+    if size > MAX_AUDIO_BYTES:
+        raise VineError(
+            E_SCHEMA,
+            f"audio is {size} bytes, over the {MAX_AUDIO_BYTES}-byte limit",
+            hint="split the recording, or transcribe it outside the forest "
+                 "and ingest the text")
+    endpoint = (binding.get("endpoint") or "").rstrip("/")
+    if not endpoint:
+        raise VineError(E_SCHEMA, "provider has no endpoint")
+
+    data = {"model": binding.get("model") or "whisper-1"}
+    if language:
+        data["language"] = language
+    if prompt:
+        data["prompt"] = prompt
+    mime = _AUDIO_MIME.get(path.suffix.lower(), "application/octet-stream")
+
+    with httpx.Client(base_url=endpoint, timeout=timeout or TRANSCRIBE_TIMEOUT,
+                      headers={"Authorization":
+                               f"Bearer {binding.get('api_key') or 'no-key'}"}
+                      ) as client:
+        with path.open("rb") as fh:
+            response = client.post(TRANSCRIBE_PATH, data=data,
+                                   files={"file": (path.name, fh, mime)})
+    if response.status_code >= 400:
+        raise VineError(
+            E_SCHEMA,
+            f"the transcription provider refused ({response.status_code})",
+            hint=response.text[:300])
+    try:
+        payload = response.json()
+    except ValueError:
+        raise VineError(E_SCHEMA,
+                        "the transcription provider did not answer JSON",
+                        hint=response.text[:200]) from None
+    text = (payload.get("text") or "").strip()
+    if not text:
+        # An empty transcription described nothing. Raising here lands on
+        # the Gardener's fallback (the stub), which at least records format
+        # and size — planting an empty body would look like success.
+        raise VineError(E_SCHEMA, "the transcription came back empty")
+    usage = payload.get("usage") or {}
+    return text, usage
+
+
 def reply_flags(chat) -> dict:
     """J.10.8 (v0.54): what the last model turn says about its own end.
 
@@ -271,6 +363,38 @@ def probe(endpoint: str, api_key: str | None) -> dict:
     return {"ok": True, "models": models[:1000], "count": len(models)}
 
 
+def apply_prompt_seam(scoped_vine, system: str, *, mode: str,
+                      question: str = "") -> str:
+    """L.3 `prompt` — an extension's addition to the system prompt.
+
+    ADDITION, never replacement: what a contribution returns is APPENDED,
+    so no extension can delete the rules the product's own answers depend
+    on — citation, the refusal to invent, the stated budget. First claimant
+    wins, a raise leaves the prompt untouched (L.7 rule 5), and a
+    contribution that ran is named on the Part D event, because this is the
+    other seam whose effect an operator cannot otherwise see.
+    """
+    registry = getattr(scoped_vine, "ext_registry", None)
+    if registry is None:
+        return system
+    claim = registry.first("prompt")
+    if claim is None:
+        return system
+    try:
+        addition = claim.handler(mode=mode, question=question, system=system)
+    except Exception:
+        return system
+    if not isinstance(addition, str) or not addition.strip():
+        return system
+    inner = getattr(scoped_vine, "vine", scoped_vine)
+    pending = getattr(inner, "_ext_via_pending", None) or []
+    try:
+        inner._ext_via_pending = sorted(set(pending) | {f"ext:{claim.ext_id}"})
+    except Exception:
+        pass
+    return system.rstrip() + "\n\n" + addition.strip()
+
+
 def answer(scoped_vine, question: str, binding: dict, k: int = 3,
            bundle: dict | None = None, reply_tokens: int | None = None) -> dict:
     """Retrieve inside the principal's scope, then let the bound model read.
@@ -303,7 +427,8 @@ def answer(scoped_vine, question: str, binding: dict, k: int = 3,
     if media:
         caveat += MEDIA_CAVEAT.format(ids=", ".join(media))
 
-    system = ANSWER_SYSTEM
+    system = apply_prompt_seam(scoped_vine, ANSWER_SYSTEM, mode="sweep",
+                               question=question)
     # J.10.8 (amended v0.63): stated whatever chose the number. Saying it only
     # when the CALLER chose left the prompt silent in exactly the case where
     # nobody had and the shipped default was deciding alone.
@@ -714,7 +839,9 @@ def forage(scoped_vine, question: str, binding: dict, k: int = 3,
     the hunt — a deadline turn forces an answer from what was already read.
     """
     max_hops = max(1, min(int(max_hops or 1), MAX_HOPS))
-    system = FORAGE_SYSTEM + FORAGE_CLOCK.format(today=host_today())
+    system = apply_prompt_seam(
+        scoped_vine, FORAGE_SYSTEM + FORAGE_CLOCK.format(today=host_today()),
+        mode="walk", question=question)
     # J.10.8 (amended v0.63): the cap bounds every turn and the note aims at
     # the answer, which is the turn it exists for. A navigating turn is short;
     # the ANSWER turn is an object carrying the text AND `answer_nodes`, and
