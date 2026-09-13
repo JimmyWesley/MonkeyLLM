@@ -308,6 +308,65 @@ def resolve_file(source: str, workdir: Path) -> Resolved:
 
 
 # ---------------------------------------------------------------------------
+# an uploaded archive (L.2, v0.81)
+# ---------------------------------------------------------------------------
+
+# This door is for an extension's own CODE. Dependencies are resolved at
+# install (L.5), and a vendored-wheel bundle belongs to the local-file
+# route, where the bytes are already on the host and never cross a JSON
+# body inflated a third by base64.
+DEFAULT_UPLOAD_MAX_MB = 25
+
+
+def upload_ceiling() -> int:
+    raw = os.environ.get("MONKEYLLM_STATION_EXT_UPLOAD_MAX_MB")
+    if raw is None or not str(raw).strip():
+        return DEFAULT_UPLOAD_MAX_MB
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        raise VineError(
+            E_SCHEMA,
+            f"MONKEYLLM_STATION_EXT_UPLOAD_MAX_MB is not a number: {raw!r}",
+            hint="a ceiling silently corrected is a ceiling nobody set")
+    return max(1, value)
+
+
+def resolve_upload(name: str, data: bytes, workdir: Path) -> Resolved:
+    """The operator's own bytes, from a browser.
+
+    "A local file" is a path on the HOST, which through a browser is the
+    container's filesystem — so without this door an operator holding an
+    extension they just wrote has no route to a remote Station short of
+    publishing it to git first. The bytes land in the workdir and take the
+    archive path L.2 already resolves: a fifth door, not a fifth resolver.
+    """
+    ceiling = upload_ceiling() * 1024 * 1024
+    if len(data) > ceiling:
+        # Refused BEFORE it is written: an upload that spends the disk to
+        # be told no has already cost what refusing it was meant to save.
+        raise VineError(
+            E_EXT_INSTALL,
+            f"the upload is {len(data)} bytes, over the {ceiling}-byte "
+            f"ceiling",
+            hint="MONKEYLLM_STATION_EXT_UPLOAD_MAX_MB raises it; an "
+                 "extension's own code is small, and vendored wheels belong "
+                 "to the local-file route",
+            data={"reason": "too_large", "bytes": len(data),
+                  "ceiling": ceiling})
+    safe = Path(str(name or "extension.zip")).name or "extension.zip"
+    local = workdir / safe
+    local.write_bytes(data)
+    return Resolved(
+        root=_extract(local, workdir), source=f"upload:{safe}",
+        kind="upload", cleanup=workdir,
+        # L.2: `unverified` BY CONSTRUCTION. There is no forge and no index
+        # identity behind an upload, so nothing could have been verified —
+        # and the tier says that rather than implying a check happened.
+        reason="an upload carries no signature that could be checked")
+
+
+# ---------------------------------------------------------------------------
 # the curated index
 # ---------------------------------------------------------------------------
 

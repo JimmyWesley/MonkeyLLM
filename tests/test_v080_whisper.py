@@ -32,7 +32,13 @@ from monkeyllm.extensions.loader import load
 from monkeyllm.extensions.store import Store
 
 WHISPER = Path(__file__).resolve().parents[1] / "extensions" / "whisper"
-HOST = "0.79.0"
+# The installed build's own number, never a copy: whisper pins
+# `station_compat` to the minor it was tested against (CONTRIBUTING,
+# "Versions"), so a literal here would have to be edited at every bump and
+# would silently stop testing the range. When this suite fails at the next
+# MINOR, that is the pin working — re-test the extension against the new
+# spec and widen its manifest deliberately.
+HOST = __import__("monkeyllm").__version__
 
 TRANSCRIPT = "Boa tarde. A reunião começa com o orçamento de 2026."
 

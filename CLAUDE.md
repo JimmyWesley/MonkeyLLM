@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.79.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.81.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,51 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **The door an author could not find (spec L.2/L.3/L.9 r1 + L.16,
+  v0.81)**: Part L shipped the mechanism and left the person it was built
+  for with no way in. `docs/extending.md` still cited **v0.20**, so the one
+  document naming extensions contradicted what had been released; nothing
+  taught how to write one; and the console's install box asked for "a
+  path", which is a path on the **host** — through a browser that is the
+  container's filesystem, so an operator holding an extension they had just
+  written had **no route at all** to a remote Station short of publishing it
+  to git first, and the local-file door served only somebody with a shell
+  there, who would have used the CLI. Now: an **uploaded archive** is a
+  fifth door into the SAME resolver (`{name, b64}`, the shape ingest has
+  carried since J.8, so a browser that can send a document sends an
+  extension with no new mechanism), `unverified` **by construction** (no
+  forge, no index identity, so nothing could have been verified and the
+  tier says that rather than implying a check happened), refused **before
+  it is written** over `MONKEYLLM_STATION_EXT_UPLOAD_MAX_MB` (25) — the
+  door is for an extension's own code, and vendored wheels belong to the
+  local-file route. Every seam **declares its handler's contract**
+  (`extensions/contracts.py`), the kit CHECKS the signature at install, and
+  the authoring reference is generated from the same declaration — three
+  texts became one. The rule hinges on **defaults, not `**kwargs`**: the
+  first cut said kwargs excused a misspelling and was wrong in the exact
+  case it was written for (given `on_event(event, forrest, **rest)`,
+  `**rest` absorbs the `forest` the host passes and `forrest` is still
+  unfilled, a `TypeError` at whatever hour the next ingest runs), so the
+  SPEC paragraph was corrected to match the code and not the reverse. The
+  check reads the author's **source** and never imports it: a `heavy`
+  handler's module imports the very dependency L.5 keeps out of this
+  process, so importing to catch a typo would break the rule that protects
+  the deployment — and would run third-party code at kit time, which L.2
+  r5 is careful to say the kit does not do. L.16: **prose is written,
+  schemas are derived** — the teaching text lives in `docs/extending.md`
+  where it is read without running anything, and the manifest schema, seam
+  contracts and role kinds come from the definitions, because a transcribed
+  schema lies at the first new seam, silently, to exactly the person with no
+  other source (F.203 adds a seam at runtime and asserts the document
+  changes). `GET /v1/extensions/authoring` is deliberately **not** under the
+  admin gate: writing is not installing, and an extension is written on a
+  laptop and installed by whoever governs the deployment, so gating the docs
+  on L.7 r1 withholds them from the only person who needs them (J.5.12's
+  reasoning about skills). Gotcha worth keeping: the new contract check
+  immediately failed a v0.80 fixture **of our own** — an `events` handler
+  declared `echo(value)`, a signature no real `events` call could fill,
+  which passed a whole release because nothing checked. F.199-F.205 in
+  `tests/test_v081_authoring.py`.
 - **A capability the deployment does not have (spec Part L + J.4.2/J.10/
   J.5, v0.80)**: Part G's line "UIs and bots are MCP/library clients, not
   plugins" drew the boundary correctly and left a whole class of work with

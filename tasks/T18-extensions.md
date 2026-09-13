@@ -1,9 +1,7 @@
-status: in-progress (2026-09-08: spec v0.80 Part L cut and closed; engine
-runtime, `vine ext`, Station governance, all TEN L.3 seams wired, Studio
-console, and 100 Part L tests green with zero regressions against the 8
-pre-existing failures. Remaining: F.194's gpg measurement, the curated
-index, `docs/extending.md`, the console's browser pass, and the first real
-extension.)
+status: in-progress (2026-09-13: v0.80 SHIPPED to PyPI; v0.81 adds the
+author's door — uploaded archives, declared seam contracts checked by the
+kit, and the L.16 authoring surface. Remaining: F.194's gpg measurement,
+the curated index, and the console's browser pass.)
 
 # T18 Extensions: third-party modules, installed by the operator
 
@@ -348,6 +346,47 @@ Unchanged from `docs/extending.md` and Part G:
   `govern` group, en/pt/es.
 - **Tests** — `tests/test_v080_extensions.py` (59) and
   `tests/test_v080_station_extensions.py` (27).
+
+## v0.81 — the door an author could not find (2026-09-13)
+
+Three gaps, and the first was not a missing button. The console's install
+box asks for "a path", and a path is on the **host** — through a browser
+that is the container's filesystem, so an operator holding an extension
+they had just written had **no route at all** to a remote Station short of
+publishing it to git first. The local-file door served only somebody with a
+shell there, who would have used the CLI.
+
+- **An uploaded archive is a source (L.2).** `{name, b64}` — the shape
+  ingest has carried since J.8, so a browser that can send a document can
+  send an extension with no new mechanism. `unverified` by construction (no
+  forge, no index identity, so nothing could have been checked), refused
+  over the ceiling **before** it is written, and capped at 25 MB because
+  this door is for an extension's own code.
+- **Seam contracts are declared and checked (L.3, L.9 r1).** What each seam
+  passes lived in the spec's prose and nowhere in the code, so the kit could
+  say "it works" about a handler with the wrong parameters — found on the
+  first ingest, at whatever hour that ran. `contracts.py` declares all ten;
+  the kit checks the signature at install by reading the **source**, never
+  importing it, because a heavy handler's module imports the dependency L.5
+  exists to keep out of this process.
+- **The authoring surface (L.16).** Prose is written and lives in
+  `docs/extending.md`; schemas are **derived** from the manifest model and
+  the seam contracts. `GET /v1/extensions/authoring` serves them, open to
+  anyone signed in — writing is not installing, and gating the docs on the
+  authority to install withholds them from the only person who needs them.
+  The console renders the seam table and hands out a folder for a coding
+  agent.
+
+Two things this round got wrong first and is worth keeping:
+
+1. **`**kwargs` was treated as excusing a misspelled parameter.** It does
+   not: given `def on_event(event, forrest, **rest)`, `**rest` absorbs the
+   `forest` the host passes and `forrest` is still unfilled. The rule hinges
+   on **defaults**, not on kwargs, and the spec paragraph was corrected to
+   match the code rather than the other way round.
+2. **The new check immediately failed a v0.80 test fixture of our own** — an
+   `events` handler declared as `echo(value)`, a signature no real `events`
+   call could fill. It passed for a release because nothing checked.
 
 ## What is not done
 

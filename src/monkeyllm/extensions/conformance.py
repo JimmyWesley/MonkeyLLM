@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from monkeyllm.errors import VineError
+from monkeyllm.extensions.contracts import check_source_signature
 from monkeyllm.extensions.loader import read_manifest
 from monkeyllm.extensions.manifest import Manifest, compat_ok
 
@@ -84,6 +85,16 @@ def run_kit(tree: Path, host_version: str, *,
         ok = bool(func) and path.exists()
         record(f"handler:{seam}:{spec.handler}", ok,
                "" if ok else "module:function does not resolve to a file")
+        if not ok:
+            continue
+        # L.3 (v0.81): the signature against the seam's declared contract,
+        # read off the SOURCE. Importing to inspect would execute the
+        # module — and a heavy handler's module imports the dependency L.5
+        # exists to keep out of this process, so the check meant to catch an
+        # author's typo would break the rule that protects the deployment.
+        problem = check_source_signature(seam, path, func)
+        record(f"signature:{seam}:{spec.handler}", problem is None,
+               problem or "")
 
     # 5 — a declared panel parses even where nothing renders it (L.10)
     if manifest.contributes.panel:

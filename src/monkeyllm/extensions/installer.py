@@ -70,7 +70,8 @@ class InstallPlan:
 
 def plan(source: str, host_version: str, *, workdir: Path | None = None,
          index: dict | None = None, verify: bool = True,
-         bound_roles: set[str] | None = None) -> tuple[InstallPlan, Path]:
+         bound_roles: set[str] | None = None,
+         upload: tuple[str, bytes] | None = None) -> tuple[InstallPlan, Path]:
     """Resolve and validate without touching the store.
 
     Returns the plan and the temporary directory holding the artifact; the
@@ -78,7 +79,13 @@ def plan(source: str, host_version: str, *, workdir: Path | None = None,
     exactly what a confirmation would accept.
     """
     tmp = Path(workdir or tempfile.mkdtemp(prefix="monkeyllm-ext-"))
-    resolved = sources.resolve(source, tmp, index=index, verify=verify)
+    if upload is not None:
+        # L.2 (v0.81): the operator's own bytes. A fifth door, and the same
+        # resolver past this line — the archive is written into the workdir
+        # and read exactly as a local one.
+        resolved = sources.resolve_upload(upload[0], upload[1], tmp)
+    else:
+        resolved = sources.resolve(source, tmp, index=index, verify=verify)
     kit = run_kit(resolved.root, host_version, bound_roles=bound_roles)
     return InstallPlan(resolved=resolved, kit=kit), tmp
 
@@ -86,10 +93,11 @@ def plan(source: str, host_version: str, *, workdir: Path | None = None,
 def install(source: str, host_version: str, *, store: Store | None = None,
             acknowledge_unverified: bool = False, index: dict | None = None,
             verify: bool = True, bound_roles: set[str] | None = None,
-            build_env: bool = True) -> dict:
+            build_env: bool = True,
+            upload: tuple[str, bytes] | None = None) -> dict:
     store = store or Store()
     prepared, tmp = plan(source, host_version, index=index, verify=verify,
-                         bound_roles=bound_roles)
+                         bound_roles=bound_roles, upload=upload)
     try:
         return _finish(prepared, store, acknowledge_unverified, build_env)
     finally:

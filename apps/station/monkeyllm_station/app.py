@@ -48,6 +48,7 @@ from starlette.requests import Request
 from starlette.responses import (
     FileResponse,
     JSONResponse,
+    PlainTextResponse,
     Response,
     StreamingResponse,
 )
@@ -5853,6 +5854,37 @@ def build_app(
         return JSONResponse(result if isinstance(result, dict)
                             else {"result": result})
 
+    async def extension_authoring(request: Request) -> JSONResponse:
+        """L.16 — what somebody writing an extension is handed.
+
+        Open to anyone signed in, and deliberately NOT gated on the
+        authority to install. J.5.12 settled the same question for skills —
+        "the person who may read the forest is the person whose AI may learn
+        to" — and it holds harder here: an extension is written on a laptop
+        and installed by whoever governs the deployment, so gating the
+        documentation on L.7 rule 1 withholds it from the only person who
+        needs it.
+
+        Everything served is DERIVED (L.16 rule 1). There is no second
+        description of the manifest here that could disagree with the
+        loader's, and adding a seam to the catalogue changes this response
+        with no edit to this file.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        from monkeyllm.extensions import authoring
+        from monkeyllm_station.mcp_surface import package_version
+
+        version = package_version()
+        want = (request.query_params.get("as") or "json").lower()
+        if want == "markdown":
+            which = (request.query_params.get("doc") or "seams").lower()
+            body = (authoring.manifest_reference(version) if which == "manifest"
+                    else authoring.seam_reference(version))
+            return PlainTextResponse(body, media_type="text/markdown")
+        return JSONResponse(authoring.schema(version))
+
     async def admin_extensions(request: Request) -> JSONResponse:
         """What is installed, and what installs one (spec Part L).
 
@@ -5908,6 +5940,24 @@ def build_app(
 
         action = str(body.get("action") or "install")
         store = _ext_store()
+
+        # L.2 (v0.81): an uploaded archive. `{name, b64}` is the shape J.8
+        # has carried since v0.48, so a browser that can already send a
+        # document can send an extension with no new mechanism.
+        upload = None
+        raw = body.get("upload")
+        if raw is not None:
+            if not isinstance(raw, dict) or not raw.get("b64"):
+                return _envelope(VineError(
+                    E_SCHEMA, "'upload' must be {name, b64}",
+                    hint='the shape ingest uses: {"name": "x.zip", '
+                         '"b64": "…"}'))
+            try:
+                data = base64.b64decode(str(raw["b64"]), validate=True)
+            except Exception:
+                return _envelope(VineError(
+                    E_SCHEMA, "'upload.b64' is not valid base64"))
+            upload = (str(raw.get("name") or "extension.zip"), data)
         # L.1: `station_compat` is judged against the version this host
         # publishes in `forests()` — the same number an author reads when
         # they choose their range. Two versions here would let an extension
@@ -5919,7 +5969,7 @@ def build_app(
                 from monkeyllm.extensions.installer import plan
                 import shutil as _shutil
                 prepared, tmp = plan(str(body.get("source") or ""),
-                                     host_version,
+                                     host_version, upload=upload,
                                      verify=body.get("verify", True) is not False)
                 try:
                     return JSONResponse(prepared.to_dict())
@@ -5930,7 +5980,7 @@ def build_app(
                 acknowledged = bool(body.get("acknowledge"))
                 if action == "install":
                     result = install(str(body.get("source") or ""),
-                                     host_version, store=store,
+                                     host_version, store=store, upload=upload,
                                      acknowledge_unverified=acknowledged,
                                      verify=body.get("verify", True) is not False)
                 else:
@@ -6867,6 +6917,10 @@ def build_app(
         # can never take a name the product needs.
         Route("/v1/ext/{ext}/{path:path}", extension_route,
               methods=["GET", "POST"]),
+        # L.16: authoring is not installing, so this one is not under the
+        # admin gate the rest of /v1/admin/extensions* carries.
+        Route("/v1/extensions/authoring", extension_authoring,
+              methods=["GET"]),
         Route("/v1/admin/extensions", admin_extensions,
               methods=["GET", "POST"]),
         Route("/v1/admin/extensions/enablement", admin_extension_enablement,

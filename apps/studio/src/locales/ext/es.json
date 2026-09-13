@@ -1,5 +1,15 @@
 {
   "ext.absent": "Este bosque espera extensiones que no están instaladas: {list}",
+  "ext.author": "Escribir una extensión",
+  "ext.author.blurb": "Añade una capacidad que esta instalación no tiene — sin que ningún paquete entre en el entorno del motor.",
+  "ext.author.derived": "Leído de esta Station ({version}), no de una copia — un seam nuevo aparece aquí sin que nadie recuerde escribirlo.",
+  "ext.author.does": "Qué hace",
+  "ext.author.download": "Descargar la carpeta de autoría",
+  "ext.author.download.hint": "SKILL.md más las referencias generadas, para tu agente de código.",
+  "ext.author.manifest_only": "declarado en el manifiesto; sin handler",
+  "ext.author.open": "Muéstrame cómo",
+  "ext.author.seam": "Seam",
+  "ext.author.shape": "Tu handler",
   "ext.config.none": "Esta extensión no declara ajustes",
   "ext.config.saved": "Guardado.",
   "ext.config.secret.set": "Hay un valor guardado. Déjalo vacío para conservarlo.",
@@ -42,5 +52,7 @@
   "ext.source.hint": "Un id del índice, github.com/org/repo@v1.2.0, un .zip https, o una ruta en el host.",
   "ext.tier": "Confianza",
   "ext.tracking": "siguiendo {ref}",
-  "ext.tracking.label": "Siguiendo"
+  "ext.tracking.label": "Siguiendo",
+  "ext.upload": "Elegir un .zip",
+  "ext.upload.hint": "La ruta de arriba es una ruta en el HOST. Para instalar una extensión desde esta máquina, súbela."
 }

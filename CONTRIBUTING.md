@@ -84,6 +84,55 @@ git rebase --signoff main    # a whole branch
 git push --force-with-lease
 ```
 
+## Versions, and what a tag means
+
+Three numbers, and until `1.0.0` only the first two carry a promise.
+
+| Position | Meaning |
+|---|---|
+| **major** | `0` until this project says otherwise. It is not `1` yet, and that is a statement: see below. |
+| **minor** | the spec version this release implements. `0.81.x` implements `docs/monkeyllm-spec-v0.81.md`. A contract change therefore always moves this number, because a contract change always cuts a spec first. |
+| **patch** | every release that cuts no spec — a fix, a console, a document, a measurement. |
+
+**While the major is `0`, a patch may break you.** That is the honest reading
+of a `0.x` version and it is stated here rather than left to be discovered:
+this project reserves the right to change behaviour in a patch release, and
+the version number alone is not a compatibility promise. What *is* promised
+is that the spec is the truth — if behaviour changed, a spec version says
+so, and if it changed without one, that is a defect worth reporting.
+
+The one place this rule has teeth is an extension's `station_compat`
+(spec L.1). Because a patch may break, an extension SHOULD pin to the minor
+it was written and tested against:
+
+```json
+"station_compat": ">=0.81,<0.82"
+```
+
+A wider range such as `>=0.81,<1.0` is allowed and means what it says — *I
+accept whatever the next minor does to me*. It is the right choice for an
+extension with a tiny surface and the wrong one for anything that reads a
+seam closely.
+
+### Releasing
+
+The tag is the only thing anybody types, and it must equal `version` in
+`pyproject.toml` — the release workflow's first job refuses the pair when
+they disagree, in ten seconds, before the suite has run. PyPI never lets a
+published version mean anything else and never lets it be replaced, so the
+sequence is:
+
+1. bump `version` in `pyproject.toml`, in a commit whose subject is
+   `Release <version>`;
+2. merge to `main`;
+3. `git tag v<version> && git push origin v<version>`;
+4. approve the `pypi` environment when the run asks — every check has
+   already run by then, and that approval is the irreversible step.
+
+Do not skip a number. A gap in the PyPI index reads as a release that was
+published and withdrawn, which is a different and more alarming thing than
+a version that never existed.
+
 ## Before you open a pull request
 
 - **The spec is the truth.** `docs/monkeyllm-spec-v0.49.md` is normative. A
