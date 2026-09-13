@@ -7,7 +7,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import TurndownService from 'turndown'
 
-import { api } from '../api.js'
+import { api , toBase64 } from '../api.js'
 import { useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import {
@@ -46,15 +46,6 @@ const EMPTY_REPLY = 'the model returned an empty message'
 
 /* Chunked so a 20 MB document does not blow the argument limit of
  * String.fromCharCode with one spread of the whole array. */
-function toBase64(buffer) {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += 8192) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192))
-  }
-  return btoa(binary)
-}
-
 /* Drag-and-drop hands over directory entries, not files. Walking them is what
  * makes dropping a folder behave like choosing one. */
 async function filesFromEntry(entry, prefix = '') {

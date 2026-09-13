@@ -1,5 +1,15 @@
 {
   "ext.absent": "This forest expects extensions that are not installed: {list}",
+  "ext.author": "Write an extension",
+  "ext.author.blurb": "Add a capability this deployment does not have — without a package entering the engine's environment.",
+  "ext.author.derived": "Read from this Station ({version}), not from a copy — a seam added to the product appears here with nobody remembering to write it down.",
+  "ext.author.does": "What it does",
+  "ext.author.download": "Download the authoring folder",
+  "ext.author.download.hint": "SKILL.md plus the generated references, for your coding agent.",
+  "ext.author.manifest_only": "declared in the manifest; no handler",
+  "ext.author.open": "Show me how",
+  "ext.author.seam": "Seam",
+  "ext.author.shape": "Your handler",
   "ext.config.none": "This extension declares no settings",
   "ext.config.saved": "Saved.",
   "ext.config.secret.set": "A value is set. Leave empty to keep it.",
@@ -42,5 +52,7 @@
   "ext.source.hint": "An index id, github.com/org/repo@v1.2.0, an https .zip, or a path on the host.",
   "ext.tier": "Trust",
   "ext.tracking": "tracking {ref}",
-  "ext.tracking.label": "Tracking"
+  "ext.tracking.label": "Tracking",
+  "ext.upload": "Choose a .zip",
+  "ext.upload.hint": "A path above is a path on the HOST. To install an extension from this machine, upload it."
 }

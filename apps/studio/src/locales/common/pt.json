@@ -1,11 +1,13 @@
 {
   "common.body": "Conteúdo",
   "common.cancel": "Cancelar",
+  "common.clear": "Limpar",
   "common.close": "Fechar",
   "common.copy": "Copiar",
   "common.create": "Criar",
   "common.elapsed": "{ms} ms",
   "common.evidence": "Evidências",
+  "common.hide": "Ocultar",
   "common.loading": "Carregando",
   "common.no_changes": "Nada mudou ainda",
   "common.optional": "opcional",

@@ -500,22 +500,28 @@ def convert(path):
         assert caught.value.code == "E_EXT_WORKER"
 
     def test_a_worker_round_trip_returns_its_value(self, tmp_path, store):
+        # On `converters`, because that is the seam a heavy handler actually
+        # rides (a local transcriber, a document toolchain) and its contract
+        # is one positional `path`. The first version of this test declared
+        # `echo(value)` on `events` — a signature no real `events` call
+        # could fill — and passed only because nothing checked. v0.81's
+        # contract check refuses it, which is the check earning its place on
+        # its own author.
         body = '''
-def echo(value):
-    return {"seen": value}
+def echo(path):
+    return {"kind": "markdown", "title": "echoed", "markdown": path}
 '''
         tree = make_ext(tmp_path / "src", "echoext", main=MAIN,
                         extra_files={"worker.py": body},
-                        contributes={"events": [
-                            {"name": "echo", "handler": "worker:echo",
-                             "heavy": True}]})
+                        contributes={"converters": [
+                            {"extensions": [".echo"],
+                             "handler": "worker:echo", "heavy": True}]})
         install(str(tree), HOST, store=store, acknowledge_unverified=True)
         registry = Registry()
         load(store.tree("echoext"), registry=registry)
-        claim = next(c for c in registry.for_seam("events")
-                     if c.spec.get("name") == "echo")
+        claim = registry.converters()[0]
         assert claim.heavy is True
-        assert claim.handler("hi") == {"seen": "hi"}
+        assert claim.handler("hi")["markdown"] == "hi"
 
     def test_one_broken_extension_never_stops_the_others(self, tmp_path,
                                                          store):

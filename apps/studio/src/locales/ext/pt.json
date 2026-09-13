@@ -1,5 +1,15 @@
 {
   "ext.absent": "Esta floresta espera extensões que não estão instaladas: {list}",
+  "ext.author": "Escrever uma extensão",
+  "ext.author.blurb": "Acrescente uma capacidade que esta instalação não tem — sem nenhum pacote entrar no ambiente da engine.",
+  "ext.author.derived": "Lido desta Station ({version}), não de uma cópia — um seam novo no produto aparece aqui sem ninguém lembrar de escrever.",
+  "ext.author.does": "O que faz",
+  "ext.author.download": "Baixar a pasta de autoria",
+  "ext.author.download.hint": "SKILL.md mais as referências geradas, para o seu agente de código.",
+  "ext.author.manifest_only": "declarado no manifesto; sem handler",
+  "ext.author.open": "Me mostre como",
+  "ext.author.seam": "Seam",
+  "ext.author.shape": "Seu handler",
   "ext.config.none": "Esta extensão não declara ajustes",
   "ext.config.saved": "Salvo.",
   "ext.config.secret.set": "Há um valor guardado. Deixe vazio para mantê-lo.",
@@ -42,5 +52,7 @@
   "ext.source.hint": "Um id do índice, github.com/org/repo@v1.2.0, um .zip https, ou um caminho no host.",
   "ext.tier": "Confiança",
   "ext.tracking": "seguindo {ref}",
-  "ext.tracking.label": "Seguindo"
+  "ext.tracking.label": "Seguindo",
+  "ext.upload": "Escolher um .zip",
+  "ext.upload.hint": "O caminho acima é um caminho no HOST. Para instalar uma extensão desta máquina, envie o arquivo."
 }

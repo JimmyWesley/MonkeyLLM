@@ -61,7 +61,8 @@ function serverTiming(res) {
   return Object.keys(out).length ? out : null
 }
 
-async function request(path, { method = 'GET', body, timing = false } = {}) {
+async function request(path, { method = 'GET', body, timing = false,
+                              raw = false } = {}) {
   const res = await fetch(path, {
     method,
     headers: {
@@ -70,6 +71,10 @@ async function request(path, { method = 'GET', body, timing = false } = {}) {
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
+  // `raw` is for a route that answers text/markdown (the L.16 authoring
+  // reference). A failure still carries the envelope, so the error path
+  // below is shared rather than duplicated for the text case.
+  if (raw && res.ok) return res.text()
   const payload = await res.json().catch(() => ({}))
   if (!res.ok) {
     const err = payload?.error || {}
@@ -86,6 +91,23 @@ async function request(path, { method = 'GET', body, timing = false } = {}) {
   // receives.
   return timing ? { data: payload, timing: serverTiming(res) } : payload
 }
+
+/** Raw bytes as the `b64` half of the `{name, text|b64}` wire shape (J.8).
+ *
+ *  Exported rather than written twice: ingest and the extension upload send
+ *  the SAME contract, and two encoders agree only where somebody compared
+ *  them. Chunked because `String.fromCharCode.apply` on a whole megabyte
+ *  overflows the argument stack.
+ */
+export function toBase64(buffer) {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192))
+  }
+  return btoa(binary)
+}
+
 
 export const api = {
   health: () => request('/v1/health'),
@@ -301,6 +323,13 @@ export const api = {
   // authority may change what exists — the route decides, and the console
   // reads `may_install` rather than deciding for itself.
   extensions: () => request('/v1/admin/extensions'),
+  // L.16: authoring is NOT under the admin gate — writing an extension is
+  // not installing one, and the person who writes it is usually not the
+  // person who governs the deployment.
+  extensionAuthoring: () => request('/v1/extensions/authoring'),
+  extensionAuthoringDoc: (doc) =>
+    request(`/v1/extensions/authoring?as=markdown&doc=${encodeURIComponent(doc)}`,
+            { raw: true }),
   extensionAction: (body) =>
     request('/v1/admin/extensions', { method: 'POST', body }),
   extensionEnablement: (forest) =>

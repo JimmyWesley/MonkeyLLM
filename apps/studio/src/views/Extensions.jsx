@@ -27,13 +27,14 @@
 
 import { useState } from 'react'
 
-import { api } from '../api.js'
+import { api, toBase64 } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { useRouteState } from '../router.js'
 import {
   Badge, Card, Empty, ErrorNote, Field, Modal, Note, Skeleton, Table, Td,
 } from '../design/ui.jsx'
-import { Alert, Refresh, Save } from '../design/icons.jsx'
+import { Alert, Download, Refresh, Save, Upload } from '../design/icons.jsx'
+import { zip } from '../zip.js'
 import { NeedsCapability, has, useAsync } from './shared.jsx'
 
 /** The tier, as a badge that is always present.
@@ -51,6 +52,8 @@ export default function Extensions({ forest, grant }) {
   const { t } = useI18n()
   const [selected, setSelected] = useRouteState('ext', null)
   const [source, setSource] = useState('')
+  const [upload, setUpload] = useState(null)   // {name, b64, bytes}
+  const [authoring, setAuthoring] = useState(false)
   const [confirming, setConfirming] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -128,26 +131,85 @@ export default function Extensions({ forest, grant }) {
               label={t('ext.source')}
               hint={t('ext.source.hint')}
               value={source}
+              disabled={!!upload}
               onChange={(e) => setSource(e.target.value)}
               placeholder="github.com/org/monkeyllm-whisper@v1.2.0"
             />
             <button
               className="btn"
-              disabled={busy || !source.trim()}
+              disabled={busy || (!source.trim() && !upload)}
               onClick={async () => {
                 // L.9 rule 4: the operator is shown the licence, the source
                 // and the tier BEFORE anything is accepted.
-                const plan = await act({ action: 'plan', source })
-                setConfirming({ plan, source })
+                const body = upload
+                  ? { action: 'plan', upload: { name: upload.name, b64: upload.b64 } }
+                  : { action: 'plan', source }
+                const plan = await act(body)
+                setConfirming({ plan, source, upload })
               }}
             >
               <Refresh /> {t('ext.review')}
             </button>
           </div>
+
+          {/* L.2 (v0.81): the door the others do not open. "A path" is a
+              path on the HOST — through a browser that is the container's
+              filesystem, so without this an operator holding an extension
+              they just wrote has no route short of publishing it to git. */}
+          <div className="row gap" style={{ alignItems: 'center' }}>
+            <label className="btn">
+              <Upload size={15} /> {t('ext.upload')}
+              <input
+                type="file"
+                accept=".zip"
+                hidden
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (!file) return
+                  setError(null)
+                  try {
+                    setUpload({
+                      name: file.name,
+                      b64: toBase64(await file.arrayBuffer()),
+                      bytes: file.size,
+                    })
+                    setSource('')
+                  } catch (err) { setError(err) }
+                }}
+              />
+            </label>
+            {upload ? (
+              <span className="muted small">
+                {upload.name} ({Math.round(upload.bytes / 1024)} KB) ·{' '}
+                <button className="btn btn-sm"
+                        onClick={() => setUpload(null)}>
+                  {t('common.clear')}
+                </button>
+              </span>
+            ) : (
+              <span className="muted small">{t('ext.upload.hint')}</span>
+            )}
+          </div>
         </Card>
       ) : (
         <Note tone="info">{t('ext.install.denied')}</Note>
       )}
+
+      {/* L.16: writing is not installing, so this is offered to everyone
+          who can open this console — and the route behind it is not under
+          the admin gate either. The teaching prose lives in the repository
+          where it is read without running anything; what is served here is
+          DERIVED, so a seam added to the catalogue documents itself. */}
+      <Card title={t('ext.author')} subtitle={t('ext.author.blurb')}
+            actions={
+              <button className="btn btn-sm"
+                      onClick={() => setAuthoring((v) => !v)}>
+                {authoring ? t('common.hide') : t('ext.author.open')}
+              </button>
+            }>
+        {authoring ? <AuthoringPanel /> : null}
+      </Card>
 
       <Card
         title={t('ext.installed')}
@@ -232,10 +294,14 @@ export default function Extensions({ forest, grant }) {
       <ReviewModal
         state={confirming}
         onClose={() => setConfirming(null)}
-        onInstall={async (src) => {
-          await act({ action: 'install', source: src, acknowledge: true })
+        onInstall={async (src, up) => {
+          await act(up
+            ? { action: 'install', acknowledge: true,
+                upload: { name: up.name, b64: up.b64 } }
+            : { action: 'install', source: src, acknowledge: true })
           setConfirming(null)
           setSource('')
+          setUpload(null)
         }}
         onRemove={(id) => remove(id, true)}
       />
@@ -277,7 +343,7 @@ function ReviewModal({ state, onClose, onInstall, onRemove }) {
            footer={
              <button className="btn btn-primary"
                      disabled={!plan.kit?.ok}
-                     onClick={() => onInstall(state.source)}>
+                     onClick={() => onInstall(state.source, state.upload)}>
                <Save /> {t('ext.review.accept')}
              </button>
            }>
@@ -392,4 +458,132 @@ function ConfigPanel({ ext, forest, mayEdit, onClose }) {
       )}
     </Modal>
   )
+}
+
+
+/** L.16 — the derived half of what an author is handed.
+ *
+ *  It lists the seams from the STATION's own contracts rather than from a
+ *  copy kept here, because a copy is what goes stale the first time a seam
+ *  is added — silently, to exactly the person who has no other source. The
+ *  concepts (why a contribution and not a patch, the worked example) live
+ *  in the repository and are linked, not restated.
+ */
+function AuthoringPanel() {
+  const { t } = useI18n()
+  const doc = useAsync(() => api.extensionAuthoring(), [])
+  const [saving, setSaving] = useState(false)
+
+  const download = async () => {
+    setSaving(true)
+    try {
+      const [seams, manifest] = await Promise.all([
+        api.extensionAuthoringDoc('seams'),
+        api.extensionAuthoringDoc('manifest'),
+      ])
+      const version = doc.data?.station || ''
+      const folder = 'monkeyllm-extension-authoring'
+      const core = [
+        '---',
+        'name: monkeyllm-extension',
+        `description: Write a MonkeyLLM extension for a Station running ${version}.`,
+        '---',
+        '',
+        `# Writing a MonkeyLLM extension (Station ${version})`,
+        '',
+        'An extension adds a capability this deployment does not have — a',
+        'converter for a file type, a tool for the agents, a panel in the',
+        'console — **without a single package entering the engine\'s own',
+        'environment**.',
+        '',
+        'It **contributes at a named seam** and never patches. That is what',
+        'leaves the product free to refactor: you are coupled to a seam\'s',
+        'published contract, never to the code behind it.',
+        '',
+        '## The package',
+        '',
+        '```',
+        'manifest.json   identity, compat, permissions, contributions, config',
+        'main.py         register(api) — the one activation entry point',
+        'worker.py       handlers you marked `heavy` (their own process)',
+        'ui/panel.json   declarative console contributions',
+        'requirements.txt  resolved into the extension\'s own environment',
+        'LICENSE         your licence, shown before the install completes',
+        '```',
+        '',
+        '- `references/seams.md` — every seam and the exact shape of its',
+        '  handler. Generated from this Station.',
+        '- `references/manifest.md` — the manifest JSON Schema. Generated.',
+        '',
+        '## Rules that will refuse you',
+        '',
+        '- A handler naming a parameter its seam does not pass **fails the',
+        '  conformance kit at install** — unless that parameter has a',
+        '  default. `**kwargs` excuses nothing.',
+        '- A tool or route name outside your namespace refuses the install.',
+        '- You never hold a model key: declare a role, and the host hands',
+        '  you a bound caller.',
+        '- Installing or removing takes effect after the host restarts.',
+        '  Settings take effect immediately.',
+        '',
+        '## Install what you wrote',
+        '',
+        'Zip the folder and upload it in the Extensions console, or from a',
+        'shell on the host: `vine ext install ./your-extension --yes`.',
+        '',
+        'The concepts, and a worked example that ships in the repository,',
+        'are in `docs/extending.md`.',
+        '',
+      ].join('\n')
+      save(`${folder}.zip`, zip([
+        { path: `${folder}/SKILL.md`, text: core },
+        { path: `${folder}/references/seams.md`, text: seams },
+        { path: `${folder}/references/manifest.md`, text: manifest },
+      ]))
+    } finally { setSaving(false) }
+  }
+
+  if (doc.busy) return <Skeleton rows={3} />
+  if (doc.error) return <ErrorNote error={doc.error} onRetry={doc.reload} />
+
+  return (
+    <div className="stack">
+      <Note tone="info">
+        {t('ext.author.derived', { version: doc.data?.station || '?' })}
+      </Note>
+      <Table head={[t('ext.author.seam'), t('ext.author.shape'),
+                    t('ext.author.does')]}>
+        {(doc.data?.seams || []).map((s) => (
+          <tr key={s.seam}>
+            <Td><code>{s.seam}</code></Td>
+            <Td>
+              {s.declarative
+                ? <span className="muted small">{t('ext.author.manifest_only')}</span>
+                : <code className="small">{s.signature}</code>}
+            </Td>
+            <Td className="small">{s.summary}</Td>
+          </tr>
+        ))}
+      </Table>
+      <div className="row gap">
+        <button className="btn btn-primary" disabled={saving}
+                onClick={download}>
+          <Download size={15} /> {t('ext.author.download')}
+        </button>
+        <span className="muted small">{t('ext.author.download.hint')}</span>
+      </div>
+    </div>
+  )
+}
+
+/** The Skills console's own saver: a Blob, an anchor, a revoked URL. */
+function save(name, blob) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
