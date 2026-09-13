@@ -13921,6 +13921,19 @@ range excludes the running host MUST be refused by name and version, never
 attempted; a host upgrade that falls outside an installed extension's range
 MUST disable it and say so, never load it and hope.
 
+**What the host's version promises, and what it does not.** The minor is
+the spec version a release implements, so `0.81.x` implements this
+document; the patch is every release that cuts no spec. While the major is
+`0` a **patch may change behaviour**, and this specification says so rather
+than letting an author infer a guarantee from the shape of a number. An
+extension SHOULD therefore pin to the minor it was written and tested
+against (`>=0.81,<0.82`). A wider range is legal and means exactly what it
+says — *I accept whatever the next minor does to me* — which is a
+reasonable choice for a small surface and an unreasonable one for anything
+that reads a seam closely. The authoring reference (L.16) MUST state this
+where the range is copied from, because the person copying it is the person
+who has no other source.
+
 ### L.2 Sources, resolution and trust
 
 An extension MAY arrive from four places, and they MUST all pass through one

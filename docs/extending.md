@@ -124,6 +124,22 @@ it that could have been checked.
 Installing or removing takes effect after the host restarts. Settings take
 effect immediately.
 
+## Pin to the minor you tested against
+
+The minor is the spec version a release implements and the patch is every
+release that cuts no spec — and **while the major is `0`, a patch may
+change behaviour**. So pin:
+
+```json
+"station_compat": ">=0.81,<0.82"
+```
+
+A wider range like `>=0.81,<1.0` is legal and means what it says: *I accept
+whatever the next minor does to me*. That is a reasonable bet for a small
+surface and an unreasonable one for anything reading a seam closely. Your
+own Station prints the range to copy — Extensions → *Write an extension*.
+See CONTRIBUTING, "Versions, and what a tag means".
+
 **What validation cannot promise**, said plainly because it matters:
 resolving `requirements.txt` executes third-party build code, and a git
 source runs the author's build backend. The conformance kit therefore does

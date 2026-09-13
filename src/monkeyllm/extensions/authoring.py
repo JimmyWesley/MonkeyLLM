@@ -26,6 +26,21 @@ from monkeyllm.extensions.sources import (DEFAULT_UPLOAD_MAX_MB,
                                           TIER_VERIFIED)
 
 
+def _minor(version: str) -> str:
+    """`0.81.0` -> `0.81`. The range an author should pin to."""
+    parts = str(version).split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else str(version)
+
+
+def _next_minor(version: str) -> str:
+    """`0.81.0` -> `0.82`, the exclusive upper bound of that pin."""
+    parts = str(version).split(".")
+    try:
+        return f"{parts[0]}.{int(parts[1]) + 1}"
+    except (IndexError, ValueError):
+        return str(version)
+
+
 def schema(host_version: str) -> dict:
     """Everything an author's tooling needs, in one derived document.
 
@@ -133,6 +148,22 @@ def manifest_reference(host_version: str) -> str:
         "`manifest.json` is the whole contract between you and a host.",
         "Unknown keys are **refused, never absorbed**: a typo beside a legal",
         "key used to mean the host silently did less than you asked.",
+        "",
+        "## Pinning `station_compat`",
+        "",
+        f"This host is **{host_version}**. The minor is the spec version a",
+        "release implements and the patch is every release that cuts no",
+        "spec — and while the major is `0`, a patch **may change**",
+        "**behaviour**. Pin to the minor you tested against:",
+        "",
+        "```json",
+        f'"station_compat": ">={_minor(host_version)},'
+        f'<{_next_minor(host_version)}"',
+        "```",
+        "",
+        "A wider range is legal and means what it says: *I accept whatever",
+        "the next minor does to me*. Reasonable for a small surface,",
+        "unreasonable for anything that reads a seam closely.",
         "",
         f"- Role kinds: `{'`, `'.join(doc['role_kinds'])}`",
         f"- Config field types: `{'`, `'.join(doc['config_field_types'])}`",
