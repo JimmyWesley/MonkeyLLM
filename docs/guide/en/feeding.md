@@ -265,7 +265,7 @@ paths the console uses:
 
 On first use it asks for the Station's origin and your username and
 password, once. The password is exchanged on the spot and never stored:
-what the Clipper keeps is a **paired key** narrowed to `read` + `ingest`,
+what the Clipper keeps is a **paired key** narrowed to `read` + `answer` + `ingest`,
 expiring in 90 days, revocable at any time under People. Pairing can only
 narrow your own authority, never add to it.
 

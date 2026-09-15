@@ -214,6 +214,9 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "min_score": _param("number"),
         "include_superseded": _param("boolean"),
         "hops": _param("boolean|integer"),
+        # J.10.13 (v0.82): the size of the response, decided at the close —
+        # `full` | `sources` | `answer`; the composite refuses any other.
+        "detail": _param("string"),
         "since": _param("string"),
         "until": _param("string"),
         "date_field": _param("string"),

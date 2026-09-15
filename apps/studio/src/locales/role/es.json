@@ -10,5 +10,5 @@
   "role.owner": "Dueño",
   "role.owner_desc": "Control total, incluido dar acceso a otras personas.",
   "role.reader": "Lector",
-  "role.reader_desc": "Lee lo que elijas. Nada más."
+  "role.reader_desc": "Lee lo que elijas y le pregunta al modelo del bosque. Nada más."
 }

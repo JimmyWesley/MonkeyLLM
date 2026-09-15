@@ -20,7 +20,9 @@ const ok = (n, c, extra = '') => {
 const ctx = (caps, forests) => ({ origin: 'https://x.test', station: '0.61.0', caps, forests })
 
 // F.111 — a {read, ingest} key gets no write instructions, and a smaller core
-const c1 = ctx(['read', 'ingest'], [{ id: 'f', caps: ['read', 'ingest'] }])
+// v0.82: the default pair mask carries `answer` (J.2.7 rule 4), so the
+// {read, ingest} key of F.111 is a {read, ingest, answer} key now.
+const c1 = ctx(['read', 'ingest', 'answer'], [{ id: 'f', caps: ['read', 'ingest', 'answer'] }])
 const sel1 = defaultBlocks(c1.caps)
 const files1 = buildSkill(c1, sel1)
 const core1 = files1[0].text
@@ -151,6 +153,19 @@ ok('F.173 the core teaches that a kind of node is a filter, not a word',
    core1.includes('type_filter: "media"') && core1.includes('filter: {"type": "media"}'))
 ok('F.127 the core states the min_score pairing',
    core1.includes('below_min_score') && core1.includes('min_evidence: 1'))
+// F.211 (v0.82) — the reference is a call: a media: id in a reply opens with view
+ok('F.211 the core names view beside media:',
+   core1.includes('media:<id>') && core1.includes('view(forest, id)'))
+ok('F.207 the core teaches hops and its cost',
+   core1.includes('hops: true') && core1.includes('one model call per hop'))
+ok('F.208 the core teaches detail',
+   core1.includes('detail: "sources"'))
+// F.206 (v0.82) — a key without `answer` is not taught to ask
+const noAsk = buildSkill(ctx(['read', 'ingest'], [{ id: 'f', caps: ['read', 'ingest'] }]),
+                         defaultBlocks(['read', 'ingest']))[0].text
+ok('F.206 a key without answer is told the capability, not the recipe',
+   !noAsk.includes('min_evidence') && noAsk.includes('needs the `answer` capability')
+   && noAsk.includes('answer(forest, question)'))
 ok('F.127 two selections, two names',
    skillName([{ id: 'a' }]) !== skillName([{ id: 'b' }])
    && skillName([{ id: 'a' }, { id: 'b' }]) !== skillName([{ id: 'a' }, { id: 'c' }]))

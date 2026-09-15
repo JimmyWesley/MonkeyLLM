@@ -43,7 +43,11 @@ from monkeyllm.vine import (
 # existence oracle.
 E_FORBIDDEN = "E_FORBIDDEN"
 
-CAPS = frozenset({"read", "write", "query", "tend", "ingest", "admin"})
+# J.2.7 (v0.82): `answer` is the seventh token. It gates the composite that
+# makes the forest's bound model run; before it, `read` did, so whoever
+# could read could spend the model and nothing recorded that fact.
+CAPS = frozenset({"read", "write", "query", "tend", "ingest", "admin",
+                  "answer"})
 WHOLE_FOREST = ("",)
 
 # Candidates pulled per requested result before scope filtering. The engine

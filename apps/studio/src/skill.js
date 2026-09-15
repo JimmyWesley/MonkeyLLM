@@ -174,6 +174,37 @@ generated. \`coverage(forest)\` is the current shape of any one of them, and
 `
 }
 
+/** J.2.7 rule 6 / J.5.12 (v0.82): the `answer` teaching follows the token.
+ *  A key that cannot ask must not be taught to ask; it is told the call
+ *  exists and what it needs, the way the reference table annotates a block
+ *  chosen beyond the key. */
+const answerTeaching = (caps) => caps.includes('answer') ? `- \`answer(forest, question)\` — the one-shot: retrieval plus a grounded reply
+  with sources. Prefer it when the forest's answer is the answer.
+  \`min_evidence: n\` refuses to answer over too little (it replies
+  \`answer: null\` and hands you the retrieval instead); \`min_score\` makes
+  that floor count *relevance* and not just items, since the sweep returns
+  \`k\` results whatever their scores. **The two compose, and more sharply
+  than they read:** scores are compressed, so a threshold that means anything
+  usually admits only the one item that ranked top of both retrievers —
+  \`(min_evidence: 1, min_score: 0.02)\` is the useful pair, and 2 is a
+  deliberate demand for corroboration you will pay for in refusals. A refusal
+  says which half fired: \`evidence_count\` beside \`below_min_score\`, the
+  items the threshold dropped. Read a few \`harvest\` scores before choosing
+  a number — it means something in this deployment and nothing outside it.
+  \`hops: true\` makes the forest's model NAVIGATE instead of reading one
+  ranked bundle — one model call per hop, and a walk may take minutes, so
+  raise your client's timeout first. \`detail: "sources"\` returns the reply,
+  its citations and the hop records without the excerpts and the trace:
+  choose it when the forest's model did the reading so you would not have
+  to, and \`pick(forest, id)\` any cited node you want in full. A
+  \`![caption](media:<id>)\` in the reply, or a source of type \`media\`, is
+  an image the forest holds: \`view(forest, id)\` shows it if you can see
+  images; the bytes never ride the reply.
+` : `- \`answer(forest, question)\` exists — retrieval plus a grounded reply from
+  the forest's own model — and needs the \`answer\` capability, which this key
+  does not carry. \`harvest\` is your one-shot instead.
+`
+
 const core = ({ origin, forests, station, blocks, caps, inline, reinstall }) => {
   const multi = forests.length > 1
   const ids = forests.map((f) => f.id)
@@ -249,19 +280,7 @@ ${fill(`For any question ${multi ? 'these forests' : 'the forest'} could answer
 (${their} projects, people, decisions, documents, data), recall first and reason
 after:`)}
 
-- \`answer(forest, question)\` — the one-shot: retrieval plus a grounded reply
-  with sources. Prefer it when the forest's answer is the answer.
-  \`min_evidence: n\` refuses to answer over too little (it replies
-  \`answer: null\` and hands you the retrieval instead); \`min_score\` makes
-  that floor count *relevance* and not just items, since the sweep returns
-  \`k\` results whatever their scores. **The two compose, and more sharply
-  than they read:** scores are compressed, so a threshold that means anything
-  usually admits only the one item that ranked top of both retrievers —
-  \`(min_evidence: 1, min_score: 0.02)\` is the useful pair, and 2 is a
-  deliberate demand for corroboration you will pay for in refusals. A refusal
-  says which half fired: \`evidence_count\` beside \`below_min_score\`, the
-  items the threshold dropped. Read a few \`harvest\` scores before choosing
-  a number — it means something in this deployment and nothing outside it.
+${answerTeaching(caps)}
 - \`harvest(forest, query)\` — retrieval without a model call: top items and
   matched passages, each carrying the \`trail\` it came from. Prefer it when
   you will reason over the material yourself.

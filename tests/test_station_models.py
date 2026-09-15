@@ -56,7 +56,7 @@ def _admin(registry, principal="root"):
 
 def _reader(registry, principal="alice", allow=("projects/",)):
     key = registry.issue_key(principal)
-    registry.grant(principal, FOREST, {"read"}, allow=list(allow))
+    registry.grant(principal, FOREST, {"read", "answer"}, allow=list(allow))  # J.2.7 (v0.82): asking is its own token
     return {"Authorization": f"Bearer {key}"}
 
 

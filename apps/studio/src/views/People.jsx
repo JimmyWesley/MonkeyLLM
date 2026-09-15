@@ -23,11 +23,13 @@ import {
  * for their scripts. So it is one form, and afterwards one row that owns
  * every change to that person.
  */
+// J.2.7 rule 4 (v0.82): every level carries `answer` beside `read` — a
+// reader who could not ask would be a narrower reader than yesterday's.
 const ROLES = {
-  reader: ['read'],
-  analyst: ['read', 'query'],
-  editor: ['read', 'query', 'write', 'tend'],
-  curator: ['read', 'query', 'write', 'tend', 'ingest'],
+  reader: ['read', 'answer'],
+  analyst: ['read', 'answer', 'query'],
+  editor: ['read', 'answer', 'query', 'write', 'tend'],
+  curator: ['read', 'answer', 'query', 'write', 'tend', 'ingest'],
   owner: ALL_CAPS,
 }
 

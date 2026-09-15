@@ -31,7 +31,7 @@ const SECTION_ICON = {
 const MCP_TOOLS = [
   ['forests', null], ['locate', 'read'], ['look', 'read'], ['move', 'read'],
   ['pick', 'read'], ['scan', 'read'], ['sniff', 'read'], ['calendar', 'read'],
-  ['harvest', 'read'], ['answer', 'read'], ['view', 'read'],
+  ['harvest', 'read'], ['answer', 'answer'], ['view', 'read'],
   ['query', 'query'], ['plant', 'write'],
   ['graft', 'write'], ['tend', 'tend'], ['ingest', 'ingest'],
 ]
@@ -227,7 +227,7 @@ station serve --root forests --registry ./station.db --port 8800 --writable`} />
           <P>{t('integrations.install.first_p')}</P>
           <CodeBlock title="bash" code={`docker compose exec station vine init --forest /forests/handbook --title "Handbook"
 docker compose exec station station key --principal admin --forest handbook \\
-  --caps read,query,write,tend,ingest,admin`} />
+  --caps read,answer,query,write,tend,ingest,admin`} />
         </Section>
 
         <Section id="deploy" title={t('integrations.deploy.title')}

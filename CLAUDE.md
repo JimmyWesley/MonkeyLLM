@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.81.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.82.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,54 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **The ask that nobody could see (spec J.2.7 + J.10.5 + J.10.13 + J.10.8
+  + J.1.2 r8 + J.10.9, v0.82)**: a consumer's MCP client filtered `answer`
+  out of its tool list and reported the product had no way to ask; the
+  Station had listed it since the first commit, so the menu was evidence of
+  nothing. Their four follow-up requests were all gaps on this side.
+  (1) **`answer` is the seventh capability token** (`CAPS`), gating the
+  composite in place of `read` (`COMPOSITES = {"answer": ("answer",
+  "answer")}`; capability checked BEFORE the binding, so a key that may not
+  ask is never told which model it may not use). A one-time
+  `DATA_REPAIRS` v2 adds `answer` to every grant and every stored pair mask
+  carrying `read` — grants are comma-joined, masks JSON (`json_insert` +
+  `json_each`) — so nobody's behaviour changes without a decision; the pair
+  ceiling and default are `{read, ingest, answer}`, `station key --caps`
+  defaults to `read,answer`, People's presets carry it. The MCP `tools/list`
+  filter is now installed UNCONDITIONALLY and hides `answer` for a key that
+  holds it nowhere (grants ∩ mask, owner and `admin` imply it) — L.7 r2's
+  rule; a granted forest with no binding still lists it (the refusal names
+  the repair). Ask console and Shell gate on `answer`; the skill's `answer`
+  bullet is emitted only for a key holding it (`answerTeaching` in
+  `skill.js`). (2) **`hops` rides the MCP `answer`** — it never had; no rule
+  excluded it, J.10.11's "lane-bound, opt-in" note was misread as one. The
+  tool takes `ctx: Context` (imported at MODULE level: PEP 563 strings are
+  evaluated in the module's globals at registration, a local import raised
+  `InvalidSignature`) and reports one `report_progress(n, budget, message)`
+  per hop through the SAME `publish(sample, "hop", …)` seam J.10.12 feeds —
+  `sample["progress"]` is the hook, set by `execute_call(progress=)`; the
+  SDK no-ops without a `progressToken`; the pending sends are awaited
+  before the result. (3) **`detail: full|sources|answer`** (J.10.13,
+  `shape_answer` in `app.py`) projects the response in `execute_call` on the
+  way OUT — after store, audit and events, which keep the whole record —
+  never in the J.10.7 key; the J.10.10 refusal is unshaped (it IS the
+  evidence). Validated in the composite before anything runs; declared in
+  `signatures.py`. (4) **`<think>` blocks are stripped** at the one place
+  content is read (`strip_reasoning` in `chat_from_binding`), flag
+  `reasoning_stripped` in `reply_flags` (sticky across a walk's turns); an
+  unclosed block is all thinking and the empty reply's `truncated` says
+  why. (5) **The SDK's refusal wears the envelope** (J.1.2 r8): a
+  `tools/call` wrapper re-states pydantic's `Error executing tool X: … 
+  validation error` as `E_SCHEMA` using `validate_args` from
+  `signatures.py` (with `forest` set aside — it is the tool's, not the
+  primitive's) so the sentence is REST's own; unknown tool → `E_NOT_FOUND`
+  with the served names; a crash → `E_INTERNAL` naming the tool. Our own
+  envelopes pass through untouched. (6) `answer`'s description, the
+  `instructions` and the skill name `view(forest, id)` for a `media:<id>`
+  in a reply — bytes never ride the response (C.6d r5). Jimmy REJECTED
+  images-in-the-body (token cost). F.206-F.211 in `tests/test_v082_ask.py`
+  + `check-skill.mjs`; the progress test asserts the Station's
+  `report_progress` calls, not the SDK's delivery.
 - **The door an author could not find (spec L.2/L.3/L.9 r1 + L.16,
   v0.81)**: Part L shipped the mechanism and left the person it was built
   for with no way in. `docs/extending.md` still cited **v0.20**, so the one

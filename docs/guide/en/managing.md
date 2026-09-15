@@ -40,7 +40,7 @@ itself, so choosing one never requires leaving it:
 
 A level is only a starting point: a "Fine-tune the capabilities" section
 lets any grant deviate from it (the capabilities are `read`, `query`,
-`write`, `tend`, `ingest`, `admin`), and the chosen level is restated in
+`write`, `tend`, `ingest`, `admin`, `answer`), and the chosen level is restated in
 plain words directly under the choice "Reads, and runs read-only SQL
 over datasets." so what you are about to save is said before you save it.
 
@@ -74,7 +74,7 @@ revoked on the spot. The secret itself is shown exactly once, at creation
 Paired keys the self-service keys the Clipper and the Skills console
 derive from a person's own password (`POST /v1/auth/pair`) live here
 too. They are ordinary tokens with a twist: they carry a capability mask
-of at most `{read, ingest}`, their authority is the person's own grants
+of at most `{read, ingest, answer}`, their authority is the person's own grants
 **intersected with that mask at the moment of use** (a grant revoked later
 is gone from the key immediately), and they always expire 90 days by
 default, 365 at most. Pairing can only narrow, never add, which is why it

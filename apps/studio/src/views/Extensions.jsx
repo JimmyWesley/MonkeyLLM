@@ -113,7 +113,7 @@ export default function Extensions({ forest, grant }) {
   }
 
   return (
-    <div className="stack">
+    <div className="space-y-4">
       {error ? <ErrorNote error={error} onRetry={refresh} /> : null}
 
       {absent.length ? (
@@ -126,8 +126,9 @@ export default function Extensions({ forest, grant }) {
 
       {mayInstall ? (
         <Card title={t('ext.install')} subtitle={t('ext.install.blurb')}>
-          <div className="row gap">
+          <div className="flex flex-wrap items-end gap-2">
             <Field
+              className="min-w-0 flex-1"
               label={t('ext.source')}
               hint={t('ext.source.hint')}
               value={source}
@@ -156,7 +157,7 @@ export default function Extensions({ forest, grant }) {
               path on the HOST — through a browser that is the container's
               filesystem, so without this an operator holding an extension
               they just wrote has no route short of publishing it to git. */}
-          <div className="row gap" style={{ alignItems: 'center' }}>
+          <div className="flex flex-wrap items-center gap-2">
             <label className="btn">
               <Upload size={15} /> {t('ext.upload')}
               <input
@@ -180,7 +181,7 @@ export default function Extensions({ forest, grant }) {
               />
             </label>
             {upload ? (
-              <span className="muted small">
+              <span className="text-[11.5px] text-text-3">
                 {upload.name} ({Math.round(upload.bytes / 1024)} KB) ·{' '}
                 <button className="btn btn-sm"
                         onClick={() => setUpload(null)}>
@@ -188,7 +189,7 @@ export default function Extensions({ forest, grant }) {
                 </button>
               </span>
             ) : (
-              <span className="muted small">{t('ext.upload.hint')}</span>
+              <span className="text-[11.5px] text-text-3">{t('ext.upload.hint')}</span>
             )}
           </div>
         </Card>
@@ -202,6 +203,7 @@ export default function Extensions({ forest, grant }) {
           where it is read without running anything; what is served here is
           DERIVED, so a seam added to the catalogue documents itself. */}
       <Card title={t('ext.author')} subtitle={t('ext.author.blurb')}
+            bodyClass={authoring ? 'p-5' : 'p-0'}
             actions={
               <button className="btn btn-sm"
                       onClick={() => setAuthoring((v) => !v)}>
@@ -225,24 +227,24 @@ export default function Extensions({ forest, grant }) {
             {list.map((ext) => (
               <tr key={ext.id}>
                 <Td>
-                  <strong>{ext.id}</strong> <span className="muted">{ext.version}</span>
+                  <strong>{ext.id}</strong> <span className="text-text-3">{ext.version}</span>
                   {/* L.2 rule 2: the ref travels with the id, everywhere. */}
                   {ext.tracking ? (
-                    <div className="muted small">
+                    <div className="text-[11.5px] text-text-3">
                       {t('ext.tracking', { ref: ext.tracking })}
                     </div>
                   ) : null}
                   {ext.description ? (
-                    <div className="muted small">{ext.description}</div>
+                    <div className="text-[11.5px] text-text-3">{ext.description}</div>
                   ) : null}
                   {ext.broken ? (
-                    <div className="small"><Alert /> {ext.broken}</div>
+                    <div className="text-[12px]"><Alert /> {ext.broken}</div>
                   ) : null}
                 </Td>
                 <Td>
                   <Tier tier={ext.tier} />
                   {ext.reason ? (
-                    <div className="muted small">{ext.reason}</div>
+                    <div className="text-[11.5px] text-text-3">{ext.reason}</div>
                   ) : null}
                 </Td>
                 <Td>
@@ -347,26 +349,26 @@ function ReviewModal({ state, onClose, onInstall, onRemove }) {
                <Save /> {t('ext.review.accept')}
              </button>
            }>
-      <dl className="kv">
-        <dt>{t('ext.licence')}</dt><dd>{plan.license || '—'}</dd>
-        <dt>{t('ext.source')}</dt><dd className="mono">{plan.source}</dd>
-        <dt>{t('ext.tier')}</dt>
+      <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-[12.5px]">
+        <dt className="font-medium text-text-2">{t('ext.licence')}</dt><dd>{plan.license || '—'}</dd>
+        <dt className="font-medium text-text-2">{t('ext.source')}</dt><dd className="font-mono text-[11.5px] text-text-3">{plan.source}</dd>
+        <dt className="font-medium text-text-2">{t('ext.tier')}</dt>
         <dd><Tier tier={plan.tier || 'unverified'} />
-          {plan.reason ? <div className="muted small">{plan.reason}</div> : null}
+          {plan.reason ? <div className="text-[11.5px] text-text-3">{plan.reason}</div> : null}
         </dd>
         {plan.revision ? (
           <>
-            <dt>{t('ext.revision')}</dt>
-            <dd className="mono">{plan.revision.slice(0, 12)}</dd>
+            <dt className="font-medium text-text-2">{t('ext.revision')}</dt>
+            <dd className="font-mono text-[11.5px] text-text-3">{plan.revision.slice(0, 12)}</dd>
           </>
         ) : null}
         {plan.tracking ? (
           <>
-            <dt>{t('ext.tracking.label')}</dt>
-            <dd className="mono">{plan.tracking}</dd>
+            <dt className="font-medium text-text-2">{t('ext.tracking.label')}</dt>
+            <dd className="font-mono text-[11.5px] text-text-3">{plan.tracking}</dd>
           </>
         ) : null}
-        <dt>{t('ext.permissions')}</dt>
+        <dt className="font-medium text-text-2">{t('ext.permissions')}</dt>
         <dd>
           <div>{t('ext.perm.network', {
             list: (plan.permissions?.network || []).join(', ') || t('ext.none.short'),
@@ -425,7 +427,7 @@ function ConfigPanel({ ext, forest, mayEdit, onClose }) {
       {error ? <ErrorNote error={error} /> : null}
       {saved ? <Note tone="good">{t('ext.config.saved')}</Note> : null}
       {config.busy ? <Skeleton rows={3} /> : (
-        <div className="stack">
+        <div className="space-y-3">
           {Object.keys(declares).length === 0
             ? <Empty title={t('ext.config.none')} />
             : Object.entries(declares).map(([key, field]) => (
@@ -446,7 +448,7 @@ function ConfigPanel({ ext, forest, mayEdit, onClose }) {
               />
             ))}
           <Card title={t('ext.quota.title')} subtitle={t('ext.quota.blurb')}>
-            <div className="muted">
+            <div className="text-text-3">
               {t('ext.quota.state', {
                 spent: (quota.data?.spent ?? 0).toFixed(4),
                 ceiling: quota.data?.ceiling ?? '—',
@@ -547,7 +549,7 @@ function AuthoringPanel() {
   if (doc.error) return <ErrorNote error={doc.error} onRetry={doc.reload} />
 
   return (
-    <div className="stack">
+    <div className="space-y-3">
       <Note tone="info">
         {t('ext.author.derived', { version: doc.data?.station || '?' })}
       </Note>
@@ -558,19 +560,19 @@ function AuthoringPanel() {
             <Td><code>{s.seam}</code></Td>
             <Td>
               {s.declarative
-                ? <span className="muted small">{t('ext.author.manifest_only')}</span>
-                : <code className="small">{s.signature}</code>}
+                ? <span className="text-[11.5px] text-text-3">{t('ext.author.manifest_only')}</span>
+                : <code className="text-[12px]">{s.signature}</code>}
             </Td>
-            <Td className="small">{s.summary}</Td>
+            <Td className="text-[12px]">{s.summary}</Td>
           </tr>
         ))}
       </Table>
-      <div className="row gap">
+      <div className="flex flex-wrap items-end gap-2">
         <button className="btn btn-primary" disabled={saving}
                 onClick={download}>
           <Download size={15} /> {t('ext.author.download')}
         </button>
-        <span className="muted small">{t('ext.author.download.hint')}</span>
+        <span className="text-[11.5px] text-text-3">{t('ext.author.download.hint')}</span>
       </div>
     </div>
   )

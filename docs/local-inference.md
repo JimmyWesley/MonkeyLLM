@@ -98,6 +98,49 @@ Use the official `openbmb/MiniCPM5-1B-GGUF` the community
 "Agentic-toolUse" fine-tune needs a custom raw prompt format and does not
 speak the OpenAI chat/tools interface this stack relies on.
 
+## Recommended small navigator: MiniCPM5-2B behind Ollama
+
+If you want a local navigator and are not sure which model to pull, start
+here. Measured 2026-09-11 on `forests/bench-forest` with the demo harness
+(BM25-only entry search, no embedder, temperature 0.1, completion budget
+1500, one run per set):
+
+| Set | MiniCPM5-2B Q8_0 | Reference |
+|---|---|---|
+| v2 mixed, 18 q | 18/18, precision 1.00, median 1,422 tokens | Gemma-4 12B: 18/18 |
+| v3 strictly multi-hop, 11 q | 11/11, precision 1.00, median 1,583 tokens | Gemma-4 12B: 11/11 |
+| v4 fork-tier, 8 q | 7/8, precision 0.88 | the paper's solo run: 7/8 |
+
+About 3.3 GB of VRAM at a 32k context, against ~7.6 GB for the quantized
+12B. Paper §5.4 carries the caveats; wall-clock was not comparable (shared
+host over the network) and is not reported.
+
+```bash
+ollama pull hf.co/openbmb/MiniCPM5-2B-GGUF:Q8_0
+export MONKEYLLM_LLM_ENDPOINT=http://localhost:11434/v1   # Ollama's OpenAI-compatible API
+export MONKEYLLM_LLM_API_KEY=no-key
+export MONKEYLLM_LLM_MODEL=hf.co/openbmb/MiniCPM5-2B-GGUF:Q8_0
+python forests/scripts/build_bench_forest.py
+python examples/demo/run_demo.py --forest forests/bench-forest --questions bench/questions-v3.json
+```
+
+Two things to know about this model in the harness:
+
+- It thinks by default and Ollama returns the thinking in a separate
+  `reasoning` field, so `content` stays clean JSON; leave
+  `MONKEYLLM_LLM_REASONING` off and 1500 tokens is enough with the thinking
+  counted in.
+- On some turns it writes the tool call in its native function syntax
+  (`<function name="locate"><param name="query">…</param></function>`)
+  instead of the JSON the prompt asks for. Since 0.80.0 `parse_action`
+  translates that syntax, typed off the engine's signature table; on an
+  older checkout those turns score as "Invalid format" until the step
+  budget is gone and read as wrong answers.
+
+For a Station, the same three variables go in `.env`, plus
+`MONKEYLLM_STATION_PROVIDER_ALLOW_PRIVATE=1` if you want the Models
+console's "Test connection" to reach the private address.
+
 ## Online model (OpenRouter) no local GPU
 
 If you don't want (or can't) run a local model, use OpenRouter: the same

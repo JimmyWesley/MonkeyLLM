@@ -74,7 +74,7 @@ segura de entregar a uma máquina é que ela **só pode estreitar, nunca
 acrescentar**:
 
 - **A máscara.** Uma chave pareada carrega uma máscara de capacidades —
-  `{read, ingest}` por padrão, e esse conjunto é também o teto: pedir
+  `{read, ingest, answer}` por padrão, e esse conjunto é também o teto: pedir
   `write`, `tend`, `query` ou `admin` é recusado como `E_SCHEMA`. Essas
   continuam sendo o que um administrador cunha deliberadamente.
 - **Concessões ∩ máscara, no momento do uso.** A autoridade efetiva da
@@ -151,7 +151,7 @@ agente precisa, e arquivos de referência que ele lê só quando precisa.
 ```
 
 Os blocos já vêm marcados conforme o que a sua chave pode fazer nas florestas
-escolhidas. Uma chave pareada com o padrão `read` + `ingest` recebe
+escolhidas. Uma chave pareada com o padrão `read` + `answer` + `ingest` recebe
 `saving.md` e não `writing.md`, e economiza uns 1.400 tokens de instruções de
 escrita que ela não poderia executar de qualquer forma. Amplie a seleção se
 estiver preparando a skill para alguém com uma chave mais larga — o bloco
@@ -239,7 +239,7 @@ o resto é guardado como mostrado.
 | `coverage` | `read` | O que a floresta guarda: suas raízes, o tamanho de cada uma, de onde veio aquele material e quando. |
 | `history` | `read` | O que aconteceu com um nó e quem fez cada commit, do mais recente para trás. |
 | `harvest` | `read` | Recuperação de um golpe só: evidência ordenada com trechos exatos, sem saltos. |
-| `answer` | `read` | Uma resposta fundamentada escrita pelo modelo ligado à floresta, com a sua evidência. |
+| `answer` | `answer` | Uma resposta fundamentada escrita pelo modelo ligado à floresta, com a sua evidência. |
 | `view` | `read` | O payload de imagem de um nó media, como conteúdo de imagem que um cliente multimodal lê para o próprio contexto. |
 | `query` | `query` | SQL somente leitura contra um nó de dataset. |
 | `plant` | `write` | Cria um nó. |
@@ -352,11 +352,12 @@ como qualquer outro, e o contrato vale em toda superfície.
 **Escopos valem.** Uma concessão vincula um principal a uma floresta com
 capacidades e escopo por prefixo de galho: listas allow e deny de prefixos
 de subárvore, deny vence em qualquer profundidade, e sem concessão não há
-acesso. As capacidades são exatamente seis:
+acesso. As capacidades são exatamente sete:
 
 | Capacidade | Permite |
 |---|---|
 | `read` | ler o material |
+| `answer` | perguntar ao modelo da floresta (a chamada `answer`) |
 | `query` | rodar SQL somente leitura |
 | `write` | criar e editar nós |
 | `tend` | alterar linhas de dataset |

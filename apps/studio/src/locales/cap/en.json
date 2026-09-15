@@ -1,5 +1,6 @@
 {
   "cap.admin": "grant access to others",
+  "cap.answer": "ask the forest's model",
   "cap.ingest": "add new documents",
   "cap.query": "run read-only SQL",
   "cap.read": "read the material",

@@ -68,7 +68,7 @@ The reply carries `api_key` (it looks like `mk_…`), your `principal`, the
 key's `caps` and its `expires_at`. What makes a paired key safe to hand to a
 machine is that it **can only narrow, never add**:
 
-- **The mask.** A paired key carries a capability mask `{read, ingest}` by
+- **The mask.** A paired key carries a capability mask `{read, ingest, answer}` by
   default, and that set is also the ceiling: asking for `write`, `tend`,
   `query` or `admin` is refused as `E_SCHEMA`. Those stay what an
   administrator mints deliberately.
@@ -141,7 +141,7 @@ needs, and reference files it reads only when it needs them.
 ```
 
 The blocks start selected to match what your key can do in the forests you
-picked. A key paired with the default `read` + `ingest` gets `saving.md` and
+picked. A key paired with the default `read` + `answer` + `ingest` gets `saving.md` and
 not `writing.md`, and is spared some 1,400 tokens of writing instructions it
 could not have executed anyway. Widen the selection if you are preparing the
 skill for somebody whose key is wider — the block then names the capability it
@@ -227,7 +227,7 @@ gated as shown.
 | `coverage` | `read` | What the forest holds: its roots, how big each is, where that material came from and when. |
 | `history` | `read` | What happened to a node and who did it every commit, newest first. |
 | `harvest` | `read` | One-shot retrieval: ranked evidence with exact snippets, no hops. |
-| `answer` | `read` | A grounded answer written by the model bound to the forest, with its evidence. |
+| `answer` | `answer` | A grounded answer written by the model bound to the forest, with its evidence. |
 | `view` | `read` | The image payload of a media node, as image content a multimodal client reads into its own context. |
 | `query` | `query` | Read-only SQL against a dataset node. |
 | `plant` | `write` | Creates a node. |
@@ -337,11 +337,12 @@ principal like any other, and the contract holds on every surface.
 
 **Scopes hold.** A grant binds a principal to one forest with capabilities
 and branch-prefix scope: allow and deny lists of subtree prefixes, deny wins
-at any depth, and no grant means no access. The capabilities are exactly six:
+at any depth, and no grant means no access. The capabilities are exactly seven:
 
 | Capability | Allows |
 |---|---|
 | `read` | read the material |
+| `answer` | ask the forest's model (the `answer` call) |
 | `query` | run read-only SQL |
 | `write` | create and edit nodes |
 | `tend` | change dataset rows |

@@ -10,5 +10,5 @@
   "role.owner": "Owner",
   "role.owner_desc": "Full control, including giving access to other people.",
   "role.reader": "Reader",
-  "role.reader_desc": "Can read what you choose. Nothing else."
+  "role.reader_desc": "Can read what you choose, and ask the forest's model about it. Nothing else."
 }

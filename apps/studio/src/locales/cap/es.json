@@ -1,5 +1,6 @@
 {
   "cap.admin": "conceder acceso a otras personas",
+  "cap.answer": "preguntar al modelo del bosque",
   "cap.ingest": "añadir documentos nuevos",
   "cap.query": "ejecutar SQL de solo lectura",
   "cap.read": "leer el material",

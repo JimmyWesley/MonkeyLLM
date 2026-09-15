@@ -181,7 +181,7 @@ def test_the_loop_reads_through_the_same_scope_as_its_caller(station, scripted):
     client, registry = station
     script, _ = scripted
     script += [tool("pick", id="people/_index"), final("tried", [])]
-    head = _key(registry, principal="alice", caps=("read",), allow=("projects/",))
+    head = _key(registry, principal="alice", caps=("read", "answer"), allow=("projects/",))
 
     out = _ask(client, head, question="q", hops=2)
     assert out["hops"][0]["ok"] is False
@@ -277,7 +277,7 @@ def test_a_refused_hop_reports_the_refusal(station, scripted):
     client, registry = station
     script, _ = scripted
     script += [tool("pick", id="people/_index"), final("no", [])]
-    head = _key(registry, principal="bob", caps=("read",), allow=("projects/",))
+    head = _key(registry, principal="bob", caps=("read", "answer"), allow=("projects/",))
 
     hops = _ask(client, head, question="q", hops=2)["hops"]
     assert hops[0]["ok"] is False

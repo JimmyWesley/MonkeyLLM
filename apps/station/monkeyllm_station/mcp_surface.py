@@ -18,6 +18,7 @@ statelessness is a correctness choice here, not a performance one.
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json
 import logging
@@ -25,6 +26,15 @@ import os
 from typing import Literal
 
 log = logging.getLogger("monkeyllm_station")
+
+# J.10.5 (v0.82): the `answer` tool takes the SDK's request context to
+# report a hop as progress. Imported at module level because annotations
+# are strings here (PEP 563) and the SDK evaluates them in this module's
+# globals when it registers the tool; `mcp` is an engine dependency.
+try:
+    from mcp.server.mcpserver import Context
+except ImportError:  # pragma: no cover - mcp is an engine dependency
+    Context = None  # type: ignore[assignment,misc]
 
 
 def package_version() -> str:
@@ -180,7 +190,12 @@ INSTRUCTIONS = (
     "you navigate by, tell your operator to re-download the skill. "
     "Retrieval: harvest(forest, query) for one-shot ranked evidence; "
     "answer(forest, question) for a grounded reply from the forest's own "
-    "model. Navigate: locate(forest, query) ranks entry points over "
+    "model — listed for a key holding the answer capability; hops=true "
+    "makes it navigate the forest itself (one model call per hop, a walk "
+    "may take minutes), detail=\"sources\" returns the reply and its "
+    "citations without the excerpts, and a media:<id> inside a reply is an "
+    "image you open with view(forest, id). "
+    "Navigate: locate(forest, query) ranks entry points over "
     "curated metadata (titles, summaries, tags — never bodies); "
     "look(forest, id) is a cheap digest, up to 10 ids per call; "
     "pick(forest, id) opens the body — up to 5 ids, a list of sections, "
@@ -290,7 +305,9 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
             is_error=isinstance(result, dict) and "error" in result,
         )
 
-    async def run(forest: str, name: str, **kwargs) -> dict:
+    async def run(forest: str, name: str, *, progress=None, **kwargs) -> dict:
+        # `progress` (J.10.5, v0.82) is keyword-only and never part of the
+        # payload: it is the transport's observer, not the caller's argument.
         principal = PRINCIPAL.get()
         if principal is None:
             return UNAUTHENTICATED
@@ -298,11 +315,13 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         # thread, where this request's contextvars do not exist (J.2.6).
         mask = CAPS_MASK.get()
         if execute is not None:
-            result = await execute(principal, forest, name, kwargs, None, mask)
+            result = await execute(principal, forest, name, kwargs, None, mask,
+                                   progress=progress)
         else:
+            sample = {"progress": progress} if progress is not None else None
             result = await in_forest_thread(
                 forest, lambda: run_primitive(principal, forest, name, kwargs,
-                                              caps_mask=mask)
+                                              caps_mask=mask, sample=sample)
             )
         if result is None:
             return {"error": {"code": "E_NOT_FOUND", "message": f"unknown forest: {forest}",
@@ -316,10 +335,11 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
             return {"job": job.snapshot()}
         return result
 
-    async def call(forest: str, name: str, **kwargs) -> CallToolResult:
+    async def call(forest: str, name: str, *, progress=None,
+                   **kwargs) -> CallToolResult:
         # One seam for every tool (J.1.2): the dict becomes the compact
         # block here, and the flag is set beside it.
-        return done(await run(forest, name, **kwargs))
+        return done(await run(forest, name, progress=progress, **kwargs))
 
     @mcp.tool()
     async def forests():
@@ -573,8 +593,10 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                           date_field=date_field)
 
     @mcp.tool()
-    async def answer(forest: str, question: str, k: int = 3,
+    async def answer(forest: str, question: str, ctx: Context, k: int = 3,
                      terms: list[str] | None = None,
+                     hops: bool | int | None = None,
+                     detail: Literal["full", "sources", "answer"] | None = None,
                      cache: bool = True,
                      reply_tokens: int | None = None,
                      min_evidence: int = 0,
@@ -586,9 +608,28 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         """Ask the forest directly: scoped retrieval read by the model bound
         to this forest, returning a grounded answer with its evidence. The
         one call that replaces a knowledge-base lookup plus a summarisation
-        round-trip. A repeat of a question may be served from the forest's
+        round-trip. Listed for a key holding the `answer` capability.
+        A repeat of a question may be served from the forest's
         answer store, labelled `cached: true`; pass `cache: false` to skip
         the store and buy a fresh run (which replaces the stored one).
+        `hops` makes the forest's model NAVIGATE instead of reading one
+        ranked bundle: `true` for the default budget, an integer for your
+        own. Every hop is one model call and the walk holds a reader lane
+        for its whole duration — a walk may take minutes, so raise your
+        client's timeout or ask for progress (a `progressToken` on the
+        request receives one notification per hop). `terms` is refused
+        beside `hops`: a walk authors its own retrieval.
+        `detail` is the size of the response: `full` (default) is the whole
+        record, excerpts and trace included; `sources` keeps the reply, its
+        citations (`sources[]`: id, title, summary, type, trail), the
+        evidence ids and the hop records, and drops the excerpts and the
+        trace; `answer` keeps the reply and the evidence ids only. Choose
+        `sources` when the forest's model did the reading so yours would
+        not have to — `pick(forest, id)` opens any cited node in full.
+        A `![caption](media:<id>)` in the reply, or a `sources[]` item of
+        type `media`, is an image the forest holds: open it with
+        `view(forest, id)` if your model can see images. The bytes never
+        ride this response.
         `terms` hands the sweep the literal words its `sniff` leg should
         look for, exactly as `harvest` takes them. Absent, they are derived
         from the question — which is the wrong move whenever the question's
@@ -615,10 +656,48 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         A document a live node `supersedes` is left out of the material by
         default and named in `superseded_excluded`;
         `include_superseded: true` answers from the history too."""
-        return await call(forest, "answer", question=question, k=k,
+        progress = None
+        pending: list = []
+        if hops:
+            # J.10.5 (v0.82): one protocol progress notification per hop.
+            # The observer runs on the forest lane; the notification is sent
+            # from the loop, and the SDK makes it a no-op when the request
+            # carried no `progressToken`. A failed send never fails the hunt.
+            loop = asyncio.get_running_loop()
+            budget = 6 if hops is True else int(hops)
+
+            async def _send(n: int, message: str) -> None:
+                try:
+                    await ctx.report_progress(n, budget, message)
+                except Exception:
+                    log.debug("progress notification failed on hop %s", n,
+                              exc_info=True)
+
+            def _schedule(n: int, message: str) -> None:
+                # On the loop thread: the task is kept so the result waits
+                # for every report it preceded — a hop's notification comes
+                # BEFORE the answer, never after.
+                pending.append(loop.create_task(_send(n, message)))
+
+            def progress(hop: dict) -> None:
+                n = int(hop.get("n") or 0)
+                out = hop.get("out") or {}
+                said = (", ".join(f"{k} {v}" for k, v in out.items())
+                        if isinstance(out, dict) and out else "")
+                message = (f"hop {n}/{budget}: {hop.get('tool')} → "
+                           f"{said or ('ok' if hop.get('ok') else 'refused')}")
+                try:
+                    loop.call_soon_threadsafe(_schedule, n, message)
+                except RuntimeError:  # loop shutting down
+                    pass
+
+        result = await call(forest, "answer", progress=progress,
+                          question=question, k=k,
                           terms=terms,
                           cache=cache, since=since, until=until,
                           date_field=date_field,
+                          **({"hops": hops} if hops is not None else {}),
+                          **({"detail": detail} if detail is not None else {}),
                           **({"reply_tokens": reply_tokens}
                              if reply_tokens is not None else {}),
                           **({"min_evidence": min_evidence}
@@ -627,6 +706,9 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                              if min_score else {}),
                           **({"include_superseded": True}
                              if include_superseded else {}))
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        return result
 
     @mcp.tool()
     async def query(forest: str, id: str, sql: str):
@@ -882,50 +964,156 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
 
     _register_extension_tools()
 
-    if EXTENSION_TOOLS:
-        # Filter the menu per key. Wrapping the handler rather than keeping
-        # a second tool table: the SDK owns the list, and a copy of it here
-        # would be a second description of one surface.
-        _entry = mcp._lowlevel_server._request_handlers.get("tools/list")
+    def _holds_answer(principal) -> bool:
+        """J.2.7 rule 5: does this key hold `answer`, through its mask, on
+        any forest it reaches? The owner holds every token and has no row;
+        `admin` implies it as it implies every other (`Policy.grants`)."""
+        if principal is None:
+            return False
+        if registry.is_owner(principal):
+            return True
+        mask = CAPS_MASK.get()
+        for grant in registry.grants_of(principal):
+            caps = set(grant["caps"])
+            if mask is not None:
+                caps &= set(mask)
+            if "answer" in caps or "admin" in caps:
+                return True
+        return False
 
-        if _entry is not None:
-            # The registry holds a `HandlerEntry` (handler + params_type),
-            # not a bare callable: replacing it with a function makes the
-            # runner fail on `params_type`. So the ENTRY is rebuilt around a
-            # wrapped handler, and the SDK keeps owning the list itself — a
-            # second tool table here would be a second description of one
-            # surface.
-            _list_tools = _entry.handler
+    def _hidden_tools(principal) -> set[str]:
+        """What this key's menu leaves out: extension tools enabled nowhere
+        it reaches (L.7 rule 2), and `answer` when it holds the token
+        nowhere (J.2.7 rule 5) — the same reasoning both times: a tool that
+        can only refuse costs every session its description and teaches
+        nothing."""
+        hidden = {
+            name for name, claim in EXTENSION_TOOLS.items()
+            if not _ext_forests_for(principal, claim.ext_id)
+        }
+        if not _holds_answer(principal):
+            hidden.add("answer")
+        return hidden
 
-            async def _filtered_list_tools(*args, **kwargs):
-                # Signature taken as given: the runner calls the handler
-                # with (ctx, params) at this era, and pinning that shape
-                # here would break on the next one for no benefit.
-                result = await _list_tools(*args, **kwargs)
-                principal = PRINCIPAL.get()
-                visible = {
-                    name for name, claim in EXTENSION_TOOLS.items()
-                    if _ext_forests_for(principal, claim.ext_id)
-                }
-                tools = getattr(result, "tools", None)
-                if tools is None:  # pragma: no cover - the SDK shape moved
-                    # Fail CLOSED. This filter decides what a key is shown,
-                    # so a shape we no longer recognise must publish fewer
-                    # tools, never more — and it must say so, because a
-                    # silently unfiltered menu is the failure itself.
-                    log.warning("tools/list has an unfamiliar shape; "
-                                "extension tools are withheld")
-                    return result
-                result.tools = [
-                    t for t in tools
-                    if t.name not in EXTENSION_TOOLS or t.name in visible
-                ]
+    import dataclasses as _dc
+
+    # Filter the menu per key. Wrapping the handler rather than keeping a
+    # second tool table: the SDK owns the list, and a copy of it here would
+    # be a second description of one surface. Installed unconditionally
+    # since v0.82 — `answer` is filtered on every deployment, extensions or
+    # not.
+    _entry = mcp._lowlevel_server._request_handlers.get("tools/list")
+
+    if _entry is not None:
+        # The registry holds a `HandlerEntry` (handler + params_type), not a
+        # bare callable: replacing it with a function makes the runner fail
+        # on `params_type`. So the ENTRY is rebuilt around a wrapped handler,
+        # and the SDK keeps owning the list itself.
+        _list_tools = _entry.handler
+
+        async def _filtered_list_tools(*args, **kwargs):
+            # Signature taken as given: the runner calls the handler with
+            # (ctx, params) at this era, and pinning that shape here would
+            # break on the next one for no benefit.
+            result = await _list_tools(*args, **kwargs)
+            principal = PRINCIPAL.get()
+            hidden = _hidden_tools(principal)
+            tools = getattr(result, "tools", None)
+            if tools is None:  # pragma: no cover - the SDK shape moved
+                # Fail CLOSED. This filter decides what a key is shown, so
+                # a shape we no longer recognise must publish fewer tools,
+                # never more — and it must say so, because a silently
+                # unfiltered menu is the failure itself.
+                log.warning("tools/list has an unfamiliar shape; "
+                            "filtered tools are withheld")
                 return result
+            result.tools = [t for t in tools if t.name not in hidden]
+            return result
 
-            import dataclasses as _dc
+        mcp._lowlevel_server._request_handlers["tools/list"] = \
+            _dc.replace(_entry, handler=_filtered_list_tools)
 
-            mcp._lowlevel_server._request_handlers["tools/list"] = \
-                _dc.replace(_entry, handler=_filtered_list_tools)
+    # J.1.2 rule 8 (v0.82): a call the SDK refuses before the tool runs —
+    # arguments the input schema rejects, a tool that does not exist — comes
+    # back as the SDK's own prose under `isError`. Rule 2 made the flag agree
+    # with the envelope; this makes the BODY agree too. The SDK still
+    # decides (as it decides J.1.1's 421); the host rewrites the sentence.
+    _SDK_PREFIX = "Error executing tool "
+
+    def _is_envelope(text: str) -> bool:
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError):
+            return False
+        return isinstance(parsed, dict) and "error" in parsed
+
+    def _restate(name: str, arguments: dict, text: str) -> dict | None:
+        from monkeyllm.errors import E_INTERNAL, E_NOT_FOUND, E_SCHEMA, VineError
+        from monkeyllm.signatures import validate_args
+
+        known = {t.name for t in mcp._tool_manager.list_tools()}
+        if name not in known:
+            return VineError(
+                E_NOT_FOUND, f"no such tool: {name}",
+                hint=f"Served tools: {sorted(known)}.").to_dict()
+        prefix = f"{_SDK_PREFIX}{name}"
+        if not text.startswith(prefix):
+            return None
+        rest = text[len(prefix):].lstrip(":").strip()
+        if "validation error" in rest:
+            # REST's own sentence for the same arguments, when the C.12
+            # table refuses them too — `forest` is the tool's, not the
+            # primitive's, so it is set aside before the table looks.
+            try:
+                validate_args(name, {k: v for k, v in dict(arguments).items()
+                                     if k != "forest"})
+            except VineError as e:
+                return e.to_dict()
+            except Exception:  # pragma: no cover - the table never crashes
+                pass
+            fields = [ln.strip() for ln in rest.splitlines()[1:]
+                      if ln and not ln.startswith(" ")]
+            named = fields[0] if fields else "arguments"
+            return VineError(
+                E_SCHEMA,
+                f"{name}: parameter {named!r} was refused by the tool's "
+                f"input schema",
+                hint=(f"{name} refused: {', '.join(fields) or 'the arguments as sent'}. "
+                      "Check the type of each named parameter against "
+                      "tools/list.")).to_dict()
+        if not rest:
+            # The SDK's generic crash message: C.12's last resort, naming
+            # the tool and nothing else.
+            return VineError(E_INTERNAL, f"{name}: the tool failed").to_dict()
+        return VineError(E_INTERNAL, f"{name}: {rest}").to_dict()
+
+    _call_entry = mcp._lowlevel_server._request_handlers.get("tools/call")
+
+    if _call_entry is not None:
+        _call_tool = _call_entry.handler
+
+        async def _enveloped_call_tool(*args, **kwargs):
+            params = next((a for a in (*args, *kwargs.values())
+                           if hasattr(a, "name") and hasattr(a, "arguments")),
+                          None)
+            result = await _call_tool(*args, **kwargs)
+            if params is None or not getattr(result, "is_error", False):
+                return result
+            content = getattr(result, "content", None) or []
+            if len(content) != 1 or getattr(content[0], "type", None) != "text":
+                return result
+            text = getattr(content[0], "text", "") or ""
+            if _is_envelope(text):
+                return result  # ours already (J.1.2 rule 2)
+            restated = _restate(str(params.name), params.arguments or {}, text)
+            if restated is None:
+                return result
+            return CallToolResult(
+                content=[TextContent(type="text", text=compact(restated))],
+                is_error=True)
+
+        mcp._lowlevel_server._request_handlers["tools/call"] = \
+            _dc.replace(_call_entry, handler=_enveloped_call_tool)
 
     # Transport options belong to the app factory in mcp 2.x, not the
     # constructor. streamable_http_path="/" because this app gets mounted

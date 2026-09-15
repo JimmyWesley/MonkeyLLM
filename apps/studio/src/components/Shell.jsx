@@ -26,7 +26,8 @@ import Welcome from './Welcome.jsx'
  *  including the scope and capabilities this grant carries. */
 export const CONSOLES = [
   { key: 'overview', group: 'use' },
-  { key: 'ask', group: 'use', cap: 'read' },
+  // J.2.7 rule 6 (v0.82): asking is its own capability.
+  { key: 'ask', group: 'use', cap: 'answer' },
   { key: 'explore', group: 'use', cap: 'read' },
   // J.5.14: the page a document is READ on — full body via export, never
   // pick's model-facing ceiling.

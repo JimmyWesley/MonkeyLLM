@@ -169,8 +169,9 @@ export default function Ask({ forest, grant, me, goto }) {
     return mergeEvidence(result.read, evidenceFromHops(result.hops))
   }, [result, live, preview])
 
-  if (!has(grant, 'read')) {
-    return <NeedsCapability message={t('access.needs_admin')} hint={t('cap.read')} />
+  // J.2.7 rule 6 (v0.82): the console is reached with `answer`, not `read`.
+  if (!has(grant, 'answer')) {
+    return <NeedsCapability message={t('access.needs_admin')} hint={t('cap.answer')} />
   }
 
   async function ask(text) {
