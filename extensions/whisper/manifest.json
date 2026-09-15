@@ -1,7 +1,7 @@
 {
   "id": "whisper",
   "version": "1.0.0",
-  "station_compat": ">=0.81,<0.82",
+  "station_compat": ">=0.82,<0.83",
   "license": "Apache-2.0",
   "description": "Turns an audio file into a transcript the forest can search, through any OpenAI-compatible /audio/transcriptions endpoint.",
   "permissions": {
