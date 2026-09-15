@@ -44,7 +44,7 @@ tela, então escolher um nunca exige sair dela:
 
 Um nível é só um ponto de partida: uma seção "Ajustar as capacidades" deixa
 qualquer concessão fugir dele (as capacidades são `read`, `query`, `write`,
-`tend`, `ingest`, `admin`), e o nível escolhido é redito em palavras
+`tend`, `ingest`, `admin`, `answer`), e o nível escolhido é redito em palavras
 simples logo abaixo da escolha "Lê e roda SQL somente leitura sobre os
 datasets." para que o que você está prestes a salvar seja dito antes de
 você salvar.
@@ -82,7 +82,7 @@ hora ou cunhe outro.
 Chaves pareadas as chaves de autosserviço que o Clipper e o console de
 Skills derivam da senha da própria pessoa (`POST /v1/auth/pair`) também
 vivem aqui. São tokens comuns com um detalhe: carregam uma máscara de
-capacidades de no máximo `{read, ingest}`, a autoridade delas é a
+capacidades de no máximo `{read, ingest, answer}`, a autoridade delas é a
 interseção das concessões da própria pessoa com essa máscara **no momento
 do uso** (uma concessão revogada depois some da chave imediatamente), e
 elas sempre expiram 90 dias por padrão, 365 no máximo. Parear só

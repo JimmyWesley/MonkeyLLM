@@ -10,7 +10,9 @@ import { useI18n } from '../i18n.jsx'
 import { Card, Empty, ErrorNote, Field, Modal, Select, TextArea } from '../design/ui.jsx'
 import { Access, Plus } from '../design/icons.jsx'
 
-export const ALL_CAPS = ['read', 'query', 'write', 'tend', 'ingest', 'admin']
+// J.2.7 (v0.82): `answer` is its own token — who may make the forest's
+// model run, decided per key, where `read` used to mean it.
+export const ALL_CAPS = ['read', 'answer', 'query', 'write', 'tend', 'ingest', 'admin']
 
 /** Props for an anchor that opens a node in Explore (J.5.8).
  *

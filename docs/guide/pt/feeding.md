@@ -277,7 +277,7 @@ qualquer outro, usando os mesmos caminhos de escrita que o console usa:
 
 No primeiro uso ele pede o origin da Station e o seu usuário e senha, uma
 vez. A senha é trocada na hora e nunca armazenada: o que o Clipper guarda
-é uma **chave pareada** estreitada a `read` + `ingest`, expirando em 90
+é uma **chave pareada** estreitada a `read` + `answer` + `ingest`, expirando em 90
 dias, revogável a qualquer momento em Acessos. Parear só pode estreitar a
 sua própria autoridade, nunca acrescentar a ela.
 

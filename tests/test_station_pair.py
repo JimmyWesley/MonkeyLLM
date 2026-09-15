@@ -104,7 +104,9 @@ def test_pair_returns_a_key_with_expiry_and_default_caps(station):
     body = r.json()
     assert body["api_key"].startswith("mk_")
     assert body["principal"] == user
-    assert body["caps"] == ["ingest", "read"]
+    # J.2.7 rule 4 (v0.82): the default mask carries `answer` beside the two —
+    # a pair key could always ask, because `read` used to mean it.
+    assert body["caps"] == ["answer", "ingest", "read"]
     assert body["expires_at"]
 
     # The row itself carries the expiry: every pair key expires (J.2.6),

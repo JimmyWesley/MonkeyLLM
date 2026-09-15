@@ -183,6 +183,9 @@ SIGNATURES: dict[str, dict[str, dict]] = {
     "harvest": {
         "query": _param("string", required=True),
         "terms": _param("string[]"),
+        # K.3 (v0.82): the host pops it before this table looks; declared
+        # here so the MCP schema and the table are compared (C.12).
+        "hybrid": _param("boolean"),
         "k": _param("integer"),
         "since": _param("string"),
         "until": _param("string"),
@@ -213,7 +216,12 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         # J.10.10 (v0.59): the floor that counts evidence, not items.
         "min_score": _param("number"),
         "include_superseded": _param("boolean"),
+        # K.3 (v0.82): see `harvest`.
+        "hybrid": _param("boolean"),
         "hops": _param("boolean|integer"),
+        # J.10.13 (v0.82): the size of the response, decided at the close —
+        # `full` | `sources` | `answer`; the composite refuses any other.
+        "detail": _param("string"),
         "since": _param("string"),
         "until": _param("string"),
         "date_field": _param("string"),

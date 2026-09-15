@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import logging
 import os
 import time
@@ -182,10 +183,18 @@ def chat_from_binding(binding: dict, *, timeout: float = 180.0,
         # read at the only place it is visible, so the reply can say
         # whether the caller received everything it paid for.
         chat.finish_reason = choice.get("finish_reason")
-        return choice["message"].get("content") or ""
+        content, stripped = strip_reasoning(
+            choice["message"].get("content") or "")
+        if stripped:
+            # J.10.8 (v0.82): sticky across a walk's turns — the flag says
+            # a model thought inline at least once, which is the fact an
+            # operator acts on.
+            chat.reasoning_stripped = True
+        return content
 
     chat.usage = {"prompt": 0, "completion": 0, "calls": 0}
     chat.finish_reason = None
+    chat.reasoning_stripped = False
     return chat, model
 
 
@@ -279,6 +288,35 @@ def transcribe_from_binding(binding: dict, audio, *, language: str | None = None
     return text, usage
 
 
+# J.10.8 (v0.82): a model that thinks inline leaves its thinking at the
+# head of `content` as a <think> block when the server does not lift it
+# into a field of its own. Read as the reply, it spent the stated budget
+# and reached the reader as the answer.
+_THINK_OPEN = re.compile(r"^\s*<(think|thinking)>", re.IGNORECASE)
+
+
+def strip_reasoning(text: str) -> tuple[str, bool]:
+    """Remove leading <think>…</think> (or <thinking>) blocks from a
+    model's content. Returns (content, stripped).
+
+    A block the cap cut open is stripped whole — it was all thinking —
+    and the empty reply's `truncated` (J.10.8) says why. A provider that
+    returns reasoning in a field of its own never reaches this: that
+    field was never read.
+    """
+    stripped = False
+    while True:
+        m = _THINK_OPEN.match(text)
+        if not m:
+            return (text.lstrip() if stripped else text), stripped
+        stripped = True
+        tag = m.group(1).lower()
+        close = text.lower().find(f"</{tag}>", m.end())
+        if close < 0:
+            return "", True
+        text = text[close + len(tag) + 3:]
+
+
 def reply_flags(chat) -> dict:
     """J.10.8 (v0.54): what the last model turn says about its own end.
 
@@ -288,12 +326,16 @@ def reply_flags(chat) -> dict:
     J.10.7 store (`storable` always refused truncated results; nothing
     ever set the flag).
     """
+    out: dict = {}
     finish = getattr(chat, "finish_reason", None)
-    if not finish or finish == "stop":
-        return {}
-    out = {"finish_reason": finish}
-    if finish == "length":
-        out["truncated"] = True
+    if finish and finish != "stop":
+        out["finish_reason"] = finish
+        if finish == "length":
+            out["truncated"] = True
+    if getattr(chat, "reasoning_stripped", False):
+        # J.10.8 (v0.82): in the record and in the store — a reply with
+        # its thinking removed is a whole reply.
+        out["reasoning_stripped"] = True
     return out
 
 

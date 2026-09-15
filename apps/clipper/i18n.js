@@ -44,7 +44,7 @@ export const MESSAGES = {
     tokenPlaceholder: 'mk_…',
     signIn: 'Pair',
     saveToken: 'Save token',
-    pairHint: 'Pairing mints a clip-only key (read + ingest) on the server. Your password is used once and never stored.',
+    pairHint: 'Pairing mints a clip-only key (read + answer + ingest) on the server. Your password is used once and never stored.',
     tokenHint: 'Paste a key you already hold. It is checked against the server before it is saved.',
 
     errBadOrigin: 'That does not look like a server address. Use the full origin, like https://station.example.com.',
@@ -164,7 +164,7 @@ export const MESSAGES = {
     tokenPlaceholder: 'mk_…',
     signIn: 'Emparelhar',
     saveToken: 'Salvar token',
-    pairHint: 'O emparelhamento cria no servidor uma chave só de recorte (leitura + ingestão). Sua senha é usada uma vez e nunca é armazenada.',
+    pairHint: 'O emparelhamento cria no servidor uma chave só de recorte (leitura + pergunta + ingestão). Sua senha é usada uma vez e nunca é armazenada.',
     tokenHint: 'Cole uma chave que você já possui. Ela é verificada no servidor antes de ser salva.',
 
     errBadOrigin: 'Isso não parece um endereço de servidor. Use a origem completa, como https://station.exemplo.com.',
@@ -284,7 +284,7 @@ export const MESSAGES = {
     tokenPlaceholder: 'mk_…',
     signIn: 'Emparejar',
     saveToken: 'Guardar token',
-    pairHint: 'El emparejamiento crea en el servidor una clave solo de recorte (lectura + ingesta). Tu contraseña se usa una vez y nunca se almacena.',
+    pairHint: 'El emparejamiento crea en el servidor una clave solo de recorte (lectura + pregunta + ingesta). Tu contraseña se usa una vez y nunca se almacena.',
     tokenHint: 'Pega una clave que ya tengas. Se comprueba contra el servidor antes de guardarse.',
 
     errBadOrigin: 'Eso no parece una dirección de servidor. Usa el origen completo, como https://station.ejemplo.com.',

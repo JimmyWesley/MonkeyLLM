@@ -123,8 +123,11 @@ def main(argv: list[str] | None = None) -> int:
                            help="mint an API key and grant a forest")
     p_key.add_argument("--principal", required=True)
     p_key.add_argument("--forest", required=True)
-    p_key.add_argument("--caps", default="read",
-                       help="comma-separated: read,write,query,tend,ingest,admin")
+    # J.2.7 rule 4 (v0.82): a door that minted `read` alone yesterday mints
+    # `read,answer` today, so nobody's credential narrows without a decision.
+    p_key.add_argument("--caps", default="read,answer",
+                       help="comma-separated: "
+                            "read,answer,write,query,tend,ingest,admin")
 
     p_grants = sub.add_parser("grants", parents=[common],
                               help="list a principal's forests")

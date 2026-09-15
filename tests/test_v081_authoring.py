@@ -42,7 +42,12 @@ STATION = Path(__file__).resolve().parents[1] / "apps" / "station"
 if str(STATION) not in sys.path:
     sys.path.insert(0, str(STATION))
 
-HOST = "0.81.0"
+# The installed build's own number, never a copy (the whisper suite's
+# reason, tests/test_v080_whisper.py): the shipped extension pins
+# `station_compat` to the minor it was tested against, so a literal here
+# would have to be edited at every bump and would silently stop testing
+# the range. A failure at the next MINOR is the pin working.
+HOST = __import__("monkeyllm").__version__
 MINE = "forest-mine"
 
 

@@ -10,5 +10,5 @@
   "role.owner": "Dono",
   "role.owner_desc": "Controle total, incluindo dar acesso a outras pessoas.",
   "role.reader": "Leitor",
-  "role.reader_desc": "Lê o que você escolher. Mais nada."
+  "role.reader_desc": "Lê o que você escolher e pergunta ao modelo da floresta sobre isso. Mais nada."
 }

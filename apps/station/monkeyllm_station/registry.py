@@ -279,6 +279,20 @@ DATA_REPAIRS = (
     # this runs once and never again.
     "UPDATE model_bindings SET max_tokens = 1500 "
     "WHERE role = 'answer' AND max_tokens = 600",
+    # v2 — J.2.7 (v0.82). `answer` became its own capability token, and
+    # every grant and every pair mask that carried `read` meant `answer`
+    # by it: nobody's behaviour changes without somebody's decision. Once,
+    # like v1: a grant narrowed to `read` afterwards is byte-identical to
+    # one that was never repaired, and only the stamp tells them apart.
+    # Grants store caps comma-joined; masks store a JSON list (J.2.6).
+    "UPDATE grants SET caps = caps || ',answer' "
+    "WHERE (',' || caps || ',') LIKE '%,read,%' "
+    "AND (',' || caps || ',') NOT LIKE '%,answer,%'",
+    "UPDATE api_keys SET caps = json_insert(caps, '$[#]', 'answer') "
+    "WHERE caps IS NOT NULL "
+    "AND EXISTS (SELECT 1 FROM json_each(api_keys.caps) WHERE value = 'read') "
+    "AND NOT EXISTS (SELECT 1 FROM json_each(api_keys.caps) "
+    "WHERE value = 'answer')",
 )
 
 # Columns added after the Phase A schema shipped; a Station upgraded in place

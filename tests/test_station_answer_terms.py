@@ -82,7 +82,7 @@ def station(terms_root, tmp_path, monkeypatch):
                     mcp=False)
     registry = app.state.registry
     key = registry.issue_key("root")
-    registry.grant("root", FOREST, {"read", "query"})
+    registry.grant("root", FOREST, {"read", "query", "answer"})
     registry.put_provider("p", "http://stub/v1", None)
     registry.bind_model(FOREST, "answer", "p", "stub-model")
     with TestClient(app) as client:
@@ -109,7 +109,7 @@ def mcp_station(terms_root, tmp_path, monkeypatch):
                     mcp=True)
     registry = app.state.registry
     key = registry.issue_key("agent")
-    registry.grant("agent", FOREST, {"read"})
+    registry.grant("agent", FOREST, {"read", "answer"})  # J.2.7 (v0.82): asking is its own token
     registry.put_provider("p", "http://stub/v1", None)
     registry.bind_model(FOREST, "answer", "p", "stub-model")
     with TestClient(app) as client:

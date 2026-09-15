@@ -151,7 +151,9 @@ class TestHandshake:
 
     def test_the_tools_are_all_still_served(self, mcp_station):
         client, registry = mcp_station
-        r = rpc(client, "tools/list", key=_key(registry))
+        # J.2.7 rule 5 (v0.82): `answer` is listed for a key that holds the
+        # token; a read-only key's menu leaves it out, by design.
+        r = rpc(client, "tools/list", key=_key(registry, caps=("read", "answer")))
         names = {t["name"] for t in r.json()["result"]["tools"]}
         assert {"forests", "locate", "look", "move", "pick", "view", "scan",
                 "sniff", "harvest", "calendar", "answer", "query", "plant",

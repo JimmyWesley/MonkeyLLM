@@ -238,7 +238,7 @@ def test_an_entry_never_crosses_scopes(station):
     assert len(calls) == 1
 
     narrow_key = registry.issue_key("narrow")
-    registry.grant("narrow", FOREST, {"read", "query"}, allow=["notes/"])
+    registry.grant("narrow", FOREST, {"read", "query", "answer"}, allow=["notes/"])
     narrow = {"Authorization": f"Bearer {narrow_key}"}
     r = _ask(client, narrow)
     assert len(calls) == 2, "a narrowed scope must buy its own run"
@@ -252,7 +252,7 @@ def test_an_entry_is_shared_inside_one_scope(station):
     client, registry, _, calls, head = station
     _ask(client, head)
     twin_key = registry.issue_key("twin")
-    registry.grant("twin", FOREST, {"read", "query"})
+    registry.grant("twin", FOREST, {"read", "query", "answer"})
     twin = {"Authorization": f"Bearer {twin_key}"}
     r = _ask(client, twin)
     assert len(calls) == 1

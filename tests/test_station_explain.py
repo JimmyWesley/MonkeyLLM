@@ -272,7 +272,7 @@ def test_a_dataset_in_the_bundle_is_flagged_as_not_readable_from_prose(
     app = build_app(root=explain_root, registry_path=tmp_path / "ds.db", mcp=False)
     registry = app.state.registry
     key = registry.issue_key("root")
-    registry.grant("root", FOREST, {"read", "query"})
+    registry.grant("root", FOREST, {"read", "query", "answer"})
     registry.put_provider("p", "http://stub/v1", None)
     registry.bind_model(FOREST, "answer", "p", "stub-model")
     registry.set_setting(FOREST, "answer_cache", {"enabled": False})
@@ -324,7 +324,7 @@ def test_cost_uses_the_providers_own_meter_and_its_own_rates(
     app = build_app(root=explain_root, registry_path=tmp_path / "cost.db", mcp=False)
     registry = app.state.registry
     key = registry.issue_key("root")
-    registry.grant("root", FOREST, {"read"})
+    registry.grant("root", FOREST, {"read", "answer"})
     registry.put_provider("p", "http://stub/v1", None)
     registry.bind_model(FOREST, "answer", "p", "priced-model")
 
@@ -413,7 +413,7 @@ def test_the_embedders_share_is_named_not_billed_to_the_forest(
     app = build_app(root=root, registry_path=tmp_path / "embed.db", mcp=False)
     registry = app.state.registry
     key = registry.issue_key("root")
-    registry.grant("root", FOREST, {"read"})
+    registry.grant("root", FOREST, {"read", "answer"})
     registry.put_provider("p", "http://stub/v1", None)
     registry.bind_model(FOREST, "answer", "p", "stub-model")
     registry.bind_model(FOREST, "embed", "p", "fake-1")

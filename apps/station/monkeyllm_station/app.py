@@ -98,7 +98,11 @@ WRITE_PRIMITIVES = frozenset({"plant", "graft", "tend", "prune",
                               "transplant"})
 # Not engine primitives: retrieval composed with the forest's bound model
 # (J.10). `answer` reads, `curate` proposes a summary for a human to apply.
-COMPOSITES = {"answer": ("read", "answer"), "curate": ("write", "ingest")}
+# J.2.7 (v0.82): `answer` rides its own token. The capability says who may
+# make the forest's model run; the binding (second element) says what
+# answers. Checked in that order, so a key that may not ask is told so and
+# never told which model it may not use.
+COMPOSITES = {"answer": ("answer", "answer"), "curate": ("write", "ingest")}
 # The Gardener over REST (J.8). Not a primitive either: `adopt`/`sync` are
 # Part G, and the host only adds identity, scope and a staging area.
 HOST_ACTIONS = frozenset({"ingest"})
@@ -107,6 +111,49 @@ SERVED_PRIMITIVES = READ_PRIMITIVES | WRITE_PRIMITIVES | set(COMPOSITES) | HOST_
 # its own latency to the caller who invoked it; these do not, because the
 # work happens inside them.
 EXPLAINED = frozenset({"answer", "harvest"})
+
+# J.10.13 (v0.82): the size of an `answer` response, decided at the CLOSE —
+# after the store, the audit row and the progress events, which all keep
+# the whole record. Levels are named for what survives. `full` is the call
+# without the parameter, to the byte.
+DETAIL_LEVELS = frozenset({"full", "sources", "answer"})
+_DETAIL_DROP = {
+    # Everything that carries text or machinery: the bundle's excerpts, a
+    # walk's opened bodies and its turns, the Part D trace.
+    "sources": frozenset({"harvest", "read", "turns", "trace"}),
+    # ...and the citations and the hop records too: the reply and its ids.
+    "answer": frozenset({"harvest", "read", "turns", "trace", "sources",
+                         "hops"}),
+}
+
+
+def shape_answer(result, detail):
+    """Project an `answer` response to its `detail` level (J.10.13).
+
+    The J.10.10 refusal is unshaped: it IS the evidence, and there is no
+    reply to make room for. An envelope is unshaped: it carries nothing the
+    levels remove.
+    """
+    drop = _DETAIL_DROP.get(detail or "full")
+    if drop is None or not isinstance(result, dict):
+        return result
+    if "error" in result or result.get("reason") == "insufficient_evidence":
+        return result
+    return {k: v for k, v in result.items() if k not in drop}
+
+
+def hybrid_echo(result, sample):
+    """K.3 (v0.82): a call that asked `hybrid: true` is told whether the
+    vector layer took part, and why not when it did not. Nothing on a
+    call that did not ask, nothing on an envelope; per serve, never
+    stored."""
+    asked = (sample or {}).get("hybrid")
+    if not asked or not isinstance(result, dict) or "error" in result:
+        return result
+    result["hybrid"] = bool(asked.get("active"))
+    if not asked.get("active"):
+        result["hybrid_reason"] = asked.get("state")
+    return result
 
 # Map projections (J.11): a region in one payload, never a primitive. The
 # default bound is generous enough that no ordinary forest meets it and low
@@ -140,7 +187,9 @@ UPLOAD_DIR = ("_derived", "uploads")
 
 # J.2.6: what a pair key may ask for — clip and look. `write`, `tend`,
 # `query` and `admin` stay what People and `station key` mint, deliberately.
-PAIR_CAPS = frozenset({"read", "ingest"})
+# J.2.7 rule 4 (v0.82): the ceiling and the default grow together with the
+# token — a pair key could always ask, because `read` used to mean it.
+PAIR_CAPS = frozenset({"read", "ingest", "answer"})
 # A pair key MUST expire: absent or zero means the default, never
 # "unlimited", and the ceiling is stated to the caller, never silently
 # clamped.
@@ -1002,6 +1051,16 @@ def build_app(
         key = sample.get("run_key")
         if key is not None:
             runs.publish(key, kind, data)
+        # J.10.5 (v0.82): the same record, handed to a transport's own
+        # progress channel when the call arrived with one (the MCP tool's
+        # `progressToken`). Hops only — a sweep reports nothing — and
+        # never a vote: a hook that raises is a spectator, not the hunt.
+        hook = sample.get("progress")
+        if kind == "hop" and callable(hook):
+            try:
+                hook(data)
+            except Exception:
+                log.debug("progress hook raised", exc_info=True)
 
     async def answer_events(request: Request):
         """`GET /v1/forests/{forest}/answer/{run}/events` (J.10.12).
@@ -1773,6 +1832,13 @@ def build_app(
         # K.3, entry search: set on every call, never left over from the last
         # one. `False` is both the default and the reset.
         vine.hybrid_locate = bool(payload.pop("hybrid", False))
+        if vine.hybrid_locate:
+            # K.3 (v0.82): what the reply will say about the layer. Read
+            # NOW, on the lane, beside the switch: a deferred sweep closes
+            # after this lane has served other calls, and the switch is
+            # reset on every one of them.
+            sample["hybrid"] = {"active": bool(vine.hybrid),
+                                "state": vine.canopy_status["state"]}
         # J.10.12: the progress channel's rendezvous. Popped here for the
         # reason `hybrid` is — it is the host's field, not the primitive's,
         # so what `validate_args` checks below is what the composite reads.
@@ -1835,6 +1901,7 @@ def build_app(
                 vine.commit_trailers = []
         if name in EXPLAINED:
             result = explain(result, vine, mark)
+        result = hybrid_echo(result, sample)
 
         commit_sha = None
         if name in WRITE_PRIMITIVES and isinstance(result, dict) and "error" not in result:
@@ -1889,6 +1956,9 @@ def build_app(
             # The deposit happens after the trace and the cost are
             # attached, so the entry is the response exactly as served.
             store_answer(sample, result)
+        # K.3 (v0.82): after the deposit, so the entry never carries a
+        # layer's state and a hit says what is true at this serve.
+        result = hybrid_echo(result, sample)
         digest = sample.get("cache_hit")
         registry.record(
             principal=principal, forest=forest, primitive=name,
@@ -2030,21 +2100,34 @@ def build_app(
                                        - (store_ms or 0.0)), 3)
         return result
 
-    async def execute_call(principal, forest, name, payload, clocks, mask):
+    async def execute_call(principal, forest, name, payload, clocks, mask,
+                           progress=None):
         """One door for both surfaces (REST and MCP): route the call to its
         lane (J.6.2), and take the sweep `answer` through the three phases
         of J.10.11. The walk (`hops`) stays lane-bound by design — it
-        interleaves reads with model turns, opt-in per call."""
+        interleaves reads with model turns, opt-in per call.
+
+        `progress` (J.10.5, v0.82) is a transport's per-hop observer — the
+        MCP tool's progress notification — called from the lane with each
+        hop record. The `detail` projection (J.10.13) is applied HERE, on
+        the way out: the store, the audit row and the events have all seen
+        the whole record by the time this returns."""
         slot = reader_slot(forest, name)
+        detail = (payload or {}).get("detail")
         if name == "answer" and not (payload or {}).get("hops"):
-            return await run_answer(principal, forest, payload, clocks, mask,
-                                    slot)
+            result = await run_answer(principal, forest, payload, clocks,
+                                      mask, slot)
+            return shape_answer(result, detail)
         get_vine = ((lambda: readers.vine(forest, slot))
                     if slot is not None else None)
-        return await in_lane(
+        sample = {"progress": progress} if progress is not None else None
+        result = await in_lane(
             forest, slot,
             lambda: run_primitive(principal, forest, name, payload, clocks,
-                                  mask, get_vine=get_vine))
+                                  mask, sample=sample, get_vine=get_vine))
+        if name == "answer":
+            result = shape_answer(result, detail)
+        return result
 
     # Per-token prices, as the provider itself states them (J.10). Fetched
     # once per endpoint and kept for the life of the process: a price list is
@@ -2460,6 +2543,18 @@ def build_app(
             if name == "answer":
                 question = payload.get("question") or payload.get("query") or ""
                 k = int(payload.get("k", 3))
+                # J.10.13 (v0.82): a size the caller cannot have is refused
+                # before anything runs — never a reason to bill a provider.
+                # The projection itself happens at the close (`execute_call`).
+                detail = payload.get("detail")
+                if detail is not None and detail not in DETAIL_LEVELS:
+                    raise VineError(
+                        E_SCHEMA,
+                        f"answer: 'detail' must be one of "
+                        f"{sorted(DETAIL_LEVELS)}, got {detail!r}",
+                        hint="`full` is the whole record; `sources` keeps the "
+                             "reply, its citations and the hop records; "
+                             "`answer` keeps the reply and the evidence ids.")
                 # C.13.1 through the composite: the window bounds the sweep's
                 # retrieval, so it also names the entry (J.10.7). The same
                 # question asked of June and of July is two questions, and an
@@ -3343,7 +3438,7 @@ def build_app(
                              and (mask is None or "admin" in mask)})
 
     async def forests(request: Request) -> JSONResponse:
-        from monkeyllm_station.mcp_surface import package_version
+        from monkeyllm_station.mcp_surface import hybrid_ready, package_version
 
         principal, err = require_principal(request)
         if err:
@@ -3356,7 +3451,10 @@ def build_app(
                 continue
             policy = registry.policy_for(principal, f["id"])
             listed.append({**f, "caps": granted[f["id"]]["caps"],
-                           "roots": policy.roots() if policy else []})
+                           "roots": policy.roots() if policy else [],
+                           # K.3 (v0.82): the deployment's shape, before
+                           # the first call.
+                           "hybrid": hybrid_ready(pool, registry, f["id"])})
         # J.1.2 rule 6 (v0.56): the first reply states the version — same
         # string as MCP's forests() and serverInfo.version.
         return JSONResponse({"forests": listed, "mode": pool.mode,

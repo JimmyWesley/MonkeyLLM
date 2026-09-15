@@ -44,7 +44,7 @@ en la propia pantalla, así que elegir uno nunca exige salir de ella:
 
 Un nivel es solo un punto de partida: una sección "Ajustar las capacidades"
 permite que cualquier concesión se desvíe de él (las capacidades son `read`,
-`query`, `write`, `tend`, `ingest`, `admin`), y el nivel elegido se reafirma
+`query`, `write`, `tend`, `ingest`, `admin`, `answer`), y el nivel elegido se reafirma
 en palabras llanas justo debajo de la elección "Lee y ejecuta SQL de solo
 lectura sobre los datasets." para que lo que estás por guardar quede dicho
 antes de guardarlo.
@@ -81,7 +81,7 @@ cópialo entonces o acuña otro.
 Las claves emparejadas las claves de autoservicio que el Clipper y la
 consola de Skills derivan de la propia contraseña de una persona (`POST
 /v1/auth/pair`) también viven aquí. Son tokens ordinarios con un giro:
-llevan una máscara de capacidades de a lo sumo `{read, ingest}`, su
+llevan una máscara de capacidades de a lo sumo `{read, ingest, answer}`, su
 autoridad son las concesiones propias de la persona **intersectadas con esa
 máscara en el momento del uso** (una concesión revocada después desaparece
 de la clave de inmediato), y siempre caducan 90 días por defecto, 365 como

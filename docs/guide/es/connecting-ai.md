@@ -74,7 +74,7 @@ segura de entregar a una máquina es que **solo puede estrechar, nunca
 añadir**:
 
 - **La máscara.** Una clave emparejada lleva una máscara de capacidades —
-  `{read, ingest}` por defecto, y ese conjunto es también el techo: pedir
+  `{read, ingest, answer}` por defecto, y ese conjunto es también el techo: pedir
   `write`, `tend`, `query` o `admin` se rechaza como `E_SCHEMA`. Esos siguen
   siendo lo que un administrador acuña deliberadamente.
 - **Concesiones ∩ máscara, en el momento del uso.** La autoridad efectiva de
@@ -151,7 +151,7 @@ necesita.
 ```
 
 Los bloques vienen marcados según lo que tu clave puede hacer en los bosques
-elegidos. Una clave emparejada con el `read` + `ingest` por defecto recibe
+elegidos. Una clave emparejada con el `read` + `answer` + `ingest` por defecto recibe
 `saving.md` y no `writing.md`, y se ahorra unos 1.400 tokens de instrucciones
 de escritura que de todos modos no podría ejecutar. Amplía la selección si
 preparas la skill para alguien con una clave más amplia — el bloque entonces
@@ -240,7 +240,7 @@ todo lo demás está detrás de la puerta que se indica.
 | `coverage` | `read` | Lo que el bosque guarda: sus raíces, el tamaño de cada una, de dónde vino ese material y cuándo. |
 | `history` | `read` | Qué le pasó a un nodo y quién lo hizo cada commit, del más reciente hacia atrás. |
 | `harvest` | `read` | Recuperación de un solo tiro: evidencia ordenada con fragmentos exactos, sin saltos. |
-| `answer` | `read` | Una respuesta fundamentada escrita por el modelo enlazado al bosque, con su evidencia. |
+| `answer` | `answer` | Una respuesta fundamentada escrita por el modelo enlazado al bosque, con su evidencia. |
 | `view` | `read` | El payload de imagen de un nodo media, como contenido de imagen que un cliente multimodal lee en su propio contexto. |
 | `query` | `query` | SQL de solo lectura contra un nodo dataset. |
 | `plant` | `write` | Crea un nodo. |
@@ -355,11 +355,12 @@ superficies.
 **Los alcances se sostienen.** Una concesión ata a un principal a un bosque
 con capacidades y alcance por prefijo de rama: listas de permitidos y
 negados de prefijos de subárbol, negar gana a cualquier profundidad, y sin
-concesión no hay acceso. Las capacidades son exactamente seis:
+concesión no hay acceso. Las capacidades son exactamente siete:
 
 | Capacidad | Permite |
 |---|---|
 | `read` | leer el material |
+| `answer` | preguntar al modelo del bosque (la llamada `answer`) |
 | `query` | ejecutar SQL de solo lectura |
 | `write` | crear y editar nodos |
 | `tend` | cambiar filas de dataset |

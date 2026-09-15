@@ -218,7 +218,7 @@ def test_a_store_hit_is_avoided_never_spent(station):
     """Both figures come off one column and only `result` separates them."""
     client, registry = station
     head = head_for(registry, "boss", [MINE])
-    asker = head_for(registry, "twice", [MINE], caps=("read",))
+    asker = head_for(registry, "twice", [MINE], caps=("read", "answer"))
     for _ in range(2):
         r = client.post(f"/v1/forests/{MINE}/answer", json={"question": QUESTION},
                         headers=asker)
