@@ -141,6 +141,20 @@ def shape_answer(result, detail):
         return result
     return {k: v for k, v in result.items() if k not in drop}
 
+
+def hybrid_echo(result, sample):
+    """K.3 (v0.82): a call that asked `hybrid: true` is told whether the
+    vector layer took part, and why not when it did not. Nothing on a
+    call that did not ask, nothing on an envelope; per serve, never
+    stored."""
+    asked = (sample or {}).get("hybrid")
+    if not asked or not isinstance(result, dict) or "error" in result:
+        return result
+    result["hybrid"] = bool(asked.get("active"))
+    if not asked.get("active"):
+        result["hybrid_reason"] = asked.get("state")
+    return result
+
 # Map projections (J.11): a region in one payload, never a primitive. The
 # default bound is generous enough that no ordinary forest meets it and low
 # enough that meeting it is survivable; either way `truncated` says so.
@@ -1818,6 +1832,13 @@ def build_app(
         # K.3, entry search: set on every call, never left over from the last
         # one. `False` is both the default and the reset.
         vine.hybrid_locate = bool(payload.pop("hybrid", False))
+        if vine.hybrid_locate:
+            # K.3 (v0.82): what the reply will say about the layer. Read
+            # NOW, on the lane, beside the switch: a deferred sweep closes
+            # after this lane has served other calls, and the switch is
+            # reset on every one of them.
+            sample["hybrid"] = {"active": bool(vine.hybrid),
+                                "state": vine.canopy_status["state"]}
         # J.10.12: the progress channel's rendezvous. Popped here for the
         # reason `hybrid` is — it is the host's field, not the primitive's,
         # so what `validate_args` checks below is what the composite reads.
@@ -1880,6 +1901,7 @@ def build_app(
                 vine.commit_trailers = []
         if name in EXPLAINED:
             result = explain(result, vine, mark)
+        result = hybrid_echo(result, sample)
 
         commit_sha = None
         if name in WRITE_PRIMITIVES and isinstance(result, dict) and "error" not in result:
@@ -1934,6 +1956,9 @@ def build_app(
             # The deposit happens after the trace and the cost are
             # attached, so the entry is the response exactly as served.
             store_answer(sample, result)
+        # K.3 (v0.82): after the deposit, so the entry never carries a
+        # layer's state and a hit says what is true at this serve.
+        result = hybrid_echo(result, sample)
         digest = sample.get("cache_hit")
         registry.record(
             principal=principal, forest=forest, primitive=name,
@@ -3413,7 +3438,7 @@ def build_app(
                              and (mask is None or "admin" in mask)})
 
     async def forests(request: Request) -> JSONResponse:
-        from monkeyllm_station.mcp_surface import package_version
+        from monkeyllm_station.mcp_surface import hybrid_ready, package_version
 
         principal, err = require_principal(request)
         if err:
@@ -3426,7 +3451,10 @@ def build_app(
                 continue
             policy = registry.policy_for(principal, f["id"])
             listed.append({**f, "caps": granted[f["id"]]["caps"],
-                           "roots": policy.roots() if policy else []})
+                           "roots": policy.roots() if policy else [],
+                           # K.3 (v0.82): the deployment's shape, before
+                           # the first call.
+                           "hybrid": hybrid_ready(pool, registry, f["id"])})
         # J.1.2 rule 6 (v0.56): the first reply states the version — same
         # string as MCP's forests() and serverInfo.version.
         return JSONResponse({"forests": listed, "mode": pool.mode,

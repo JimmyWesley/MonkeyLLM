@@ -124,7 +124,18 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
   in a reply — bytes never ride the response (C.6d r5). Jimmy REJECTED
   images-in-the-body (token cost). F.206-F.211 in `tests/test_v082_ask.py`
   + `check-skill.mjs`; the progress test asserts the Station's
-  `report_progress` calls, not the SDK's delivery.
+  `report_progress` calls, not the SDK's delivery. (7) **`hybrid` on every
+  surface** (K.3 amended): the MCP `locate`/`harvest`/`answer` tools carry
+  it (K.3 had named the calls since v0.20 and the tools never had it); a
+  call that asked gets `hybrid: true|false` + `hybrid_reason` (K.4's
+  state) — read into `sample["hybrid"]` on the lane BESIDE the switch,
+  because a deferred sweep's close runs after the lane served other calls
+  and `hybrid_locate` is reset per call; attached by `hybrid_echo` after
+  the store deposit and before the audit row. `forests()`/`/v1/forests`
+  carry `hybrid` per forest via `hybrid_ready` (embed binding + canopy
+  `index.json` model match, no lane). F.212. Jimmy ruled the Troop (Part E,
+  `troop/`, measured in T03: accuracy amplifier, not speed) stays a LAB —
+  no multi-agent parameter on `answer`.
 - **The door an author could not find (spec L.2/L.3/L.9 r1 + L.16,
   v0.81)**: Part L shipped the mechanism and left the person it was built
   for with no way in. `docs/extending.md` still cited **v0.20**, so the one

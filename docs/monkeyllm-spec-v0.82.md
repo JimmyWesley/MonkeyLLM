@@ -54,7 +54,13 @@ none of which was the one they named first.
   `media:<id>` in a reply resolves nowhere; the description, the
   instructions and the skill now name `view` as the neighbour that shows
   it. Bytes still never ride the response (C.6d rule 5).
-- **Acceptance F.206-F.211.**
+- **`hybrid` on every surface, and the reply says whether it happened
+  (amends K.3).** K.3 named `locate`, `harvest` and `answer`, and the MCP
+  tools carried no such parameter; a call that asked for the vector layer
+  on a forest without one was answered by BM25 in silence. The tools carry
+  it, the reply carries `hybrid` with its reason, and `forests()` says
+  which forests have the layer at all.
+- **Acceptance F.206-F.212.**
 
 **Changelog v0.80 → v0.81 — the door an author could not find.**
 
@@ -14099,6 +14105,38 @@ whatever the previous request asked for.
 is a property of the forest's configuration, not of the caller's identity.
 A deployment MAY additionally pin it on or off for a given credential, but
 the default is per-forest availability plus per-call choice.
+
+**Every surface, and the reply says whether it happened (v0.82).** The
+rule above names the calls, and the MCP tools for two of them carried no
+such parameter: the tool IS the call, and a menu that does not name a
+parameter is v0.79's failure — for an agent the parameter does not exist.
+And a call that asked for the layer on a forest without one was answered by
+BM25 in silence, which is the lie C.13 forbids a filter to tell. Normative:
+
+1. The `locate`, `harvest` and `answer` tools carry `hybrid`, forwarded
+   exactly as REST forwards it (a host field, popped before the C.12
+   table looks; declared in the table so the two surfaces are compared).
+2. A response to a call that asked `hybrid: true` carries `hybrid: true |
+   false` — whether the vector layer took part — and, when false,
+   `hybrid_reason` naming K.4's state (`no-embedder`, `no-index`,
+   `model-mismatch`). A call that did not ask carries neither field,
+   byte-identical to before. The echo is read on the lane beside the
+   switch and attached per serve, after the J.10.7 deposit, so a stored
+   answer never freezes a layer's state and a hit says what is true today.
+3. `forests()` and `/v1/forests` carry `hybrid: true | false` per forest —
+   the deployment's shape, read before the first call, in J.10.11's sense.
+   It is read off the `embed` binding and the index manifest and never by
+   opening the forest: the listing is what every session starts with, and
+   a listing touches no lane.
+
+**F.212 (acceptance).** The three tools publish `hybrid`. On a forest with
+no embedder bound, `answer(hybrid: true)` over MCP and over REST answers the
+reply itself with `hybrid: false` and `hybrid_reason: "no-embedder"`; the
+same call without the parameter carries neither field; `harvest` and
+`locate` say the same; `forests()` and `/v1/forests` report `hybrid:
+false`. On a forest with a canopy index built for the bound embedder the
+same call carries `hybrid: true` and no reason, a store hit still says so,
+and the listings report `hybrid: true`. Covered by tests.
 
 ### K.4 Index integrity (the mismatch guard)
 

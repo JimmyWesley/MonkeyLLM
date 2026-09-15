@@ -643,3 +643,107 @@ def test_a_domain_refusal_is_untouched(station):
     result, body = _call(client, key, "look", id="no/such/node")
     assert result["isError"] is True
     assert body["error"]["code"] == "E_NOT_FOUND"
+
+
+# ===========================================================================
+# F.212 — hybrid on every surface, and the reply says whether it happened
+# ===========================================================================
+
+
+class FakeEmbedder:
+    model = "fake-embed"
+
+    def embed(self, texts):
+        return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
+
+
+@pytest.fixture()
+def dense_station(tmp_path, scripted, monkeypatch):
+    """A forest whose canopy index was built for the bound embedder, as a
+    J.13.4 build leaves it: saved, model recorded."""
+    from starlette.testclient import TestClient
+
+    from monkeyllm import Vine
+    from monkeyllm.canopy import CanopyIndex
+    from monkeyllm_station import inference
+    from monkeyllm_station.app import build_app
+
+    root = tmp_path / "root"
+    build_forest(root / FOREST)
+    seed = Vine(root / FOREST, writable=False)
+    rows = [(r["id"], f"{r['title']}. {r['summary']}")
+            for r in seed.catalog.conn.execute(
+                "SELECT id, title, summary FROM nodes")]
+    CanopyIndex.build(rows, FakeEmbedder()).save(seed.forest.derived_dir)
+    seed.close()
+
+    monkeypatch.setattr(inference, "embedder_from_binding",
+                        lambda binding: FakeEmbedder())
+    monkeypatch.setenv("MONKEYLLM_STATION_READERS", "0")
+    app = build_app(root=root, registry_path=tmp_path / "dense.db", mcp=True)
+    registry = app.state.registry
+    registry.put_provider("p", "http://stub/v1", None)
+    registry.bind_model(FOREST, "answer", "p", "scripted-model")
+    registry.bind_model(FOREST, "embed", "p", "fake-embed")
+    with TestClient(app) as client:
+        yield client, registry
+
+
+def test_the_three_tools_publish_hybrid(station):
+    client, registry = station
+    key = _key(registry, "asker", {"read", "answer"})
+    tools = _tools(client, key)
+    for name in ("locate", "harvest", "answer"):
+        assert "hybrid" in tools[name]["inputSchema"]["properties"], name
+
+
+def test_a_layer_asked_for_and_absent_is_said(station, scripted):
+    """K.3 rule 2: BM25 in silence was the lie C.13 forbids a filter to
+    tell. A call that did not ask carries neither field."""
+    client, registry = station
+    key = _key(registry, "asker", {"read", "answer"})
+    q = "architecture notes"
+
+    plain = _rest(client, key, question=q).json()
+    assert "hybrid" not in plain and "hybrid_reason" not in plain
+
+    asked = _rest(client, key, question=q, hybrid=True).json()
+    assert asked["answer"] == "stub answer"
+    assert asked["hybrid"] is False
+    assert asked["hybrid_reason"] == "no-embedder"
+
+    for name, args in (("answer", {"question": q}),
+                       ("harvest", {"query": q}),
+                       ("locate", {"query": "architecture"})):
+        _result, body = _call(client, key, name, hybrid=True, **args)
+        assert body["hybrid"] is False, name
+        assert body["hybrid_reason"] == "no-embedder", name
+        _result, body = _call(client, key, name, **args)
+        assert "hybrid" not in body, name
+
+    _result, listed = _call(client, key, "forests")
+    assert {f["id"]: f["hybrid"] for f in listed["forests"]}[FOREST] is False
+    rest = client.get("/v1/forests", headers=_bearer(key)).json()["forests"]
+    assert {f["id"]: f["hybrid"] for f in rest}[FOREST] is False
+
+
+def test_a_layer_present_is_fused_and_listed(dense_station, scripted):
+    """K.3 rule 3 and the per-serve echo: a hit says what is true today."""
+    client, registry = dense_station
+    key = _key(registry, "asker", {"read", "answer"})
+    q = "architecture notes"
+
+    asked = _rest(client, key, question=q, hybrid=True).json()
+    assert asked["hybrid"] is True and "hybrid_reason" not in asked
+    again = _rest(client, key, question=q, hybrid=True).json()
+    assert again["cached"] is True and again["hybrid"] is True
+
+    _result, body = _call(client, key, "answer", question=q, hybrid=True)
+    assert body["hybrid"] is True
+    _result, body = _call(client, key, "locate", query="architecture", hybrid=True)
+    assert body["hybrid"] is True
+
+    _result, listed = _call(client, key, "forests")
+    assert {f["id"]: f["hybrid"] for f in listed["forests"]}[FOREST] is True
+    rest = client.get("/v1/forests", headers=_bearer(key)).json()["forests"]
+    assert {f["id"]: f["hybrid"] for f in rest}[FOREST] is True

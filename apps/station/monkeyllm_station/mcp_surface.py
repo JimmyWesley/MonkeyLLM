@@ -62,6 +62,31 @@ def package_version() -> str:
 # client lists — at the 2026-07-28 era it is the only server-to-client
 # channel, so withholding it ends the connection rather than saving anything
 # (J.1.4). A test asserts the shape of this tuple for that reason.
+def hybrid_ready(pool, registry, forest_id: str) -> bool:
+    """K.3 (v0.82): whether `hybrid: true` would fuse the vector layer on
+    this forest — an `embed` binding AND a canopy index built for that
+    binding's model. Read off the registry row and the index manifest, never
+    by opening the forest: this rides the listing every session starts
+    with, and a listing touches no lane (J.9's rule for the job board). A
+    half-written manifest reads as "not ready", never as an error."""
+    try:
+        from pathlib import Path
+
+        from monkeyllm.canopy import CANOPY_DIRNAME
+
+        binding = registry.binding(forest_id, "embed")
+        root = getattr(pool, "root", None)
+        if not binding or root is None:
+            return False
+        meta_path = Path(root) / forest_id / "_derived" / CANOPY_DIRNAME / "index.json"
+        if not meta_path.is_file():
+            return False
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        return bool(meta.get("ids")) and meta.get("model") == binding.get("model")
+    except Exception:
+        return False
+
+
 UNSERVED_METHODS = (
     "prompts/list", "prompts/get", "resources/list",
     "resources/templates/list", "resources/read",
@@ -194,7 +219,9 @@ INSTRUCTIONS = (
     "makes it navigate the forest itself (one model call per hop, a walk "
     "may take minutes), detail=\"sources\" returns the reply and its "
     "citations without the excerpts, and a media:<id> inside a reply is an "
-    "image you open with view(forest, id). "
+    "image you open with view(forest, id). hybrid=true on locate, harvest "
+    "and answer fuses the vector layer into entry search where forests() "
+    "reports hybrid: true, and the reply says whether it took part. "
     "Navigate: locate(forest, query) ranks entry points over "
     "curated metadata (titles, summaries, tags — never bodies); "
     "look(forest, id) is a cheap digest, up to 10 ids per call; "
@@ -360,7 +387,9 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                 # can actually do — same rule as /v1/me for a console.
                 caps = sorted(set(caps) & mask)
             entry = {"id": f["id"], "caps": caps,
-                     "roots": policy.roots() if policy else []}
+                     "roots": policy.roots() if policy else [],
+                     # K.3 (v0.82): which forests have the vector layer.
+                     "hybrid": hybrid_ready(pool, registry, f["id"])}
             if f.get("locked"):
                 # J.1.3: the first call the instructions prescribe must
                 # not send the agent into a room that does not open.
@@ -377,7 +406,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                      include: list[str] | None = None,
                      since: str | None = None, until: str | None = None,
                      date_field: str | None = None,
-                     lang: str | None = None):
+                     lang: str | None = None,
+                     hybrid: bool = False):
         """Drop near the answer: ranked entry points over curated metadata —
         titles, summaries and tags, never bodies. Each result carries
         `body_tokens`, so you can size what you are about to open;
@@ -393,11 +423,15 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         like an empty forest. `lang` filters by the node's declared
         language tag (A.3.2), exact match — a node that declares none is
         in no language filter. `type_filter` narrows to one node type: the
-        pictures are `type_filter="media"`, not a query for the word."""
+        pictures are `type_filter="media"`, not a query for the word.
+        `hybrid: true` fuses the vector layer into the ranking where
+        forests() reports `hybrid: true`; the reply says `hybrid` and,
+        when the layer could not take part, `hybrid_reason`."""
         return await call(forest, "locate", query=query, k=k, scope=scope,
                           type_filter=type_filter, include=include,
                           since=since, until=until, date_field=date_field,
-                          lang=lang)
+                          lang=lang,
+                          **({"hybrid": True} if hybrid else {}))
 
     @mcp.tool()
     async def look(forest: str, id: str | list[str],
@@ -533,7 +567,8 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                       until: str | None = None,
                       date_field: str | None = None,
                       lang: str | None = None,
-                      include_superseded: bool = False):
+                      include_superseded: bool = False,
+                      hybrid: bool = False):
         """One-shot retrieval: ranked evidence with exact snippets, no hops.
         `since`/`until` bound both of its legs to a period.
 
@@ -541,10 +576,14 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         that a live node `supersedes` is left OUT with its seat refilled —
         `superseded_excluded` names what was set aside and by what, so a
         replaced policy never answers for the current one.
-        `include_superseded=true` brings the history back."""
+        `include_superseded=true` brings the history back.
+        `hybrid: true` fuses the vector layer into the entry search where
+        forests() reports `hybrid: true`; the reply says `hybrid` and,
+        when the layer could not take part, `hybrid_reason`."""
         return await call(forest, "harvest", query=query, terms=terms, k=k,
                           since=since, until=until, date_field=date_field,
                           lang=lang,
+                          **({"hybrid": True} if hybrid else {}),
                           **({"include_superseded": True}
                              if include_superseded else {}))
 
@@ -597,6 +636,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                      terms: list[str] | None = None,
                      hops: bool | int | None = None,
                      detail: Literal["full", "sources", "answer"] | None = None,
+                     hybrid: bool = False,
                      cache: bool = True,
                      reply_tokens: int | None = None,
                      min_evidence: int = 0,
@@ -655,7 +695,11 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         on `locate` — ask `calendar` which periods hold anything first.
         A document a live node `supersedes` is left out of the material by
         default and named in `superseded_excluded`;
-        `include_superseded: true` answers from the history too."""
+        `include_superseded: true` answers from the history too.
+        `hybrid: true` fuses the vector layer into the sweep's entry
+        search where forests() reports `hybrid: true`; the reply says
+        `hybrid` and, when the layer could not take part, `hybrid_reason`
+        — never silence."""
         progress = None
         pending: list = []
         if hops:
@@ -698,6 +742,7 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
                           date_field=date_field,
                           **({"hops": hops} if hops is not None else {}),
                           **({"detail": detail} if detail is not None else {}),
+                          **({"hybrid": True} if hybrid else {}),
                           **({"reply_tokens": reply_tokens}
                              if reply_tokens is not None else {}),
                           **({"min_evidence": min_evidence}

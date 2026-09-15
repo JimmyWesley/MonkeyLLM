@@ -199,7 +199,10 @@ const answerTeaching = (caps) => caps.includes('answer') ? `- \`answer(forest, q
   to, and \`pick(forest, id)\` any cited node you want in full. A
   \`![caption](media:<id>)\` in the reply, or a source of type \`media\`, is
   an image the forest holds: \`view(forest, id)\` shows it if you can see
-  images; the bytes never ride the reply.
+  images; the bytes never ride the reply. \`hybrid: true\` fuses the vector
+  layer into the entry search of \`answer\`, \`harvest\` and \`locate\` — only
+  where \`forests()\` reports \`hybrid: true\` — and the reply says
+  \`hybrid: false\` with the reason when the layer could not take part.
 ` : `- \`answer(forest, question)\` exists — retrieval plus a grounded reply from
   the forest's own model — and needs the \`answer\` capability, which this key
   does not carry. \`harvest\` is your one-shot instead.
