@@ -1,4 +1,5 @@
 {
+  "ingest.accepts": "Esta floresta aceita: {list}",
   "ingest.branches": "Galhos novos",
   "ingest.chosen": "{n} arquivo(s) prontos",
   "ingest.compose_body": "Conteúdo",
@@ -21,7 +22,8 @@
   "ingest.dest_hint": "Um galho existente. Tudo entra abaixo dele.",
   "ingest.dest_root": "Raiz da floresta",
   "ingest.drop": "Solte arquivos ou uma pasta aqui",
-  "ingest.drop_hint": "Markdown, texto, CSV, JSON, Word e Excel. Arquivos tabulares viram datasets consultáveis.",
+  "ingest.drop_hint": "{list}. Arquivos tabulares viram datasets consultáveis.",
+  "ingest.drop_hint_unknown": "Consultando quais formatos esta floresta aceita…",
   "ingest.empty": "Nada ingerido ainda.",
   "ingest.errors": "Erros",
   "ingest.job_cancel": "Parar depois deste documento",

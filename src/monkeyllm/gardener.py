@@ -630,6 +630,47 @@ def discover_converters(config: dict, extra: list | None = None,
     return convs
 
 
+def supported_formats(config: dict, extra: list | None = None,
+                      registry=None) -> list[dict]:
+    """G.2 (v0.83): which extensions the chain claims, and who claims each.
+
+    The SAME discovery `discover_converters` runs, read instead of run: one
+    entry per file extension in precedence order, naming the first claimant
+    the way a report would — `hook` (a G.6 command hook), `ext:<id>` (a
+    Part L extension), `describer` (a host-injected extra), `plugin:<name>`
+    (an entry point) or `builtin`. No Vine, no file opened.
+
+    It exists so that no surface keeps a list of its own: a copied list is
+    what let a `.pdf` stay greyed out in a console while the converter for
+    it was installed, enabled and loaded.
+    """
+    seen: dict[str, str] = {}
+
+    def claim(converter, via: str) -> None:
+        for ext in sorted(getattr(converter, "extensions", ()) or ()):
+            seen.setdefault(str(ext).lower(), via)
+
+    for ext, tpl in (config.get("converters") or {}).items():
+        claim(CommandConverter(ext, tpl), "hook")
+    if registry is not None:
+        from monkeyllm.extensions.converters import from_registry
+        for conv in from_registry(registry):
+            claim(conv, f"ext:{conv.ext_id}")
+    for conv in extra or []:
+        claim(conv, "describer")
+    for ep in entry_points(group="monkeyllm.converters"):
+        try:
+            loaded = ep.load()
+            claim(loaded() if isinstance(loaded, type) else loaded,
+                  f"plugin:{ep.name}")
+        except Exception:  # a broken plugin never blocks the pipeline
+            continue
+    for conv in builtin_converters():
+        claim(conv, "builtin")
+    return [{"extension": ext, "via": via}
+            for ext, via in sorted(seen.items())]
+
+
 def discover_hooks() -> list[Callable]:
     """G.4.3: `on_curate` hooks from the `monkeyllm.hooks` entry-point group."""
     hooks: list[Callable] = []

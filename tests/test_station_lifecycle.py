@@ -660,7 +660,15 @@ class TestIngestStatus:
         head = _key(registry, ["read", "ingest"])
         r = client.get(f"/v1/forests/{FOREST}/ingest", headers=head)
         assert r.status_code == 200, r.text
-        assert r.json() == {"source": None, "can_sync": False, "host_paths": False}
+        body = r.json()
+        assert body["source"] is None
+        assert body["can_sync"] is False
+        assert body["host_paths"] is False
+        # J.8.5 (v0.83): the status also says what this forest converts —
+        # here the built-ins alone, since nothing is hooked or enabled.
+        formats = {f["extension"]: f["via"] for f in body["formats"]}
+        assert formats[".md"] == "builtin"
+        assert ".pdf" not in formats
 
     def test_it_names_the_source_after_an_adopt(self, ingest_station):
         client, registry, _, inbox = ingest_station

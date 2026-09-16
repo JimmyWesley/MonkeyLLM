@@ -29,11 +29,19 @@ import {
  * converters read bytes. Anything else is refused HERE, by name, instead of
  * being dropped on the floor: an upload that silently ignores half the
  * selection is indistinguishable from one that failed. */
+/* Which entries travel as text (`{name, text}`) rather than as bytes. The
+ * shape is J.8's. What the forest ACCEPTS is not decided here at all: it
+ * arrives with the ingest status as `formats` (J.8.5, v0.83), computed by
+ * the same discovery the next batch will run, so a converter an extension
+ * adds is accepted here the moment the forest enables it. The v0.82 console
+ * kept a list of its own and greyed out every .pdf while the converter for
+ * it was installed, enabled and loaded — nothing had failed. */
 const TEXTUAL = /\.(md|markdown|txt|csv|json|tsv|ya?ml)$/i
-const BINARY = /\.(docx|xlsx?|db|sqlite|sqlite3)$/i
-const ACCEPT = '.md,.markdown,.txt,.csv,.json,.tsv,.yaml,.yml,.docx,.xls,'
-             + '.xlsx,.db,.sqlite,.sqlite3'
 const MAX_BYTES = 25 * 1024 * 1024
+const extensionOf = (path) => {
+  const m = /\.[^./\\]+$/.exec(path)
+  return m ? m[0].toLowerCase() : ''
+}
 
 /* The G.10.1 stages, in the Gardener's order. Named here rather than read
  * off the job, because a bar's fraction needs to know how many phases
@@ -187,6 +195,12 @@ export default function Ingest({ forest, grant, goto }) {
   const ingestState = useAsync(() => api.ingestStatus(forest),
                                [forest, state.report, settled])
   const status = ingestState.data || {}
+  // J.8.5: the formats THIS forest converts, from the host. `null` while
+  // unknown — and while unknown nothing is refused by type: a list the host
+  // has not answered is not a list this console may invent.
+  const accepted = Array.isArray(status.formats)
+    ? new Set(status.formats.map((f) => f.extension)) : null
+  const acceptedList = accepted ? [...accepted].sort().join(', ') : ''
 
   if (!has(grant, 'ingest')) {
     return <NeedsCapability message={t('ingest.needs_cap')} hint={t('cap.ingest')} />
@@ -201,8 +215,9 @@ export default function Ingest({ forest, grant, goto }) {
     setReading(true)
     try {
       for (const { file, path } of entries) {
-        const binary = BINARY.test(path)
-        if (!binary && !TEXTUAL.test(path)) {
+        // Refused HERE, before upload, by what the forest said it takes —
+        // so "no converter for this format" is a fact about this forest.
+        if (accepted && !accepted.has(extensionOf(path))) {
           refused.push({ name: path, why: 'type' })
           continue
         }
@@ -210,9 +225,9 @@ export default function Ingest({ forest, grant, goto }) {
           refused.push({ name: path, why: 'size' })
           continue
         }
-        picked.push(binary
-          ? { name: path, b64: toBase64(await file.arrayBuffer()), bytes: file.size }
-          : { name: path, text: await file.text(), bytes: file.size })
+        picked.push(TEXTUAL.test(path)
+          ? { name: path, text: await file.text(), bytes: file.size }
+          : { name: path, b64: toBase64(await file.arrayBuffer()), bytes: file.size })
       }
     } finally { setReading(false) }
     // Same name twice in one batch would stage the first and lose it.
@@ -373,7 +388,10 @@ export default function Ingest({ forest, grant, goto }) {
                   <span className="mb-2 grid h-11 w-11 place-items-center rounded-xl
                                    bg-surface-2 text-text-3"><Upload size={20} /></span>
                   <p className="text-[13.5px] font-medium text-text">{t('ingest.drop')}</p>
-                  <p className="mt-1 text-[12px] text-text-3">{t('ingest.drop_hint')}</p>
+                  <p className="mt-1 text-[12px] text-text-3">
+                    {accepted ? t('ingest.drop_hint', { list: acceptedList })
+                              : t('ingest.drop_hint_unknown')}
+                  </p>
                   {/* Two explicit buttons: "choose a folder" meant the folder on
                       your own machine, and there was no way to say that. */}
                   <div className="mt-3 flex gap-2">
@@ -386,7 +404,8 @@ export default function Ingest({ forest, grant, goto }) {
                       {t('ingest.pick_folder')}
                     </button>
                   </div>
-                  <input ref={picker} type="file" multiple accept={ACCEPT} className="hidden"
+                  <input ref={picker} type="file" multiple className="hidden"
+                         accept={accepted ? [...accepted].join(',') : undefined}
                          onChange={(e) => take(e.target.files)} />
                   <input ref={folderPicker} type="file" multiple webkitdirectory=""
                          directory="" className="hidden"
@@ -398,6 +417,11 @@ export default function Ingest({ forest, grant, goto }) {
                 {skipped.length > 0 && (
                   <Note tone="warn">
                     <div>{t('ingest.skipped', { n: skipped.length })}</div>
+                    {accepted && skipped.some((s) => s.why === 'type') && (
+                      <div className="mt-1 text-[11.5px]">
+                        {t('ingest.accepts', { list: acceptedList })}
+                      </div>
+                    )}
                     <ul className="mt-1.5 max-h-28 space-y-0.5 overflow-y-auto">
                       {skipped.slice(0, 20).map((s, i) => (
                         <li key={`${s.name}-${i}`} className="font-mono text-[11.5px]">

@@ -31,9 +31,12 @@ import { api, toBase64 } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { useRouteState } from '../router.js'
 import {
-  Badge, Card, Empty, ErrorNote, Field, Modal, Note, Skeleton, Table, Td,
+  Badge, Card, Empty, ErrorNote, Field, Modal, Note, Segmented, Skeleton,
+  Table, Td, Toggle,
 } from '../design/ui.jsx'
-import { Alert, Download, Refresh, Save, Upload } from '../design/icons.jsx'
+import {
+  Alert, Check, Download, File, Link, Refresh, Save, Upload,
+} from '../design/icons.jsx'
 import { zip } from '../zip.js'
 import { NeedsCapability, has, useAsync } from './shared.jsx'
 
@@ -48,13 +51,10 @@ function Tier({ tier }) {
   return <Badge tone={tone}>{tier}</Badge>
 }
 
-export default function Extensions({ forest, grant }) {
+export default function Extensions({ forest, grant, goto }) {
   const { t } = useI18n()
   const [selected, setSelected] = useRouteState('ext', null)
-  const [source, setSource] = useState('')
-  const [upload, setUpload] = useState(null)   // {name, b64, bytes}
-  const [authoring, setAuthoring] = useState(false)
-  const [confirming, setConfirming] = useState(null)
+  const [confirming, setConfirming] = useState(null)   // a removal, pending
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -69,6 +69,8 @@ export default function Extensions({ forest, grant }) {
   const mayInstall = installed.data?.may_install === true
   const enabled = new Set(enablement.data?.enabled || [])
   const absent = enablement.data?.expected_but_absent || []
+  // L.8 (v0.83): "installed" and "installed and serving" are two states.
+  const pending = list.filter((ext) => ext.loaded === false).map((ext) => ext.id)
 
   const refresh = () => { installed.reload(); enablement.reload() }
 
@@ -76,9 +78,7 @@ export default function Extensions({ forest, grant }) {
     setBusy(true)
     setError(null)
     try {
-      const result = await api.extensionAction(body)
-      refresh()
-      return result
+      return await api.extensionAction(body)
     } catch (err) {
       setError(err)
       throw err
@@ -104,6 +104,7 @@ export default function Extensions({ forest, grant }) {
     try {
       await act({ action: 'remove', id, acknowledge })
       setConfirming(null)
+      refresh()
     } catch (err) {
       // L.8: the host names what stops being declared; show that rather
       // than a generic failure, and let the operator decide again.
@@ -125,74 +126,8 @@ export default function Extensions({ forest, grant }) {
       ) : null}
 
       {mayInstall ? (
-        <Card title={t('ext.install')} subtitle={t('ext.install.blurb')}>
-          <div className="flex flex-wrap items-end gap-2">
-            <Field
-              className="min-w-0 flex-1"
-              label={t('ext.source')}
-              hint={t('ext.source.hint')}
-              value={source}
-              disabled={!!upload}
-              onChange={(e) => setSource(e.target.value)}
-              placeholder="github.com/org/monkeyllm-whisper@v1.2.0"
-            />
-            <button
-              className="btn"
-              disabled={busy || (!source.trim() && !upload)}
-              onClick={async () => {
-                // L.9 rule 4: the operator is shown the licence, the source
-                // and the tier BEFORE anything is accepted.
-                const body = upload
-                  ? { action: 'plan', upload: { name: upload.name, b64: upload.b64 } }
-                  : { action: 'plan', source }
-                const plan = await act(body)
-                setConfirming({ plan, source, upload })
-              }}
-            >
-              <Refresh /> {t('ext.review')}
-            </button>
-          </div>
-
-          {/* L.2 (v0.81): the door the others do not open. "A path" is a
-              path on the HOST — through a browser that is the container's
-              filesystem, so without this an operator holding an extension
-              they just wrote has no route short of publishing it to git. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="btn">
-              <Upload size={15} /> {t('ext.upload')}
-              <input
-                type="file"
-                accept=".zip"
-                hidden
-                onChange={async (e) => {
-                  const file = e.target.files?.[0]
-                  e.target.value = ''
-                  if (!file) return
-                  setError(null)
-                  try {
-                    setUpload({
-                      name: file.name,
-                      b64: toBase64(await file.arrayBuffer()),
-                      bytes: file.size,
-                    })
-                    setSource('')
-                  } catch (err) { setError(err) }
-                }}
-              />
-            </label>
-            {upload ? (
-              <span className="text-[11.5px] text-text-3">
-                {upload.name} ({Math.round(upload.bytes / 1024)} KB) ·{' '}
-                <button className="btn btn-sm"
-                        onClick={() => setUpload(null)}>
-                  {t('common.clear')}
-                </button>
-              </span>
-            ) : (
-              <span className="text-[11.5px] text-text-3">{t('ext.upload.hint')}</span>
-            )}
-          </div>
-        </Card>
+        <Installer forest={forest} busy={busy} act={act} goto={goto}
+                   onInstalled={refresh} />
       ) : (
         <Note tone="info">{t('ext.install.denied')}</Note>
       )}
@@ -202,16 +137,7 @@ export default function Extensions({ forest, grant }) {
           the admin gate either. The teaching prose lives in the repository
           where it is read without running anything; what is served here is
           DERIVED, so a seam added to the catalogue documents itself. */}
-      <Card title={t('ext.author')} subtitle={t('ext.author.blurb')}
-            bodyClass={authoring ? 'p-5' : 'p-0'}
-            actions={
-              <button className="btn btn-sm"
-                      onClick={() => setAuthoring((v) => !v)}>
-                {authoring ? t('common.hide') : t('ext.author.open')}
-              </button>
-            }>
-        {authoring ? <AuthoringPanel /> : null}
-      </Card>
+      <AuthoringCard />
 
       <Card
         title={t('ext.installed')}
@@ -227,7 +153,11 @@ export default function Extensions({ forest, grant }) {
             {list.map((ext) => (
               <tr key={ext.id}>
                 <Td>
-                  <strong>{ext.id}</strong> <span className="text-text-3">{ext.version}</span>
+                  <strong>{ext.id}</strong> <span className="text-text-3">{ext.version}</span>{' '}
+                  {/* L.8 (v0.83): serving now, or after a restart — said. */}
+                  {ext.loaded === false
+                    ? <Badge tone="warn">{t('ext.not_loaded')}</Badge>
+                    : <Badge tone="good">{t('ext.loaded')}</Badge>}
                   {/* L.2 rule 2: the ref travels with the id, everywhere. */}
                   {ext.tracking ? (
                     <div className="text-[11.5px] text-text-3">
@@ -251,6 +181,11 @@ export default function Extensions({ forest, grant }) {
                   {(ext.contributes || []).map((seam) => (
                     <Badge key={seam}>{seam}</Badge>
                   ))}
+                  {(ext.formats || []).length ? (
+                    <div className="mt-1 font-mono text-[11px] text-text-3">
+                      {ext.formats.join(' ')}
+                    </div>
+                  ) : null}
                   {(ext.registers_roles || []).map((role) => (
                     <Badge key={role.role} tone="accent">
                       {t('ext.role', { role: role.role, kind: role.kind })}
@@ -283,9 +218,13 @@ export default function Extensions({ forest, grant }) {
             ))}
           </Table>
         )}
-        {/* L.8: a restart is stated, never implied — "disabled" without one
-            means the module is still resident. */}
-        <Note tone="info">{t('ext.restart')}</Note>
+        {/* L.8: a restart is stated when it is NEEDED, naming who needs it;
+            "disabled" without one means the module is still resident. */}
+        {pending.length ? (
+          <Note tone="warn">{t('ext.restart.pending', { list: pending.join(', ') })}</Note>
+        ) : (
+          <Note tone="info">{t('ext.restart')}</Note>
+        )}
       </Card>
 
       {selected ? (
@@ -293,67 +232,194 @@ export default function Extensions({ forest, grant }) {
                      onClose={() => setSelected(null)} />
       ) : null}
 
-      <ReviewModal
-        state={confirming}
-        onClose={() => setConfirming(null)}
-        onInstall={async (src, up) => {
-          await act(up
-            ? { action: 'install', acknowledge: true,
-                upload: { name: up.name, b64: up.b64 } }
-            : { action: 'install', source: src, acknowledge: true })
-          setConfirming(null)
-          setSource('')
-          setUpload(null)
-        }}
-        onRemove={(id) => remove(id, true)}
-      />
+      <RemoveModal state={confirming} onClose={() => setConfirming(null)}
+                   onRemove={(id) => remove(id, true)} />
     </div>
   )
 }
 
-/** What the operator is being asked to accept, before anything happens.
- *
- *  Licence, source, tier and permissions together — L.9 rule 4 is one act of
- *  consent, and splitting it across screens is how consent becomes a click.
- *  The permissions line says plainly that it INFORMS rather than contains,
- *  because in-process it does (L.9 rule 2) and an install screen that
- *  implied otherwise would be the most expensive sentence in the product. */
-function ReviewModal({ state, onClose, onInstall, onRemove }) {
+/** L.16's card, unchanged in substance: opened on demand. */
+function AuthoringCard() {
   const { t } = useI18n()
-  if (!state) return null
+  const [authoring, setAuthoring] = useState(false)
+  return (
+    <Card title={t('ext.author')} subtitle={t('ext.author.blurb')}
+          bodyClass={authoring ? 'p-5' : 'p-0'}
+          actions={
+            <button className="btn btn-sm"
+                    onClick={() => setAuthoring((v) => !v)}>
+              {authoring ? t('common.hide') : t('ext.author.open')}
+            </button>
+          }>
+      {authoring ? <AuthoringPanel /> : null}
+    </Card>
+  )
+}
 
-  if (state.losing) {
-    return (
-      <Modal open title={t('ext.remove.title')} onClose={onClose}
-             footer={
-               <button className="btn btn-danger"
-                       onClick={() => onRemove(state.id)}>
-                 {t('ext.remove.confirm')}
-               </button>
-             }>
-        <Note tone="warn">
-          {t('ext.remove.losing', { list: state.losing.join(', ') })}
-        </Note>
-      </Modal>
-    )
+/** The install, as one legible act (L.11, v0.83).
+ *
+ *  The v0.82 card had the file chooser at the bottom, a "Review" button at
+ *  the top right that merely changed shade when a file was chosen, and a
+ *  dialog over the card to install from — three places for one act, and an
+ *  operator who had chosen a zip did not read the distant button as the
+ *  next step. So:
+ *
+ *  1. ONE primary control at a time, beside the thing it acts on: choose
+ *     (primary) → review (primary, under the choice) → install (primary,
+ *     under the review).
+ *  2. Choosing changes nothing on the host; the review (L.9 rule 4) is the
+ *     first call and its result is shown IN PLACE, never in a dialog.
+ *  3. Enabling on this forest rides the install through a visible control
+ *     that defaults on — installing from a forest is a statement of intent
+ *     about that forest — and the route refuses the enablement, never the
+ *     install, where it may not.
+ *  4. The outcome says what is active now, what needs a restart, what the
+ *     forest now accepts, and what is still missing before it can be used.
+ */
+function Installer({ forest, busy, act, goto, onInstalled }) {
+  const { t } = useI18n()
+  const [mode, setMode] = useState('upload')          // 'upload' | 'address'
+  const [source, setSource] = useState('')
+  const [upload, setUpload] = useState(null)          // {name, b64, bytes}
+  const [plan, setPlan] = useState(null)              // the review, in place
+  const [enableHere, setEnableHere] = useState(true)
+  const [outcome, setOutcome] = useState(null)        // the install's answer
+
+  const chosen = mode === 'upload' ? !!upload : !!source.trim()
+  const request = () => (mode === 'upload'
+    ? { upload: { name: upload.name, b64: upload.b64 } }
+    : { source: source.trim() })
+
+  const reset = () => {
+    setSource(''); setUpload(null); setPlan(null); setOutcome(null)
   }
 
-  const plan = state.plan || {}
+  const pick = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setPlan(null)
+    setUpload({ name: file.name, b64: toBase64(await file.arrayBuffer()),
+                bytes: file.size })
+  }
+
+  const review = async () => {
+    setPlan(null)
+    try { setPlan(await act({ action: 'plan', ...request() })) }
+    catch { /* shown by act() */ }
+  }
+
+  const install = async () => {
+    try {
+      const result = await act({
+        action: 'install', acknowledge: true, ...request(),
+        ...(enableHere ? { enable_on: forest } : {}),
+      })
+      setOutcome(result)
+      setPlan(null)
+      onInstalled()
+    } catch { /* shown by act() */ }
+  }
+
   return (
-    <Modal open title={t('ext.review.title')} onClose={onClose}
-           subtitle={plan.id ? `${plan.id} ${plan.version || ''}` : state.source}
-           footer={
-             <button className="btn btn-primary"
-                     disabled={!plan.kit?.ok}
-                     onClick={() => onInstall(state.source, state.upload)}>
-               <Save /> {t('ext.review.accept')}
-             </button>
-           }>
+    <Card title={t('ext.install')} subtitle={t('ext.install.blurb')} icon={Upload}>
+      {outcome ? (
+        <Outcome outcome={outcome} forest={forest} goto={goto} onAnother={reset} />
+      ) : (
+        <div className="space-y-4">
+          <Segmented value={mode}
+                     onChange={(next) => { setMode(next); setPlan(null) }}
+                     options={[
+                       { value: 'upload', label: t('ext.mode.upload'), icon: Upload },
+                       { value: 'address', label: t('ext.mode.address'), icon: Link },
+                     ]} />
+
+          {mode === 'upload' ? (
+            <div className="rounded-xl border-2 border-dashed border-line px-4 py-6 text-center">
+              {upload ? (
+                <>
+                  <p className="flex items-center justify-center gap-1.5 text-[13.5px] font-medium text-text">
+                    <File size={14} /> {upload.name}
+                  </p>
+                  <p className="mt-1 text-[12px] text-text-3">
+                    {t('ext.upload.chosen', { kb: Math.round(upload.bytes / 1024) })}
+                  </p>
+                  <label className="btn btn-sm mt-3">
+                    {t('ext.upload.change')}
+                    <input type="file" accept=".zip" hidden onChange={pick} />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <p className="text-[13.5px] font-medium text-text">{t('ext.upload.title')}</p>
+                  <p className="mt-1 text-[12px] text-text-3">{t('ext.upload.hint')}</p>
+                  {/* The one primary control while nothing is chosen. */}
+                  <label className="btn btn-primary mt-3">
+                    <Upload size={15} /> {t('ext.upload')}
+                    <input type="file" accept=".zip" hidden onChange={pick} />
+                  </label>
+                </>
+              )}
+            </div>
+          ) : (
+            <Field
+              label={t('ext.source')}
+              hint={t('ext.source.hint')}
+              value={source}
+              onChange={(e) => { setSource(e.target.value); setPlan(null) }}
+              placeholder="github.com/org/monkeyllm-whisper@v1.2.0"
+            />
+          )}
+
+          {plan ? (
+            <Review plan={plan} forest={forest} busy={busy}
+                    enableHere={enableHere} setEnableHere={setEnableHere}
+                    onInstall={install} onBack={() => setPlan(null)} />
+          ) : (
+            // Rule 1: under the choice, primary the moment there is one.
+            <div className="flex flex-wrap items-center gap-3">
+              <button className={`btn ${chosen ? 'btn-primary' : ''}`}
+                      disabled={busy || !chosen} onClick={review}>
+                <Refresh /> {t('ext.review.cta')}
+              </button>
+              <span className="text-[11.5px] text-text-3">
+                {chosen ? t('ext.review.next') : t('ext.review.first')}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+/** What the operator is being asked to accept, in place (L.9 rule 4, L.11
+ *  rule 2). Licence, source, tier and permissions together — one act of
+ *  consent — plus what the extension will make the forest take and offer,
+ *  so the decision is about what it DOES and not only where it came from. */
+function Review({ plan, forest, busy, enableHere, setEnableHere, onInstall, onBack }) {
+  const { t } = useI18n()
+  const ok = plan.kit?.ok === true
+  const roles = (plan.registers_roles || [])
+    .map((r) => `${r.role} (${r.kind})`).join(', ')
+  return (
+    <div className="space-y-3 rounded-xl border border-line p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[13.5px]">
+          <strong>{plan.id || plan.source}</strong>{' '}
+          <span className="text-text-3">{plan.version || ''}</span>
+        </div>
+        <Badge tone={ok ? 'good' : 'warn'}>
+          {ok ? t('ext.review.ok') : t('ext.review.failed')}
+        </Badge>
+      </div>
       <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-[12.5px]">
         <dt className="font-medium text-text-2">{t('ext.licence')}</dt><dd>{plan.license || '—'}</dd>
-        <dt className="font-medium text-text-2">{t('ext.source')}</dt><dd className="font-mono text-[11.5px] text-text-3">{plan.source}</dd>
+        <dt className="font-medium text-text-2">{t('ext.source')}</dt>
+        <dd className="font-mono text-[11.5px] text-text-3">{plan.source}</dd>
         <dt className="font-medium text-text-2">{t('ext.tier')}</dt>
-        <dd><Tier tier={plan.tier || 'unverified'} />
+        <dd>
+          <Tier tier={plan.tier || 'unverified'} />
           {plan.reason ? <div className="text-[11.5px] text-text-3">{plan.reason}</div> : null}
         </dd>
         {plan.revision ? (
@@ -368,6 +434,12 @@ function ReviewModal({ state, onClose, onInstall, onRemove }) {
             <dd className="font-mono text-[11.5px] text-text-3">{plan.tracking}</dd>
           </>
         ) : null}
+        <dt className="font-medium text-text-2">{t('ext.review.formats')}</dt>
+        <dd className="font-mono text-[11.5px]">
+          {(plan.formats || []).length ? plan.formats.join(' ') : t('ext.review.none')}
+        </dd>
+        <dt className="font-medium text-text-2">{t('ext.review.roles')}</dt>
+        <dd>{roles || t('ext.review.none')}</dd>
         <dt className="font-medium text-text-2">{t('ext.permissions')}</dt>
         <dd>
           <div>{t('ext.perm.network', {
@@ -385,6 +457,80 @@ function ReviewModal({ state, onClose, onInstall, onRemove }) {
           {t('ext.kit.failed', { list: (plan.kit.failed || []).join(', ') })}
         </Note>
       ) : null}
+      {ok ? (
+        <Toggle checked={enableHere} onChange={setEnableHere}
+                label={t('ext.enable_here', { forest })}
+                hint={t('ext.enable_here.hint')} />
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+        {/* The one primary control, under what it acts on. */}
+        <button className="btn btn-primary" disabled={busy || !ok} onClick={onInstall}>
+          <Save /> {t('ext.install.cta')}
+        </button>
+        <button className="btn" disabled={busy} onClick={onBack}>
+          {t('ext.review.back')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** L.11 rule 4: what is active now, what needs a restart, what the forest
+ *  now accepts, and what is still missing before the extension can be used. */
+function Outcome({ outcome, forest, goto, onAnother }) {
+  const { t } = useI18n()
+  const roles = (outcome.registers_roles || [])
+    .map((r) => `${r.role} (${r.kind})`).join(', ')
+  return (
+    <div className="space-y-3">
+      <Note tone={outcome.activated ? 'good' : 'warn'}>
+        <strong>{t('ext.done.title', { id: outcome.id, version: outcome.version || '' })}</strong>{' '}
+        {outcome.activated
+          ? t('ext.done.active')
+          : t('ext.done.restart', { note: outcome.activation_note || '' })}
+      </Note>
+      <ul className="space-y-1.5 text-[12.5px]">
+        {outcome.enabled_on?.length ? (
+          <li className="flex items-center gap-1.5"><Check size={14} /> {t('ext.done.enabled', { forest })}</li>
+        ) : null}
+        {outcome.enable_error ? (
+          <li className="flex items-center gap-1.5"><Alert size={14} /> {t('ext.done.enable_error', { error: outcome.enable_error })}</li>
+        ) : null}
+        {(outcome.formats || []).length ? (
+          <li>{t('ext.done.formats', { list: outcome.formats.join(', ') })}</li>
+        ) : null}
+        {roles ? (
+          <li className="flex flex-wrap items-center gap-2">
+            <span>{t('ext.done.roles', { list: roles })}</span>
+            {goto ? (
+              <button className="btn btn-sm" onClick={() => goto('models')}>
+                {t('ext.done.goto_models')}
+              </button>
+            ) : null}
+          </li>
+        ) : null}
+      </ul>
+      <button className="btn" onClick={onAnother}>{t('ext.done.another')}</button>
+    </div>
+  )
+}
+
+/** L.8: what a removal un-declares is named BEFORE the act, and decided
+ *  again by the operator. */
+function RemoveModal({ state, onClose, onRemove }) {
+  const { t } = useI18n()
+  if (!state?.losing) return null
+  return (
+    <Modal open title={t('ext.remove.title')} onClose={onClose}
+           footer={
+             <button className="btn btn-danger"
+                     onClick={() => onRemove(state.id)}>
+               {t('ext.remove.confirm')}
+             </button>
+           }>
+      <Note tone="warn">
+        {t('ext.remove.losing', { list: state.losing.join(', ') })}
+      </Note>
     </Modal>
   )
 }

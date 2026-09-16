@@ -302,6 +302,37 @@ class Runtime:
         self._host_surfaces = host_surfaces
         self._load_kwargs = load_kwargs
         self._enabled: dict[str, set[str]] = {}
+        # L.8 (v0.83): what this process has LOADED, by manifest id — kept
+        # apart from the registry's claim list, because an extension that
+        # only registers a role makes no claim and is loaded all the same.
+        self._loaded: set[str] = set()
+        # …and what it has ATTEMPTED, loaded or not. An id whose load failed
+        # after import may still hold a module object under its tree's
+        # name, which a second load would silently reuse instead of reading
+        # the reinstalled code — the exact silence L.4 forbids. So a live
+        # activation is only ever offered to an id this process never met.
+        self._attempted: set[str] = set()
+
+    def _kwargs(self) -> dict:
+        """The loader arguments a Station adds, built the same way for the
+        boot load and for a live activation — two builders would be two
+        answers to "where does config come from"."""
+        kwargs = dict(self._load_kwargs)
+        if self.host_registry is not None and "config_factory" not in kwargs:
+            # L.7 rule 4: on a Station the config of record is the REGISTRY's
+            # — that is where custody lives — not the engine store's file.
+            # Two sources would disagree the moment somebody used the
+            # console, and the one the extension read would be the stale one.
+            kwargs["config_factory"] = (
+                lambda ext_id: (lambda: self.host_registry.ext_config
+                                .values(ext_id)))
+        if self.host_registry is not None and "models_factory" not in kwargs:
+            # L.6: one access object per extension, so metering, quota and
+            # the audit row can all name which one spent.
+            kwargs["models_factory"] = (
+                lambda ext_id, roles: model_access(self.host_registry,
+                                                   ext_id, roles))
+        return kwargs
 
     def load(self) -> "Runtime":
         from monkeyllm import extensions as engine
@@ -320,26 +351,65 @@ class Runtime:
             return self
         # One broken extension never stops the others — `load_all` collects
         # failures rather than raising, which is G.2's standing rule.
-        kwargs = dict(self._load_kwargs)
-        if self.host_registry is not None and "config_factory" not in kwargs:
-            # L.7 rule 4: on a Station the config of record is the REGISTRY's
-            # — that is where custody lives — not the engine store's file.
-            # Two sources would disagree the moment somebody used the
-            # console, and the one the extension read would be the stale one.
-            kwargs["config_factory"] = (
-                lambda ext_id: (lambda: self.host_registry.ext_config
-                                .values(ext_id)))
-        if self.host_registry is not None and "models_factory" not in kwargs:
-            # L.6: one access object per extension, so metering, quota and
-            # the audit row can all name which one spent.
-            kwargs["models_factory"] = (
-                lambda ext_id, roles: model_access(self.host_registry,
-                                                   ext_id, roles))
+        self._attempted.update(i.id for i in installs)
         self.report = load_all(installs, store, registry=self.registry,
-                               host_surfaces=self._host_surfaces, **kwargs)
+                               host_surfaces=self._host_surfaces,
+                               **self._kwargs())
         self.failed = self.report.failed
         self.unserved = self.report.unserved
+        self._loaded.update(l.manifest.id for l in self.report.loaded)
         return self
+
+    def activate(self, ext_id: str) -> dict:
+        """L.8 (v0.83): load ONE install into the running registry.
+
+        Offered only to an id this process has never met. The restart L.8
+        requires is about unloading, and there is nothing to unload here:
+        the loader, the config factory and the model access are the boot's
+        own, so an extension activated live is the extension a restart
+        would have loaded. Never raises — an activation that fails must not
+        fail the install that preceded it; the record stands and the caller
+        says `restart_required`.
+        """
+        from monkeyllm.extensions.loader import load
+        from monkeyllm.extensions.store import Store
+
+        if self.registry is None:
+            return {"activated": False,
+                    "reason": (self.failed[0].get("message")
+                               if self.failed else "extensions unavailable")}
+        if ext_id in self._attempted:
+            return {"activated": False,
+                    "reason": "already loaded in this process; a restart "
+                              "picks up the new code"}
+        store = Store()
+        record = store.get(ext_id)
+        if record is None:
+            return {"activated": False, "reason": "not installed"}
+        self._attempted.add(ext_id)
+        kwargs = self._kwargs()
+        provider = kwargs.pop("config_factory", None)
+        try:
+            got = load(store.tree(ext_id), registry=self.registry,
+                       config=store.read_config(ext_id),
+                       config_provider=(None if provider is None
+                                        else provider(ext_id)),
+                       venv=store.venv(ext_id),
+                       host_surfaces=self._host_surfaces, **kwargs)
+        except Exception as exc:  # VineError or a third party's own
+            self.registry.drop(ext_id)
+            message = getattr(exc, "message", None) or str(exc)
+            self.failed.append({"id": ext_id, "code": getattr(exc, "code",
+                                                              "E_EXT_LOAD"),
+                                "message": message})
+            return {"activated": False, "reason": message}
+        if self.report is not None:
+            self.report.loaded.append(got)
+            for surface in got.unserved:
+                self.unserved.append({"id": ext_id, "surface": surface,
+                                      "note": "declared (no host surface)"})
+        self._loaded.add(ext_id)
+        return {"activated": True}
 
     # -- enablement --------------------------------------------------------
 
@@ -380,7 +450,53 @@ class Runtime:
                 if ext_id in self.enabled_for(f, root)]
 
     def loaded_ids(self) -> list[str]:
-        return self.registry.extensions() if self.registry else []
+        """By manifest id, loaded or activated — never the claim list,
+        which omits an extension that only registers a role."""
+        return sorted(self._loaded)
+
+
+# ---------------------------------------------------------------------------
+# L.6 rule 1 (v0.83) — every bindable role, with its kind and its origin
+# ---------------------------------------------------------------------------
+
+# The product's own roles and the API shape each speaks (J.10, L.6). Listed
+# here beside the registry's ROLES rather than inferred from it, because the
+# kind is what a console shapes the binding form by, and the registry has
+# never needed to know it.
+BUILTIN_ROLE_KINDS = (("ingest", "chat"), ("answer", "chat"),
+                      ("vision", "vision"), ("embed", "embed"))
+
+
+def roles_catalogue(runtime, store=None) -> list[dict]:
+    """What `GET /v1/admin/models` carries as `roles`: the built-ins first,
+    then every role a loaded extension registers, each with `kind`, its
+    origin (`builtin`, or `ext`) and the description its manifest gave it.
+
+    One list, read by the bind route and rendered by the console, so the
+    two can never disagree about what may be bound — which is how v0.82
+    listed a role on one console and refused it on the other.
+    """
+    out = [{"role": role, "kind": kind, "builtin": True, "description": ""}
+           for role, kind in BUILTIN_ROLE_KINDS]
+    registry = getattr(runtime, "registry", None)
+    registered = registry.roles() if registry is not None else {}
+    if not registered:
+        return out
+    described: dict[tuple[str, str], str] = {}
+    if store is not None:
+        from monkeyllm.extensions.loader import read_manifest
+        for ext_id in sorted({v["ext"] for v in registered.values()}):
+            try:
+                manifest = read_manifest(store.tree(ext_id))
+            except Exception:
+                continue
+            for spec in manifest.models.registers:
+                described[(ext_id, spec.role)] = spec.description
+    for role, info in sorted(registered.items()):
+        out.append({"role": role, "kind": info["kind"], "builtin": False,
+                    "ext": info["ext"],
+                    "description": described.get((info["ext"], role), "")})
+    return out
 
 
 # ---------------------------------------------------------------------------

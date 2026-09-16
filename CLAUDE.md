@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.82.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.83.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -77,6 +77,40 @@ Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
 
+- **The extension that could not be used (spec G.2 + J.8.5 + L.1 + L.6 r1
+  + L.8 + L.11 + L.14, v0.83)**: an operator uploaded two extensions
+  through the console, enabled both, and could use neither. The ingest
+  console kept its own list of formats (`ACCEPT`/`BINARY` constants in
+  `Ingest.jsx`) so every `.pdf` stayed greyed out while the converter was
+  installed, enabled and loaded; the Models console kept its own list of
+  roles (`ROLES` in `Models.jsx`) and the bind route called `bind_model`
+  without `extra_roles` (`ROLES` in `registry.py` is the four built-ins), so
+  `transcribe` was listed on one console and refused on the other — the
+  shipped station test bound through the registry directly and hid it.
+  Nothing had failed; the surfaces had never been told what the mechanism
+  changed. Now ONE source per list: `gardener.supported_formats(config,
+  extra, registry)` answers what the chain claims in discovery order
+  (`hook` > `ext:<id>` > `describer` > `plugin:<name>` > `builtin`) and
+  rides `GET .../ingest` as `formats` (J.8.5); `roles_catalogue()` in the
+  Station's `extensions.py` answers every bindable role with `kind`, origin
+  and `description` (a new optional `RoleSpec` field) and rides `GET
+  /v1/admin/models` as `roles`, which the POST reads as `extra_roles`.
+  Both consoles render from those answers; `check-usable.mjs` (F.218)
+  asserts the constants are gone and runs against the v0.82.0 tag as the
+  negative control. L.8: the restart is about UNLOADING, so an id this
+  process never met is activated live at install (`Runtime.activate`,
+  offered only to ids not in `_attempted` — a failed load after import
+  keeps a module under the tree's name and a second load would silently
+  reuse it); the response says `activated`/`restart_required`, the listing
+  says `loaded`, and an update keeps the restart. L.11: the install is one
+  in-place act (choose → review → install, one primary control at a time,
+  `enable_on: <forest>` in the same request, the outcome naming what is
+  active, what is accepted and what is still to bind). Found on the way:
+  `load_all` popped `config_factory` INSIDE its loop, so only the first
+  extension on a volume read its settings live — the console's Save never
+  reached `whisper` when `pdf` sorted first. Left out, named: the console's
+  25 MB ceiling on an upload (a video by base64 JSON is a J.8 transport
+  question, not a constant). F.213-F.218 in `tests/test_v083_usable*.py`.
 - **The ask that nobody could see (spec J.2.7 + J.10.5 + J.10.13 + J.10.8
   + J.1.2 r8 + J.10.9, v0.82)**: a consumer's MCP client filtered `answer`
   out of its tool list and reported the product had no way to ask; the

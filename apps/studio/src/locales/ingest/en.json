@@ -1,4 +1,5 @@
 {
+  "ingest.accepts": "This forest accepts: {list}",
   "ingest.branches": "New branches",
   "ingest.chosen": "{n} file(s) ready",
   "ingest.compose_body": "Content",
@@ -21,7 +22,8 @@
   "ingest.dest_hint": "An existing branch. Everything lands under it.",
   "ingest.dest_root": "Top level of the forest",
   "ingest.drop": "Drop files or a folder here",
-  "ingest.drop_hint": "Markdown, text, CSV, JSON, Word and Excel. Tabular files become queryable datasets.",
+  "ingest.drop_hint": "{list}. Tabular files become queryable datasets.",
+  "ingest.drop_hint_unknown": "Asking which formats this forest accepts…",
   "ingest.empty": "Nothing ingested yet.",
   "ingest.errors": "Errors",
   "ingest.job_cancel": "Stop after this document",

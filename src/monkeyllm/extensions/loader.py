@@ -265,8 +265,12 @@ def load_all(installs, store, *, host_surfaces: set[str] | None = None,
     """Load many, and let no single failure stop the rest."""
     registry = kwargs.pop("registry", None) or Registry()
     report = LoadReport(registry=registry)
+    # Popped ONCE, before the loop. Popped inside it, the first extension
+    # took the factory with it and every later one read a static snapshot
+    # of its settings — the console's Save then reached the first install
+    # on the volume and nobody else, with nothing raised (L.7 rule 4).
+    provider = kwargs.pop("config_factory", None)
     for install in installs:
-        provider = kwargs.pop("config_factory", None)
         try:
             got = load(store.tree(install.id), registry=registry,
                        config=store.read_config(install.id),

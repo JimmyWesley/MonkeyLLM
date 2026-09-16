@@ -50,6 +50,9 @@ class Permissions(_Strict):
 class RoleSpec(_Strict):
     role: str
     kind: str  # one of ROLE_KINDS; validated below so the message names them
+    # L.1 (v0.83): what a console says about the role on its binding card.
+    # Optional, because a manifest written for v0.80 is still a manifest.
+    description: str = ""
 
     @field_validator("kind")
     @classmethod

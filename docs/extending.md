@@ -12,7 +12,7 @@ transcriber, a converter for a format nobody here has heard of, an OCR
 pass, a tool your agents can call. That is an **extension** (spec Part L),
 and it is what most of this page is about.
 
-`docs/monkeyllm-spec-v0.81.md` is the normative contract; nothing here
+`docs/monkeyllm-spec-v0.83.md` is the normative contract; nothing here
 overrides it.
 
 ---
@@ -114,15 +114,25 @@ artifact before it is validated:
 | git | `vine ext install github.com/you/ext@v1.0.0` |
 | a release archive | `vine ext install https://…/ext-1.0.0.zip` |
 | a path on the host | `vine ext install ./ext` |
-| **an upload** | the Extensions console — the only door that works from your own machine against a remote Station |
+| **an upload** | the Extensions console — the only door that works from your own machine against a remote Station. Choose the zip, review in place, install; the same act can enable it on the forest you are looking at |
 
 Trust is stated, never implied: `verified` (from the index), `signed` (a
 signed git tag checked against the keys your forge publishes for you), or
 `unverified` — which an upload always is, because there is nothing behind
 it that could have been checked.
 
-Installing or removing takes effect after the host restarts. Settings take
-effect immediately.
+A first install is **active at once**: the host loads an id it has never
+loaded and says so (`activated: true`). Reinstalling, updating or removing
+an extension that is loaded takes effect after the host restarts, because
+Python cannot unload a module; the console names what is waiting. Settings
+take effect immediately.
+
+What your extension changes shows up where it is used: a converter's file
+extensions appear in the ingest console's picker of every forest that
+enables it (the host answers `formats`), and a role you register appears
+as a card in Models with the `description` you gave it in the manifest —
+`{"role": "transcribe", "kind": "transcribe", "description": "…"}` —
+shaped by its `kind`, so a transcription binding asks for no reply length.
 
 ## Pin to the minor you tested against
 
@@ -131,10 +141,10 @@ release that cuts no spec — and **while the major is `0`, a patch may
 change behaviour**. So pin:
 
 ```json
-"station_compat": ">=0.81,<0.82"
+"station_compat": ">=0.83,<0.84"
 ```
 
-A wider range like `>=0.81,<1.0` is legal and means what it says: *I accept
+A wider range like `>=0.83,<1.0` is legal and means what it says: *I accept
 whatever the next minor does to me*. That is a reasonable bet for a small
 surface and an unreasonable one for anything reading a seam closely. Your
 own Station prints the range to copy — Extensions → *Write an extension*.
