@@ -65,6 +65,10 @@ class InstallPlan:
             })
             if m.contributes.panel:
                 out["contributes"]["panel"] = 1
+            # L.11 rule 2 (v0.83): the review says what the forest will
+            # start accepting, so the decision is about what it DOES.
+            out["formats"] = sorted({ext for c in m.contributes.converters
+                                     for ext in c.extensions})
         return out
 
 

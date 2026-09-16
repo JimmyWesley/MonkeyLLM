@@ -129,7 +129,11 @@ class TestAuthority:
         assert response.status_code == 201
         body = response.json()
         assert body["id"] == "whisper"
-        assert body["restart_required"] is True
+        # L.8 (v0.83): an id this process never loaded is activated at
+        # once, and the response says so rather than demanding a restart
+        # it does not need.
+        assert body["activated"] is True
+        assert body["restart_required"] is False
 
     def test_a_forest_admin_sees_the_list_without_the_provenance(
             self, station, ext_tree):
@@ -211,7 +215,8 @@ class TestEnablement:
                                headers=auth)
         assert response.status_code == 200
         assert response.json()["enabled_now"] == ["whisper"]
-        assert response.json()["restart_required"] is True
+        # v0.83: the install above activated it, so enabling serves at once.
+        assert response.json()["restart_required"] is False
 
         from monkeyllm.extensions import forestcfg
         root = Path(app.state.pool.root)

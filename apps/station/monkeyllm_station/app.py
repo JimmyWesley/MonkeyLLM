@@ -3132,7 +3132,7 @@ def build_app(
         whose scope is invisible — which is how v0.25 shipped, and how a
         forest ingested the Station's own source tree.
         """
-        from monkeyllm.gardener import Gardener
+        from monkeyllm.gardener import Gardener, supported_formats
 
         policy = registry.policy_for(principal, forest)
         if policy is None:
@@ -3149,9 +3149,19 @@ def build_app(
         # Built fresh rather than read off a cached Forest attribute: an
         # adopt that just recorded a root must be visible to the next call,
         # and this is the same loader the Gardener itself uses.
-        recorded = str(Gardener(vine, hooks=[]).config.get("source_root") or "").strip()
+        gardener = Gardener(vine, hooks=[])
+        recorded = str(gardener.config.get("source_root") or "").strip()
+        # J.8.5 (v0.83): what this forest converts, through the SAME
+        # discovery the next ingest runs — its command hooks, the extensions
+        # it enables, the describer the host injects, plugins, built-ins.
+        # The console derives its picker from this; it keeps no list.
+        describer = vision.image_converter(registry.binding(forest, "vision"))
+        formats = supported_formats(
+            gardener.config, extra=([describer] if describer else None),
+            registry=_ext_registry_for(forest))
         return {
             "source": recorded or None,
+            "formats": formats,
             # Both halves matter and they fail for different reasons: no
             # source at all, or a source this Station may no longer read
             # because the roots were narrowed under it.
@@ -4392,7 +4402,11 @@ def build_app(
             forest = request.query_params.get("forest")
             if not is_admin(principal, forest, mask=mask_of(request)):
                 return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
-            return JSONResponse({"bindings": registry.bindings(forest)})
+            # L.6 rule 1 (v0.83): the bindable roles ride beside the
+            # bindings, so a console renders its cards from the host and
+            # never from a list of its own.
+            return JSONResponse({"bindings": registry.bindings(forest),
+                                 "roles": _bindable_roles()})
         body = _json_object(await request.json())
         forest = body.get("forest")
         if not is_admin(principal, forest, mask=mask_of(request)):
@@ -4401,10 +4415,15 @@ def build_app(
             if body.get("remove"):
                 registry.unbind_model(forest, body.get("role"))
             else:
+                # L.6 rule 1: a role a loaded extension registers is
+                # bindable here — the v0.82 route refused it while the
+                # Extensions console listed it.
                 registry.bind_model(forest, body.get("role"), body.get("provider"),
                                     body.get("model"),
                                     max_tokens=body.get("max_tokens", 600),
-                                    reasoning=body.get("reasoning", "off"))
+                                    reasoning=body.get("reasoning", "off"),
+                                    extra_roles={r["role"] for r in
+                                                 _bindable_roles()})
         except (ValueError, KeyError, TypeError) as e:
             return _envelope(VineError(E_SCHEMA, str(e)))
         # Which model reads a forest's material is a property of that forest,
@@ -5830,6 +5849,45 @@ def build_app(
         from monkeyllm.extensions.store import Store
         return Store()
 
+    def _bindable_roles() -> list[dict]:
+        """L.6 rule 1 (v0.83): one list for the bind route and the console."""
+        from monkeyllm_station.extensions import roles_catalogue
+        try:
+            store = _ext_store()
+        except Exception:
+            store = None
+        return roles_catalogue(ext_runtime, store)
+
+    def _enable_extension(principal: str, forest: str, ext_id: str,
+                          enabled: bool) -> dict:
+        """L.7 rule 2 — ONE write path for enablement, whether the operator
+        toggled it or asked for it in the same act as the install (L.11
+        rule 3). The forest's own `_meta/` first, the registry index second;
+        raises VineError with the reason when it cannot."""
+        from monkeyllm.extensions import forestcfg
+        root = _lock_root(forest)
+        if root is None:
+            raise VineError(E_NOT_FOUND, f"no such forest: {forest}")
+        _ext_store().require(ext_id)
+        if enabled:
+            forestcfg.enable(root, ext_id)
+        else:
+            forestcfg.disable(root, ext_id)
+        registry.ext_enablement.set(ext_id, forest, enabled, principal)
+        # The runtime caches which extensions a forest enables; the write
+        # just changed that answer.
+        ext_runtime.invalidate(forest)
+        registry.record(principal=principal, forest=forest,
+                        primitive="extension.enable" if enabled
+                        else "extension.disable",
+                        args={"ext": ext_id}, result="ok")
+        return {"forest": forest, "ext": ext_id, "enabled": enabled,
+                # L.8 (v0.83): stated, and TRUE — an extension this process
+                # loaded serves the forest as soon as the write lands; one
+                # it did not load cannot serve it until a restart.
+                "restart_required": ext_id not in ext_runtime.loaded_ids(),
+                "enabled_now": forestcfg.enabled(root)}
+
     def _ext_deployment_gate(principal: str, request: Request):
         """L.7 rule 1 — installing puts third-party code in this process.
 
@@ -5871,8 +5929,15 @@ def build_app(
                 out["contributes"].append("panel")
             out["registers_roles"] = [r.model_dump()
                                       for r in manifest.models.registers]
+            # J.8.5: the file extensions its converters claim — what the
+            # ingest console will start accepting where it is enabled.
+            out["formats"] = sorted({ext for c in manifest.contributes.converters
+                                     for ext in c.extensions})
         except VineError as exc:
             out["broken"] = exc.message
+        # L.8 (v0.83): "installed" and "installed and serving" are two
+        # states, and an operator must be able to tell them apart.
+        out["loaded"] = record.id in ext_runtime.loaded_ids()
         if detailed:
             out.update({"source": record.source, "kind": record.kind,
                         "revision": record.revision,
@@ -6090,6 +6155,52 @@ def build_app(
                                 args={"id": result["id"],
                                       "tier": result["tier"]},
                                 result="ok")
+                # L.8 (v0.83): an id this process never loaded has nothing
+                # to unload, so it is activated now; an update keeps the
+                # restart, because that is the case Python cannot honour.
+                # The response SAYS which happened.
+                activation = (ext_runtime.activate(result["id"])
+                              if action == "install"
+                              else {"activated": False,
+                                    "reason": "an update replaces code "
+                                              "that is loaded"})
+                result["activated"] = bool(activation.get("activated"))
+                result["restart_required"] = not result["activated"]
+                if activation.get("reason"):
+                    result["activation_note"] = activation["reason"]
+                # L.11 rule 4: what it now takes and what it now offers,
+                # so the console can say what to do next.
+                try:
+                    from monkeyllm.extensions.loader import read_manifest
+                    manifest = read_manifest(store.tree(result["id"]))
+                    result["formats"] = sorted({
+                        ext for c in manifest.contributes.converters
+                        for ext in c.extensions})
+                    result["registers_roles"] = [
+                        r.model_dump() for r in manifest.models.registers]
+                except Exception:
+                    pass
+                # L.11 rule 3: enabling MAY ride the install — on the forest
+                # the console is open on, for a principal who administers
+                # it. A refusal here refuses the enablement, never the
+                # install that already landed.
+                enable_on = str(body.get("enable_on") or "")
+                if enable_on:
+                    if not is_admin(principal, enable_on,
+                                    mask=mask_of(request)):
+                        result["enable_error"] = (
+                            f"requires the 'admin' capability on "
+                            f"{enable_on!r}")
+                    else:
+                        try:
+                            outcome = _enable_extension(
+                                principal, enable_on, result["id"], True)
+                            result["enabled_on"] = [enable_on]
+                            result["restart_required"] = (
+                                result["restart_required"]
+                                or outcome["restart_required"])
+                        except VineError as exc:
+                            result["enable_error"] = exc.message
                 return JSONResponse(result, status_code=201)
             if action == "remove":
                 from monkeyllm.extensions.installer import (dialect_impact,
@@ -6238,32 +6349,12 @@ def build_app(
             return _envelope(VineError(
                 E_READONLY, "this Station is read-only"), 403)
         ext_id = str(body.get("ext") or "")
-        store = _ext_store()
-        try:
-            store.require(ext_id)
-        except VineError as exc:
-            return _envelope(exc)
         enabled = body.get("enabled", True) is not False
         try:
-            if enabled:
-                forestcfg.enable(root, ext_id)
-            else:
-                forestcfg.disable(root, ext_id)
+            return JSONResponse(_enable_extension(principal, forest, ext_id,
+                                                  enabled))
         except VineError as exc:
             return _envelope(exc)
-        registry.ext_enablement.set(ext_id, forest, enabled, principal)
-        # The runtime caches which extensions a forest enables; the write
-        # just changed that answer.
-        ext_runtime.invalidate(forest)
-        registry.record(principal=principal, forest=forest,
-                        primitive="extension.enable" if enabled
-                        else "extension.disable",
-                        args={"ext": ext_id}, result="ok")
-        return JSONResponse({"forest": forest, "ext": ext_id,
-                             "enabled": enabled,
-                             # L.8: stated, never implied.
-                             "restart_required": True,
-                             "enabled_now": forestcfg.enabled(root)})
 
     async def admin_extension_config(request: Request) -> JSONResponse:
         """L.7 rule 4 — the host's custody, and a secret that never returns.

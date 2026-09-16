@@ -62,13 +62,20 @@ function SaveButton({ busy, done, dirty, disabled, label }) {
  *  output is the scent every later hop navigates by; answering wants speed.
  *  One global endpoint cannot express that, and it cannot express "this
  *  corpus stays local while that one uses a hosted model" either. */
-const ROLES = [
+/* L.6 rule 1 (v0.83): the LIST of roles is the host's — `GET /v1/admin/models`
+ * carries every bindable role with its `kind` and its origin, and this
+ * console renders from that answer. What stays here is presentation for the
+ * product's own roles: an icon and a reply-length default. A role an
+ * extension registers gets a generic glyph and its manifest's description.
+ * The v0.82 console kept the list itself, so a role the Extensions console
+ * listed had no card here and the route refused it besides. */
+const PRESENTATION = {
   // 300 was sized for the summary (60 tokens) and not for the reply that
   // carries it: JSON envelope, tags, and — on a hybrid thinker — a whole
   // reasoning pass before the first character of content. Too small a
   // budget truncates the reply mid-JSON, which reads downstream as "the
   // model said nothing useful" rather than "it was cut off".
-  { key: 'ingest', icon: Ingest, defaultTokens: 600 },
+  ingest: { icon: Ingest, defaultTokens: 600 },
   // `answer` is the one role whose reply carries the citation apparatus and
   // not just prose: on a walk the final action is a JSON object holding the
   // answer text AND `answer_nodes`, and a client that also asks for a
@@ -78,14 +85,19 @@ const ROLES = [
   // At 1500 both pass and the wall time falls with them (139s -> 15s),
   // because the rejected retries stop happening. The hint below already
   // warned about this; the default did not obey it.
-  { key: 'answer', icon: Ask, defaultTokens: 1500 },
+  answer: { icon: Ask, defaultTokens: 1500 },
   // The G.5.1 describer. It runs where ingest runs — once per image, at
   // adopt/sync — and what it writes is the only text `sniff` will ever see
   // of a slide or a screenshot, so fidelity is the thing to pay for. Unbound,
   // images still plant as media with the stub body; nothing here is required
   // for ingest to keep working (J.10).
-  { key: 'vision', icon: Eye, defaultTokens: 600 },
-]
+  vision: { icon: Eye, defaultTokens: 600 },
+}
+const GENERIC = { icon: Chip, defaultTokens: 600 }
+// The shapes a binding form takes, by the role's `kind` (L.6): a chat turn
+// has a reply length and a reasoning switch; a transcription is a multipart
+// upload and has neither.
+const CHAT_SHAPED = new Set(['chat', 'vision'])
 
 const PRESETS = [
   { name: 'openrouter', endpoint: 'https://openrouter.ai/api/v1' },
@@ -117,12 +129,16 @@ export default function Models({ forest, grant }) {
   const admin = has(grant, 'admin')
   const providers = useAsync(() => api.providers().then((p) => p.providers),
                              [forest], { skip: !admin })
-  const bindings = useAsync(() => api.bindings(forest).then((b) => b.bindings),
-                            [forest], { skip: !admin })
+  // The whole answer, not only `.bindings`: `.roles` is what the cards are
+  // rendered from (L.6 rule 1).
+  const bindings = useAsync(() => api.bindings(forest), [forest], { skip: !admin })
 
   if (!admin) {
     return <NeedsCapability message={t('models.needs_admin')} hint={t('cap.admin')} />
   }
+
+  const bound = bindings.data?.bindings || []
+  const roles = (bindings.data?.roles || []).filter((r) => r.role !== 'embed')
 
   const refresh = () => { providers.reload(); bindings.reload() }
 
@@ -259,18 +275,23 @@ export default function Models({ forest, grant }) {
         </div>
       </Card>
 
+      {bindings.busy && !bindings.data ? <Skeleton rows={4} /> : null}
       <div className="grid gap-4 lg:grid-cols-2">
-        {ROLES.map((role) => (
-          <RoleBinding key={role.key} role={role} forest={forest}
+        {roles.map((r) => (
+          <RoleBinding key={r.role}
+                       role={{ key: r.role, kind: r.kind, builtin: r.builtin !== false,
+                               ext: r.ext, description: r.description,
+                               ...(PRESENTATION[r.role] || GENERIC) }}
+                       forest={forest}
                        providers={providers.data || []}
-                       binding={(bindings.data || []).find((b) => b.role === role.key)}
+                       binding={bound.find((b) => b.role === r.role)}
                        catalogue={catalogue} loadCatalogue={load}
                        onSaved={refresh} onError={setError} />
         ))}
       </div>
 
       <Gauntlet forest={forest} providers={providers.data || []}
-                binding={(bindings.data || []).find((b) => b.role === 'embed')}
+                binding={bound.find((b) => b.role === 'embed')}
                 catalogue={catalogue} loadCatalogue={load}
                 onSaved={refresh} onError={setError} />
 
@@ -517,18 +538,31 @@ function RoleBinding({ role, forest, providers, binding, catalogue, loadCatalogu
     catch (err) { onError(err); throw err }
   })
 
+  // The form's shape follows the role's `kind` (L.6 rule 1): a transcription
+  // binding is a multipart upload with no reply and no reasoning, and a
+  // field that means nothing is a field somebody will tune.
+  const chatShaped = CHAT_SHAPED.has(role.kind || 'chat')
+
   // Compared against what is bound, field by field, so "Update" lights up
   // for a reply-length tweak and not for re-selecting the same model.
   const dirty = form.provider !== (binding?.provider || '')
     || form.model !== (binding?.model || '')
-    || form.reasoning !== (binding?.reasoning || 'off')
-    || Number(form.max_tokens) !== Number(binding?.max_tokens ?? role.defaultTokens)
+    || (chatShaped && form.reasoning !== (binding?.reasoning || 'off'))
+    || (chatShaped
+        && Number(form.max_tokens) !== Number(binding?.max_tokens ?? role.defaultTokens))
+
+  const title = role.builtin ? t(`models.role_${role.key}`) : role.key
+  const subtitle = role.builtin ? t(`models.role_${role.key}_sub`)
+    : (role.description || t('models.role_ext_sub', { ext: role.ext }))
 
   return (
-    <Card title={t(`models.role_${role.key}`)} subtitle={t(`models.role_${role.key}_sub`)}
+    <Card title={title} subtitle={subtitle}
           icon={role.icon}
-          actions={binding ? <Badge tone="accent">{t('models.bound')}</Badge>
-                           : <Badge>{t('models.unbound')}</Badge>}>
+          actions={<>
+            {!role.builtin && <Badge>{t('models.role_from', { ext: role.ext })}</Badge>}
+            {binding ? <Badge tone="accent">{t('models.bound')}</Badge>
+                     : <Badge>{t('models.unbound')}</Badge>}
+          </>}>
       <form onSubmit={save} className="space-y-3">
         <Select label={t('models.providers')} value={form.provider} required
                 onChange={(e) => setForm({ ...form, provider: e.target.value })}>
@@ -546,19 +580,24 @@ function RoleBinding({ role, forest, providers, binding, catalogue, loadCatalogu
           onChange={(model) => setForm({ ...form, model })}
         />
         {stray && <Note tone="warn">{t('models.model_stray', { provider: form.provider })}</Note>}
+        {!role.builtin && (
+          <p className="text-[11.5px] text-text-3">{t(`models.kind_${role.kind || 'chat'}`)}</p>
+        )}
         {/* Two columns only once there is room for them: at 375px the
             reply-length label wrapped to two lines while its neighbour did
             not, and the reasoning select clipped its own option mid-word. */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t('models.max_tokens')} type="number" min="64"
-                 hint={t('models.max_tokens_hint')} value={form.max_tokens}
-                 onChange={(e) => setForm({ ...form, max_tokens: Number(e.target.value) })} />
-          <Select label={t('models.reasoning')} value={form.reasoning}
-                  onChange={(e) => setForm({ ...form, reasoning: e.target.value })}>
-            <option value="off">{t('models.reasoning_off')}</option>
-            <option value="on">{t('models.reasoning_on')}</option>
-          </Select>
-        </div>
+        {chatShaped && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label={t('models.max_tokens')} type="number" min="64"
+                   hint={t('models.max_tokens_hint')} value={form.max_tokens}
+                   onChange={(e) => setForm({ ...form, max_tokens: Number(e.target.value) })} />
+            <Select label={t('models.reasoning')} value={form.reasoning}
+                    onChange={(e) => setForm({ ...form, reasoning: e.target.value })}>
+              <option value="off">{t('models.reasoning_off')}</option>
+              <option value="on">{t('models.reasoning_on')}</option>
+            </Select>
+          </div>
+        )}
         {/* Actions right, where a form's actions live: the eye leaves the
             last field on the right and lands on them. */}
         <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-3">

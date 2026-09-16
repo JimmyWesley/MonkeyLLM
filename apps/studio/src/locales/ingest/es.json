@@ -1,4 +1,5 @@
 {
+  "ingest.accepts": "Este bosque acepta: {list}",
   "ingest.branches": "Ramas nuevas",
   "ingest.chosen": "{n} archivo(s) listos",
   "ingest.compose_body": "Contenido",
@@ -21,7 +22,8 @@
   "ingest.dest_hint": "Una rama existente. Todo entra debajo de ella.",
   "ingest.dest_root": "Raíz del bosque",
   "ingest.drop": "Suelta archivos o una carpeta aquí",
-  "ingest.drop_hint": "Markdown, texto, CSV, JSON, Word y Excel. Los archivos tabulares se vuelven datasets consultables.",
+  "ingest.drop_hint": "{list}. Los archivos tabulares se vuelven datasets consultables.",
+  "ingest.drop_hint_unknown": "Consultando qué formatos acepta este bosque…",
   "ingest.empty": "Nada ingerido todavía.",
   "ingest.errors": "Errores",
   "ingest.job_cancel": "Detener después de este documento",

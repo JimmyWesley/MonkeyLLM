@@ -67,11 +67,19 @@ def test_importing_is_the_ingest_surface_and_nothing_else():
 
 
 def test_both_consoles_accept_the_same_dataset_formats():
+    """The Data console names the dataset formats it imports; the ingest
+    console names nothing (J.8.5, v0.83) and reads the host's `formats`,
+    which come from the engine's own chain. So the two agree where the
+    host's answer contains every format the Data console offers."""
+    from monkeyllm.gardener import supported_formats
+
     accept = re.search(r"IMPORT_ACCEPT = '([^']+)'", DATA).group(1).split(",")
     assert sorted(accept) == sorted(DATASET_EXTENSIONS)
-    ingest_accept = "".join(re.findall(r"const ACCEPT = ('[^;]+)", INGEST, re.S))
+    assert "const ACCEPT =" not in INGEST, "the ingest console keeps no list"
+    assert "status.formats" in INGEST
+    claimed = {f["extension"] for f in supported_formats({})}
     for ext in DATASET_EXTENSIONS:
-        assert f"{ext}," in ingest_accept or f"{ext}'" in ingest_accept, ext
+        assert ext in claimed, ext
 
 
 def test_leaving_a_dataset_clears_the_selection_and_keeps_a_draft():

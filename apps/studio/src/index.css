@@ -188,9 +188,11 @@
     @apply inline-flex rounded-lg border border-line bg-surface-2 p-0.5;
   }
   .segment > button {
-    @apply flex flex-1 items-center justify-center gap-1.5 rounded-[6px] px-2.5
-           py-1 text-[12.5px] font-medium text-text-3 transition
-           hover:text-text-2;
+    /* nowrap: two options of unequal length share the width equally, and
+       the longer one broke into two lines inside a one-line control. */
+    @apply flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap
+           rounded-[6px] px-2.5 py-1 text-[12.5px] font-medium text-text-3
+           transition hover:text-text-2;
   }
   .segment > button[aria-pressed='true'] {
     @apply bg-surface text-text shadow-sm;
