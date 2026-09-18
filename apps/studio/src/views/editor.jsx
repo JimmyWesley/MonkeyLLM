@@ -19,10 +19,13 @@
  * section grain; and an index's body is the indexer's render, so it too
  * stays at the section grain.
  *
- * **What the rich editor cannot hold, it must not eat.** A body carrying
- * markdown beyond the rich schema (tables, raw HTML) round-trips lossily —
- * so those bodies open in the Markdown surface, where the bytes on screen
- * are the bytes stored, and the rich mode is locked rather than lossy.
+ * **What the rich editor cannot hold, it must not eat.** A body that the
+ * round trip does not give back unchanged opens in the Markdown surface,
+ * where the bytes on screen are the bytes stored, and the rich mode is
+ * locked rather than lossy. The criterion is mechanical and lives in
+ * `../roundtrip.js`: the trip is RUN and the result compared, so the rule
+ * covers the shapes nobody thought to name — a hard-wrapped extraction, an
+ * identifier with an underscore in it — and not only the two that were.
  *
  * **The patch is shown before it is sent.** The operator is authoring a
  * commit, and a commit is not a keystroke: the operations appear beside
@@ -32,10 +35,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { marked } from 'marked'
-import TurndownService from 'turndown'
-
 import { api } from '../api.js'
+import {
+  HEADING_LEVELS, richLossy, toHtml, toMarkdown,
+} from '../roundtrip.js'
 import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, CodeArea, ErrorNote, Field, Note, Skeleton,
@@ -44,27 +47,6 @@ import { Highlighted } from '../design/highlight.jsx'
 import { Check, ChevronLeft, Code2, Mic, Pencil, Save, Undo } from '../design/icons.jsx'
 import { has, useAsync } from './shared.jsx'
 import { parseTags } from '../tags.js'
-
-/* Markdown is what the forest stores; the rich editor speaks HTML. The
- * pair is kept in one place so a round trip cannot drift between two
- * settings. */
-const turndown = new TurndownService({
-  headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced',
-})
-// A wikilink is forest content, not markup: turndown must not "escape" the
-// brackets it does not understand.
-turndown.addRule('keepWikilinks', {
-  filter: (node) => node.nodeName === 'P' && /\[\[[^\]]+\]\]/.test(node.textContent),
-  replacement: (content) => content.replace(/\\\[\\\[/g, '[[').replace(/\\\]\\\]/g, ']]'),
-})
-
-const toHtml = (md) => marked.parse(String(md || ''), { gfm: true, breaks: false })
-const toMarkdown = (html) => turndown.turndown(String(html || '')).trim()
-
-/** Markdown the rich schema cannot represent: pipe tables and raw HTML
- *  blocks. Round-tripping them through the rich editor would silently drop
- *  them, so such bodies edit as source (J.5.4 v0.43). */
-const richLossy = (md) => /^\s*\|.*\|/m.test(md || '') || /^\s*<\w+/m.test(md || '')
 
 /** The engine's own budget for a summary (models.validate_summary): 60
  *  tokens, counted the way the parser counts them — whitespace-separated. */
@@ -255,7 +237,11 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [2, 3] } }),
+      // Every level the forest's bodies actually carry (see roundtrip.js):
+      // a level outside this list has no node in the schema, so ProseMirror
+      // drops the heading and keeps the text — which is how an untouched
+      // body came back with its own title demoted to a paragraph.
+      StarterKit.configure({ heading: { levels: HEADING_LEVELS } }),
       Placeholder.configure({ placeholder: t('editor.placeholder') }),
     ],
     content: '',
@@ -319,8 +305,15 @@ export default function NodeEditor({ forest, grant, id, onClose, onSaved }) {
   } else if (whole && mode === 'source') {
     if (src !== orig) patch.replace_body = src
   } else if (!whole && original && editor) {
+    // The section grain compares against the round-tripped original for the
+    // same reason the whole note does, and it did not: a section carrying
+    // `snake_case` came back as `snake\_case` from an untouched surface, so
+    // merely OPENING a truncated document staged a `replace_section` per
+    // section the operator looked at. There is no Markdown surface at this
+    // grain to fall back to, so the guard is the comparison alone.
     const edited = toMarkdown(editor.getHTML())
-    if (edited && edited !== original.body) {
+    const baseline = toMarkdown(toHtml(original.body))
+    if (edited && edited !== baseline) {
       patch.replace_section = { header: original.header, body: edited }
     }
   }

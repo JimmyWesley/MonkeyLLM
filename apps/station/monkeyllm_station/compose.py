@@ -284,8 +284,27 @@ class PassportGate:
             out[name] = int(out.get(name, 0) or 0) + count
         return out
 
+    @staticmethod
+    def _key(draft: dict) -> tuple[str, str]:
+        """Which document this draft is, and which PART of it (J.8.4, v0.84).
+
+        The gate decided by `source_path` alone, and every node of a
+        converter's tree (G.2.8) carries the same one — so a 200-chapter
+        book would land as 200 copies of one summary and one set of tags:
+        the passport's `title` on every chapter, the scent it was written to
+        give the document spread flat across its parts, and no chapter
+        findable by what it actually says. `source_part` is the
+        discriminator, and its ABSENCE is what says "this node is the
+        document".
+        """
+        return (str(draft.get("source_path") or ""),
+                str(draft.get("source_part") or ""))
+
     def __call__(self, draft: dict) -> dict:
-        passport = self.passports.get(str(draft.get("source_path") or ""))
+        path, part = self._key(draft)
+        # A part is curated exactly as an adopted file is: the passport
+        # names the document, and the document is the branch.
+        passport = None if part else self.passports.get(path)
         if passport is None:
             if self.curator is not None:
                 result = self.curator(draft)

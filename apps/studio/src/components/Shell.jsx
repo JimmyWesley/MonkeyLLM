@@ -47,6 +47,12 @@ export const CONSOLES = [
   // J.16. The build group is the three directions a forest moves in:
   // what comes in, who reads it, what goes out.
   { key: 'webhooks', group: 'build', cap: 'admin' },
+  // J.20 (v0.84): the fourth direction, and the reverse of the one above —
+  // what the outside tells this forest. Beside Webhooks because the two
+  // share one signing rule and are read together; `admin` on this forest,
+  // because a subscription is a governance object whose secret is a
+  // permanent standing authority.
+  { key: 'notify', group: 'build', cap: 'admin' },
   { key: 'people', group: 'govern', cap: 'admin' },
   { key: 'audit', group: 'govern', cap: 'admin' },
   { key: 'health', group: 'govern', cap: 'admin' },

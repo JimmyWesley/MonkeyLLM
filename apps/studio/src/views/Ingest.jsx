@@ -15,14 +15,16 @@ import {
   useBoard,
 } from '../board.js'
 import {
-  Badge, Card, Empty, ErrorNote, Field, Note, Select, Spinner, Tabs,
+  Badge, Card, Empty, ErrorNote, Field, Note, Segmented, Select, Spinner, Tabs,
 } from '../design/ui.jsx'
 import {
-  Clock, File, Files, Ingest as Upload, Pencil, Play, Plus, Refresh, X,
+  Clock, Database, File, Files, Ingest as Upload, Pencil, Play, Plus, Refresh,
+  X,
 } from '../design/icons.jsx'
 import {
   NeedsCapability, NewBranch, branchOf, has, nodeLink, useAsync, useForestTree,
 } from './shared.jsx'
+import Storage from './storage.jsx'
 
 /* What the Gardener's built-in converters read (G.2). Text goes up as text;
  * .docx/.xls/.xlsx and SQLite databases go up as base64, because their
@@ -75,13 +77,51 @@ async function filesFromEntry(entry, prefix = '') {
   return out
 }
 
+/** The source a bucket adopt is started from (J.8.6 rule 2).
+ *
+ *  The store's own bucket and prefix, plus whatever the operator narrowed it
+ *  to. Composed here and shown on the card BEFORE anything starts, because
+ *  the moment the source is chosen is the only moment the operator has a
+ *  choice about what will be read — and because the two halves of a prefix
+ *  (the administrator's, in the store, and this one) are exactly the kind of
+ *  thing somebody doubles by hand.
+ */
+export function bucketUri(store, prefix = '') {
+  const parts = [store.prefix || '', prefix || '']
+    .map((p) => String(p).replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean)
+  return `s3://${store.bucket}${parts.length ? `/${parts.join('/')}` : ''}`
+}
+
 /* The composer writes prose; the forest stores markdown. One converter,
  * configured once, so the round trip cannot drift. */
 const turndown = new TurndownService({
   headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced',
 })
 
-export default function Ingest({ forest, grant, goto }) {
+/* The content policy a bucket adopts under (G.7 rule 7, v0.84). `cached` is
+ * the default for a remote source — the body lives in `_derived/` and out of
+ * git — and the card says what that costs a snapshot, because a backup that
+ * silently depends on somebody's bucket still existing is the class of
+ * surprise Part I's v0.74 round was about. */
+const CONTENT = ['cached', 'inline']
+
+/* The canopy build and refresh are J.9 jobs from v0.84 (J.13.4), so they
+ * ride the same board, the same pill and the same `?job=` as a batch. The
+ * mode is how a RE-DISCOVERED job (a reload, another tab) is recognised;
+ * a job this console started arrives in the response and needs no name. */
+const CANOPY = 'canopy'
+
+/** Is this job's report the ingest report the card below knows how to read?
+ *
+ *  Two runs on the board are not ingests — the scent pass (J.13.6.1) and the
+ *  canopy build — and their reports carry none of its fields. Rendered as
+ *  one, a canopy build's report announces that no ingest model is bound,
+ *  which is a statement about a model that run never wanted. Each has its
+ *  own card in Optimize, which is where its own numbers belong. */
+const ingestShaped = (job) => !['recurate', CANOPY].includes(job?.mode)
+
+export default function Ingest({ forest, grant, me, goto }) {
   const { t } = useI18n()
   // The tab is in the address; what is staged in it is not. Files, a draft
   // and a destination are work in progress, and a reload has already lost
@@ -91,9 +131,13 @@ export default function Ingest({ forest, grant, goto }) {
   // the tab wrote `?mode=sync` and the validator handed back the fallback:
   // the console snapped to Upload and the page appeared to close itself.
   // A tab that exists MUST be nameable in the address (J.5.8).
+  // 'bucket' and 'storage' join the list with J.8.6 and J.19.9 (v0.84): a
+  // tab that exists MUST be nameable in the address, and the lesson that
+  // wrote this comment cost a console that snapped back to Upload.
   const [mode, setMode] = useRouteState('mode', 'upload',
-                                        { allow: ['upload', 'adopt', 'compose',
-                                                  'optimize'] })
+                                        { allow: ['upload', 'adopt', 'bucket',
+                                                  'compose', 'optimize',
+                                                  'storage'] })
   // The running batch, by address (J.9.1): `?job=` is replaced in, so a
   // reload restores the progress view by reading the job — a record, never
   // a call — and Back does not walk the batch's lifetime.
@@ -108,6 +152,13 @@ export default function Ingest({ forest, grant, goto }) {
   // reported from outside as the field not working.
   const [sourceUrl, setSourceUrl] = useState('')
   const [path, setPath] = useState('')
+  /* Connecting a bucket (J.8.6): the store is CHOSEN from the host's own
+     list and never typed — a text field here would resolve against whatever
+     ambient credential chain the process happens to have (G.3.1 rule 1),
+     which is the one place in this console where being wrong is expensive.
+     The rest are the two decisions G.3.1 and G.4.7 make, and no others. */
+  const [bucket, setBucket] = useState({ store: '', prefix: '', curate: true,
+                                         content: 'cached' })
   const [state, setState] = useState({})
   const [skipped, setSkipped] = useState([])
   const [reading, setReading] = useState(false)
@@ -138,6 +189,15 @@ export default function Ingest({ forest, grant, goto }) {
   const bound = !has(grant, 'admin') ? false
     : bindings.busy ? undefined
     : (bindings.data || []).find((b) => b.role === 'ingest') || null
+
+  /* The deployment's object stores (J.19), read ONCE for the two tabs that
+     need them: the Storage tab sets this forest's binding out of these
+     names, and Connect a bucket sources from them. Listing is open to any
+     administrator (J.19.2) — whether this reader may CHANGE one is the
+     route's answer, not this console's arithmetic. */
+  const stores = useAsync(() => api.stores(), [forest],
+                          { skip: !has(grant, 'admin') })
+  const storeList = stores.data?.stores || []
 
   /* The tab's one view of the job board (J.9.3): the batches waiting their
      turn, and the jobs as last read. Tab memory, so both survive a look at
@@ -267,9 +327,18 @@ export default function Ingest({ forest, grant, goto }) {
       text: turndown.turndown(composer?.getHTML() || ''),
       dest: dest || undefined,
     }
+    /* A bucket is an `adopt` whose source is an `s3://` URI (J.8.6 rule 5):
+       the same mode, the same job, the same queue, the same report. What it
+       adds is the two decisions the card asked for — curate now or later,
+       and the content policy the bodies land under. */
+    const chosen = storeList.find((s) => s.name === bucket.store)
+    const source = chosen ? bucketUri(chosen, bucket.prefix) : ''
     const body = mode === 'upload'
       ? { mode, files: payload, dest: dest || undefined }
       : mode === 'adopt' ? { mode, path, dest: dest || undefined }
+      : mode === 'bucket'
+        ? { mode: 'adopt', source, dest: dest || undefined,
+            curate: bucket.curate, content: bucket.content }
       : mode === 'compose' ? { ...composition, stage: true }
       : { mode: 'sync' }
     // J.9.2: while the board is busy this submit is a promise, not a POST.
@@ -280,7 +349,7 @@ export default function Ingest({ forest, grant, goto }) {
         mode,
         count: mode === 'upload' ? files.length : undefined,
         dest: dest || undefined,
-        path: mode === 'adopt' ? path : undefined,
+        path: mode === 'adopt' ? path : mode === 'bucket' ? source : undefined,
       })
       if (mode === 'upload') { setFiles([]); setSkipped([]); setSourceUrl('') }
       setState({})
@@ -345,6 +414,11 @@ export default function Ingest({ forest, grant, goto }) {
   const composed = (composer?.getText() || '').trim()
   const ready = mode === 'upload' ? files.length > 0
     : mode === 'adopt' ? Boolean(path)
+    // A store, and that is the whole requirement: the prefix may be empty
+    // (the store's own is the source then) and the destination defaults to
+    // the root, exactly as every other door's does.
+    : mode === 'bucket' ? Boolean(bucket.store)
+    : mode === 'storage' ? false
     : mode === 'compose' ? Boolean(title.trim() && composed)
     // J.8: a forest with no recorded source has nothing to refresh, and one
     // whose source left this Station's ingest roots cannot be refreshed from
@@ -365,7 +439,17 @@ export default function Ingest({ forest, grant, goto }) {
             // is refused teaches the operator nothing about why.
             ...(has(grant, 'admin') && status.host_paths !== false
               ? [{ value: 'adopt', label: t('ingest.mode_adopt'), icon: Files }] : []),
+            // J.8.6 + J.19.9: both read the deployment's store list, which
+            // is an administrator's listing (J.19.2) — a tab whose every
+            // request is refused teaches nothing about why.
+            ...(has(grant, 'admin')
+              ? [{ value: 'bucket', label: t('ingest.mode_bucket'), icon: Database }]
+              : []),
             { value: 'optimize', label: t('ingest.mode_optimize'), icon: Refresh },
+            ...(has(grant, 'admin')
+              ? [{ value: 'storage', label: t('ingest.mode_storage'),
+                   icon: Database }]
+              : []),
           ]} />
 
           <form onSubmit={submit} className="mt-4 space-y-4">
@@ -490,7 +574,18 @@ export default function Ingest({ forest, grant, goto }) {
                      onChange={(e) => setPath(e.target.value)} />
             )}
 
-            {mode === 'optimize' ? (
+            {mode === 'bucket' && (
+              <ConnectBucket value={bucket} onChange={setBucket}
+                             stores={storeList} busy={stores.busy}
+                             error={stores.error} onStorage={() => setMode('storage')} />
+            )}
+
+            {mode === 'storage' && <Note>{t('ingest.storage_lede')}</Note>}
+
+            {/* The Storage tab sets where originals go; it neither refreshes
+                a source nor takes a destination, so it takes neither
+                control. */}
+            {mode === 'storage' ? null : mode === 'optimize' ? (
               <div className="space-y-2">
                 <Note>{t('ingest.sync_hint')}</Note>
                 {/* The whole point of J.8's amendment: name the directory. */}
@@ -530,7 +625,7 @@ export default function Ingest({ forest, grant, goto }) {
               </div>
             )}
 
-            <div className="flex justify-end">
+            <div className={`flex justify-end ${mode === 'storage' ? 'hidden' : ''}`}>
               {/* One batch per forest at a time (J.9) — but a busy board no
                   longer disables the button: the batch waits in the tab's
                   queue instead (J.9.2), and the label says it will wait
@@ -570,8 +665,21 @@ export default function Ingest({ forest, grant, goto }) {
                        setJobId(started.id)
                      }} />
             <Staging forest={forest} />
-            <DenseLayer forest={forest} />
+            <DenseLayer forest={forest}
+                        job={job && job.mode === CANOPY ? job : null}
+                        onJob={(started) => {
+                          noteJob(forest, started)
+                          setJobId(started.id)
+                        }} />
           </>
+        )}
+        {/* J.19.9: where the originals go, in the console whose question is
+            how documents get in. Outside the ingest form on purpose — its
+            two panels are forms of their own, and a form inside a form is
+            not a form. */}
+        {mode === 'storage' && has(grant, 'admin') && (
+          <Storage forest={forest} stores={stores} status={status} me={me}
+                   onBound={ingestState.reload} />
         )}
         {state.busy && <Card><Spinner label={t('ingest.running')} /></Card>}
         {state.error && <Card><ErrorNote error={state.error} /></Card>}
@@ -605,7 +713,7 @@ export default function Ingest({ forest, grant, goto }) {
             {job.error && <div className="mt-2"><ErrorNote error={job.error} /></div>}
           </Card>
         )}
-        {job && job.state !== 'running' && job.report && (
+        {job && job.state !== 'running' && job.report && ingestShaped(job) && (
           <Report report={job.report} forest={forest} />
         )}
         {state.report && <Report report={state.report} forest={forest} />}
@@ -747,7 +855,10 @@ function QueueCard({ forest, queue }) {
               <span className="min-w-0 flex-1 truncate text-[12.5px] text-text-2">
                 {item.mode === 'upload'
                   ? t('ingest.queue_files', { n: item.count || 0 })
-                  : item.mode === 'adopt'
+                  // A bucket waits under the source it will read, like the
+                  // folder beside it: `s3://bucket/prefix` is the one thing
+                  // that tells two queued batches apart.
+                  : item.mode === 'adopt' || item.mode === 'bucket'
                     ? <code className="font-mono text-[12px]">{item.path}</code>
                     : t('ingest.mode_optimize')}
                 {item.mode !== 'optimize' && (
@@ -804,6 +915,92 @@ function Composer({ editor }) {
       <div className="rounded-b-lg border border-t-0 border-line bg-surface-2 p-3">
         <EditorContent editor={editor} />
       </div>
+    </div>
+  )
+}
+
+/** Connecting a bucket (spec J.8.6).
+ *
+ *  The fourth door, and the one for the operator whose corpus is already
+ *  somewhere — which is most operators, and the audience J.8 was written
+ *  for: a browser and no shell. Its fields are exactly the decisions G.3.1
+ *  and G.4.7 make and no others.
+ *
+ *  The store is CHOSEN, never typed. A text field for an endpoint or a
+ *  bucket would resolve against whatever ambient credential chain the
+ *  process happens to have, and this console carries no list of stores of
+ *  its own for the same reason it carries no list of formats (J.8.5's rule,
+ *  applied to the thing where being wrong is expensive). With nothing
+ *  configured the card says which console configures one, rather than
+ *  offering a field whose every value is refused.
+ *
+ *  Both choices state their cost where they are made: curating now is one
+ *  model call per document before the corpus is searchable, and `cached`
+ *  bodies mean a snapshot carries the map and not the text.
+ */
+function ConnectBucket({ value, onChange, stores, busy, error, onStorage }) {
+  const { t } = useI18n()
+  const chosen = stores.find((s) => s.name === value.store) || null
+  const set = (patch) => onChange({ ...value, ...patch })
+
+  if (error) return <ErrorNote error={error} />
+  if (busy && !stores.length) return <Spinner label={t('common.loading')} />
+  if (!stores.length) {
+    return (
+      <div className="space-y-3">
+        <Note tone="warn">{t('ingest.bucket_no_store')}</Note>
+        <button type="button" className="btn btn-sm" onClick={onStorage}>
+          <Database size={13} /> {t('ingest.bucket_configure')}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Select label={t('ingest.bucket_store')} value={value.store} required
+                hint={t('ingest.bucket_store_hint')}
+                onChange={(e) => set({ store: e.target.value })}>
+          <option value="" disabled>—</option>
+          {stores.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+        </Select>
+        <Field label={t('ingest.bucket_prefix')} value={value.prefix}
+               placeholder="handbook/2024/" hint={t('ingest.bucket_prefix_hint')}
+               onChange={(e) => set({ prefix: e.target.value })} />
+      </div>
+
+      {/* What will be read, resolved, before anything starts (J.8.6 rule 2).
+          The object count is the batch's own `total` — it is counted by the
+          listing the job runs, and this console does not run one of its
+          own. */}
+      {chosen && (
+        <Note>
+          {t('ingest.bucket_reads')}{' '}
+          <code className="font-mono">{bucketUri(chosen, value.prefix)}</code>
+          <div className="mt-1 text-[11.5px]">{t('ingest.bucket_count')}</div>
+        </Note>
+      )}
+
+      <div>
+        <div className="label">{t('ingest.bucket_curate')}</div>
+        <Segmented value={value.curate ? 'now' : 'later'}
+                   onChange={(v) => set({ curate: v === 'now' })}
+                   options={[{ value: 'now', label: t('ingest.bucket_curate_now') },
+                             { value: 'later', label: t('ingest.bucket_curate_later') }]} />
+        <p className="mt-1.5 text-[11.5px] text-text-3">
+          {t(value.curate ? 'ingest.bucket_curate_now_hint'
+                          : 'ingest.bucket_curate_later_hint')}
+        </p>
+      </div>
+
+      <Select label={t('ingest.bucket_content')} value={value.content}
+              hint={t(`ingest.bucket_content_${value.content}_hint`)}
+              onChange={(e) => set({ content: e.target.value })}>
+        {CONTENT.map((c) => (
+          <option key={c} value={c}>{t(`ingest.bucket_content_${c}`)}</option>
+        ))}
+      </Select>
     </div>
   )
 }
@@ -998,6 +1195,29 @@ function Report({ report, forest }) {
         </Note>
       )}
 
+      {/* Formats, not files (J.8 v0.84, J.8.6 rule 6). `unsupported` is a
+          list of relative paths and three thousand of them is not a report
+          anybody reads; `{extension: count}` is the sentence an operator
+          can act on, and it sits ABOVE the paths, which stay exactly as
+          they were. Rendered from the report's own map — a console that
+          counted the paths itself would disagree with it the moment the
+          list is bounded. */}
+      {report.unsupported_formats
+        && Object.keys(report.unsupported_formats).length > 0 && (
+        <div className="mt-4">
+          <div className="label">{t('ingest.unsupported_formats')}</div>
+          <ul className="flex flex-wrap gap-1.5">
+            {Object.entries(report.unsupported_formats)
+              .sort((a, b) => b[1] - a[1])
+              .map(([ext, n]) => (
+                <li key={ext}>
+                  <span className="badge font-mono">{ext} · {n}</span>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
+
       {groups.length === 0 ? (
         <p className="mt-4 text-[13px] text-text-3">{t('ingest.unchanged')}</p>
       ) : (
@@ -1144,14 +1364,23 @@ function Rederive({ forest }) {
 function Rescent({ forest, bound, job, onJob }) {
   const { t } = useI18n()
   const [state, setState] = useState({})
+  /* J.13.6.1 rules 8 and 9 (v0.84). `created` is the host's own default and
+     is left unsent while it is chosen, so a console that has never touched
+     these controls asks for exactly what v0.83 asked for. `limit` empty is
+     the whole scope. */
+  const [order, setOrder] = useState('created')
+  const [limit, setLimit] = useState('')
   const running = job && job.state === 'running'
   const report = job && job.state !== 'running' ? job.report : null
 
   const run = async () => {
     setState({ busy: true })
     try {
-      const started = await api.recurate(forest, ['scent'])
-      setState({ nodes: started.nodes })
+      const started = await api.recurate(forest, ['scent'], {
+        order: order === 'created' ? undefined : order,
+        limit: limit === '' ? undefined : Number(limit),
+      })
+      setState({ nodes: started.nodes, remaining: started.remaining })
       if (started.job) onJob(started.job)
     } catch (error) {
       setState({ error })
@@ -1169,10 +1398,38 @@ function Rescent({ forest, bound, job, onJob }) {
       {bound === null && (
         <div className="mt-3"><Note tone="warn">{t('ingest.rescent_unbound')}</Note></div>
       )}
+
+      {/* Which nodes, and how many of them. Oldest first is what the pass
+          exists for — the thinnest scent, carried longest — and hottest
+          first improves what agents are actually reading before what nobody
+          has opened. A bound run pays for the cap and not for the scope,
+          and running it again re-visits the same nodes: the pass keeps no
+          memory of what it curated, and that is said here rather than
+          discovered on the second bill. */}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <Select label={t('ingest.rescent_order')} value={order}
+                hint={t(`ingest.rescent_order_${order}_hint`)}
+                onChange={(e) => setOrder(e.target.value)}>
+          <option value="created">{t('ingest.rescent_order_created')}</option>
+          <option value="heat">{t('ingest.rescent_order_heat')}</option>
+        </Select>
+        <Field label={t('ingest.rescent_limit')} type="number" min="1"
+               value={limit} placeholder={t('ingest.rescent_limit_all')}
+               hint={t('ingest.rescent_limit_hint')}
+               onChange={(e) => setLimit(e.target.value)} />
+      </div>
+
       {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
       {state.nodes !== undefined && (
         <div className="mt-3">
-          <Note tone="info">{t('ingest.rescent_scope', { n: state.nodes })}</Note>
+          {/* The bill, as the host stated it: with a cap the number is the
+              cap and never the scope (rule 9), so this prints what came
+              back and computes nothing of its own. */}
+          <Note tone="info">
+            {t('ingest.rescent_scope', { n: state.nodes })}
+            {state.remaining ? ` ${t('ingest.rescent_remaining',
+                                      { n: state.remaining })}` : ''}
+          </Note>
         </div>
       )}
       {report && (
@@ -1184,6 +1441,10 @@ function Rescent({ forest, bound, job, onJob }) {
             })}
             {report.fallbacks > 0
               && ` ${t('ingest.rescent_fallbacks', { n: report.fallbacks })}`}
+            {/* Rule 9: `remaining` beside the bill is what makes a second
+                run a decision rather than a guess. */}
+            {report.remaining
+              ? ` ${t('ingest.rescent_remaining', { n: report.remaining })}` : ''}
           </Note>
         </div>
       )}
@@ -1258,11 +1519,14 @@ function Staging({ forest }) {
  *  documents it never asked about, in the primitive with the tightest
  *  budget in the spec. It is a choice now, and the number that says what
  *  the choice costs is printed above the button. */
-function DenseLayer({ forest }) {
+function DenseLayer({ forest, job, onJob }) {
   const { t } = useI18n()
   const [state, setState] = useState({})
-  const status = useAsync(() => api.canopy(forest), [forest])
+  // The status is re-read when the run settles: what `stale` says is exactly
+  // what the run changed.
+  const status = useAsync(() => api.canopy(forest), [forest, job?.state])
   const now = state.done || status.data
+  const running = job && job.state === 'running'
 
   // Nothing to say to a forest that never built an index: Models is where
   // that conversation belongs, and repeating it here would send the
@@ -1272,7 +1536,13 @@ function DenseLayer({ forest }) {
   const refresh = async () => {
     setState({ busy: true })
     try {
-      setState({ done: await api.refreshCanopy(forest) })
+      const started = await api.refreshCanopy(forest)
+      // J.13.4 (v0.84): a refresh is a J.9 job now — same board, same
+      // progress, same cancel, same one-batch-per-forest lock. An older
+      // Station answers the status synchronously, and that answer is still
+      // read rather than being called a failure.
+      if (started?.job) { setState({}); onJob(started.job) }
+      else setState({ done: started })
     } catch (error) {
       setState({ error })
     }
@@ -1286,12 +1556,19 @@ function DenseLayer({ forest }) {
           ? t('ingest.dense_behind', { n: now.stale })
           : t('ingest.dense_current', { n: now.vectors })}
       </Note>
+      {/* A cancelled run changed nothing and is not resumable (J.13.4): the
+          index is the one the forest already had, and the next press starts
+          over and pays again. Said here, because what was spent is spent. */}
+      {job && job.state === 'cancelled' && (
+        <div className="mt-3"><Note tone="warn">{t('ingest.dense_cancelled')}</Note></div>
+      )}
       {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
       <div className="mt-4 flex justify-end">
         <button type="button" className="btn"
-                disabled={state.busy || !now.stale} onClick={refresh}>
+                disabled={state.busy || running || !now.stale} onClick={refresh}>
           <Refresh size={14} />
-          {state.busy ? t('ingest.dense_running') : t('ingest.dense_start')}
+          {state.busy || running ? t('ingest.dense_running')
+                                 : t('ingest.dense_start')}
         </button>
       </div>
     </Card>

@@ -54,6 +54,13 @@ extensions = []
 # Floor is 1.26, the first release with a Python 3.12 wheel (the engine
 # takes >=3.11) — and a version actually exercised: 1.26.4, 2.0.2, 2.5.2.
 canopy = ["numpy>=1.26"]
+# G.9 / J.19 object storage. `boto3` is Apache-2.0, which is the licence of
+# this tree, so it sits on the engine side of `LICENSING.md` without
+# qualification. Floor is 1.34, the first release whose `botocore` carries
+# the `Config(s3={"addressing_style": "path"})` and the presign TTL clamp
+# `fetch.presign` relies on; the module still imports and every non-`s3://`
+# path still works with it absent, which is what makes it an extra.
+s3 = ["boto3>=1.34"]
 
 [project.urls]
 Homepage      = "https://monkeyllm.com"

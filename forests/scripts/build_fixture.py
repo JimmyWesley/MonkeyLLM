@@ -616,17 +616,21 @@ def main() -> int:
     for branch_id, (title, blurb, cross) in BRANCHES.items():
         subs, bananas = children_of(branch_id)
         lines = [f"# {title}", "", f"> {blurb}", ""]
+        # A.5: a blank line between a heading and the list under it. The
+        # engine's own `indexer.add_entry` writes it, and without it a
+        # renderer round trip (the Studio editor's rich mode) puts it back
+        # and reads as a change nobody made.
         if subs:
-            lines.append("## Sub-branches")
+            lines += ["## Sub-branches", ""]
             for s in subs:
                 lines.append(entry_line(s, BRANCHES[s][1]))
             lines.append("")
-        lines.append("## Direct bananas")
+        lines += ["## Direct bananas", ""]
         for b in bananas:
             lines.append(entry_line(b, by_id[b]["summary"]))
         lines.append("")
         if cross:
-            lines.append("## Cross trails")
+            lines += ["## Cross trails", ""]
             for c in cross:
                 lines.append(f"- {c}")
             lines.append("")
@@ -647,13 +651,15 @@ def main() -> int:
         "concepts, sales, events and infrastructure. Dialect at [[_meta/schema]].",
         "",
         "## Sub-branches",
+        "",
     ]
     for b in sorted(top_branches):
         lines.append(entry_line(b, BRANCHES[b][1]))
-    lines += ["", "## Direct bananas", "", "## Landmarks"]
+    lines += ["", "## Direct bananas", "", "## Landmarks", ""]
     for lm in LANDMARKS:
         lines.append(entry_line(lm, by_id[lm]["summary"]))
-    lines += ["", "## Cross trails", "- Forest dialect (node and edge types) → [[_meta/schema]]", ""]
+    lines += ["", "## Cross trails", "",
+              "- Forest dialect (node and edge types) → [[_meta/schema]]", ""]
     body = "\n".join(lines)
     fm = {
         "id": "_index", "type": "branch", "title": "Tropicália Forest",

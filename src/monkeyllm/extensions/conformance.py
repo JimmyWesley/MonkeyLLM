@@ -92,7 +92,10 @@ def run_kit(tree: Path, host_version: str, *,
         # module — and a heavy handler's module imports the dependency L.5
         # exists to keep out of this process, so the check meant to catch an
         # author's typo would break the rule that protects the deployment.
-        problem = check_source_signature(seam, path, func)
+        # L.5 (v0.84): `heavy` decides whether `config` is a parameter this
+        # seam passes. A light handler naming it would bind to nothing.
+        problem = check_source_signature(seam, path, func,
+                                         bool(getattr(spec, "heavy", False)))
         record(f"signature:{seam}:{spec.handler}", problem is None,
                problem or "")
 

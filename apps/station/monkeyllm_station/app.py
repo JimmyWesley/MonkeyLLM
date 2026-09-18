@@ -74,7 +74,13 @@ from monkeyllm.server import ForestPool
 from monkeyllm.signatures import validate_args
 from monkeyllm.snapshot import CONTAINER_SUFFIX
 from monkeyllm.windows import exclusive_end, normalize_window
-from monkeyllm_station import answer_store, runs as runs_mod, vision, webhooks
+from monkeyllm_station import (
+    answer_store,
+    runs as runs_mod,
+    stores as stores_mod,
+    vision,
+    webhooks,
+)
 from monkeyllm_station.jobs import JobBoard
 from monkeyllm_station.policy import CAPS, E_FORBIDDEN, REQUIRED_CAP, ScopedVine
 from monkeyllm_station.extensions import Runtime as ExtensionRuntime
@@ -125,6 +131,29 @@ _DETAIL_DROP = {
     "answer": frozenset({"harvest", "read", "turns", "trace", "sources",
                          "hops"}),
 }
+
+
+def curation_block(curator, binding, curate) -> dict:
+    """What the curation stage did, and — when it did nothing — why (G.4.7
+    rule 2).
+
+    J.8's own lesson ("nothing to do is not a rejection") with a third
+    state. A model that never answered and a model that answered and was
+    rejected every time produce the same output and want opposite fixes, so
+    the block already separated those; `disabled` and `unbound` are the two
+    that were missing, and they are the two a console needs to offer the
+    later pass instead of sending an operator to repair a model that was
+    never asked anything.
+    """
+    if curator is None:
+        return {"reason": "disabled" if curate is False else "unbound"}
+    stats = dict(curator.stats)
+    if curator.last_error:
+        stats["error"] = curator.last_error
+    if curator.last_reject:
+        stats["rejected_because"] = curator.last_reject
+        stats["last_reply"] = curator.last_reply or ""
+    return stats
 
 
 def shape_answer(result, detail):
@@ -201,6 +230,45 @@ PAIR_MAX_DAYS = 365.0
 # both are rate limited. Fixed window per (username, client host).
 AUTH_ATTEMPT_LIMIT = 5
 AUTH_WINDOW_SECONDS = 60.0
+
+# J.14 (v0.84): where the payload route stops proxying. Under the ceiling a
+# remote payload is served through the G.9 cache exactly as a local one is;
+# above it the Station answers 302 to a presigned URL, because a recording is
+# gigabytes and the Station is not a CDN.
+PAYLOAD_PROXY_MAX_MB_ENV = "MONKEYLLM_STATION_PAYLOAD_PROXY_MAX_MB"
+DEFAULT_PAYLOAD_PROXY_MAX_MB = 32.0
+PAYLOAD_PRESIGN_TTL_ENV = "MONKEYLLM_STATION_PAYLOAD_PRESIGN_TTL"
+DEFAULT_PAYLOAD_PRESIGN_TTL = 300
+
+# J.20 (v0.84): a notification is an event, not a backfill — and a backfill
+# is `sync`. The queue is what a notification arriving mid-batch lands in:
+# bounded, coalesced, visible on the job board, and dead with the process.
+NOTIFY_MAX_KEYS_ENV = "MONKEYLLM_STATION_NOTIFY_MAX_KEYS"
+DEFAULT_NOTIFY_MAX_KEYS = 1000
+NOTIFY_QUEUE_MAX = 1000
+NOTIFY_SKEW_SECONDS = 300.0
+NOTIFY_MODE = "sync"
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+def payload_proxy_max_bytes() -> int:
+    return int(_float_env(PAYLOAD_PROXY_MAX_MB_ENV,
+                          DEFAULT_PAYLOAD_PROXY_MAX_MB) * 1024 * 1024)
+
+
+def payload_presign_ttl() -> int:
+    return max(1, int(_float_env(PAYLOAD_PRESIGN_TTL_ENV,
+                                 DEFAULT_PAYLOAD_PRESIGN_TTL)))
+
+
+def notify_max_keys() -> int:
+    return max(1, int(_float_env(NOTIFY_MAX_KEYS_ENV, DEFAULT_NOTIFY_MAX_KEYS)))
 
 
 class AuthWindow:
@@ -301,6 +369,14 @@ class PreparedIngest:
     principal: str = ""
     forest: str = ""
     payload: dict = field(default_factory=dict)
+    # G.4.7 (v0.84): what the batch decided about curation, so the finisher
+    # can say which of the three happened — a model wrote, the caller said
+    # later, or nothing is bound. `binding` is read here and never again:
+    # whether a model IS bound is a fact about the batch that started.
+    binding: dict | None = None
+    curate: bool | None = None
+    content: str | None = None
+    content_degraded: bool = False
 
 
 # J.13.6.1: the job's `mode`, which is the caller's own word everywhere else
@@ -325,6 +401,55 @@ class PreparedRecurate:
     before: str | None = None
     principal: str = ""
     forest: str = ""
+
+
+# J.13.4 (v0.84): the job's `mode`, which is the caller's own word (J.9,
+# v0.61). This caller is the canopy console, and nothing is being ingested —
+# a console that labelled it `sync` would offer the operator a repair that
+# has nothing to do with what is running.
+CANOPY_MODE = "canopy"
+
+
+@dataclass
+class PreparedCanopy:
+    """An accepted dense-layer build (J.13.4), handed from the forest lane
+    back to the event loop: the same construction as `PreparedIngest`, so
+    the progress, the cancel and the one-batch-per-forest lock are the same
+    ones every other batch uses."""
+
+    job: object
+    steps: object          # the embed step iterator (G.10's shape)
+    vine: object
+    forest: str = ""
+    principal: str = ""
+    refresh: bool = False
+
+
+class SingleStep:
+    """A run the engine does not yield through, shaped like a G.10 run.
+
+    The BUILD steps per node (`Vine.build_canopy_iter`); the REFRESH does
+    not — it embeds what changed, in one engine call, and there is nothing
+    to report between the first vector and the last. Wearing the stepped
+    shape anyway is what lets the job, the lock, the cancel and the report
+    be one piece of machinery for both.
+    """
+
+    def __init__(self, run, total: int = 0):
+        self._run = run
+        self.total = total
+        self.result: dict | None = None
+        self._done = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> dict:
+        if self._done:
+            raise StopIteration
+        self._done = True
+        self.result = self._run() or {}
+        return {"index": 1, "action": "embedded", "file": None}
 
 
 # The Studio is a React/Vite build: static files only, no server rendering,
@@ -841,7 +966,6 @@ def build_app(
     mcp: bool = True,
     warm: bool | None = None,
 ) -> Starlette:
-    pool = ForestPool(root=Path(root), writable=writable)
     # On by default: a console is judged on the speed of its first call, and
     # the cost is one open per forest, which the registry pays anyway. Off is
     # for the registry big enough that holding every forest open at once is
@@ -855,6 +979,20 @@ def build_app(
               file=sys.stderr)
     registry = Registry(registry_path)
     registry.adopt_env_providers(providers_from_env())
+    # J.19.4: a deployment that set `MONKEYLLM_S3_BUCKET` has declared a
+    # store, exactly as an endpoint declares a provider. Published read-only
+    # under the name `env`; its credential is never written down.
+    registry.adopt_env_store(stores_mod.store_from_env())
+    # J.19.8: ONE seam, built once and handed to every Vine and Gardener this
+    # host constructs. It reads the registry at call time, so an edited store
+    # reaches the next ingest and a removed one stops resolving.
+    store_resolver = stores_mod.StoreResolver(registry)
+
+    # Constructed after the resolver so the pool's own Vines are handed it
+    # too: `ForestPool` forwards `stores=` to every Vine it opens, lazily or
+    # at boot, so a read of a remote payload resolves by bucket wherever it
+    # happens and nothing has to attach a credential after construction.
+    pool = ForestPool(root=Path(root), writable=writable, stores=store_resolver)
     # Part L: load every installed extension once, here, before anything can
     # ask for one. `host_surfaces` says what THIS host can serve — a Station
     # draws panels, so it names one; a contribution it cannot serve stays
@@ -943,7 +1081,10 @@ def build_app(
                 from monkeyllm.vine import Vine
 
                 assert pool.root is not None
-                v = Vine(pool.root / forest, writable=False)
+                # J.19.8: a reader resolves a remote payload by bucket, so
+                # it is handed the same seam the writer holds.
+                v = Vine(pool.root / forest, writable=False,
+                         stores=store_resolver)
                 self._vines[key] = v
             return v
 
@@ -1157,20 +1298,21 @@ def build_app(
                   if (prep.curator and not cancelled) else None)
         after = _git(prep.root, "rev-parse", "HEAD")
         # `curated` is what the model DID, not what the operator configured
-        # — same reasoning as the compose path (G.4 rule 6).
-        stats = dict(prep.curator.stats) if prep.curator else None
-        if stats and prep.curator.last_error:
-            stats["error"] = prep.curator.last_error
-        if stats and prep.curator.last_reject:
-            stats["rejected_because"] = prep.curator.last_reject
-            stats["last_reply"] = prep.curator.last_reply or ""
-        written = bool(stats and (stats["llm_summaries"] or stats["branch_rollups"]))
+        # — same reasoning as the compose path (G.4 rule 6). `bound` is
+        # whether a model IS bound (G.4.7 rule 2), which is a different
+        # question and is the one a console acts on.
+        stats = curation_block(prep.curator, prep.binding, prep.curate)
+        written = bool(stats and (stats.get("llm_summaries")
+                                  or stats.get("branch_rollups")))
         result = {
             **report, "mode": prep.mode, "staged": prep.staged,
             "rollup": rollup,
             "commit": after or None, "commit_before": prep.before,
-            "curated": written, "bound": prep.curator is not None,
+            "curated": written, "bound": prep.binding is not None,
             "curation": stats,
+            **({"curate": False} if prep.curate is False else {}),
+            **({"content": prep.content} if prep.content else {}),
+            **({"content_degraded": True} if prep.content_degraded else {}),
         }
         result.pop("drafts", None)  # an ordinary ingest has none
         registry.record(
@@ -1186,6 +1328,15 @@ def build_app(
         between steps every queued call to this forest gets its turn (J.9
         fairness). Cancellation is honoured at step boundaries — a document
         is whole or absent, never half."""
+        try:
+            await _drive_ingest_inner(prep)
+        finally:
+            # J.20: a notification held while this batch ran fires at the
+            # settle and at no other time. Scheduled after the job has
+            # finished on the board, so the claim it makes can succeed.
+            _schedule_drain(prep.forest)
+
+    async def _drive_ingest_inner(prep: PreparedIngest) -> None:
         job, steps = prep.job, prep.steps
         try:
             while True:
@@ -1250,6 +1401,136 @@ def build_app(
                     "total": prep.job.total})
         return prep.job
 
+    # -- what a notification is held in (J.20, J.9's v0.84 amendment) --------
+    #
+    # J.9 refuses to queue because work waiting in a server after its
+    # audience left becomes a surprise ingest an hour later. A J.20
+    # notification has NO audience: there is nobody to tell to come back, and
+    # the alternative to holding the keys is dropping them. So it is held,
+    # under the three conditions that separate it from the door J.9 closed —
+    # visible (on the job board), bounded (overflow counted, never silent)
+    # and coalesced (several notifications merge into ONE deduplicated set).
+    # Host memory, dead on restart; the healing mechanism is the periodic
+    # full `sync` G.8 already requires. An operator's own batch POST is
+    # unchanged and is still refused E_LOCKED.
+    notify_pending: dict[str, dict] = {}
+
+    def _queue_notify(forest: str, keys: list[str], sub: str = "") -> int:
+        held = notify_pending.setdefault(
+            forest, {"keys": [], "dropped": 0, "sub": sub})
+        if sub:
+            held["sub"] = sub
+        seen = set(held["keys"])
+        for key in keys:
+            if key in seen:
+                continue
+            if len(held["keys"]) >= NOTIFY_QUEUE_MAX:
+                held["dropped"] += 1
+                continue
+            held["keys"].append(key)
+            seen.add(key)
+        return len(held["keys"])
+
+    def _pending_notify(forest: str) -> dict:
+        held = notify_pending.get(forest)
+        if not held:
+            return {"keys": 0, "dropped": 0}
+        return {"keys": len(held["keys"]), "dropped": held["dropped"]}
+
+    async def _start_notify_sync(forest: str, keys: list[str], sub: str = ""):
+        """A targeted `sync` for exactly those keys, as a J.9 job.
+
+        It cannot adopt, it cannot change `dest`, it cannot name a different
+        source and it cannot reach another forest: the source is the one the
+        forest recorded (G.3.1 rule 8). No curation model is constructed —
+        a refresh never curates (J.8) — so a machine's call at 03:00 spends
+        nothing a person did not already decide to spend.
+        """
+        if not writable or not _servable(forest):
+            return None
+        job = board.claim(forest, NOTIFY_MODE, 0, f"notify:{sub}" if sub
+                          else "notify")
+        if job is None:
+            return None
+
+        def prepare():
+            from monkeyllm.gardener import Gardener, discover_hooks
+
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            gardener_hooks = discover_hooks()
+            ext_view = _ext_registry_for(forest)
+            if ext_view is not None:
+                gardener_hooks = list(gardener_hooks or []) + [
+                    c.handler for c in ext_view.for_seam("curation")]
+            # The describer is a CONVERTER, not curation (G.5.1): without it
+            # a re-converted image comes back with no description and the
+            # refresh would quietly make the forest worse.
+            describer = vision.image_converter(registry.binding(forest, "vision"))
+            gardener = Gardener(
+                vine, hooks=gardener_hooks,
+                extra_converters=([describer] if describer else None),
+                ext_registry=ext_view,
+                stores=store_resolver,
+                on_stage=lambda f, st: board.note_stage(job, f, st))
+            recorded = str(gardener.config.get("source_root") or "").strip()
+            if not recorded:
+                return VineError(
+                    E_SCHEMA, "this forest has no recorded source to refresh"
+                ).to_dict()
+            if stores_mod.is_bucket_uri(recorded):
+                denied = _bucket_admission(recorded)
+            else:
+                denied = ingest_roots.check(recorded)
+            if denied is not None:
+                return denied.to_dict()
+            try:
+                steps = gardener.sync_iter(paths=list(keys))
+            except VineError as e:
+                return e.to_dict()
+            return {"_prepared": PreparedIngest(
+                job=job, steps=steps, gardener=gardener, curator=None,
+                mode=NOTIFY_MODE, staged=[], root=Path(vine.forest.root),
+                before=_git(Path(vine.forest.root), "rev-parse", "HEAD") or None,
+                principal=(f"notify:{sub}" if sub else "notify"),
+                forest=forest, payload={"mode": NOTIFY_MODE,
+                                        "keys": len(keys)})}
+
+        prepared = await in_forest_thread(forest, prepare)
+        if not isinstance(prepared, dict) or "_prepared" not in prepared:
+            board.abandon(job)
+            return None
+        prep = prepared["_prepared"]
+        job.mode, job.total = NOTIFY_MODE, prep.steps.total
+        return _launch_ingest(prep)
+
+    def _schedule_drain(forest: str) -> None:
+        """A batch settled: fire the held keys, if any. Scheduled rather than
+        awaited — the driver that just finished is not the place to start the
+        next run, and a drain that claims a job will find its own queue
+        empty."""
+        if not notify_pending.get(forest, {}).get("keys"):
+            return
+        try:
+            asyncio.get_running_loop().create_task(_drain_notify(forest))
+        except RuntimeError:  # pragma: no cover - no loop at shutdown
+            pass
+
+    async def _drain_notify(forest: str) -> None:
+        held = notify_pending.get(forest)
+        if not held or not held["keys"]:
+            return
+        keys, sub = list(held["keys"]), held.get("sub") or ""
+        # Taken out BEFORE the run: a claim that fails puts them back, and a
+        # claim that succeeds must not leave a second drain firing the same
+        # set at the next settle.
+        notify_pending.pop(forest, None)
+        started = await _start_notify_sync(forest, keys, sub)
+        if started is None:
+            _queue_notify(forest, keys, sub)
+
     # -- re-curating the scent (J.13.6.1) ------------------------------------
 
     def _recurate_report(prep: PreparedRecurate) -> dict:
@@ -1312,6 +1593,14 @@ def build_app(
         Cancellation is honoured at step boundaries: a node is curated and
         committed, or untouched — never half-written.
         """
+        try:
+            await _drive_recurate_inner(prep)
+        finally:
+            # J.20: this batch holds the same one-per-forest lock an ingest
+            # does, so a notification held behind it fires at this settle.
+            _schedule_drain(prep.forest)
+
+    async def _drive_recurate_inner(prep: PreparedRecurate) -> None:
         job, steps = prep.job, prep.steps
         try:
             while True:
@@ -1359,6 +1648,89 @@ def build_app(
                 primitive="recurate",
                 args={"derive": ["scent"], "job": job.id}, result="error",
                 size=len(json.dumps(err)))
+
+    # -- the dense layer, built as a job (J.13.4, v0.84) ---------------------
+
+    def _canopy_steps(vine, refresh: bool):
+        """The build's steps, on the lane that will drive them.
+
+        `refresh` embeds what changed and `build` embeds everything; they
+        are not interchangeable — a model change requires the build, because
+        a partial re-embed would leave the index in two spaces at once
+        (K.4), and a dot product never says so.
+        """
+        if refresh:
+            return SingleStep(lambda: vine.refresh_canopy(), total=1)
+        return vine.build_canopy_iter()
+
+    def _canopy_report(prep: PreparedCanopy, cancelled: bool) -> dict:
+        status = {**prep.vine.canopy_status,
+                  "enabled": registry.setting(prep.forest, "gauntlet", True),
+                  "refresh": prep.refresh}
+        if cancelled:
+            # K.4's rule from the other side: the new index is installed at
+            # the close, atomically, so a cancelled build leaves the forest
+            # with the index it already had — present, absent or stale,
+            # whichever it was. What was spent is spent, and the record says
+            # so rather than implying a half-index can be continued.
+            status["resumable"] = False
+            status["note"] = ("the index is unchanged; a cancelled build is "
+                              "not resumable and a new build starts over")
+        elif isinstance(getattr(prep.steps, "result", None), dict):
+            status = {**status, **prep.steps.result}
+        return status
+
+    async def _drive_canopy(prep: PreparedCanopy) -> None:
+        job, steps = prep.job, prep.steps
+        try:
+            try:
+                while True:
+                    if job.cancel_requested:
+                        final = await in_forest_thread(
+                            prep.forest, lambda: _canopy_report(prep, True))
+                        board.finish(job, "cancelled", report=final)
+                        return
+                    step = await in_forest_thread(
+                        prep.forest, lambda: _advance(steps, prep.forest,
+                                                      prep.principal))
+                    if step is None:
+                        final = await in_forest_thread(
+                            prep.forest, lambda: _canopy_report(prep, False))
+                        board.finish(job, "done", report=final)
+                        # J.6.2: reader vines hold the canopy they loaded at
+                        # open; a rebuilt index reaches them by reopening.
+                        readers.reset(prep.forest)
+                        registry.record(
+                            principal=prep.principal, forest=prep.forest,
+                            primitive="canopy",
+                            args={"refresh": prep.refresh, "job": job.id},
+                            result="ok", size=int(final.get("nodes") or 0))
+                        hooks.emit(prep.forest, "canopy.built", prep.principal,
+                                   {"embedded": final.get("embedded"),
+                                    "nodes": final.get("nodes"),
+                                    "stale": final.get("stale"),
+                                    "model": final.get("model"),
+                                    "refresh": prep.refresh})
+                        return
+                    board.note_step(job, step)
+            except Exception as e:  # noqa: BLE001 — a job must land somewhere
+                err = (e.to_dict() if isinstance(e, VineError)
+                       else VineError(E_SCHEMA,
+                                      f"canopy build failed: {e}"[:300]).to_dict())
+                board.finish(job, "error", error=err.get("error", err),
+                             report={"resumable": False, "refresh": prep.refresh})
+                registry.record(
+                    principal=prep.principal, forest=prep.forest,
+                    primitive="canopy",
+                    args={"refresh": prep.refresh, "job": job.id},
+                    result="error", size=len(json.dumps(err)))
+        finally:
+            _schedule_drain(prep.forest)
+
+    def _launch_canopy(prep: PreparedCanopy):
+        prep.job.task = asyncio.get_running_loop().create_task(
+            _drive_canopy(prep))
+        return prep.job
 
     def _launch_recurate(prep: PreparedRecurate):
         prep.job.task = asyncio.get_running_loop().create_task(
@@ -2789,6 +3161,54 @@ def build_app(
                 passports[target.relative_to(staging_root).as_posix()] = validated[i]
         return staging, written, provenance, passports
 
+    def _bucket_admission(uri: str) -> VineError | None:
+        """Whether this Station may read that prefix (G.3.1 rules 1-2).
+
+        The store list is not who may ask — that was the capability above —
+        it is what exists to be asked for: J.8.2's sentence about
+        directories, said about buckets. A store declaring `prefix: teams`
+        serves `s3://b/teams/legal` and refuses `s3://b/finance`, decided on
+        the normalised key with zero calls made to the store.
+
+        The engine decides the SAME thing when it builds the walk
+        (`sources.open_bucket_source`), and this is that decision asked
+        early, so the refusal arrives before a job is claimed and before a
+        staging directory is touched. Two decisions about one question, and
+        `test_the_host_and_the_engine_refuse_the_same_bucket` is where they
+        were compared — which is the only thing that keeps them one rule.
+        """
+        from monkeyllm import fetch
+
+        bucket, key = fetch.split_uri(uri)
+        if not bucket:
+            return VineError(E_SCHEMA, f"an s3:// source needs a bucket: {uri}",
+                             hint="A bucket source is s3://<bucket>/<prefix>.")
+        creds = fetch.resolve_store(bucket=bucket, stores=store_resolver)
+        if creds is None:
+            return VineError(
+                E_FORBIDDEN, f"no object store serves bucket '{bucket}'",
+                hint=_store_hint())
+        if not creds.contains(key.strip("/") or creds.prefix):
+            return VineError(
+                E_FORBIDDEN,
+                f"prefix '{key}' is outside what store '{creds.name}' serves",
+                hint="A store confined to a prefix serves only under it "
+                     "(G.3.1 rule 2); the walk's reach is bounded where it "
+                     "is built.")
+        return None
+
+    def _store_hint() -> str:
+        names = sorted(s["name"] for s in registry.stores())
+        have = (f"Configured stores: {', '.join(names)}. " if names else
+                "This deployment has no object store configured. ")
+        return (have + "A bucket is reached only through one (J.19): make it "
+                "in the Storage console, or set MONKEYLLM_S3_BUCKET.")
+
+    def _bucket_readable(uri: str) -> bool:
+        """The same question as a boolean, for the surfaces that ask whether
+        a refresh COULD run rather than refusing one (J.8's `can_sync`)."""
+        return _bucket_admission(uri) is None
+
     def run_ingest(principal, forest, vine, policy, _name, payload) -> dict:
         """The Gardener over REST (J.8), with the host's three additions:
         the `ingest` capability, a scope check on where it may write, and a
@@ -2834,6 +3254,25 @@ def build_app(
                 E_SCHEMA, f"review is not available for mode '{mode}'",
                 hint="adopt, sync and upload are batches; there is no single "
                      "draft to decide on. Use mode 'compose'.").to_dict()
+
+        # G.4.7 (v0.84): curating later is a decision, not a failure. It
+        # travels in the request rather than living in a console, because it
+        # changes what is written into the forest and what the deployment is
+        # billed. Absent, the forest's binding decides, as it does today.
+        curate = payload.get("curate")
+        if curate is not None and not isinstance(curate, bool):
+            return VineError(
+                E_SCHEMA, f"curate must be true or false, got "
+                          f"{type(curate).__name__}").to_dict()
+        # G.7 rule 7 (v0.84): the batch's content policy. `reference` into a
+        # bucket resolves a body over the network inside `pick`, so it is
+        # degraded to `cached` and the degradation is REPORTED — the same
+        # rule a staged upload already lives under (J.8.3).
+        content = payload.get("content")
+        if content is not None and content not in ("inline", "cached", "reference"):
+            return VineError(
+                E_SCHEMA, f"unknown content policy: {content!r}",
+                hint="One of: inline, cached, reference.").to_dict()
 
         # J.9: batches answer with a job; compose answers in place. Decided
         # here, before compose rewrites itself into an upload.
@@ -2908,15 +3347,37 @@ def build_app(
         # capability would read anything the container can see. A targeted sync
         # keeps the same requirement here: J.8 exempts it, and being stricter
         # than the spec costs an operator one capability they already hold.
+        # J.8 (v0.84): a bucket is named by `source` and is a privileged act
+        # for a DIFFERENT reason — a host path is read with the Station's
+        # filesystem authority, an `s3://` URI spends the deployment's stored
+        # credentials. Same requirement, two reasons, and both are worth
+        # stating: a content capability must not become arbitrary read access
+        # to the host, and it must not become arbitrary read access to the
+        # organisation's object storage either.
+        bucket_source = stores_mod.is_bucket_uri(source)
         if (source or payload.get("path")) and not policy.grants("admin"):
             return VineError(
-                E_FORBIDDEN, "reading a host path requires the 'admin' capability",
+                E_FORBIDDEN,
+                "reading an object store requires the 'admin' capability"
+                if bucket_source else
+                "reading a host path requires the 'admin' capability",
                 hint="Use mode 'upload' to send the documents themselves.").to_dict()
         # J.8.2: the capability answered who may ask; the roots answer what
         # exists to be asked for. Both, or the host's whole filesystem sits
         # one grant away — and in a self-hosted deployment the operator holds
         # that grant by construction.
-        if source:
+        #
+        # G.3.1 rules 1-2 (v0.84): for a bucket the STORE is the admission,
+        # and `MONKEYLLM_INGEST_ROOTS` never lists one — a path allow-list
+        # cannot express an endpoint, a bucket and a credential. The refusal
+        # comes before the first listing call, because every S3 client in
+        # wide use falls back to an ambient credential chain and a default
+        # endpoint, so an unserved bucket would otherwise resolve somewhere.
+        if bucket_source:
+            denied = _bucket_admission(source)
+            if denied is not None:
+                return denied.to_dict()
+        elif source:
             denied = ingest_roots.check(source)
             if denied is not None:
                 return denied.to_dict()
@@ -2955,8 +3416,14 @@ def build_app(
             if mode == "upload":
                 source, staged, provenance, passports = stage_upload(root, payload["files"])
 
-            curator = inference.curator_from_binding(
-                vine, policy, registry.binding(forest, "ingest"))
+            binding = registry.binding(forest, "ingest")
+            # G.4.7 rule 1 (v0.84): `false` means the model is never called —
+            # not "called and ignored", not "called for branches". The
+            # Curator is not constructed and no model hook joins the chain,
+            # so every summary is G.4 rule 1's derived one, and the rollup
+            # falls back to `derive_branch_summary`, which is arithmetic.
+            curator = (None if curate is False else
+                       inference.curator_from_binding(vine, policy, binding))
             # G.5.1: the describer is the host's half of the media story —
             # a forest with a `vision` binding reads its images at ingest,
             # once; without one the engine's stub still plants `media`,
@@ -3002,8 +3469,15 @@ def build_app(
             if ext_view is not None:
                 hooks = list(hooks or []) + [
                     c.handler for c in ext_view.for_seam("curation")]
+            # The v0.84 engine seams: `stores` (J.19.8 — the archive stage
+            # is the ONE writer to a store) and `curate` (G.4.7 rule 1 —
+            # the Gardener's own curation stage, skipped at the same
+            # decision as the host's). `curate` is the REQUEST's tri-state:
+            # `None` and `True` are v0.83's behaviour to the byte, which is
+            # what keeps a call that never mentioned curation unchanged.
             gardener = Gardener(
                 vine, hooks=hooks, dry_run=stage,
+                stores=store_resolver, curate=curate,
                 extra_converters=([describer] if describer else None),
                 # L.3: an extension the operator installed and enabled on
                 # THIS forest outranks anything this project ships — the
@@ -3014,6 +3488,21 @@ def build_app(
                 provenance=(provenance or None),
                 on_stage=(None if watched is None
                           else lambda f, st: board.note_stage(watched, f, st)))
+
+            # G.7 rule 7 (v0.84): the batch's content policy. It is the
+            # forest's policy for this source — the Gardener records it
+            # beside `source_root`, so the `sync` that refreshes the same
+            # source refreshes it the same way, which is the only reading
+            # under which "the policy" is one thing. `reference` into a
+            # bucket is DEGRADED and the degradation is reported: rule 1
+            # resolves such a body from the source at every `pick`, which
+            # for a bucket is a network round trip inside the primitive
+            # with the tightest budget in this document.
+            degraded = content == "reference" and bucket_source
+            if degraded:
+                content = "cached"
+            if content:
+                gardener.config["content"] = content
 
             if mode == "upload":
                 # J.8 (v0.61): ONE path for every upload, first or hundredth.
@@ -3051,7 +3540,15 @@ def build_app(
                     # which refuses it as E_SCHEMA rather than inventing a
                     # directory (G.3).
                     recorded = str(gardener.config.get("source_root") or "").strip()
-                    if recorded:
+                    if recorded and stores_mod.is_bucket_uri(recorded):
+                        # G.3.1 (v0.84): a recorded bucket is re-admitted by
+                        # the store list, never by the host's path roots — a
+                        # store removed since the adopt is exactly the case
+                        # this re-check exists for, said about buckets.
+                        denied = _bucket_admission(recorded)
+                        if denied is not None:
+                            raise denied
+                    elif recorded:
                         denied = ingest_roots.check(recorded)
                         if denied is not None:
                             raise denied
@@ -3070,7 +3567,11 @@ def build_app(
                     job=job, steps=steps, gardener=gardener, curator=curator,
                     mode=mode, staged=staged, root=root,
                     before=before or None, principal=principal, forest=forest,
-                    payload=payload, passports=passports, gate=gate)}
+                    payload=payload, passports=passports, gate=gate,
+                    # G.4.7 rule 2: the finisher says which of the three
+                    # happened, so it has to know what was decided here.
+                    binding=binding, curate=curate, content=content,
+                    content_degraded=degraded)}
 
             # compose answers in place (J.9): one document, and the J.8.1
             # review is a conversation, not a batch.
@@ -3093,16 +3594,9 @@ def build_app(
         # from a working one: the Curator falls back silently by design (G.4
         # rule 6), so every document still planted, with derived summaries,
         # under a report that said the model wrote them.
-        stats = dict(curator.stats) if curator else None
-        if stats and curator.last_error:
-            stats["error"] = curator.last_error
-        if stats and curator.last_reject:
-            # A model that answers and is rejected every time looks exactly
-            # like one that never answered — same fallback, same output. The
-            # fixes are opposite, so the report has to separate them.
-            stats["rejected_because"] = curator.last_reject
-            stats["last_reply"] = curator.last_reply or ""
-        written = bool(stats and (stats["llm_summaries"] or stats["branch_rollups"]))
+        stats = curation_block(curator, binding, curate)
+        written = bool(stats and (stats.get("llm_summaries")
+                                  or stats.get("branch_rollups")))
         if stage:
             # Ids alone would make the reviewer open another console to find
             # out what they are agreeing to (J.8.1).
@@ -3119,7 +3613,16 @@ def build_app(
             # would put a sha in the audit log for a call that wrote nothing.
             "commit": None if stage else (after or None),
             "commit_before": before or None,
-            "curated": written, "bound": curator is not None, "curation": stats,
+            # G.4.7 rule 2: `bound` is whether a model IS bound — which is
+            # what lets a console offer the later pass instead of sending an
+            # operator to repair a model that was never asked anything. It
+            # was `curator is not None`, which is the same answer on every
+            # v0.83 path and a different one on `curate: false`.
+            "curated": written, "bound": binding is not None,
+            "curation": stats,
+            **({"curate": False} if curate is False else {}),
+            **({"content": content} if content else {}),
+            **({"content_degraded": True} if degraded else {}),
         }
 
     def run_ingest_status(principal: str, forest: str,
@@ -3148,8 +3651,10 @@ def build_app(
             return e.to_dict()   # see run_primitive: not an existence question
         # Built fresh rather than read off a cached Forest attribute: an
         # adopt that just recorded a root must be visible to the next call,
-        # and this is the same loader the Gardener itself uses.
-        gardener = Gardener(vine, hooks=[])
+        # and this is the same loader the Gardener itself uses. It is also
+        # what answers `assets:` beside the source (J.19.5) — one read of
+        # `_meta/gardener.yaml`, never a second parser.
+        gardener = Gardener(vine, hooks=[], stores=store_resolver)
         recorded = str(gardener.config.get("source_root") or "").strip()
         # J.8.5 (v0.83): what this forest converts, through the SAME
         # discovery the next ingest runs — its command hooks, the extensions
@@ -3159,15 +3664,33 @@ def build_app(
         formats = supported_formats(
             gardener.config, extra=([describer] if describer else None),
             registry=_ext_registry_for(forest))
+        # J.19.5/J.19.9 (v0.84): the forest's own binding, and the names it
+        # could be bound to. ONE source per list — the console carries no
+        # store list of its own, exactly as J.8.5 gave it no format list.
+        assets = str(gardener.config.get("assets") or "").strip() or None
+        available = [s["name"] for s in registry.stores()]
+        # G.3.1: a recorded bucket is admitted by the store list, never by
+        # the host's path roots, so `can_sync` asks the right question about
+        # whichever kind of source this forest actually has.
+        if recorded and stores_mod.is_bucket_uri(recorded):
+            can_sync = _bucket_readable(recorded)
+        else:
+            can_sync = bool(recorded) and ingest_roots.check(recorded) is None
         return {
             "source": recorded or None,
             "formats": formats,
             # Both halves matter and they fail for different reasons: no
             # source at all, or a source this Station may no longer read
             # because the roots were narrowed under it.
-            "can_sync": bool(recorded) and ingest_roots.check(recorded) is None,
+            "can_sync": can_sync,
             # Whether "mirror a host folder" is worth offering at all.
             "host_paths": bool(ingest_roots.roots),
+            "assets": assets,
+            "stores": available,
+            # An expectation the deployment does not meet is named where the
+            # binding is set (J.19.5): the forest keeps working and the
+            # archive falls back, and a surface that can say so must.
+            "assets_missing": bool(assets and assets not in available),
         }
 
     # -- map projections (J.11) ---------------------------------------------
@@ -3787,12 +4310,17 @@ def build_app(
                              "has_password": registry.has_password(target)})
 
     async def admin_canopy(request: Request) -> JSONResponse:
-        """Index health and rebuild (Part K).
+        """Index health, and the build that is a job (Part K, J.13.4 v0.84).
 
-        Building is offline work by design — it re-embeds every summary — so
-        it runs on the forest thread like every other forest touch, and the
-        caller waits. A fire-and-forget build would leave the console unable
-        to say whether the index it is about to rely on exists.
+        A build embeds every node, so on a ten-thousand-node forest it is
+        ten thousand provider round trips inside the HTTP request that asked
+        for them — J.9's founding argument arriving at a different console.
+        So the POST answers 202 with a job, and it shares the ONE batch per
+        forest lock every ingest-shaped run takes: an ingest planting nodes
+        under a running build produces an index that is silently incomplete,
+        and an operator watching one batch must not be shown two.
+
+        `GET` is unchanged: status is free, and it stays synchronous.
         """
         principal, err = require_principal(request)
         if err:
@@ -3803,8 +4331,9 @@ def build_app(
             forest = body.get("forest")
         if not is_admin(principal, forest, mask=mask_of(request)):
             return _envelope(VineError(E_FORBIDDEN, "requires 'admin' on that forest"), 403)
+        building = request.method == "POST" and "enabled" not in body
 
-        def work():
+        def status_work():
             try:
                 vine = pool.get(forest)
             except VineError:
@@ -3813,43 +4342,73 @@ def build_app(
             if request.method == "POST" and "enabled" in body:
                 registry.set_setting(forest, "gauntlet", bool(body["enabled"]))
                 attach_embedder(vine, forest)
-                return {**vine.canopy_status,
-                        "enabled": registry.setting(forest, "gauntlet", True)}
-            if request.method == "POST":
-                if vine.embedder is None:
-                    return {"error": VineError(
-                        E_SCHEMA, "no embedding model is bound to this forest",
-                        hint="Bind one under Models, then build the index.").to_dict()["error"]}
-                # J.13.4: refresh embeds what changed, build embeds
-                # everything. They are not interchangeable — a model change
-                # requires the build, because a partial re-embed would leave
-                # the index in two spaces at once (K.4).
-                if body.get("refresh"):
-                    try:
-                        return {**vine.refresh_canopy(),
-                                "enabled": registry.setting(forest, "gauntlet", True)}
-                    except VineError as e:
-                        return e.to_dict()
-                vine.build_canopy()
             return {**vine.canopy_status,
-                    "enabled": registry.setting(forest, "gauntlet", True)}
+                    "enabled": registry.setting(forest, "gauntlet", True),
+                    # Read on the lane beside the status: the refusal below
+                    # is about this forest's own binding.
+                    "_embedder": vine.embedder is not None}
 
-        status = await in_forest_thread(forest, work)
+        status = await in_forest_thread(forest, status_work)
         if status is None:
             return _unknown_forest(forest)
-        if "error" in status:
-            return JSONResponse(status, status_code=400)
-        if request.method == "POST":
-            # J.6.2: reader vines hold the canopy they loaded at open; a
-            # rebuilt index reaches them by reopening, not by luck.
-            readers.reset(forest)
-            hooks.emit(forest, "canopy.built", principal,
-                       {"embedded": status.get("embedded"),
-                        "nodes": status.get("nodes"),
-                        "stale": status.get("stale"),
-                        "model": status.get("model"),
-                        "refresh": bool(body.get("refresh"))})
-        return JSONResponse(status)
+        has_embedder = bool(status.pop("_embedder", False))
+        if not building:
+            if request.method == "POST":
+                # The Gauntlet switch is a setting, not a build: it spends
+                # nothing and answers in place, exactly as it always did.
+                readers.reset(forest)
+            return JSONResponse(status)
+        if not has_embedder:
+            # Before the lock, like the scent pass's binding check: a job
+            # that would fall back on every node spends nothing and repairs
+            # nothing, and the operator would read a "done" over a forest
+            # that did not change.
+            return JSONResponse({"error": VineError(
+                E_SCHEMA, "no embedding model is bound to this forest",
+                hint="Bind one under Models, then build the index."
+            ).to_dict()["error"]}, status_code=400)
+        refresh = bool(body.get("refresh"))
+        job = board.claim(forest, CANOPY_MODE, 0, principal)
+        if job is None:
+            running = board.running(forest)
+            return _envelope(VineError(
+                E_LOCKED,
+                "an ingest job is already running on this forest"
+                + (f": {running.id}" if running else ""),
+                hint="Watch it under GET /v1/forests/{forest}/jobs, cancel "
+                     "it, or wait for it to finish."), 409)
+
+        def prepare():
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            attach_embedder(vine, forest)
+            try:
+                steps = _canopy_steps(vine, refresh)
+            except VineError as e:
+                return e.to_dict()
+            return {"_prepared": PreparedCanopy(
+                job=job, steps=steps, vine=vine, forest=forest,
+                principal=principal, refresh=refresh)}
+
+        prepared = await in_forest_thread(forest, prepare)
+        if prepared is None:
+            board.abandon(job)
+            return _unknown_forest(forest)
+        if isinstance(prepared.get("error"), dict):
+            board.abandon(job)
+            code = prepared["error"].get("code", E_SCHEMA)
+            return JSONResponse(prepared,
+                                status_code=STATUS_BY_CODE.get(code, 400))
+        prep = prepared["_prepared"]
+        job.total = getattr(prep.steps, "total", 0) or 0
+        _launch_canopy(prep)
+        return JSONResponse({"job": job.snapshot(), "refresh": refresh,
+                             # The bill, when the run can state it: a total
+                             # nobody computed is not reported as zero.
+                             **({"nodes": job.total} if job.total else {})},
+                            status_code=202)
 
     async def admin_people(request: Request) -> JSONResponse:
         """Governance shaped like a person, not like the tables (J.2.3).
@@ -4394,6 +4953,199 @@ def build_app(
         return JSONResponse(await asyncio.get_running_loop().run_in_executor(
             None, lambda: inference.probe(endpoint, key)))
 
+    # -- object stores (J.19) ------------------------------------------------
+
+    def _store_body(body: dict) -> dict:
+        """The fields a store is written from, read once so the create and
+        the update cannot disagree about them."""
+        return {
+            "endpoint": str(body.get("endpoint") or "").strip(),
+            "bucket": str(body.get("bucket") or "").strip(),
+            "prefix": str(body.get("prefix") or "").strip(),
+            "region": str(body.get("region") or "").strip(),
+            "path_style": bool(body.get("path_style")),
+            "access_key": (str(body.get("access_key") or "").strip() or None),
+            # J.19.1: `null` means keep — the only way an editor that cannot
+            # READ a value can leave it alone (J.16's rule for headers).
+            "secret_key": (str(body.get("secret_key") or "").strip() or None),
+        }
+
+    def _store_reach(principal: str, mask) -> JSONResponse | None:
+        """J.19.2: creating, changing, removing or testing a store requires
+        administering EVERY forest — any forest may bind it, and its
+        credential pays for all of them. Stated as reach and not as the
+        owner bit, so J.2.1 break-glass keeps store repair."""
+        if not governs_deployment(principal, mask):
+            return _envelope(VineError(
+                E_FORBIDDEN, "managing object stores requires authority over "
+                             "every forest",
+                hint="A store serves every forest; administering one of "
+                     "several does not cover it."), 403)
+        return None
+
+    def _audit_store(principal: str, action: str, name: str, fields: dict,
+                     result: str, extra: dict | None = None) -> None:
+        """J.4.1's row for a store: name, endpoint, bucket, prefix, whether a
+        credential was supplied — and neither the credential nor, on the
+        payload route, a presigned URL. An audit table is read by more
+        people, for longer, than anything else the Station keeps."""
+        record_governance(
+            principal, f"admin.store{action}",
+            {"store": name,
+             "endpoint": fields.get("endpoint") or "",
+             "bucket": fields.get("bucket") or "",
+             "prefix": fields.get("prefix") or "",
+             "key_supplied": bool(fields.get("secret_key")),
+             **(extra or {})},
+            result)
+
+    async def admin_stores(request: Request) -> JSONResponse:
+        """List every store, or create one (J.19.1/J.19.2)."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        mask = mask_of(request)
+        if not is_admin(principal, mask=mask):
+            return _envelope(VineError(
+                E_FORBIDDEN, "requires the 'admin' capability"), 403)
+        if request.method == "GET":
+            # Readable by any forest administrator: a forest's `assets:`
+            # binding points at these names, and the response carries
+            # `has_key` rather than any secret.
+            return JSONResponse({
+                "stores": registry.stores(),
+                # J.19.9: the card says which of the two authorities the
+                # reader holds rather than offering a control that refuses.
+                "may_manage": governs_deployment(principal, mask),
+            })
+        refusal = _store_reach(principal, mask)
+        if refusal is not None:
+            return refusal
+        try:
+            body = _json_object(await request.json())
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        name = str(body.get("name") or "").strip()
+        fields = _store_body(body)
+        try:
+            store = registry.put_store(name, **fields)
+        except ValueError as e:
+            _audit_store(principal, ".create", name, fields, "refused")
+            return _envelope(VineError(E_SCHEMA, str(e)))
+        _audit_store(principal, ".create", name, fields, "ok")
+        return JSONResponse({"store": store}, status_code=201)
+
+    async def admin_store(request: Request) -> JSONResponse:
+        """One store: changed in place, or removed (J.19.2)."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        refusal = _store_reach(principal, mask_of(request))
+        if refusal is not None:
+            return refusal
+        name = request.path_params["name"]
+        if request.method == "DELETE":
+            # Removing a store removes no binding and no byte: a binding is
+            # a line in a forest's versioned `_meta/` and a host MUST NOT
+            # rewrite a forest's content to reflect a registry change.
+            try:
+                removed = registry.delete_store(name)
+            except ValueError as e:
+                _audit_store(principal, ".remove", name, {}, "refused")
+                return _envelope(VineError(E_SCHEMA, str(e)))
+            if not removed:
+                return _envelope(VineError(E_NOT_FOUND, f"no such store: {name}"), 404)
+            _audit_store(principal, ".remove", name, {}, "ok")
+            return JSONResponse({"removed": name, "stores": registry.stores()})
+
+        try:
+            body = _json_object(await request.json())
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        existing = registry.store(name)
+        if existing is None:
+            return _envelope(VineError(E_NOT_FOUND, f"no such store: {name}"), 404)
+        fields = _store_body(body)
+        # An update that omits a field keeps what is stored; only the
+        # credential's `null` has a rule of its own (J.19.1).
+        for key in ("endpoint", "bucket", "prefix", "region"):
+            if body.get(key) is None:
+                fields[key] = existing[key]
+        if "path_style" not in body:
+            fields["path_style"] = existing["path_style"]
+        try:
+            store = registry.put_store(name, **fields)
+        except ValueError as e:
+            _audit_store(principal, ".update", name, fields, "refused")
+            return _envelope(VineError(E_SCHEMA, str(e)))
+        _audit_store(principal, ".update", name, fields, "ok")
+        return JSONResponse({"store": store})
+
+    async def admin_store_test(request: Request) -> JSONResponse:
+        """Reach the bucket, write under the prefix, remove it (J.19.3).
+
+        The probe is a WRITE: a read-only grant passes every check a listing
+        could make and fails at the first archive, at whatever hour ingest
+        runs. Audited whether it passes or is refused — it makes the server
+        open a connection to an address a caller chose.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        refusal = _store_reach(principal, mask_of(request))
+        if refusal is not None:
+            return refusal
+        name = request.path_params["name"]
+        try:
+            body = _json_object(await request.json() if await request.body() else {})
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        stored = registry.store_secret(name) or {}
+        typed = _store_body(body)
+        target = {
+            "name": name,
+            "endpoint": typed["endpoint"] or stored.get("endpoint") or "",
+            "bucket": typed["bucket"] or stored.get("bucket") or "",
+            "prefix": typed["prefix"] or stored.get("prefix") or "",
+            "region": typed["region"] or stored.get("region") or "",
+            "path_style": (typed["path_style"] if "path_style" in body
+                           else bool(stored.get("path_style"))),
+        }
+        if not target["bucket"]:
+            return _envelope(VineError(E_SCHEMA, "bucket is required"))
+        # J.3.2 custody rule 2: the stored credential belongs to the
+        # destination it was stored against. A typed endpoint or bucket that
+        # differs is a different destination — it brings its own credential
+        # or it goes with none.
+        moved = ((typed["endpoint"] and typed["endpoint"]
+                  != (stored.get("endpoint") or ""))
+                 or (typed["bucket"] and typed["bucket"]
+                     != (stored.get("bucket") or "")))
+        if typed["secret_key"]:
+            target["access_key"] = typed["access_key"]
+            target["secret_key"] = typed["secret_key"]
+        elif moved:
+            target["access_key"] = target["secret_key"] = None
+        else:
+            target["access_key"] = stored.get("access_key")
+            target["secret_key"] = stored.get("secret_key")
+        # The destination is validated before it is contacted, on the SAME
+        # variable the provider route reads: one deployment posture, and a
+        # deployment that is half-guarded is guarded by nobody. An empty
+        # endpoint is the provider's own public one — nobody typed it.
+        if target["endpoint"]:
+            guard = _reject_internal_endpoint(target["endpoint"])
+            if guard is not None:
+                _audit_store(principal, ".test", name, target, "refused")
+                return guard
+        _audit_store(principal, ".test", name, target, "ok",
+                     {"stored_key": bool(target.get("secret_key")
+                                         and not typed["secret_key"])})
+        # Off the event loop and off every forest lane: this opens sockets.
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: stores_mod.probe(target))
+        return JSONResponse(result)
+
     async def admin_models(request: Request) -> JSONResponse:
         principal, err = require_principal(request)
         if err:
@@ -4777,6 +5529,252 @@ def build_app(
             E_SCHEMA, f"unknown action: {action or '(none)'}",
             hint="One of: test, rotate, redeliver."))
 
+    # -- the forest's store binding (J.19.5) ---------------------------------
+
+    async def forest_ingest_config(request: Request) -> JSONResponse:
+        """`PUT /v1/forests/{forest}/ingest/config {assets}` (J.19.5/G.6).
+
+        The binding is the forest admin's decision and the store's existence
+        is the deployment's: two authorities, two screens — the split L.12
+        draws between installing an extension and enabling it. It writes a
+        NAME into the forest's own versioned `_meta/`, never a credential,
+        never an endpoint, and it commits it so that it travels in a
+        snapshot.
+        """
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+        if not writable:
+            return _envelope(VineError(
+                E_READONLY, "this Station is read-only",
+                hint="Start it with --writable to accept writes."), 403)
+        try:
+            body = _json_object(await request.json() if await request.body() else {})
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        if "assets" not in body:
+            return _envelope(VineError(
+                E_SCHEMA, "parameter 'assets' is required",
+                hint='The store name, or null to keep originals in the '
+                     "branch's own _assets/."))
+        assets = body["assets"]
+        if assets is not None and not isinstance(assets, str):
+            return _envelope(VineError(
+                E_SCHEMA, f"assets must be a store name or null, got "
+                          f"{type(assets).__name__}"))
+        assets = (assets or "").strip() or None
+        known = [s["name"] for s in registry.stores()]
+        if assets and assets not in known:
+            # A forest MAY expect a store the deployment does not have —
+            # that state arises when one is removed, and it is reported
+            # rather than repaired (J.19.5). Creating it by typing a name is
+            # a different thing: nothing would ever meet that expectation.
+            return _envelope(VineError(
+                E_SCHEMA, f"no store named '{assets}' is configured",
+                hint=f"Configured stores: {known}." if known else
+                     "This deployment has no object store yet."))
+
+        def work():
+            from monkeyllm.gardener import Gardener
+
+            try:
+                vine = pool.get(forest)
+            except VineError as e:
+                return e.to_dict()
+            import yaml
+
+            from monkeyllm.gitops import GitRepo
+
+            gardener = Gardener(vine, hooks=[], stores=store_resolver)
+            # Binding a store is GOVERNANCE, not ingest (J.19.5/L.12), so it
+            # is written here and not through the Gardener's own
+            # `_save_config`: that one is the ingest's record of the source
+            # it just walked, it commits under the ingest's message, and
+            # calling it from a console would persist a `source_root` this
+            # act never touched. What IS shared is the narrow `_meta` door
+            # L.12 opened (`commit_meta`, `.yaml`/`.md` under `_meta/`
+            # only), so A.3.1's `.md`-only guard on the ordinary commit path
+            # is not relaxed, and the row carries the principal who decided.
+            config = dict(gardener.config or {})
+            if assets:
+                config["assets"] = assets
+            else:
+                config.pop("assets", None)
+            path = Path(vine.forest.root) / "_meta" / "gardener.yaml"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
+                encoding="utf-8", newline="\n")
+            if (Path(vine.forest.root) / ".git").exists():
+                repo = GitRepo(Path(vine.forest.root))
+                repo.trailers = [f"station-principal: {principal}"]
+                try:
+                    repo.commit_meta([path], f"assets: {assets or 'local'}")
+                finally:
+                    repo.trailers = []
+            return {"assets": assets}
+
+        result = await in_forest_thread(forest, work)
+        if result is None:
+            return _unknown_forest(forest)
+        if isinstance(result.get("error"), dict):
+            code = result["error"].get("code", E_SCHEMA)
+            return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        record_governance(principal, "admin.forest.assets",
+                          {"assets": assets or ""}, "ok", forest=forest)
+        return JSONResponse({**result, "stores": known})
+
+    # -- the inbound trigger (J.20) ------------------------------------------
+
+    def _notify_refusal() -> JSONResponse:
+        """ONE refusal for every cause (J.20 rule 3).
+
+        An absent signature, a wrong one, a stale timestamp, an unknown
+        subscription and a removed one all answer this. A distinct refusal
+        per cause is an oracle that tells an unauthenticated caller which
+        half they got right — J.17's rule for a share token, which is the
+        other surface here that answers to a secret and not to a person.
+        """
+        return _envelope(VineError(
+            E_FORBIDDEN, "unsigned or unrecognised notification",
+            hint="Sign <timestamp>.<body> with the subscription's secret and "
+                 "send X-MonkeyLLM-Timestamp, X-MonkeyLLM-Signature and "
+                 "X-MonkeyLLM-Subscription."), 401)
+
+    async def forest_ingest_subscriptions(request: Request) -> JSONResponse:
+        """List and create the forest's inbound triggers (J.20 rule 4)."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+        if request.method == "GET":
+            return JSONResponse({
+                "subscriptions": registry.subscriptions(forest),
+                "limits": {"max_keys": notify_max_keys(),
+                           "skew_seconds": int(NOTIFY_SKEW_SECONDS),
+                           "queue_max": NOTIFY_QUEUE_MAX},
+                "url": f"/v1/forests/{forest}/ingest/notify",
+            })
+        try:
+            body = _json_object(await request.json() if await request.body() else {})
+        except json.JSONDecodeError as e:
+            return _envelope(VineError(E_SCHEMA, f"invalid JSON body: {e}"))
+        label = str(body.get("label") or "").strip()[:80] or None
+        row, secret = registry.create_subscription(
+            forest=forest, label=label, created_by=principal)
+        record_governance(principal, "admin.ingest.subscription.create",
+                          {"subscription": row["id"]}, "ok", forest=forest)
+        # Once. The console says so at the moment it shows it (J.16.4).
+        return JSONResponse({"subscription": row, "secret": secret},
+                            status_code=201)
+
+    async def forest_ingest_subscription(request: Request) -> JSONResponse:
+        """Remove one (J.20 rule 4). A removed subscription answers the same
+        refusal an unknown one does, which is the whole of its revocation."""
+        principal, err = require_principal(request)
+        if err:
+            return err
+        forest = request.path_params["forest"]
+        gate = admin_gate(principal, forest, request)
+        if gate is not None:
+            return gate
+        sub_id = request.path_params["sub"]
+        if not registry.delete_subscription(sub_id, forest):
+            return _envelope(VineError(E_NOT_FOUND, "no such subscription"), 404)
+        record_governance(principal, "admin.ingest.subscription.delete",
+                          {"subscription": sub_id}, "ok", forest=forest)
+        return JSONResponse({"deleted": sub_id})
+
+    async def forest_ingest_notify(request: Request) -> JSONResponse:
+        """`POST /v1/forests/{forest}/ingest/notify` — the reverse of J.16.
+
+        J.16 leaves the Station's authority behind and rations what it may
+        SAY; this arrives with no authority at all and rations what it may
+        CAUSE: refresh these keys of this forest's own recorded source, and
+        nothing else. No principal, no session — the signature is the whole
+        of the authority.
+        """
+        forest = request.path_params["forest"]
+        raw = await request.body()
+        sub_id = request.headers.get("x-monkeyllm-subscription") or ""
+        timestamp = request.headers.get("x-monkeyllm-timestamp") or ""
+        signature = request.headers.get("x-monkeyllm-signature") or ""
+        record = registry.subscription(sub_id)
+        if record is None or record["forest"] != forest:
+            return _notify_refusal()
+        try:
+            # The timestamp is INSIDE the signed string for J.16's reason —
+            # a captured body must not replay forever — and one outside the
+            # skew is refused whatever it signs.
+            age = abs(time.time() - float(timestamp))
+        except (TypeError, ValueError):
+            return _notify_refusal()
+        if age > NOTIFY_SKEW_SECONDS:
+            return _notify_refusal()
+        expected = webhooks.sign(record["secret"], timestamp, raw)
+        if not secrets.compare_digest(expected, signature):
+            return _notify_refusal()
+
+        try:
+            body = _json_object(json.loads(raw or b"{}"))
+        except (json.JSONDecodeError, VineError):
+            return _envelope(VineError(
+                E_SCHEMA, "the body must be a JSON object: {\"keys\": [...]}"))
+        keys = body.get("keys")
+        if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+            return _envelope(VineError(
+                E_SCHEMA, "keys must be a list of strings",
+                hint='{"keys": ["handbook/2024/onboarding.md"]}'))
+        ceiling = notify_max_keys()
+        if len(keys) > ceiling:
+            return _envelope(VineError(
+                E_SCHEMA, f"a notification carries at most {ceiling} keys, "
+                          f"got {len(keys)}",
+                hint="A notification is an event, not a backfill — a "
+                     "backfill is `sync`."))
+        offending = next((k for k in keys if stores_mod.escapes(k)), None)
+        if offending is not None:
+            # The whole request, never the one key: dropping it silently
+            # would make a mis-wired subscription permanent — the
+            # notifications keep answering 202 and nothing is refreshed.
+            return _envelope(VineError(
+                E_SCHEMA,
+                f"{len(keys)} keys, and one escapes the source: "
+                f"{offending!r}",
+                hint="A key is relative to the forest's own recorded source "
+                     "root; absolute keys and '..' are refused."))
+        registry.touch_subscription(sub_id)
+        # Audited under the subscription, never under a person (J.20): the
+        # key COUNT and no key, because a key is a path in somebody's bucket.
+        registry.record(principal=f"notify:{sub_id}", forest=forest,
+                        primitive="ingest.notify", args={"keys": len(keys)},
+                        result="ok", size=len(keys))
+        if not keys:
+            return JSONResponse({"forest": forest, "scheduled": 0},
+                                status_code=202)
+        if board.running(forest) is not None:
+            queued = _queue_notify(forest, keys)
+            return JSONResponse({"forest": forest, "queued": queued,
+                                 "pending": _pending_notify(forest)},
+                                status_code=202)
+        started = await _start_notify_sync(forest, keys)
+        if started is None:
+            # A forest that is busy after all, or one with nothing recorded:
+            # the keys are held rather than dropped, for J.20's reason.
+            queued = _queue_notify(forest, keys)
+            return JSONResponse({"forest": forest, "queued": queued,
+                                 "pending": _pending_notify(forest)},
+                                status_code=202)
+        return JSONResponse({"forest": forest, "scheduled": len(keys),
+                             "job": started.id}, status_code=202)
+
     def _job_watch_refusal(principal: str, forest: str,
                            mask: frozenset[str] | None = None
                            ) -> JSONResponse | None:
@@ -4805,6 +5803,13 @@ def build_app(
         out: dict = {"jobs": listed}
         if truncated:
             out["truncated"] = True
+        # J.20/J.9 (v0.84): what a notification is holding, beside the
+        # running job. Visible is one of the three conditions that separate
+        # this queue from the door J.9 closed — and the count of what was
+        # dropped over the bound is part of being visible.
+        pending = _pending_notify(forest)
+        if pending["keys"] or pending["dropped"]:
+            out["pending"] = pending
         return JSONResponse(out)
 
     async def job_get(request: Request) -> JSONResponse:
@@ -4896,13 +5901,14 @@ def build_app(
                 # Absence is explicit — the map keeps working (G.7).
                 return not_found
             if "://" in payload:
+                # J.14 (v0.84): a remote payload is SERVED, one of two ways,
+                # and the size decides. Resolved on the lane and fetched off
+                # it: the node's identity is a forest read, the network is
+                # not (J.10.11's split, for J.10.11's reason).
                 scheme = payload.split("://", 1)[0]
-                # Fetching on a GET would hide a network dependency inside a
-                # read (G.9); a remote region is warmed by `vine prefetch`.
-                return VineError(
-                    E_SCHEMA,
-                    f"remote payload scheme '{scheme}' is not served",
-                    hint="This surface serves local bytes only.").to_dict()
+                return {"remote": payload, "scheme": scheme,
+                        "root": str(vine.forest.root),
+                        "etag": str(node.frontmatter.get("payload_hash") or "")}
             # Relative to the node's own directory, exactly as the Gardener
             # writes it (`_assets/<name>` or a sibling `.db`) — and contained
             # after resolution, J.8.2's posture: this surface hands out file
@@ -4926,6 +5932,9 @@ def build_app(
         if isinstance(result.get("error"), dict):
             code = result["error"].get("code", E_SCHEMA)
             return JSONResponse(result, status_code=STATUS_BY_CODE.get(code, 400))
+        if result.get("remote"):
+            return await _serve_remote_payload(principal, forest, node_id,
+                                               result, request)
         # Audited like a read (J.4): who fetched which node's bytes, and how
         # many — never the bytes.
         registry.record(principal=principal, forest=forest, primitive="payload",
@@ -4945,6 +5954,141 @@ def build_app(
                       or "application/octet-stream")
         return FileResponse(result["path"], media_type=media_type,
                             headers=headers)
+
+    def _asks_for_json(request: Request) -> bool:
+        """J.14 rule 5: did the caller ASK for the URL instead of the bytes?
+
+        Explicitly, never by wildcard. A browser and a bare `curl` both send
+        `*/*`, and answering them JSON would replace the download with a
+        document about the download for everybody who did not ask.
+        """
+        accept = request.headers.get("accept") or ""
+        return any(part.split(";", 1)[0].strip().lower() == "application/json"
+                   for part in accept.split(","))
+
+    def _remote_not_found(node_id: str) -> dict:
+        """J.3's invariant: out-of-scope, absent and payload-less are ONE
+        envelope, and a remote payload the store does not hold is the same
+        absent payload a missing local file is."""
+        return VineError(E_NOT_FOUND, f"node not found: {node_id}",
+                         hint="Use locate() to find entry points.").to_dict()
+
+    async def _serve_remote_payload(principal: str, forest: str, node_id: str,
+                                    resolved: dict, request: Request):
+        """A remote payload, proxied under the ceiling and redirected over it
+        (J.14, v0.84).
+
+        Refusing it made an object store the place a document goes to become
+        unreachable from the console that ingested it. Everything here runs
+        OFF the forest's lane: a lane held for a multi-megabyte download is
+        every other read of that forest waiting behind it (J.10.11).
+
+        Every byte-moving decision is the engine's — `remote_size` for the
+        HEAD, `PayloadCache` for the fetch, `presign` for the URL — so the
+        refusal a reader gets here is the one `view` and the CLI get for the
+        same node, and the bucket lookup has one implementation.
+        """
+        from monkeyllm import fetch
+
+        uri = resolved["remote"]
+        etag = resolved.get("etag") or ""
+        ceiling = payload_proxy_max_bytes()
+        loop = asyncio.get_running_loop()
+
+        def measure():
+            # G.9: a bucket no store serves raises E_NOT_FOUND naming the
+            # bucket — reachable only for a node this caller already holds,
+            # which is what keeps it from being an existence oracle.
+            return fetch.remote_size(uri, stores=store_resolver)
+
+        try:
+            size = await loop.run_in_executor(None, measure)
+        except VineError as e:
+            return _envelope(e)
+        except Exception as e:  # noqa: BLE001 — the store, not this Station
+            # An outage is not an absence: answering `E_NOT_FOUND` would tell
+            # an operator their payload is gone, which is the one wrong thing
+            # to say here. The type, and nothing else — not the key, not the
+            # endpoint, not the bucket's credentials.
+            return _envelope(VineError(
+                E_INTERNAL, f"the object store did not answer "
+                            f"({type(e).__name__})",
+                hint="The map is intact; the bytes are behind a store that "
+                     "is refusing or unreachable."), 502)
+        if size is None:
+            return JSONResponse(_remote_not_found(node_id), status_code=404)
+
+        if size > ceiling:
+            if not fetch.can_presign(uri):
+                # A scheme with no presigned form is proxied or refused —
+                # never given an invented redirect, which would hand out an
+                # unauthenticated URL.
+                scheme = resolved.get("scheme") or "remote"
+                return _envelope(VineError(
+                    E_SCHEMA,
+                    f"a {scheme}:// payload over the proxy ceiling is not served",
+                    hint=f"{PAYLOAD_PROXY_MAX_MB_ENV} is "
+                         f"{ceiling // (1024 * 1024)} MB; raise it to proxy "
+                         f"this object."))
+            ttl = payload_presign_ttl()
+            try:
+                url = await loop.run_in_executor(
+                    None, lambda: fetch.presign(uri, ttl, stores=store_resolver))
+            except VineError as e:
+                return _envelope(e)
+            # The row says the node, the byte count the HEAD reported, and
+            # that the bytes were redirected rather than served. NEVER the
+            # signed URL: a signature is a credential in the URL's tail,
+            # which is why J.16 audits a webhook by destination host alone.
+            # The row says the same thing whichever line the URL leaves on:
+            # the fact recorded is that this principal was handed the bytes'
+            # address rather than the bytes, and `Accept:` is a rendering
+            # choice, not a different act.
+            registry.record(principal=principal, forest=forest,
+                            primitive="payload",
+                            args={"node": node_id, "redirect": True},
+                            result="ok", size=size)
+            no_store = "private, no-store"
+            if _asks_for_json(request):
+                # J.14 rule 5: the same URL, minted once, on a second line.
+                # It exists because both obvious alternatives fail for a
+                # console: J.5.13 pins the page to `connect-src 'self'`, so
+                # a credentialed fetch cannot follow a 302 to a store's
+                # origin, and a bare link to this route is a top-level
+                # navigation carrying no credential — J.2 authenticates by
+                # header and never by cookie — so it would answer 401 to
+                # everyone.
+                expires = datetime.now(timezone.utc) + timedelta(seconds=ttl)
+                return JSONResponse(
+                    {"url": url,
+                     "expires_at": expires.isoformat().replace("+00:00", "Z")},
+                    headers={"Cache-Control": no_store})
+            return Response(status_code=302, headers={
+                "Location": url, "Cache-Control": no_store})
+
+        def fetch_bytes():
+            cache = fetch.PayloadCache(Path(resolved["root"]) / "_derived",
+                                       stores=store_resolver)
+            return cache.get(uri, etag or None)
+
+        try:
+            path = await loop.run_in_executor(None, fetch_bytes)
+        except VineError:
+            # A hash mismatch, an unreachable object, a scheme with no
+            # fetcher: to the reader all of them are the absent payload a
+            # missing local file already is.
+            return JSONResponse(_remote_not_found(node_id), status_code=404)
+        registry.record(principal=principal, forest=forest, primitive="payload",
+                        args={"node": node_id}, result="ok", size=size)
+        headers = {"Cache-Control": "private"}
+        if etag:
+            headers["ETag"] = etag
+            if request.headers.get("if-none-match") == etag:
+                return Response(status_code=304, headers=headers)
+        media_type = (mimetypes.guess_type(str(path))[0]
+                      or mimetypes.guess_type(uri)[0]
+                      or "application/octet-stream")
+        return FileResponse(path, media_type=media_type, headers=headers)
 
     async def forest_export(request: Request):
         """`GET /v1/forests/{forest}/export/{node}`: the document as
@@ -5621,8 +6765,9 @@ def build_app(
                    {"nodes": result["nodes"], "ms": result["ms"]})
         return JSONResponse(result)
 
-    async def recurate_scent(principal: str, forest: str,
-                             policy) -> JSONResponse:
+    async def recurate_scent(principal: str, forest: str, policy,
+                             order: str | None = None,
+                             limit: int | None = None) -> JSONResponse:
         """`derive: ["scent"]` — re-curate the scent with the ingest model
         (J.13.6.1). Reached only through `admin_recurate`, which has already
         decided admin, writability and the unrestricted scope (rule 6).
@@ -5675,10 +6820,22 @@ def build_app(
                 return VineError(E_SCHEMA,
                                  "the ingest binding could not be opened").to_dict()
             gardener = Gardener(
-                vine, hooks=[curator],
+                vine, hooks=[curator], stores=store_resolver,
                 on_stage=lambda f, st: board.note_stage(job, f, st))
             try:
-                steps = gardener.recurate_scent_iter()
+                # J.13.6.1 rules 8-9 (v0.84): the order is chosen and the run
+                # is bounded. A call that names neither is byte-identical to
+                # v0.75's — including the iterator construction, which is
+                # why the arguments are ASSEMBLED rather than passed as
+                # defaults: `recurate_scent_iter()` is the call v0.75 made,
+                # and an unbounded pass must still be exactly it.
+                scope = {}
+                if order:
+                    scope["order"] = order
+                if limit:
+                    scope["limit"] = limit
+                steps = (gardener.recurate_scent_iter(**scope) if scope
+                         else gardener.recurate_scent_iter())
             except VineError as e:
                 return e.to_dict()
             return {"_prepared": PreparedRecurate(
@@ -5703,8 +6860,15 @@ def build_app(
         # the job, because it is also the number of model calls the operator
         # is about to pay for. J.10.8's rule applied to a batch — the budget
         # is said whatever chose it.
+        # Rule 9: with a cap the number IS the cap and never the scope —
+        # stating the scope would be quoting a price nobody is being
+        # charged. `remaining` rides the report, so a second run is a
+        # decision rather than a guess.
         return JSONResponse({"job": job.snapshot(), "nodes": job.total,
-                             "derive": ["scent"]}, status_code=202)
+                             "derive": ["scent"],
+                             **({"order": order} if order else {}),
+                             **({"limit": limit} if limit else {})},
+                            status_code=202)
 
     async def admin_recurate(request: Request) -> JSONResponse:
         """Re-derive what ingest derives, from the passports (J.13.6).
@@ -5762,7 +6926,25 @@ def build_app(
                     hint="`aliases` is passport arithmetic and the caller "
                          "waits for it; `scent` is one model call per node "
                          "and answers with a job. Send them as two calls."))
-            return await recurate_scent(principal, forest, policy)
+            order = body.get("order")
+            if order is not None and order not in ("created", "heat"):
+                return _envelope(VineError(
+                    E_SCHEMA, f"unknown order: {order!r}",
+                    hint="One of: created (oldest first, the default), heat "
+                         "(hottest first)."))
+            limit = body.get("limit")
+            if limit is not None:
+                try:
+                    limit = int(limit)
+                except (TypeError, ValueError):
+                    limit = -1
+                if limit <= 0:
+                    return _envelope(VineError(
+                        E_SCHEMA, "limit must be a positive integer",
+                        hint="It is the number of nodes the pass visits, "
+                             "which is the number of model calls billed."))
+            return await recurate_scent(principal, forest, policy,
+                                        order=order, limit=limit)
 
         def work():
             from monkeyllm.gardener import Gardener
@@ -5776,7 +6958,7 @@ def build_app(
                 # J.4: the principal rides the commits this pass writes,
                 # exactly as it rides a scoped write.
                 vine.commit_trailers = [f"station-principal: {principal}"]
-                out = Gardener(vine).recurate(derive)
+                out = Gardener(vine, stores=store_resolver).recurate(derive)
             except VineError as e:
                 return e.to_dict()
             finally:
@@ -6528,7 +7710,8 @@ def build_app(
             except VineError as e:
                 return e.to_dict()
             staging = Path(vine.forest.root).joinpath(*UPLOAD_DIR)
-            unrecorded = Gardener(vine, hooks=[]).unrecorded_sources(staging)
+            unrecorded = Gardener(vine, hooks=[],
+                                  stores=store_resolver).unrecorded_sources(staging)
             total = sum(size for _, size in unrecorded)
             out = {"forest": forest,
                    "unrecorded": len(unrecorded),
@@ -6788,9 +7971,21 @@ def build_app(
             try:
                 # Part I (v0.74): payloads travel unless the caller says
                 # otherwise. A default that loses data is not a default.
+                # Part I (v0.84): `with_remote` packs the objects a store
+                # holds. Default FALSE — the bytes are already in a store
+                # designed to keep them, and a container that silently
+                # pulled a terabyte would be a backup nobody can take. What
+                # the default does NOT do is stay silent: `create` reports
+                # `payloads_remote` beside `payloads_omitted`.
                 return create_snapshot(
                     Path(vine.forest.root), out=out,
-                    with_payloads=body.get("with_payloads", True) is not False)
+                    with_payloads=body.get("with_payloads", True) is not False,
+                    with_remote=bool(body.get("with_remote")),
+                    # J.19.8: packing a remote object is a READ of a store,
+                    # so it resolves by bucket like every other one. Without
+                    # the resolver `--with-remote` would report every object
+                    # unreachable on a deployment that serves them all.
+                    stores=store_resolver)
             except VineError as e:
                 return e.to_dict()
 
@@ -6810,7 +8005,10 @@ def build_app(
         return JSONResponse({"name": Path(result["snapshot"]).name,
                              "bytes": result["bytes"],
                              "payloads": result.get("payloads"),
-                             "payloads_omitted": result.get("payloads_omitted")})
+                             "payloads_omitted": result.get("payloads_omitted"),
+                             **{k: result[k] for k in
+                                ("payloads_remote", "remote_packed")
+                                if result.get(k) is not None}})
 
     async def admin_snapshot_file(request: Request):
         """One bundle or sidecar, streamed out (J.13.1).
@@ -6954,7 +8152,13 @@ def build_app(
                 try:
                     return restore_snapshot(
                         paths["bundle"], target,
-                        payload_sidecar=paths.get("payloads"))
+                        payload_sidecar=paths.get("payloads"),
+                        # Part I (v0.84): `buckets_unserved` is the count of
+                        # nodes whose bucket THIS deployment has no store
+                        # for, which is a question only the resolver can
+                        # answer. Without it every remote payload would be
+                        # reported unserved on a Station that serves it.
+                        stores=store_resolver)
                 except VineError as e:
                     shutil.rmtree(target, ignore_errors=True)
                     return e.to_dict()
@@ -6994,6 +8198,14 @@ def build_app(
                              "nodes": result.get("nodes"),
                              "payloads": result.get("restored_payloads"),
                              "payloads_missing": result.get("payloads_missing"),
+                             # Part I (v0.84): a remote payload is a third
+                             # state and it is counted. Passed through as
+                             # the engine names it and emitted only when it
+                             # answered — an older restore makes no claim
+                             # about a tier it did not know about.
+                             **{k: result[k] for k in
+                                ("remote_restored", "buckets_unserved")
+                                if result.get(k) is not None},
                              "grants": registry.grants_of(principal)})
 
     # One instance: `/s/{token}` renders the same shell without going
@@ -7097,6 +8309,15 @@ def build_app(
         Route("/v1/admin/audit", admin_audit),
         Route("/v1/admin/providers", admin_providers, methods=["GET", "POST"]),
         Route("/v1/admin/providers/test", admin_provider_test, methods=["POST"]),
+        # J.19 (v0.84): object stores. Listing is any administrator's;
+        # creating, changing, removing and testing need authority over every
+        # forest, because any forest may bind one and its credential pays
+        # for all of them.
+        Route("/v1/admin/stores", admin_stores, methods=["GET", "POST"]),
+        Route("/v1/admin/stores/{name}", admin_store,
+              methods=["PUT", "DELETE"]),
+        Route("/v1/admin/stores/{name}/test", admin_store_test,
+              methods=["POST"]),
         Route("/v1/admin/models", admin_models, methods=["GET", "POST"]),
         Route("/v1/admin/health", admin_health),
         Route("/v1/admin/cache", admin_cache, methods=["GET", "POST"]),
@@ -7132,6 +8353,19 @@ def build_app(
         # Jobs before the generic pair: `/jobs` is a literal, and the
         # `{kind}` GET below would otherwise swallow it (J.9).
         Route("/v1/forests/{forest}/jobs", jobs_list, methods=["GET"]),
+        # J.19.5 / J.20 (v0.84): the forest's own ingest governance. Before
+        # the generic `{kind}`/`{primitive}` pair by the ordering rule, not
+        # by the accident that these carry more than one segment.
+        Route("/v1/forests/{forest}/ingest/config", forest_ingest_config,
+              methods=["PUT"]),
+        Route("/v1/forests/{forest}/ingest/subscriptions",
+              forest_ingest_subscriptions, methods=["GET", "POST"]),
+        Route("/v1/forests/{forest}/ingest/subscriptions/{sub}",
+              forest_ingest_subscription, methods=["DELETE"]),
+        # The one surface in Part J with no principal: the signature is the
+        # whole of the authority (J.20).
+        Route("/v1/forests/{forest}/ingest/notify", forest_ingest_notify,
+              methods=["POST"]),
         Route("/v1/forests/{forest}/webhooks", forest_webhooks,
               methods=["GET", "POST"]),
         Route("/v1/forests/{forest}/webhooks/{hook}", forest_webhook,
@@ -7249,6 +8483,10 @@ def build_app(
                     middleware=[Middleware(SecurityHeaders, csp=studio_csp())])
     app.state.pool = pool
     app.state.registry = registry
+    # J.19.8: the one seam the engine is handed. Exposed so a host-side
+    # tool reads the SAME resolver the forests were opened with, never a
+    # second one built from the same table.
+    app.state.stores = store_resolver
     # Part L (v0.80): every installed extension, loaded ONCE. Installing
     # requires a restart (L.8), so the loaded set is fixed for the life of
     # this process and enablement is a use-time question, not a load-time

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
+import { WATCH, noteJob, useAttend, useBoard } from '../board.js'
 import {
   Badge, Card, Combobox, Empty, ErrorNote, Field, Note, Select, Skeleton,
   Spinner, Table, Td, Toggle,
@@ -410,7 +411,17 @@ function Gauntlet({ forest, providers, binding, catalogue, loadCatalogue,
   const { t } = useI18n()
   const [form, setForm] = useState({ provider: '', model: '' })
   const [building, setBuilding] = useState(false)
-  const status = useAsync(() => api.canopy(forest), [forest])
+  /* J.13.4 (v0.84): a build is a J.9 job. It embeds every node, so on a
+     ten-thousand-node forest the synchronous shape was a request no gateway
+     on the path is patient enough to hold — and the operator's answer was a
+     timeout over work that was still running. The board is the one the
+     ingest console and the pill already read; this card only has to find
+     its own run on it and follow it. */
+  const board = useBoard(forest)
+  const job = board.jobs.find((j) => j.mode === 'canopy') || null
+  const running = job?.state === 'running'
+  useAttend(forest, WATCH, running)
+  const status = useAsync(() => api.canopy(forest), [forest, job?.state])
   const enabled = status.data?.enabled !== false
 
   async function toggle(next) {
@@ -444,8 +455,16 @@ function Gauntlet({ forest, providers, binding, catalogue, loadCatalogue,
 
   async function build() {
     setBuilding(true)
-    try { await api.buildCanopy(forest); status.reload() }
-    catch (err) { onError(err) } finally { setBuilding(false) }
+    try {
+      const started = await api.buildCanopy(forest)
+      // The job goes on the board first-hand, so the pill announces it on
+      // every console and the watcher takes over — the operator is free to
+      // leave this page, which is the whole reason jobs exist. An older
+      // Station answers the status synchronously and is not called a
+      // failure for it.
+      if (started?.job) noteJob(forest, started.job)
+      status.reload()
+    } catch (err) { onError(err) } finally { setBuilding(false) }
   }
 
   return (
@@ -489,13 +508,45 @@ function Gauntlet({ forest, providers, binding, catalogue, loadCatalogue,
         <div className="mt-3"><Note tone="warn">{t('gauntlet.mismatch')}</Note></div>
       )}
 
+      {/* The run, while it is running: done over total off the job record,
+          never a spinner that says only that something is happening. The
+          cancel is the job's own (the pill and the Ingest console carry it),
+          so this card follows and does not duplicate it. */}
+      {running && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between text-[12.5px]">
+            <span className="font-medium text-text">
+              {t('gauntlet.job_progress', { done: job.done || 0,
+                                            total: job.total || 0 })}
+            </span>
+            <span className="text-text-3">
+              {Math.min(100, Math.round(((job.done || 0)
+                                         / Math.max(job.total || 0, 1)) * 100))}%
+            </span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-2">
+            <div className="h-full rounded-full bg-accent transition-[width] duration-500"
+                 style={{ width: `${Math.min(100, Math.round(((job.done || 0)
+                   / Math.max(job.total || 0, 1)) * 100))}%` }} />
+          </div>
+        </div>
+      )}
+      {/* J.13.4: a cancelled build is not resumable in v0.84 — the forest
+          keeps the index it had, and the next build starts over and pays
+          again. An index in two states is worse than no index, and a
+          half-built one would be indistinguishable from a complete index
+          over a smaller forest. */}
+      {job?.state === 'cancelled' && (
+        <div className="mt-3"><Note tone="warn">{t('gauntlet.build_cancelled')}</Note></div>
+      )}
+
       <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3
                       border-t border-line pt-4">
         <Toggle checked={enabled} onChange={toggle}
                 label={t('gauntlet.enabled')} hint={t('gauntlet.enabled_hint')} />
         <button type="button" className="btn ml-auto" onClick={build}
-                disabled={building || !binding}>
-          {building ? <Spinner label={t('gauntlet.building')} />
+                disabled={building || running || !binding}>
+          {building || running ? <Spinner label={t('gauntlet.building')} />
                     : status.data?.vectors ? t('gauntlet.rebuild') : t('gauntlet.build')}
         </button>
       </div>

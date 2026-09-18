@@ -12,7 +12,7 @@ transcriber, a converter for a format nobody here has heard of, an OCR
 pass, a tool your agents can call. That is an **extension** (spec Part L),
 and it is what most of this page is about.
 
-`docs/monkeyllm-spec-v0.83.md` is the normative contract; nothing here
+`docs/monkeyllm-spec-v0.84.md` is the normative contract; nothing here
 overrides it.
 
 ---
@@ -73,6 +73,61 @@ named in the trace, because an operator comparing a bad answer against a
 good one has no other way to learn a third party was between them),
 `roles` (a model role you register) and `panel` (your console surface).
 
+## When a converter should return a tree
+
+A converter may answer `kind: "tree"` — the document's own front matter
+plus its parts, in order — and the Gardener plants a branch and a node per
+part (spec G.2.8). It exists because the size at which a document stops
+being findable is a property of the document, and the converter is the only
+party that has read it. Three questions, in order:
+
+**Is it big enough to be worth it?** Below about 3,000 tokens — roughly
+12,000 characters — do not cut. `pick` returns a body of up to 4,000 tokens
+in one call, so a document under that ceiling is read whole by an agent that
+found it, and splitting it buys nothing while spending a branch, a summary
+per part and one curation call per part. Above it, a single 60-token summary
+is being asked to stand for material a reader cannot see; that is the point
+where granularity starts paying.
+
+**Where does the document say it divides?** In order of preference:
+
+1. **Its own bookmarks or outline.** A PDF's bookmark tree, a `.docx`'s
+   heading-1 structure, an EPUB's spine: the author already decided where
+   the parts are, and reading that decision is not the converter inventing
+   one. Take the top level, and take the second level only when the top
+   level yields fewer than two parts.
+2. **Detected headings.** Where there is no outline, the formatting usually
+   still says: a line that is larger, bolder, numbered (`1.`, `1.1`,
+   `Chapter 7`) or alone on its page. This is a heuristic, so hold it to a
+   standard — a part that is one line long is not a part, and a "chapter"
+   detector that produces 400 of them for a 200-page book has detected
+   something else.
+3. **Windows of N pages.** The honest fallback for a scanned or unstructured
+   document: fixed windows (say 10 pages), titled by their range, with the
+   page numbers in the title so a reader knows where they are. A window is a
+   worse cut than a chapter and a far better one than no cut at all — and it
+   is legible, which a wrong chapter boundary is not.
+
+**What goes in `markdown`, the branch's own body?** The front matter of the
+document: its header line, its provenance (name, size, page count), its
+outline if it has one, an abstract if it prints one. Not the content — the
+parts are the content — and nothing that repeats on every part. Keep it
+short: it is a branch body, and a branch above 3,000 tokens is flagged for
+splitting like any other.
+
+Three practical notes:
+
+- **Never emit a one-child tree.** It is refused. If the cut found nothing,
+  return `kind: "markdown"` — a document that is one node is allowed to be
+  one node.
+- **Give every part a real title.** It becomes the child's title and its id
+  slug, and after ingest it is what a reader chooses between. `Part 3` is a
+  legal title and a wasted one; `3. Provisioning the cluster` is the same
+  cut with a scent.
+- **The order is yours and it is load-bearing.** The Gardener numbers the
+  parts in the order you hand them over and links them with `succeeds`, so
+  the list you return is the order a reader will walk. Do not sort it.
+
 ## Four rules that will refuse you
 
 1. **A handler must fit its seam.** A parameter the seam does not pass is
@@ -102,6 +157,17 @@ something the host already knows how to make.
 A worked example ships in this repository: [`extensions/whisper`](../extensions/whisper)
 turns an audio file into a transcript the forest can search, in about 130
 lines, with **no `requirements.txt` at all**.
+
+**Your settings travel with the call (v0.84).** A heavy handler used to
+receive its arguments and nothing else, which is why extensions written
+against the older protocol read their knobs from environment variables and
+declared an empty `config` block. Declare a `config` parameter on the
+handler — `def convert(path, config): ...` — and the request carries your
+manifest's defaults overlaid with the operator's stored values, resolved at
+call time, so a change made in the console reaches the next call without a
+restart. A handler that does not declare it is called exactly as before.
+Anything you declared as a secret reaches the worker and nothing else: not a
+log, not a report, not an audit row, not a crash trace.
 
 ## Installing what you wrote
 

@@ -236,10 +236,19 @@ export const Puzzle = (p) => (
   </S>
 )
 
+/* Something arriving from outside, into a tray (J.20). The mirror of the
+   Webhook above and drawn as its opposite on purpose: that one fans out
+   from a source, this one comes down into one. The two live side by side
+   in the Build group and a reader must be able to tell which direction a
+   console is about without reading its name. */
+export const Inbox = (p) => (
+  <S {...p}><path d="M4 13.5V18a2 2 0 002 2h12a2 2 0 002-2v-4.5h-4.2a2 2 0 00-1.8 1.1 2 2 0 01-1.8 1.1h-.4a2 2 0 01-1.8-1.1 2 2 0 00-1.8-1.1z" /><path d="M12 3v7M9 7.2l3 3 3-3" /></S>
+)
+
 export const CONSOLE_ICON = {
   overview: Overview, ask: Ask, explore: Explore, read: Book,
   playground: Playground,
   data: Data, skills: Sparkle, ingest: Ingest, models: Models, people: Users,
   audit: Audit, integrations: Plug, health: Health, webhooks: Webhook,
-  links: Link, extensions: Puzzle,
+  links: Link, extensions: Puzzle, notify: Inbox,
 }

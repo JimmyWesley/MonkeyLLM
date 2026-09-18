@@ -9,8 +9,9 @@ the binary: the screenshot a console shows, the `.db` a browser saves.
 What is load-bearing here is the discipline around the bytes: out-of-scope,
 absent and payload-less answer ONE byte-identical envelope (no existence
 oracle), a payload resolving outside the forest root is refused rather than
-followed, and a remote URI is `E_SCHEMA` — fetching on a GET would hide a
-network dependency inside a read.
+followed, and — since v0.84 — a remote URI is served through the G.9 cache
+under the proxy ceiling and redirected over it, with a bucket no store
+serves answering the one refusal that names a repair somebody can perform.
 """
 
 from __future__ import annotations
@@ -190,16 +191,23 @@ def test_a_payload_escaping_the_forest_is_refused_never_followed(station):
     assert "escapes the forest" in r.json()["error"]["message"]
 
 
-def test_a_remote_payload_uri_is_schema_naming_the_scheme(station):
+def test_a_remote_payload_on_an_unserved_bucket_names_the_bucket(station):
+    """v0.84 (J.14/G.9) replaces v0.48's blanket refusal: a remote payload
+    is SERVED, and the one thing that stops it is having no credential for
+    its bucket. That refusal is reachable only for a node the caller
+    already holds — scope and existence decided first — which is why it may
+    name the bucket, and it names nothing else: not the key, not the
+    endpoint, not a store."""
     client, registry, forest_dir = station
     head = _key(registry, caps=("read", "write"))
     _plant_media(client, head, forest_dir, "notes/f49-remote",
                  "s3://bucket/x")
 
     r = _get(client, head, "notes/f49-remote")
-    assert r.status_code == 400, r.text
-    assert r.json()["error"]["code"] == "E_SCHEMA"
-    assert "s3" in r.json()["error"]["message"]
+    assert r.status_code == 404, r.text
+    assert r.json()["error"]["code"] == "E_NOT_FOUND"
+    assert "bucket" in r.json()["error"]["message"]
+    assert "/x" not in r.json()["error"]["message"]
 
 
 def test_bytes_missing_on_disk_answer_the_not_found_envelope(station):

@@ -29,7 +29,7 @@ import tempfile
 import unicodedata
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Protocol
 
 import yaml
@@ -42,10 +42,16 @@ from monkeyllm.models import (
     validate_tag,
 )
 from monkeyllm.parser import (
-    append_section, extract_section, replace_section, serialize_node,
+    HEADER_RE, append_section, extract_section, replace_section,
+    serialize_node,
 )
+from monkeyllm.fetch import (
+    STORE_TIMEOUT_S, head_object, put_object, resolve_store,
+)
+from monkeyllm.links import rewrite_link
+from monkeyllm.sources import is_bucket_source, open_bucket_source
 from monkeyllm.tokens import estimate_tokens
-from monkeyllm.vine import Vine
+from monkeyllm.vine import MAX_BATCH_PLANT, Vine
 
 GARDENER_CONFIG = "gardener.yaml"  # lives in _meta/ (not a node: non-.md)
 FOREST_MARKER = "_index.md"  # A.5: what makes a directory a forest root
@@ -70,13 +76,122 @@ PAYLOAD_TYPE_BY_EXT = {
     ".webp": "image",
     ".mp3": "audio", ".wav": "audio", ".m4a": "audio", ".ogg": "audio",
     ".flac": "audio",
+    # A.3/G.5.1 (v0.84): a recording was typed `document` for one reason —
+    # the enum had no word for it.
+    ".mp4": "video", ".m4v": "video", ".mkv": "video", ".mov": "video",
+    ".webm": "video", ".avi": "video", ".mpg": "video", ".mpeg": "video",
 }
 
-# G.5.1: the extensions the media stub claims — exactly the image and audio
-# halves of PAYLOAD_TYPE_BY_EXT, kept as named sets because the typing rule
-# and the staging-archive rule test the same membership.
+# G.5.1: the extensions the media stub claims — exactly the image, audio and
+# (v0.84) video halves of PAYLOAD_TYPE_BY_EXT, kept as named sets because the
+# typing rule and the staging-archive rule test the same membership.
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac"}
+VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mkv", ".mov", ".webm", ".avi",
+                    ".mpg", ".mpeg"}
+
+# G.5.1's typing rule, in ONE predicate: image, audio and video sources are
+# `media` whatever the converter handed back. Both the adopt path and the
+# refresh path read it, because two spellings of one membership test is how
+# the v0.78 archive rule nearly diverged.
+MEDIA_PAYLOAD_TYPES = ("image", "audio", "video")
+
+
+def is_media_ext(ext: str) -> bool:
+    return PAYLOAD_TYPE_BY_EXT.get(str(ext).lower()) in MEDIA_PAYLOAD_TYPES
+
+
+# G.2.8 rule 2 (v0.84): how many parts one document may become. The hard
+# ceiling is 999 and not a preference: rule 4 fixes the id padding at three
+# digits so that a tree's order IS its id order for the life of the forest
+# (ids are immutable, so they cannot be widened afterwards), and 1000 parts
+# would need a fourth. 200 is the working default — a converter that cuts a
+# document into more than that has probably detected something other than
+# chapters.
+TREE_CHILDREN_MAX = 200
+TREE_CHILDREN_CEILING = 999
+TREE_PART_WIDTH = 3
+
+# G.2.8 rule 5: the A.5 headings a document's own front matter must not be
+# able to capture. `parser.extract_section` matches case-insensitively, at
+# any level, exact first and then BY PREFIX, taking the first match — so a
+# document heading named like one of these captures the index's own entries,
+# silently.
+INDEX_SECTIONS = (indexer.SUBBRANCH_SECTION, indexer.BANANAS_SECTION,
+                  "Cross trails")
+
+# G.3.1 rule 6 (v0.84): where an object downloaded from a bucket waits while
+# it is converted. A SIBLING of the Station's `_derived/uploads/` and never
+# the same directory: J.13.7 asks one question of a staging area — which
+# files no live passport records — and the two have opposite answers. An
+# upload's unrecorded bytes are the only copy in existence and are the
+# evidence of a batch that failed; a bucket download's are a cache of
+# something the store still holds.
+STAGING_DIR = ("_derived", "staging")
+
+# G.3.2 (v0.84): how many DIRECT files a source directory or prefix may hold
+# before `adopt` groups them into sub-branches. A source tree mirrors
+# one-to-one, so a flat prefix of ten thousand keys mirrors into one branch
+# with ten thousand direct children; A.5 flags `needs_split` at 150, which is
+# advice to a Ranger that never splits anything, so it fires 9,850 entries
+# too late to prevent anything. `0` disables the mechanism for an operator
+# who would rather have the flat mirror and the wall.
+BUCKET_ABOVE_ENV = "MONKEYLLM_ADOPT_BUCKET_ABOVE"
+BUCKET_ABOVE_DEFAULT = 200
+
+# The three rules, in the order they are tried — by how much the material
+# itself said. `initial` always terminates, which is why it is last and why
+# it is used anyway when nothing splits to size (G.3.2 rule 2).
+BUCKET_RULES = ("name-prefix", "year-month", "initial")
+
+
+def bucket_above() -> int:
+    try:
+        return max(0, int(os.environ.get(BUCKET_ABOVE_ENV,
+                                         BUCKET_ABOVE_DEFAULT)))
+    except (TypeError, ValueError):
+        return BUCKET_ABOVE_DEFAULT
+
+
+def _group_key(rule: str, name: str, created: str) -> str:
+    """Which group one file's name (and date) puts it in."""
+    if rule == "name-prefix":
+        return re.split(r"[-_.]", name, maxsplit=1)[0] or "other"
+    if rule == "year-month":
+        return (created or "")[:7] or "undated"
+    first = (slugify(Path(name).stem) or "other")[:1]
+    return first if first.isalnum() else "other"
+
+
+def choose_bucketing(names: list[str], created: dict[str, str],
+                     above: int) -> str | None:
+    """The first of the three rules that yields groups of at most `above`.
+
+    Rule a additionally requires at least two groups and no group of one: a
+    corpus that encodes its own grouping (`invoice_…`, `2024Q1-…`) is
+    telling us where it wants to sit, and a name somebody chose beats a name
+    we invent — but a "grouping" that gives every file its own branch is not
+    one. If NO rule fits, the last is used anyway (rule 2): ten thousand
+    files all beginning with `2024` is a real corpus, and refusing to adopt
+    it would be refusing the case this section was written for. The wall that
+    catches what grouping could not is A.5's rendering cap, which is why the
+    two ship together.
+    """
+    if above <= 0 or len(names) <= above:
+        return None
+    for rule in BUCKET_RULES:
+        groups: dict[str, int] = {}
+        for name in names:
+            key = _group_key(rule, name, created.get(name, ""))
+            groups[key] = groups.get(key, 0) + 1
+        if len(groups) < 2:
+            continue
+        if max(groups.values()) > above:
+            continue
+        if rule == "name-prefix" and min(groups.values()) < 2:
+            continue
+        return rule
+    return BUCKET_RULES[-1]
 
 
 # ===========================================================================
@@ -85,16 +200,23 @@ AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac"}
 
 @dataclass
 class Conversion:
-    """What a converter hands back: markdown, a dataset description, or —
-    for a format the forest already speaks — the payload itself (G.2.2).
+    """What a converter hands back: markdown, a dataset description, the
+    payload itself for a format the forest already speaks (G.2.2), or — as
+    of v0.84 — a TREE (G.2.8).
 
     `tables`/`samples`/`counts` describe a `payload` conversion for the
     G.2.3 map: the structure read from the source, three rows per table,
     and the row counts. They are never the data — a payload conversion
     reads the shape of a database, never the whole of it.
+
+    `children` describes a `tree`: the document's own front matter is
+    `markdown` and its parts are `children`, in the document's order. Where
+    a document divides is the converter's decision and never the engine's —
+    dividing it requires knowing the format and usually the subject, and
+    this package carries no content vocabulary, not even in a hint.
     """
 
-    kind: str  # "markdown" | "dataset" | "payload"
+    kind: str  # "markdown" | "dataset" | "payload" | "tree"
     title: str
     markdown: str = ""
     schema: dict | None = None          # C.7.1 declarative schema
@@ -102,6 +224,8 @@ class Conversion:
     tables: dict[str, dict[str, str]] | None = None
     samples: dict[str, list[list]] | None = None
     counts: dict[str, int] | None = None
+    # G.2.8 (v0.84): [{title, markdown}, …], ordered, at least two.
+    children: list[dict] | None = None
 
 
 class Converter(Protocol):
@@ -541,7 +665,7 @@ MEDIA_STUB_SENTINEL = "No description has been generated for this media yet."
 
 
 class MediaStubConverter:
-    """Built-in (G.5.1): the model-free floor for image and audio files.
+    """Built-in (G.5.1): the model-free floor for image, audio and video.
 
     Before this existed an image was `unsupported` — no converter claimed
     it, so a screenshot fell out of the report entirely. The stub returns
@@ -552,7 +676,10 @@ class MediaStubConverter:
     the node exists either way.
     """
 
-    extensions = IMAGE_EXTENSIONS | AUDIO_EXTENSIONS
+    # v0.84: video joins, for the reason the typing rule does — a recording
+    # with no converter fell out of the report entirely, which is the exact
+    # failure this stub was written to end for images.
+    extensions = IMAGE_EXTENSIONS | AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
 
     def convert(self, path: Path) -> Conversion:
         title = path.stem.replace("_", " ").replace("-", " ")
@@ -702,6 +829,84 @@ _SELF_CODE_RE = re.compile(r"\b([A-Z]{2,6})-(\d{1,6})\b")
 # A file stem that IS numbered, as opposed to one that merely starts with a
 # digit: the number is followed by a separator or by nothing (G.2.6 rule 5).
 _LEADING_NUMBER_RE = re.compile(r"(\d+)(?=[-_.\s]|$)")
+
+
+def validate_tree(conversion: Conversion) -> str | None:
+    """G.2.8 rule 2: what a tree must be, or the sentence that refuses it.
+
+    Every refusal is per FILE and none is fatal to a batch: the caller
+    reports it exactly as any other conversion failure, the document is not
+    planted, and the rest of the batch proceeds. A partial tree is never
+    planted — the document's parts ARE the document, and half of one is a
+    forest claiming to hold a book it does not.
+    """
+    children = conversion.children
+    if not isinstance(children, list):
+        return "a tree conversion carries a list of children"
+    if len(children) < 2:
+        # A converter that found no second cut is describing a document that
+        # is one node, and `kind: "markdown"` says that already. Accepting
+        # one child would leave two spellings of one outcome — a node, and a
+        # branch with a node under it — and the two would drift in `scan`,
+        # in `coverage`, in every count and in every reader's habits.
+        return (f"a tree needs at least two children, got {len(children)} "
+                f"(a document that is one node is a markdown conversion)")
+    if len(children) > TREE_CHILDREN_MAX:
+        return (f"a tree carries at most {TREE_CHILDREN_MAX} children, got "
+                f"{len(children)}")
+    for i, child in enumerate(children, start=1):
+        if not isinstance(child, dict):
+            return f"child {i} is not an object"
+        if not str(child.get("title") or "").strip():
+            return f"child {i} has no title"
+        if not str(child.get("markdown") or "").strip():
+            return f"child {i} has no body"
+    return None
+
+
+def demote_index_headings(markdown: str) -> tuple[str, int]:
+    """G.2.8 rule 5: keep the words, lose the `##` (returns body, count).
+
+    A heading in the document's own front matter named like one of the A.5
+    sections captures the index's own entries — the failure is silent, and
+    entries are appended to whatever section matched first. Demoted to plain
+    emphasis it keeps every word it had; DROPPED it would be the kind of
+    filter this project forbids (G.4.2 rule 1's rule, applied to a body).
+    """
+    demoted = 0
+
+    def replace(m: re.Match) -> str:
+        nonlocal demoted
+        text = m.group(2).strip()
+        low = text.lower()
+        for section in INDEX_SECTIONS:
+            want = section.strip().lower()
+            if low == want or low.startswith(want):
+                demoted += 1
+                # HEADER_RE's trailing `\s*` is greedy across newlines, so
+                # what it swallowed is put back: a demotion may not also
+                # close the paragraph break under the heading.
+                raw = m.group(0)
+                return f"**{text}**" + raw[len(raw.rstrip()):]
+        return m.group(0)
+
+    return HEADER_RE.sub(replace, markdown), demoted
+
+
+def unmet_store(config: dict, stores=None) -> str | None:
+    """The forest's `assets:` binding, when the deployment does not have it.
+
+    G.6 rule 2 (v0.84): `_meta` declares EXPECTATION and never a grant, so a
+    forest naming a store nobody configured keeps working — the archive falls
+    back to `_assets/` (J.19.6) — and every surface that can say so MUST:
+    `validate` prints it, H.3 reports it, the batch report names the
+    fallback per file. L.12's rule for an extension a forest expects, said
+    about a destination.
+    """
+    binding = str((config or {}).get("assets") or "").strip()
+    if not binding:
+        return None
+    return None if resolve_store(name=binding, stores=stores) is not None else binding
 
 
 def normalize_dest(dest: str | None) -> str | None:
@@ -858,6 +1063,41 @@ class IngestReport:
     # J.8 (v0.61): sources the caller declared disposable and that became a
     # node, removed after they landed. Empty on every ordinary run.
     consumed: list[str] = field(default_factory=list)
+    # J.19.6 (v0.84): originals this run put in an object store, and the
+    # ones a store refused. The fallback is NAMED per file — bytes the
+    # courier is about to delete are the only copy that will exist, so a
+    # store that could not take them is the one thing an operator has to be
+    # told. Zero and empty on every deployment that configured no store.
+    archived_remote: int = 0
+    archive_fallbacks: list[str] = field(default_factory=list)
+    # G.10.2 rule 8 (v0.84): documents converted, rehearsed and waiting in
+    # the open batch. `planted` names what is in GIT at the close, as it
+    # always did, so a deferred plant must not be counted as durable while
+    # it is still deferred — and an abandoned run leaves these here, which
+    # is the honest record of the conversion work `sync` will redo.
+    queued: list[str] = field(default_factory=list)
+    # G.7 rule 7 (v0.84): nodes whose requested `content: reference` was
+    # degraded to `cached`. A reference body is read back from its source at
+    # every `pick`, and for a bucket that is a network round trip inside the
+    # primitive with the tightest budget in the spec — the bill K.2 moved out
+    # of the read path in v0.42, and it must not walk back in through the
+    # content policy. Degraded is fine; degraded in silence is not.
+    content_degraded: int = 0
+    # G.2.8 rule 5 (v0.84): headings in a document's own front matter that
+    # would have captured the index's own entries, demoted to emphasis with
+    # their words intact.
+    headings_demoted: int = 0
+    # G.2.8 rule 7 (v0.84): tree branches whose forest declares no
+    # `succeeds`, so the parts are there and the sequence is not. Told,
+    # never silent: a chapter list nobody can walk is otherwise
+    # indistinguishable from a converter that lost the order, and the repair
+    # is one line in `_meta/schema.md` followed by a `sync`.
+    sequence_skipped: list[str] = field(default_factory=list)
+    # G.4.7 rule 2 (v0.84): why a model wrote nothing, when one did not.
+    # Empty on a batch that curated — the host fills the rest of the block
+    # (whether a model is bound at all is the host's knowledge, never the
+    # engine's).
+    curation: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {k: (list(v) if isinstance(v, list) else v)
@@ -875,7 +1115,8 @@ _LANDED = frozenset({"planted", "updated", "unchanged"})
 # precedence — a planted file may also record its branch, and the branch is
 # not the action. A draft counts as `planted`: a preview steps exactly as
 # the run it previews.
-_STEP_ACTIONS = (("planted", "planted"), ("updated", "updated"),
+_STEP_ACTIONS = (("planted", "planted"), ("queued", "planted"),
+                 ("updated", "updated"),
                  ("unchanged", "unchanged"), ("unsupported", "unsupported"),
                  ("errors", "error"), ("stale", "stale"), ("drafts", "planted"))
 
@@ -913,13 +1154,24 @@ def _counts(report: IngestReport) -> dict:
 
 
 def _step(file: str, index: int, total: int, report: IngestReport,
-          before: dict) -> dict:
+          before: dict, committed: int | None = None) -> dict:
+    """G.10: one document. `committed` (v0.84) is how many of this run's
+    documents are in git at the moment this step yielded — at most `index`.
+
+    Two numbers because they are two facts: a consumer rendering "N of M
+    done" from `index` is rendering CONVERSIONS, and one that says
+    "committed" must read `committed`. A single number would have to choose
+    which one to be wrong about.
+    """
     action = "skipped"
     for attr, name in _STEP_ACTIONS:
         if len(getattr(report, attr)) > before[attr]:
             action = name
             break
-    return {"file": file, "index": index, "total": total, "action": action}
+    out = {"file": file, "index": index, "total": total, "action": action}
+    if committed is not None:
+        out["committed"] = committed
+    return out
 
 
 def _drain(steps: "IngestSteps") -> dict:
@@ -928,7 +1180,8 @@ def _drain(steps: "IngestSteps") -> dict:
     return steps.result
 
 
-def _scent_dict(report: IngestReport, stats: dict) -> dict:
+def _scent_dict(report: IngestReport, stats: dict,
+                remaining: int = 0) -> dict:
     """J.13.6.1's report: what the pass touched, and what it did not.
 
     `fallbacks` and `skipped` are separate on purpose. A fallback is a model
@@ -946,6 +1199,9 @@ def _scent_dict(report: IngestReport, stats: dict) -> dict:
         "changed": len(report.updated),
         "fallbacks": int(stats.get("fallbacks", 0)),
         "skipped": int(stats.get("skipped", 0)),
+        # J.13.6.1 rule 9 (v0.84): what a bounded run did not reach. Zero on
+        # an unbounded pass, which visited everything in scope.
+        "remaining": int(remaining),
     })
     return out
 
@@ -1008,10 +1264,29 @@ class Gardener:
                  on_stage: Callable[[str, str], None] | None = None,
                  extra_converters: list | None = None,
                  ext_registry=None,
+                 stores=None,
+                 curate: bool | None = None,
                  provenance: dict[str, str] | None = None):
         self.vine = vine
         self.forest = vine.forest
         self.config = self._load_config()
+        # J.19.8 (v0.84): the object-store resolver, keyword-only and
+        # host-supplied — the G.2.5 construction that already keeps
+        # `adopted=` and `visible=` off the wire, for the same reason: a
+        # credential an agent can name is not a credential. Inherited from
+        # the Vine when the caller does not override it, because a host
+        # that gave one to the Vine gave it to this forest.
+        self.stores = stores if stores is not None else getattr(vine, "stores", None)
+        # G.3.1 (v0.84): the object source of a bucket run, set by
+        # `adopt_iter`/`sync_iter`. `None` is a directory source, which is
+        # every v0.83 run.
+        self._remote_source = None
+        # G.10.2 (v0.84): the open batch. Documents plant in batches of up to
+        # `MAX_BATCH_PLANT` through C.7.4's list form — one commit per batch
+        # instead of one per document — while the STEP stays one document,
+        # because the step is what a progress bar counts.
+        self._batch: list[dict] = []
+        self._batch_ids: set[str] = set()
         # J.8 (v0.48): source path -> URL, for sources whose origin is an
         # address rather than a directory (a clipped page, a saved image).
         # A MAP handed at construction, deliberately not an `on_curate`
@@ -1037,6 +1312,15 @@ class Gardener:
                                                     extra=extra_converters,
                                                     registry=ext_registry))
         self.hooks = hooks if hooks is not None else discover_hooks()
+        # G.4.7 (v0.84): curating later is a DECISION, not a failure.
+        # `False` means the model is never called — not "called and
+        # ignored", not "called for branches": no `on_curate` hook runs and
+        # every node's summary is G.4 rule 1's derived one. `True` and
+        # `None` are v0.83's behaviour to the byte. Keyword-only and
+        # host-supplied: what it changes is what is written into the forest
+        # and what the deployment is billed, so it is the batch's decision
+        # and never a preference this object invents.
+        self.curate = curate
         self.dry_run = bool(dry_run)
         self.on_stage = on_stage
 
@@ -1068,12 +1352,34 @@ class Gardener:
         return {}
 
     def _save_config(self) -> None:
+        """G.6 (v0.84): written AND committed through the narrow `_meta` door.
+
+        This file was untracked in every forest this project has produced —
+        `init` commits `.gitignore`, `_index.md` and `_meta/schema.md`, and
+        this method wrote the file and stopped. So "the binding travels in a
+        snapshot" was true of the path and false of the artifact. L.12's door
+        (`commit_meta`, `.yaml`/`.md` under `_meta/` only) is what makes it
+        true; A.3.1's `.md`-only guard on the ordinary commit path is not
+        relaxed.
+
+        Committing the file commits everything in it, which is intended and
+        stated: `source_root` and the G.3.2 bucketing rule travel too. Both
+        are ADDRESSES, the class of thing `origin` and `payload` already
+        are; a credential lives in J.19's registry and never here.
+        """
         if self.dry_run:
             return  # a preview that recorded a source root would misdirect
         p = self._config_path()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(yaml.safe_dump(self.config, allow_unicode=True, sort_keys=False),
                      encoding="utf-8")
+        try:
+            self.vine.git.commit_meta([p], "gardener(config): source and bindings")
+        except Exception:  # noqa: BLE001
+            # A forest whose git is unavailable still ingests: the config is
+            # on disk and the batch is what the operator asked for. Failing
+            # the ingest to version a setting would be the wrong trade.
+            pass
 
     # -- walking ------------------------------------------------------------
 
@@ -1146,6 +1452,94 @@ class Gardener:
                 hint="A forest's own nodes are not a source to re-ingest.")
         return src
 
+    def _staging_root(self) -> Path:
+        return self.forest.root.joinpath(*STAGING_DIR)
+
+    def _open_source(self, source: str | Path | None, *,
+                     recorded: bool = False):
+        """The one place a source becomes something to walk (G.3, G.3.1).
+
+        Returns `(root, remote)`: a directory and `None`, or the staging root
+        and the `BucketSource` that fills it. Every refusal a bucket can
+        raise — a bucket no configured store serves, a prefix a store does
+        not contain — happens HERE, before the first listing call, which is
+        the containment rule for a remote source.
+        """
+        raw = str(source or "").strip()
+        if not raw and recorded:
+            raw = str(self.config.get("source_root") or "").strip()
+        if is_bucket_source(raw):
+            staging = self._staging_root()
+            remote = open_bucket_source(
+                raw, stores=self.stores, staging=staging,
+                ignored=lambda rel: self._ignored(Path(rel)))
+            staging.mkdir(parents=True, exist_ok=True)
+            return staging, remote
+        return self._resolve_source(raw or source, recorded=recorded), None
+
+    def _materialise(self, src: Path, rel: str, entry: dict | None) -> Path:
+        """The file this step converts: the source's own, or one object."""
+        if entry is None or self._remote_source is None:
+            return src / rel
+        return self._remote_source.fetch(rel)
+
+    def _release(self, f: Path, entry: dict | None) -> None:
+        if entry is not None and self._remote_source is not None:
+            self._remote_source.release(f)
+
+    # -- G.10.2 the open batch ----------------------------------------------
+
+    def _queue_plant(self, draft: dict, rel: str, report: IngestReport) -> None:
+        """Rehearse this document's plant, then defer the commit.
+
+        The step's `action` is decided HERE, from the draft's own C.7.3
+        rehearsal, so a draft that would fail is an `error` at its own step
+        and not at the flush — which is the only way a batch can be a commit
+        without also becoming the place errors are reported.
+        """
+        try:
+            self.vine.plant(draft, dry_run=True, adopted=True)
+        except VineError as e:
+            report.errors.append(f"{rel}: {e.message}")
+            return
+        self._batch.append(draft)
+        self._batch_ids.add(draft["id"])
+        report.queued.append(draft["id"])
+        if len(self._batch) >= MAX_BATCH_PLANT:
+            self._flush_batch(report)
+
+    def _flush_batch(self, report: IngestReport) -> None:
+        """Close the open batch: one commit for the lot, or none of it.
+
+        A batch of ONE plants singly — byte-identical to v0.83, commit
+        subject included, so a one-document ingest is untouched by this
+        round.
+        """
+        if not self._batch:
+            return
+        batch, self._batch = self._batch, []
+        ids = [d["id"] for d in batch]
+        self._batch_ids.difference_update(ids)
+        try:
+            if len(batch) == 1:
+                self.vine.plant(batch[0], adopted=True)
+            else:
+                self.vine.plant(batch, adopted=True)
+        except VineError as e:
+            # C.7.4 is all-or-nothing, so there is no state between: nothing
+            # landed, and the report says so rather than leaving the count to
+            # be believed.
+            for node_id in ids:
+                if node_id in report.queued:
+                    report.queued.remove(node_id)
+            report.errors.append(
+                f"plant(batch) of {len(ids)} node(s) refused: {e.message}")
+            return
+        for node_id in ids:
+            if node_id in report.queued:
+                report.queued.remove(node_id)
+            report.planted.append(node_id)
+
     def _converter_for(self, path: Path):
         ext = path.suffix.lower()
         for conv in self.converters:
@@ -1177,6 +1571,12 @@ class Gardener:
         url = self.provenance.get(rel)
         if url:
             return url
+        if self._remote_source is not None:
+            # G.3.1 rule 4: the object's own URI — the address that resolves
+            # from any machine holding the store's credentials, which is what
+            # a mount path never was. The staged copy is plumbing and its
+            # path is never an address.
+            return self._remote_source.object_uri(rel)
         if self._is_staged(f):
             return None
         return f.resolve().as_uri()
@@ -1291,6 +1691,14 @@ class Gardener:
         for tag in (self.config.get("curation") or {}).get("default_tags") or []:
             if tag not in draft["tags"]:
                 draft["tags"].append(tag)
+        if self.curate is False:
+            # G.4.7 rule 1: the hooks ARE the curation seam (G.4 rule 3), so
+            # skipping them is the whole of "the model is never called". The
+            # report says which of the three happened (rule 2) rather than
+            # leaving a deliberate choice looking like a model that failed —
+            # J.8's own lesson, with a third state.
+            report.curation = {"ran": False, "reason": "disabled"}
+            return draft
         for hook in self.hooks:
             before = _hook_counts(hook)
             try:
@@ -1304,20 +1712,114 @@ class Gardener:
 
     # -- stage 0: archive ----------------------------------------------------
 
-    def _archive(self, src_file: Path, branch_id: str) -> tuple[str, str | None, str]:
-        """Copy the original under the branch's _assets/ (gitignored).
-        Returns (payload, payload_type | None, payload_hash)."""
-        branch_dir = self.forest.path_for(branch_id).parent
-        assets = branch_dir / ASSETS_DIR
+    def _archive_needed(self, ext: str, kind: str, consumed: bool) -> bool:
+        """G.7 rule 5 (v0.84): lossiness decides, not the policy alone.
+
+        A conversion is LOSSLESS when the forest holds what the source held:
+        a text passthrough, whose body *is* the bytes, and a payload adoption
+        (G.2.2), whose payload *is* the source. Everything else is lossy —
+        a PDF's tables, a `.docx`'s images, a video's frames — and a lossy
+        original MUST be kept whatever `archive:` says when the source will
+        not survive the ingest, which is every source the courier consumes
+        (J.8.3 removes it the moment the file lands).
+
+        This generalises G.5.1's staging amendment, which stated the rule for
+        media and gave a reason that was never about media: a PDF arriving
+        through the same door got none of it, and its original existed
+        nowhere. ONE predicate, read by the adopt path and the refresh path
+        alike — two copies of this test is how the v0.78 rule nearly
+        diverged.
+
+        A dataset's original is excluded under `never`: the forest holds its
+        rows, `query` reads them, and the node's `payload` is its own `.db`,
+        so a second copy would be bytes no passport names. `archive: always`
+        still keeps it, which is what that policy is for.
+        """
+        if kind == "payload":
+            return False
+        if ext in MarkdownConverter.extensions:
+            return False
+        if self.config.get("archive", "never") == "always":
+            return True
+        return consumed and kind != "dataset"
+
+    def _source_is_consumed(self, f: Path) -> bool:
+        """Whether this ingest is the last thing that will hold these bytes.
+
+        A staged upload's source is a courier the forest itself deletes
+        (J.8.3). A bucket object staged under `_derived/staging/` is the
+        opposite case, and the distinction is the whole reason G.3.1 rule 7
+        can say "the bucket is the BONE": the staged copy goes, the object
+        stays, and copying it into `_assets/` would be the double store
+        this round exists to avoid.
+        """
+        return self._remote_source is None and self._is_staged(f)
+
+    def _archive_store(self):
+        """J.19.6: the forest's binding, then the `env` store, then local."""
+        binding = str(self.config.get("assets") or "").strip()
+        if binding:
+            found = resolve_store(name=binding, stores=self.stores)
+            if found is not None:
+                return found
+        return resolve_store(name="env", stores=self.stores)
+
+    def _archive(self, src_file: Path, branch_id: str, *,
+                 report: "IngestReport | None" = None,
+                 rel: str | None = None) -> tuple[str, str | None, str]:
+        """Keep the original: in the bound object store, or under `_assets/`.
+
+        Returns `(payload, payload_type, payload_hash)`. The key is content
+        addressed — `<prefix>/<forest id>/<sha256>.<ext>` — so dedup and
+        immutability cost nothing and no component is caller-authored: an
+        administrator's prefix, the forest root's own directory name, a
+        digest and the source's lowercased extension. There is nothing in it
+        to traverse with.
+
+        **A failed upload falls back locally and is NAMED.** These bytes are
+        about to be deleted by the courier, so losing them to a network error
+        is the precise outcome J.19 exists to prevent — and the passport
+        records what ACTUALLY happened. The reverse failure, a passport
+        naming an object the store does not hold, must never occur, which is
+        why the URI is returned only after the PUT returned.
+        """
         data = src_file.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
-        name = f"{digest[:8]}-{slugify(src_file.stem)}{src_file.suffix.lower()}"
+        ext = src_file.suffix.lower()
+        # A.3 (v0.84): an archived original whose extension names no other
+        # payload type is `file`. Before it, those bytes were copied and
+        # referenced by nothing.
+        ptype = PAYLOAD_TYPE_BY_EXT.get(ext) or "file"
+
+        store = self._archive_store()
+        if store is not None:
+            key = store.key_for(self.forest.root.name, f"{digest}{ext}")
+            if self.dry_run:
+                return store.uri(key), ptype, digest
+            try:
+                if head_object(store, key, timeout=STORE_TIMEOUT_S) is None:
+                    put_object(store, key, data, timeout=STORE_TIMEOUT_S)
+                if report is not None:
+                    report.archived_remote += 1
+                return store.uri(key), ptype, digest
+            except Exception as e:  # noqa: BLE001 - every SDK raises its own
+                if report is not None:
+                    # The store's NAME and the failure, never a credential:
+                    # `StoreCredentials` prints no secret and none is read
+                    # here.
+                    report.archive_fallbacks.append(
+                        f"{rel or src_file.name}: store {store.name!r} "
+                        f"refused the upload ({type(e).__name__}) — the "
+                        f"original was kept locally instead")
+
+        branch_dir = self.forest.path_for(branch_id).parent
+        assets = branch_dir / ASSETS_DIR
+        name = f"{digest[:8]}-{slugify(src_file.stem)}{ext}"
         # The digest and the name are computed either way, so a dry run's
         # draft carries the same payload fields a real one would write.
         if not self.dry_run:
             assets.mkdir(parents=True, exist_ok=True)
             (assets / name).write_bytes(data)
-        ptype = PAYLOAD_TYPE_BY_EXT.get(src_file.suffix.lower())
         return f"{ASSETS_DIR}/{name}", ptype, digest
 
     # -- adopt (G.3) ---------------------------------------------------------
@@ -1336,27 +1838,119 @@ class Gardener:
         operator starting over.
         """
         dest = normalize_dest(dest)
-        src = self._resolve_source(source)
+        src, remote = self._open_source(source)
+        self._remote_source = remote
+        entries = ({e["rel"]: e for e in remote.entries} if remote is not None
+                   else None)
+        rels = (list(entries)
+                if entries is not None
+                else [f.relative_to(src).as_posix() for f in self._walk(src)])
         if not self.dry_run:
-            self.config["source_root"] = src.as_posix()
+            # G.3.1 rule 8: the recorded root is the URI, written BEFORE the
+            # first step, so G.10's abandonment rule and J.9's "recovery is
+            # `sync`, not archaeology" work unchanged.
+            self.config["source_root"] = (remote.uri if remote is not None
+                                          else src.as_posix())
             if dest:
                 self.config["dest"] = dest
+            if remote is not None and not self.config.get("content"):
+                # G.7 rule 7: `cached` is the default for a remote source —
+                # the body is a function of source and converter, the source
+                # is durable and addressed, and keeping ten thousand
+                # converted bodies in git buys versioning of text nobody
+                # wrote.
+                self.config["content"] = "cached"
+            self._plan_bucketing(rels, src, entries)
             self._save_config()
-        files = self._walk(src)
         report = IngestReport()
 
         def steps():
-            for i, f in enumerate(files):
+            for i, rel in enumerate(rels):
                 before = _counts(report)
-                self._ingest_file(src, f, dest, report)
-                yield _step(f.relative_to(src).as_posix(), i + 1, len(files),
-                            report, before)
+                entry = entries.get(rel) if entries is not None else None
+                f = self._materialise(src, rel, entry)
+                try:
+                    self._ingest_file(src, f, dest, report, entry=entry)
+                finally:
+                    self._release(f, entry)
+                yield _step(rel, i + 1, len(rels), report, before,
+                            committed=i + 1 - len(self._batch))
+            self._flush_batch(report)
             return report.as_dict()
 
-        return IngestSteps(len(files), steps(), report)
+        return IngestSteps(len(rels), steps(), report)
+
+    # -- G.3.2 auto-bucketing ------------------------------------------------
+
+    def _plan_bucketing(self, rels: list[str], src: Path,
+                        entries: dict | None) -> None:
+        """Record how a too-wide directory or prefix was grouped (G.3.2).
+
+        Decided ONCE, at adopt, and written into `gardener.yaml` — and the
+        RECORDED rule wins on every later `sync`. A file arriving tomorrow
+        lands where today's files went even when the set has grown past the
+        point where a different rule would now be chosen; otherwise a refresh
+        would silently start planting siblings into a second branch, and no
+        primitive relocates a node (J.5.7).
+        """
+        above = bucket_above()
+        if above <= 0:
+            return
+        recorded = dict(self.config.get("bucketing") or {})
+        by_dir: dict[str, list[str]] = {}
+        for rel in rels:
+            path = PurePosixPath(rel)
+            by_dir.setdefault(str(path.parent) if path.parent.name or
+                              str(path.parent) != "." else "", []).append(rel)
+        for folder, members in by_dir.items():
+            folder = "" if folder == "." else folder
+            if folder in recorded or len(members) <= above:
+                continue
+            names = [PurePosixPath(r).name for r in members]
+            created = {}
+            for rel in members:
+                name = PurePosixPath(rel).name
+                created[name] = self._created_of(src, rel,
+                                                 (entries or {}).get(rel))
+            rule = choose_bucketing(names, created, above)
+            if rule:
+                recorded[folder] = {"rule": rule, "above": above}
+        if recorded != (self.config.get("bucketing") or {}):
+            self.config["bucketing"] = recorded
+
+    def _created_of(self, src: Path, rel: str, entry: dict | None) -> str:
+        """The date a passport would carry: the object's `LastModified` for a
+        bucket, the file's mtime for a directory — the SAME value, so the
+        grouping and C.13's windows agree by construction."""
+        try:
+            if entry is not None:
+                stamp = entry.get("last_modified")
+                if stamp is not None and hasattr(stamp, "strftime"):
+                    return stamp.strftime("%Y-%m-%d")
+                return ""
+            return dt.date.fromtimestamp((src / rel).stat().st_mtime).isoformat()
+        except (OSError, ValueError, OverflowError):
+            return ""
+
+    def _placement(self, rel: Path, src: Path, entry: dict | None) -> Path:
+        """Where this document's node lives — `rel`, or `rel` under a group.
+
+        The placement is the only thing auto-bucketing changes: `source_path`
+        stays the true relative path, because it is the sync key and a
+        grouping is not provenance.
+        """
+        recorded = self.config.get("bucketing") or {}
+        folder = rel.parent.as_posix()
+        folder = "" if folder == "." else folder
+        rule = (recorded.get(folder) or {}).get("rule")
+        if not rule:
+            return rel
+        created = self._created_of(src, rel.as_posix(), entry)
+        group = slugify(_group_key(rule, rel.name, created)) or "other"
+        return rel.parent / group / rel.name
 
     def _ingest_file(self, src: Path, f: Path, dest: str | None,
-                     report: IngestReport) -> None:
+                     report: IngestReport, *, entry: dict | None = None) -> None:
         rel = f.relative_to(src)
         ext = f.suffix.lower()
         claimants = [c for c in self.converters if ext in c.extensions]
@@ -1392,12 +1986,18 @@ class Gardener:
                     f"{rel.as_posix()}: {type(conv_obj).__name__} failed, "
                     f"falling back: {e}")
 
-        branch_id = self._ensure_branch(rel.parent, dest, report)
-        node_id = self._node_id(rel, dest)
+        place = self._placement(rel, src, entry)
+        branch_id = self._ensure_branch(place.parent, dest, report)
+        node_id = self._node_id(place, dest)
         # A real run collides against nodes that now exist; a dry run has to
         # count the drafts too, or two previewed files that slug the same way
-        # would both claim the id and only one of them would be right.
-        taken = self.forest.exists(node_id) or (
+        # would both claim the id and only one of them would be right. As of
+        # v0.84 the OPEN BATCH counts the same way: a node queued and not yet
+        # committed does not exist on disk, and two documents slugging alike
+        # inside one batch would both claim the id — which C.7.4 then refuses
+        # for the whole batch, a refusal produced by the batching and by
+        # nothing the operator did.
+        taken = self.forest.exists(node_id) or node_id in self._batch_ids or (
             self.dry_run and any(d["id"] == node_id for d in report.drafts))
         if taken:
             node_id = f"{node_id}-{hashlib.sha256(rel.as_posix().encode()).hexdigest()[:6]}"
@@ -1409,7 +2009,7 @@ class Gardener:
         # G.5.1: media is typed off the SOURCE, not off what the converter
         # returned — a describer and the stub both hand back markdown, and
         # the passport has to say `media` either way.
-        is_media_source = PAYLOAD_TYPE_BY_EXT.get(ext) in ("image", "audio")
+        is_media_source = is_media_ext(ext)
         draft: dict = {
             "id": node_id,
             "parent": branch_id,
@@ -1420,8 +2020,16 @@ class Gardener:
             "source_hash": source_hash,
             # G.8 fast-path: sync skips hashing when both still match
             "source_size": st.st_size,
-            "source_mtime": round(st.st_mtime, 3),
         }
+        if entry is None:
+            draft["source_mtime"] = round(st.st_mtime, 3)
+        else:
+            # G.3.1 rule 5: the store's own change signal in place of an
+            # mtime no store will promise. An ETag is NOT a content hash —
+            # a multipart upload's is a digest of digests — so it decides
+            # whether to spend the download and never whether the bytes are
+            # the same; `source_hash` still answers that, on the bytes.
+            draft["source_etag"] = entry.get("etag") or ""
         # G.2.6 (v0.54): part of the draft build, so adopt derives them and
         # sync recomputes rather than erases. Curation never touches them.
         aliases = derive_aliases(rel, self.config.get("aliases") or {},
@@ -1468,22 +2076,41 @@ class Gardener:
                 "body": conversion.markdown,
                 "summary": derive_summary(conversion.markdown, conversion.title),
             })
-        # G.7 archive policy: durable sources are referenced, not copied.
-        # A payload conversion's original IS its payload (G.2.2 rule 6) —
-        # archiving it would store the same bytes twice under two hashes.
-        # G.5.1 amendment: media STAGED under this forest's `_derived/` (an
-        # upload) is archived regardless of the policy — `_derived/` is
-        # disposable by contract, so the `_assets/` copy is the only one
-        # that will exist. Resolved paths on both sides: the forest root
-        # may sit behind a symlink (same comparison `_resolve_source` makes).
-        staged_media = is_media_source and src.resolve().is_relative_to(
-            self.forest.root.resolve() / "_derived")
-        if (not is_text_source and conversion.kind != "payload"
-                and (staged_media
-                     or self.config.get("archive", "never") == "always")):
-            payload, ptype, phash = self._archive(f, branch_id)
-            # dataset payload is its own .db; unknown payload types are
-            # archived but not referenced (the A.3 enum stays honest)
+        # G.3.1 rule 7 (v0.84): the bucket is the BONE. A source the store
+        # keeps durably is REFERENCED, not copied — the object's own URI is
+        # the payload, resolved on first use through G.9's hash-validated
+        # cache. This is what makes a ten-thousand-document forest hold zero
+        # bytes of anybody's original.
+        if entry is not None and conversion.kind != "dataset":
+            ptype = PAYLOAD_TYPE_BY_EXT.get(ext)
+            if conversion.kind == "payload" or ptype:
+                draft.update({
+                    "payload": self._remote_source.object_uri(rel.as_posix()),
+                    "payload_type": ptype or "sqlite",
+                    "payload_hash": source_hash,
+                })
+        # G.2.8 (v0.84): a converter may answer with a TREE, and then this
+        # file is a branch and its parts rather than one node. Everything
+        # above is shared — the id this rule would have given the single
+        # node is the branch's own — and everything below belongs to a leaf.
+        if conversion.kind == "tree":
+            self._ingest_tree(
+                conversion, rel=rel, node_id=node_id, parent_id=branch_id,
+                f=f, src=src, entry=entry, st=st, source_hash=source_hash,
+                origin=origin, is_text_source=is_text_source,
+                is_media_source=is_media_source, report=report)
+            return
+        # G.7 rule 5 (v0.84): lossiness decides. A durable source is still
+        # referenced and not copied; a lossy conversion whose source this
+        # ingest consumes keeps its original wherever J.19.6 resolves to.
+        if self._archive_needed(ext, conversion.kind,
+                                self._source_is_consumed(f)):
+            payload, ptype, phash = self._archive(f, branch_id, report=report,
+                                                  rel=rel.as_posix())
+            # A dataset's payload is its own `.db` (G.2.2 rule 6): under
+            # `archive: always` the spreadsheet is kept and NOT referenced,
+            # or the archived original would displace the database the node
+            # is read through.
             if conversion.kind != "dataset" and ptype:
                 draft.update({"payload": payload, "payload_type": ptype,
                               "payload_hash": phash})
@@ -1503,14 +2130,15 @@ class Gardener:
         if conversion.kind == "markdown":
             draft = self._apply_content_policy(draft, conversion.title,
                                                is_text_source,
-                                               staged=self._is_staged(f))
+                                               staged=self._is_staged(f),
+                                               report=report)
         if self.dry_run:
             report.drafts.append(draft)
             return
         self._stage(rel.as_posix(), STAGE_PLANT)
         installed: Path | None = None
         try:
-            if conversion.kind == "payload":
+            if conversion.kind == "payload" and entry is None:
                 installed = self._install_payload(node_id, f)
                 draft["payload"] = installed.name
                 draft["payload_hash"] = source_hash
@@ -1518,8 +2146,17 @@ class Gardener:
             # source that already exists, not a model declaring a schema —
             # so the C.7.1 count limits do not bind it. Names and types are
             # validated exactly as they are for everyone else.
-            self.vine.plant(draft, adopted=True)
-            report.planted.append(node_id)
+            #
+            # G.10.2 rule 3 (v0.84): a dataset cannot join a batch (C.7.4
+            # rule 6 — a payload birth mid-batch has no rollback story), so
+            # it closes the open batch, plants by itself, and the next batch
+            # starts empty.
+            if draft.get("type") == "dataset":
+                self._flush_batch(report)
+                self.vine.plant(draft, adopted=True)
+                report.planted.append(node_id)
+            else:
+                self._queue_plant(draft, rel.as_posix(), report)
         except VineError as e:
             # C.7's atomicity extends to the copy (G.2.2 rule 5): a payload
             # whose passport was refused is a file nothing references.
@@ -1530,6 +2167,307 @@ class Gardener:
             if installed is not None:
                 installed.unlink(missing_ok=True)
             raise
+
+    # -- G.2.8 a document that becomes a branch ------------------------------
+
+    def _provenance_fields(self, rel: Path, source_hash: str, st,
+                           origin: str | None, entry: dict | None) -> dict:
+        """G.2.8 rule 6: what EVERY node of one document records.
+
+        The same five values on the branch and on every part — they describe
+        the one file all of them came from, and the forest is still the sync
+        state.
+        """
+        fields = {
+            "source_path": rel.as_posix(),
+            "source_hash": source_hash,
+            "source_size": st.st_size,
+        }
+        if entry is None:
+            fields["source_mtime"] = round(st.st_mtime, 3)
+        else:
+            fields["source_etag"] = entry.get("etag") or ""
+        if origin:
+            fields["origin"] = origin
+        return fields
+
+    def _child_type(self, is_text_source: bool, is_media_source: bool) -> str:
+        """G.2.8 rule 3: the SOURCE types a part, exactly as it would have
+        typed the single node. The kind of the conversion never types a
+        node."""
+        return ("note" if is_text_source
+                else "media" if is_media_source else "document")
+
+    def _branch_body(self, markdown: str, title: str,
+                     report: IngestReport) -> str:
+        """The document's own front matter ABOVE the A.5 generated sections."""
+        text, demoted = demote_index_headings(markdown or f"# {title}")
+        report.headings_demoted += demoted
+        text = text.rstrip() or f"# {title}"
+        return (f"{text}\n\n## {indexer.SUBBRANCH_SECTION}\n\n"
+                f"## {indexer.BANANAS_SECTION}\n\n## Cross trails\n")
+
+    def _ingest_tree(self, conversion: Conversion, *, rel: Path, node_id: str,
+                     parent_id: str, f: Path, src: Path, entry: dict | None,
+                     st, source_hash: str, origin: str | None,
+                     is_text_source: bool, is_media_source: bool,
+                     report: IngestReport) -> None:
+        """Plant one document as a branch and its parts (G.2.8)."""
+        problem = validate_tree(conversion)
+        if problem:
+            # Reported exactly as every other conversion failure is (G.2):
+            # the error names the file, the document is NOT planted, and the
+            # rest of the batch proceeds.
+            report.errors.append(f"{rel.as_posix()}: tree conversion refused "
+                                 f"— {problem}")
+            return
+
+        branch_id = f"{node_id}/_index"
+        provenance = self._provenance_fields(rel, source_hash, st, origin,
+                                             entry)
+        markdown = self._with_provenance(conversion.markdown or "",
+                                         rel.as_posix())
+        branch = {
+            "id": branch_id,
+            "type": "branch",
+            "parent": parent_id,
+            "title": conversion.title,
+            # Rule 8: derived deterministically at ingest and REPLACED by the
+            # G.4.4 rollup when curation runs — the branch is
+            # `source: ingest`, so rollup's scope covers it with nothing
+            # added.
+            "summary": derive_summary(markdown, conversion.title),
+            "source": "ingest",
+            "confidence": INGEST_CONFIDENCE,
+            "body": self._branch_body(markdown, conversion.title, report),
+            **provenance,
+        }
+        # Rule 6: derived aliases belong to the DOCUMENT's node alone.
+        # Copying a document's code onto 200 chapters would make
+        # `locate("BE-291")` answer with 200 results of equal weight.
+        aliases = derive_aliases(rel, self.config.get("aliases") or {},
+                                 title=conversion.title)
+        if aliases:
+            branch["aliases"] = aliases
+        # Rule 10: the original is archived ONCE and named by the BRANCH.
+        ext = f.suffix.lower()
+        if entry is not None:
+            ptype = PAYLOAD_TYPE_BY_EXT.get(ext)
+            if ptype:
+                branch.update({
+                    "payload": self._remote_source.object_uri(rel.as_posix()),
+                    "payload_type": ptype, "payload_hash": source_hash})
+        elif self._archive_needed(ext, conversion.kind,
+                                  self._source_is_consumed(f)):
+            payload, ptype, phash = self._archive(f, parent_id, report=report,
+                                                  rel=rel.as_posix())
+            if ptype:
+                branch.update({"payload": payload, "payload_type": ptype,
+                               "payload_hash": phash})
+
+        # Rule 7: the dialect is checked ONCE, before the batch is built — a
+        # rel refused inside a batch refuses the whole batch (C.7.4 rule 1),
+        # and the document is not what is wrong.
+        sequenced = "succeeds" in self.vine.forest.dialect.rels
+        if not sequenced:
+            report.sequence_skipped.append(branch_id)
+
+        child_type = self._child_type(is_text_source, is_media_source)
+        children: list[dict] = []
+        previous: str | None = None
+        for n, part in enumerate(conversion.children, start=1):
+            part_no = f"{n:0{TREE_PART_WIDTH}d}"
+            child_id = f"{node_id}/{part_no}-{slugify(str(part['title']))}"
+            body = str(part["markdown"])
+            draft = {
+                "id": child_id,
+                "type": child_type,
+                "parent": branch_id,
+                "title": str(part["title"]),
+                "summary": derive_summary(body, str(part["title"])),
+                "source": "ingest",
+                "confidence": INGEST_CONFIDENCE,
+                "body": body,
+                "source_part": part_no,
+                **provenance,
+            }
+            # Rule 6: a child derives aliases from its own TITLE only.
+            own = derive_aliases(Path(f"{part_no}.md"),
+                                 self.config.get("aliases") or {},
+                                 title=str(part["title"]))
+            if own:
+                draft["aliases"] = own
+            if sequenced and previous is not None:
+                # Rule 7: confidence 1.0 is the order the converter READ out
+                # of the file, not a proposal — so it carries no link-level
+                # confidence at all and Part H never manages it.
+                draft["links"] = [{"rel": "succeeds", "target": previous}]
+            # Rule 8: each part is curated on its OWN full text (G.7.4).
+            self._stage(rel.as_posix(), STAGE_CURATE)
+            draft = self._curate(draft, report)
+            draft = self._apply_content_policy(
+                draft, str(part["title"]), is_text_source,
+                staged=self._is_staged(f), report=report)
+            children.append(draft)
+            previous = child_id
+
+        if self.dry_run:
+            report.drafts.append(branch)
+            report.drafts.extend(children)
+            return
+
+        self._stage(rel.as_posix(), STAGE_PLANT)
+        # Rule 9: the branch is planted BEFORE its children, so every child's
+        # parent exists when it is rehearsed and a crash between two commits
+        # leaves the planted prefix — nothing points at a node that does not
+        # exist except a `succeeds` the next batch will create.
+        self._flush_batch(report)
+        try:
+            self.vine.plant(branch, adopted=True)
+        except VineError as e:
+            report.errors.append(f"{rel.as_posix()}: {e.message}")
+            return
+        report.branches.append(branch_id)
+        report.planted.append(branch_id)
+        for draft in children:
+            self._queue_plant(draft, rel.as_posix(), report)
+
+    def _sync_tree(self, conversion: Conversion, branch_id: str, f: Path,
+                   new_hash: str, report: IngestReport, rel: str,
+                   entry: dict | None, info: dict) -> None:
+        """G.2.8 rule 11: reconcile by part, and delete nothing.
+
+        The identity is (`source_path`, `source_part`) — never the title and
+        never the id, because a converter that renamed a chapter must not
+        renumber the forest.
+        """
+        problem = validate_tree(conversion)
+        if problem:
+            report.errors.append(f"{rel}: tree conversion refused — {problem}")
+            return
+        node_id = branch_id[: -len("/_index")]
+        parts = dict(info.get("parts") or {})
+        st = f.stat()
+        origin = self._origin_for(f, rel)
+        provenance = self._provenance_fields(Path(rel), new_hash, st, origin,
+                                             entry)
+        sequenced = "succeeds" in self.vine.forest.dialect.rels
+        if not sequenced:
+            report.sequence_skipped.append(branch_id)
+
+        branch = self.forest.read(branch_id)
+        is_text_source = f.suffix.lower() in MarkdownConverter.extensions
+        child_type = self._child_type(is_text_source,
+                                      is_media_ext(f.suffix.lower()))
+        order: list[str] = []
+        for n, part in enumerate(conversion.children, start=1):
+            part_no = f"{n:0{TREE_PART_WIDTH}d}"
+            known = parts.pop(part_no, None)
+            body = str(part["markdown"])
+            if known is not None:
+                # A refresh NEVER curates (G.3): the summary, the tags, the
+                # links somebody approved stay — and the title stays with
+                # them, because a title is curated frontmatter and the id,
+                # which carries the old slug, is immutable.
+                order.append(known["id"])
+                self._refresh_part(known["id"], body, provenance, report)
+                continue
+            child_id = f"{node_id}/{part_no}-{slugify(str(part['title']))}"
+            draft = {
+                "id": child_id, "type": child_type, "parent": branch_id,
+                "title": str(part["title"]),
+                "summary": derive_summary(body, str(part["title"])),
+                "source": "ingest", "confidence": INGEST_CONFIDENCE,
+                "body": body, "source_part": part_no, **provenance,
+            }
+            draft = self._curate(draft, report)
+            draft = self._apply_content_policy(
+                draft, str(part["title"]), is_text_source,
+                staged=self._is_staged(f), report=report)
+            self._queue_plant(draft, rel, report)
+            order.append(child_id)
+        # A part the forest has and the new tree does not is reported and NOT
+        # deleted — the Gardener never deletes nodes (G.3), and what a
+        # tombstone is remains the Ranger's question.
+        for leftover in parts.values():
+            report.stale.append(leftover["id"])
+        self._flush_batch(report)
+        if sequenced:
+            self._rewrite_sequence(order, report)
+
+        # The branch's own body is rewritten from the new tree's markdown
+        # exactly as a leaf's body is from a new conversion; the A.5 sections
+        # are the indexer's and are refreshed by the plants, as always.
+        markdown = self._with_provenance(conversion.markdown or "", rel)
+        fm = dict(branch.frontmatter)
+        fm.update(provenance)
+        fm["updated"] = dt.date.today().isoformat()
+        body = self._branch_body(markdown, str(fm.get("title") or ""), report)
+        for section in (indexer.SUBBRANCH_SECTION, indexer.BANANAS_SECTION,
+                        "Cross trails"):
+            kept = extract_section(self.forest.read(branch_id).body, section)
+            if kept:
+                content = "\n".join(kept.splitlines()[1:]).strip()
+                replaced = replace_section(body, section, content)
+                if replaced is not None:
+                    body = replaced
+        assert branch.path is not None
+        branch.path.write_text(serialize_node(fm, body), encoding="utf-8",
+                               newline="\n")
+        self.vine.git.commit([branch.path], f"gardener(sync): {branch_id}")
+        self.vine.catalog.upsert_node(self.forest.read(branch_id))
+        report.updated.append(branch_id)
+
+    def _refresh_part(self, node_id: str, body: str, provenance: dict,
+                      report: IngestReport) -> None:
+        """One part, refreshed in place — id kept, curated scent kept."""
+        node = self.forest.read(node_id)
+        fm = dict(node.frontmatter)
+        fm.update(provenance)
+        fm["source_part"] = node.frontmatter.get("source_part")
+        fm["updated"] = dt.date.today().isoformat()
+        if fm.get("content") == "cached":
+            self._write_body_cache(node_id, body)
+            new_body = node.body
+        else:
+            new_body = body
+        assert node.path is not None
+        if node.path.read_text(encoding="utf-8") == serialize_node(fm, new_body):
+            report.unchanged.append(node_id)
+            return
+        node.path.write_text(serialize_node(fm, new_body), encoding="utf-8",
+                             newline="\n")
+        self.vine.git.commit([node.path], f"gardener(sync): {node_id}")
+        self.vine.catalog.upsert_node(self.forest.read(node_id))
+        self.vine.catalog.mark_stale(node_id)
+        report.updated.append(node_id)
+
+    def _rewrite_sequence(self, order: list[str], report: IngestReport) -> None:
+        """The sequence, recomputed over the parts the source NOW has.
+
+        Through the ONE audited `.md`-only link write the Ranger's
+        promote/prune and the human vote already share (H.2.1 rule 1), with
+        the Gardener as its author — because two descriptions of what
+        rewriting a link means agree only where somebody compared them.
+        """
+        previous: str | None = None
+        for node_id in order:
+            if not self.forest.exists(node_id):
+                previous = node_id
+                continue
+            node = self.forest.read(node_id)
+            have = [l for l in (node.frontmatter.get("links") or [])
+                    if isinstance(l, dict) and l.get("rel") == "succeeds"]
+            want = {"rel": "succeeds", "target": previous} if previous else None
+            for link in have:
+                if want is None or link.get("target") != previous:
+                    rewrite_link(self.vine, node_id, link, remove=True,
+                                 by="gardener")
+            if want is not None and not any(
+                    l.get("target") == previous for l in have):
+                rewrite_link(self.vine, node_id, want, add=True,
+                             by="gardener")
+            previous = node_id
 
     def _install_payload(self, node_id: str, source: Path) -> Path:
         """G.2.2 rule 2: the source database, copied beside its passport
@@ -1566,10 +2504,20 @@ class Gardener:
 
     def _apply_content_policy(self, draft: dict, title: str,
                               is_text_source: bool,
-                              staged: bool = False) -> dict:
+                              staged: bool = False,
+                              report: IngestReport | None = None) -> dict:
         policy = self.config.get("content", "inline")
         if policy == "reference" and not is_text_source:
             policy = "cached"  # converted bodies must live SOMEWHERE local
+        if policy == "reference" and self._remote_source is not None:
+            # G.7 rule 7 (v0.84): rule 1 resolves a `reference` body from
+            # `source_root/source_path` at every `pick`, which for a bucket
+            # is a network round trip inside `pick`'s own budget. Degraded,
+            # and counted — J.8's lesson that a silent downgrade reads as a
+            # feature that does not work.
+            policy = "cached"
+            if report is not None:
+                report.content_degraded += 1
         if policy == "reference" and staged:
             # J.8 (v0.61), the same reasoning one step further: a
             # `reference` body is read back from its source at every
@@ -1637,13 +2585,33 @@ class Gardener:
             except VineError:
                 continue
             fm = node.frontmatter
-            if fm.get("source_path"):
-                out[str(fm["source_path"])] = {
-                    "id": nid,
-                    "hash": str(fm.get("source_hash", "")),
-                    "size": fm.get("source_size"),
-                    "mtime": fm.get("source_mtime"),
-                }
+            if not fm.get("source_path"):
+                continue
+            rel = str(fm["source_path"])
+            facts = {
+                "id": nid,
+                "hash": str(fm.get("source_hash", "")),
+                "size": fm.get("source_size"),
+                "mtime": fm.get("source_mtime"),
+                # G.3.1 rule 5 (v0.84): the store's own change signal,
+                # absent for every directory-adopted node.
+                "etag": fm.get("source_etag"),
+            }
+            entry = out.setdefault(rel, {})
+            part = fm.get("source_part")
+            if part is None:
+                # The document's own node. It WINS the top-level facts
+                # whatever order the walk met the nodes in.
+                entry.update(facts)
+            else:
+                # G.2.8 rule 11 (v0.84): a tree makes every node share one
+                # `source_path`, so keying on that alone collapsed the whole
+                # document to whichever node the walk read last. The parts
+                # are keyed by `source_part` — the one field that lets a
+                # refresh address one part of one file.
+                entry.setdefault("parts", {})[str(part)] = facts
+                for key, value in facts.items():
+                    entry.setdefault(key, value)
         return out
 
     # -- J.13.6 re-derivation (v0.61) ---------------------------------------
@@ -1732,7 +2700,8 @@ class Gardener:
 
     # -- J.13.6.1 re-curating the scent (v0.75) -----------------------------
 
-    def scent_scope(self) -> list[str]:
+    def scent_scope(self, order: str = "created",
+                    limit: int | None = None) -> list[str]:
         """The nodes a `derive: ["scent"]` pass would visit, in order.
 
         Eager and cheap — one indexed catalog read, no body opened — because
@@ -1760,13 +2729,51 @@ class Gardener:
         costs the same few hundred tokens whether the payload is 5 MB or
         5 GB. Nothing here writes a dataset's body — the two generated
         sections stay the Gardener's (G.4.6 rule 3).
-        """
-        rows = self.vine.catalog.conn.execute(
-            "SELECT id FROM nodes WHERE kind != 'branch' AND source = 'ingest' "
-            "ORDER BY id").fetchall()
-        return [r[0] for r in rows if not r[0].startswith("_meta/")]
 
-    def recurate_scent_iter(self) -> IngestSteps:
+        **The order is chosen, and it is `created` by default (rule 8,
+        v0.84).** It used to be id order, which is alphabetical, which is
+        nothing — the order a directory listing happens to be in. `created`
+        visits OLDEST first: the material that has been carrying the
+        thinnest scent for longest is what this pass exists for, and it is
+        the order that makes a partial run legible to the person watching
+        it. `heat` visits the HOTTEST first, read from the persistent
+        pheromone scope in one statement, so a forest of ten thousand
+        documents improves what agents are actually reading before it
+        improves what nobody has opened.
+
+        Session heat is excluded — it belongs to one live walk, and a
+        maintenance pass steered by whoever happens to be navigating right
+        now is not a maintenance pass. A node with no heat row sorts LAST,
+        ties break on `created`, and both orders are deterministic: two runs
+        over an unchanged forest visit the same nodes in the same sequence,
+        which is the only thing that makes `limit` usable.
+        """
+        if order not in ("created", "heat"):
+            raise VineError(
+                E_SCHEMA, f"unknown scent order: {order}",
+                hint="`order` is 'created' (oldest first, the default) or "
+                     "'heat' (hottest first).")
+        rows = self.vine.catalog.conn.execute(
+            "SELECT id, created FROM nodes WHERE kind != 'branch' "
+            "AND source = 'ingest' ORDER BY created, id").fetchall()
+        scope = [(r[0], r[1] or "") for r in rows
+                 if not r[0].startswith("_meta/")]
+        if order == "heat":
+            heat = self.vine.trails.heat_all()
+            scope.sort(key=lambda item: (-heat.get(item[0], 0.0), item[1],
+                                         item[0]))
+        ids = [node_id for node_id, _created in scope]
+        if limit is not None:
+            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+                raise VineError(
+                    E_SCHEMA, f"limit must be a positive integer, got {limit!r}",
+                    hint="`limit` bounds how many nodes the pass visits; "
+                         "omit it to visit the whole scope.")
+            ids = ids[:limit]
+        return ids
+
+    def recurate_scent_iter(self, order: str = "created",
+                            limit: int | None = None) -> IngestSteps:
         """J.13.6.1: re-curate every in-scope node, one model call per step.
 
         The shape is an ingest's, because it IS an ingest-shaped run: the
@@ -1780,7 +2787,14 @@ class Gardener:
         body lives in the source tree by definition, so it is skipped
         rather than fetched.
         """
-        ids = self.scent_scope()
+        ids = self.scent_scope(order=order, limit=limit)
+        # Rule 9: the bill is the BOUNDED number and the report says what is
+        # left, so a second run is a decision rather than a guess. The pass
+        # keeps no memory of what it curated — running it twice with the
+        # same limit and order re-visits the same nodes and pays for them
+        # again, which is stated because it is this feature's sharp edge.
+        remaining = (max(len(self.scent_scope(order=order)) - len(ids), 0)
+                     if limit is not None else 0)
         report = IngestReport()
         stats = {"fallbacks": 0, "skipped": 0}
 
@@ -1789,7 +2803,7 @@ class Gardener:
                 before = _counts(report)
                 self._recurate_scent(node_id, report, stats)
                 yield _step(node_id, i + 1, len(ids), report, before)
-            return _scent_dict(report, stats)
+            return _scent_dict(report, stats, remaining=remaining)
 
         out = IngestSteps(len(ids), steps(), report)
         # Read by `scent_result` so a CANCELLED run can still be accounted
@@ -1798,9 +2812,10 @@ class Gardener:
         out.scent_stats = stats
         return out
 
-    def recurate_scent(self) -> dict:
+    def recurate_scent(self, order: str = "created",
+                       limit: int | None = None) -> dict:
         """`recurate_scent_iter`, drained — the library's own entry point."""
-        return _drain(self.recurate_scent_iter())
+        return _drain(self.recurate_scent_iter(order=order, limit=limit))
 
     def _stored_body(self, node) -> str | None:
         """The text curation gets, from the forest and nowhere else (rule 1).
@@ -2047,7 +3062,10 @@ class Gardener:
         the first step: it reads the forest, and construction touches only
         the filesystem.
         """
-        src = self._resolve_source(source, recorded=True)
+        src, remote = self._open_source(source, recorded=True)
+        self._remote_source = remote
+        entries = ({e["rel"]: e for e in remote.entries} if remote is not None
+                   else None)
         dest = normalize_dest(dest) or self.config.get("dest")
         report = IngestReport()
 
@@ -2075,13 +3093,22 @@ class Gardener:
                 passports = self._passports()
                 for i, (rel, f) in enumerate(resolved):
                     before = _counts(report)
-                    if f.is_file():
-                        self._sync_one(src, f, rel, passports, dest, report)
+                    entry = entries.get(rel) if entries is not None else None
+                    if entry is not None or f.is_file():
+                        self._sync_one(src, f, rel, passports, dest, report,
+                                       entry=entry)
                     elif rel in passports:
                         report.stale.append(passports[rel]["id"])
                     else:
                         report.unsupported.append(rel)
-                    step = _step(rel, i + 1, len(resolved), report, before)
+                    # J.8.3: a courier's bytes are the only copy in
+                    # existence, so this route never defers a commit — the
+                    # source is deleted below, and deleting it while the
+                    # plant sits in an open batch is exactly the loss that
+                    # rule exists to prevent.
+                    self._flush_batch(report)
+                    step = _step(rel, i + 1, len(resolved), report, before,
+                                 committed=i + 1)
                     # J.8 (v0.61): bytes the CALLER declared disposable, and
                     # that became a node, are removed once they have. The
                     # node is the record; the courier does not keep a copy,
@@ -2101,26 +3128,34 @@ class Gardener:
 
             return IngestSteps(len(resolved), some(), report)
 
-        files = self._walk(src)
+        rels = (list(entries) if entries is not None
+                else [f.relative_to(src).as_posix() for f in self._walk(src)])
 
         def steps():
             passports = self._passports()
             seen: set[str] = set()
-            for i, f in enumerate(files):
-                rel = f.relative_to(src).as_posix()
+            for i, rel in enumerate(rels):
                 seen.add(rel)
                 before = _counts(report)
-                self._sync_one(src, f, rel, passports, dest, report)
-                yield _step(rel, i + 1, len(files), report, before)
+                entry = entries.get(rel) if entries is not None else None
+                self._sync_one(src, src / rel, rel, passports, dest, report,
+                               entry=entry)
+                yield _step(rel, i + 1, len(rels), report, before,
+                            committed=i + 1 - len(self._batch))
+            self._flush_batch(report)
             for rel, info in passports.items():
                 if rel not in seen:
                     report.stale.append(info["id"])
             return report.as_dict()
 
-        return IngestSteps(len(files), steps(), report)
+        return IngestSteps(len(rels), steps(), report)
 
     def _sync_one(self, src: Path, f: Path, rel: str, passports: dict,
-                  dest: str | None, report: IngestReport) -> None:
+                  dest: str | None, report: IngestReport, *,
+                  entry: dict | None = None) -> None:
+        if entry is not None:
+            self._sync_one_object(src, rel, passports, dest, report, entry)
+            return
         if rel not in passports:
             self._ingest_file(src, f, dest, report)
             return
@@ -2135,7 +3170,46 @@ class Gardener:
         if new_hash == info["hash"]:
             self._settle_unchanged(info["id"], rel, report, f)
             return
-        self._update_passport(info["id"], f, new_hash, report, rel)
+        self._update_passport(info["id"], f, new_hash, report, rel, info=info)
+
+    def _sync_one_object(self, src: Path, rel: str, passports: dict,
+                         dest: str | None, report: IngestReport,
+                         entry: dict) -> None:
+        """One object, reconciled (G.3.1 rule 5).
+
+        The fast-path is ETag + size and it decides ONE thing: whether to
+        spend the download. An object re-uploaded byte-identically changes
+        its ETag, is downloaded, hashes equal and is reported `unchanged`
+        with no commit — one wasted download, never a false update.
+        """
+        info = passports.get(rel)
+        if info is not None and info.get("size") == entry.get("size") \
+                and (info.get("etag") or "") == (entry.get("etag") or "") \
+                and info.get("etag"):
+            self._settle_unchanged(info["id"], rel, report, None)
+            return
+        try:
+            f = self._materialise(src, rel, entry)
+        except Exception as e:  # noqa: BLE001 - every SDK raises its own
+            # G.3.1 rule 10: a store that answers an error is an ERROR, never
+            # an absence. `stale` means the source is gone, and a 503 that
+            # read as a deletion would eventually invite a pruning pass to
+            # act on an outage.
+            report.errors.append(f"{rel}: the store refused the object "
+                                 f"({type(e).__name__})")
+            return
+        try:
+            if info is None:
+                self._ingest_file(src, f, dest, report, entry=entry)
+                return
+            new_hash = hashlib.sha256(f.read_bytes()).hexdigest()
+            if new_hash == info["hash"]:
+                self._settle_unchanged(info["id"], rel, report, f)
+                return
+            self._update_passport(info["id"], f, new_hash, report, rel,
+                                  entry=entry, info=info)
+        finally:
+            self._release(f, entry)
 
     def _settle_unchanged(self, node_id: str, rel: str,
                           report: IngestReport,
@@ -2151,7 +3225,8 @@ class Gardener:
         merged = self._merge_aliases(node_id, rel, report)
         node = self.forest.read(node_id)
         settle_origin = None
-        if f is not None and not node.frontmatter.get("origin"):
+        if not node.frontmatter.get("origin") and (
+                f is not None or self._remote_source is not None):
             settle_origin = self._origin_for(f, rel)
         if merged is None and settle_origin is None:
             report.unchanged.append(node_id)
@@ -2196,7 +3271,9 @@ class Gardener:
         return merged
 
     def _update_passport(self, node_id: str, f: Path, new_hash: str,
-                         report: IngestReport, rel: str | None = None) -> None:
+                         report: IngestReport, rel: str | None = None, *,
+                         entry: dict | None = None,
+                         info: dict | None = None) -> None:
         """G.3: refresh body + source_hash via the audited write path —
         curated frontmatter (summary, tags, links, confidence) is preserved.
 
@@ -2242,6 +3319,17 @@ class Gardener:
         if conversion.kind == "markdown" and rel is not None:
             conversion.markdown = self._with_provenance(conversion.markdown, rel)
 
+        if conversion.kind == "tree" and rel is not None:
+            # G.2.8 rule 11: this source is a branch and its parts, not one
+            # body. Reconciled per part, and the dry run's own preview is the
+            # same "it would be refreshed" one line below.
+            if self.dry_run:
+                report.updated.append(node_id)
+                return
+            self._sync_tree(conversion, node_id, f, new_hash, report, rel,
+                            entry, info or {})
+            return
+
         if self.dry_run:
             # An update refreshes the body and keeps the curated scent (G.3),
             # so there is no passport to review — reporting that it *would*
@@ -2255,7 +3343,10 @@ class Gardener:
         fm["source_hash"] = new_hash
         st = f.stat()
         fm["source_size"] = st.st_size
-        fm["source_mtime"] = round(st.st_mtime, 3)
+        if entry is None:
+            fm["source_mtime"] = round(st.st_mtime, 3)
+        else:
+            fm["source_etag"] = entry.get("etag") or ""
         fm["updated"] = dt.date.today().isoformat()
         if rel is not None:
             # G.2.6 rule 3 (v0.56): a refresh unions derived aliases in,
@@ -2320,19 +3411,16 @@ class Gardener:
         # archived copy, so a changed original lands under a new name and
         # the stale one is removed rather than left to accumulate.
         ext = f.suffix.lower()
-        is_text_source = ext in MarkdownConverter.extensions
-        staged_media = (PAYLOAD_TYPE_BY_EXT.get(ext) in ("image", "audio")
-                        and f.resolve().is_relative_to(
-                            self.forest.root.resolve() / "_derived"))
-        if (not is_text_source and conversion.kind not in ("payload", "dataset")
-                and (staged_media
-                     or self.config.get("archive", "never") == "always")):
+        if (conversion.kind not in ("payload", "dataset")
+                and self._archive_needed(ext, conversion.kind,
+                                         self._source_is_consumed(f))):
             old = fm.get("payload")
-            payload, ptype, phash = self._archive(f, node_id)
+            payload, ptype, phash = self._archive(f, node_id, report=report,
+                                                  rel=rel)
             if ptype:
                 fm.update({"payload": payload, "payload_type": ptype,
                            "payload_hash": phash})
-                if old and old != payload and old.startswith(f"{ASSETS_DIR}/"):
+                if old and old != payload and str(old).startswith(f"{ASSETS_DIR}/"):
                     stale = self.forest.path_for(node_id).parent / old
                     try:
                         stale.unlink(missing_ok=True)

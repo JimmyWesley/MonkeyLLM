@@ -27,6 +27,8 @@
   "nav.models": "Models",
   "nav.models.blurb": "Which model reads this forest, and which summarises it",
   "nav.more": "More",
+  "nav.notify": "Notifications",
+  "nav.notify.blurb": "Let a bucket or a script tell this forest what changed",
   "nav.overview": "Overview",
   "nav.overview.blurb": "What is in this forest, and what you may do here",
   "nav.people": "Access",

@@ -404,11 +404,24 @@ class Curator:
     def _propose(self, draft: dict) -> None:
         query = f"{draft.get('title', '')} {draft.get('summary', '')}".strip()
         offered: dict[str, dict] = {}
+        # G.4.2.1 rule 1 (v0.84): a draft that carries `source_part` is one
+        # part of a tree (G.2.8), and its SIBLINGS are the other parts of the
+        # same document — already joined by `part-of` and by the sequence, so
+        # a `related-to` between two chapters of one book records nothing a
+        # reader did not already have, and three proposals spent inside the
+        # document are three not spent on the forest.
+        sibling_prefix = (f"{draft['parent'][: -len('/_index')]}/"
+                          if draft.get("source_part")
+                          and str(draft.get("parent", "")).endswith("/_index")
+                          else None)
         for c in self.candidates(query) or []:
             cid = c.get("id")
             # the draft itself and its parent are never candidates (G.4.2.1)
-            if cid and cid not in (draft.get("id"), draft.get("parent")):
-                offered[cid] = c
+            if not cid or cid in (draft.get("id"), draft.get("parent")):
+                continue
+            if sibling_prefix and cid.startswith(sibling_prefix):
+                continue
+            offered[cid] = c
         if not offered:
             return
         cand_block = "\n".join(

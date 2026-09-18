@@ -150,12 +150,24 @@ class TestRollup:
             validate_summary(vine.forest.read(branch_id).frontmatter["summary"])
 
     def test_commits_are_md_only(self, garden, nested_source):
+        """A.3.1: no binary ever enters forest git.
+
+        The one widening is L.12's narrow `_meta` door — `.yaml`/`.md` under
+        `_meta/` only — which as of v0.84 the Gardener's own config travels
+        through (G.6 rule 3): a setting that decides where a forest's bytes
+        live has to travel with the forest, and `_meta/gardener.yaml` was
+        untracked in every forest this project had produced.
+        """
         g, vine, root = garden
         g.adopt(nested_source)
         g.rollup(None)
         tracked = subprocess.run(["git", "ls-files"], cwd=root, check=True,
-                                 capture_output=True, text=True).stdout
-        assert all(f.endswith((".md", ".gitignore")) for f in tracked.split())
+                                 capture_output=True, text=True).stdout.split()
+        assert "_meta/gardener.yaml" in tracked
+        for f in tracked:
+            if f.endswith((".md", ".gitignore")):
+                continue
+            assert f.startswith("_meta/") and f.endswith((".yaml", ".yml")), f
 
 
 class TestDeriveBranchSummary:

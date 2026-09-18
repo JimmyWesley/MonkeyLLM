@@ -90,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
     p_adopt.add_argument("--curate", action="store_true",
                          help="LLM curation (G.4.2): A.4 summaries + tags + edge "
                               "proposals via MONKEYLLM_LLM_ENDPOINT")
+    p_adopt.add_argument("--no-curate", action="store_true",
+                         help="G.4.7: land the corpus with derived summaries "
+                              "and call no model; the scent pass revisits it")
 
     p_sync = sub.add_parser("sync", help="Gardener: hash-diff the adopted source and refresh passports")
     p_sync.add_argument("source", nargs="?", default=None,
@@ -98,6 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     p_sync.add_argument("--curate", action="store_true",
                         help="LLM curation for newly adopted files (G.4.2, "
                              "incl. edge proposals)")
+    p_sync.add_argument("--no-curate", action="store_true",
+                        help="G.4.7: land newly adopted files with derived "
+                             "summaries and call no model")
     p_sync.add_argument("--path", default=None,
                         help="targeted sync (G.8): reconcile only this source-relative path")
 
@@ -126,6 +132,10 @@ def main(argv: list[str] | None = None) -> int:
                         action="store_true",
                         help="create: the default since v0.74; accepted for scripts")
     p_snap.set_defaults(with_payloads=True)
+    p_snap.add_argument("--with-remote", dest="with_remote",
+                        action="store_true",
+                        help="create: also pull the objects an object store "
+                             "holds into the container (J.19/Part I)")
     p_snap.add_argument("--payloads", default=None,
                         help="restore: payload sidecar of a pre-v0.74 snapshot")
     p_snap.add_argument("--to", default=None,
@@ -225,6 +235,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"warning: this forest expects extension {ext_id!r} and it "
                   f"is not installed")
         warnings += len(absent)
+        # G.6 rule 2 (v0.84): the same sentence about a destination. An unmet
+        # `assets:` binding is not an error — the archive falls back to
+        # `_assets/` and the ingest succeeds — but it is exactly the kind of
+        # expectation that is otherwise met with silence.
+        import yaml as _yaml
+
+        from monkeyllm.gardener import unmet_store
+
+        _cfg_path = forest_root / "_meta" / "gardener.yaml"
+        _cfg = (_yaml.safe_load(_cfg_path.read_text(encoding="utf-8")) or {}) \
+            if _cfg_path.is_file() else {}
+        _store = unmet_store(_cfg)
+        if _store:
+            print(f"warning: this forest expects object store {_store!r} and "
+                  f"this deployment does not have it — originals are being "
+                  f"kept under _assets/ instead")
+            warnings += 1
         print(f"\n{errors} error(s), {warnings} warning(s)")
         if errors or (args.strict and warnings):
             return 1
@@ -258,9 +285,12 @@ def main(argv: list[str] | None = None) -> int:
                     curator, only_ingest=not args.rollup_all)
                 report = {}
             else:
+                if args.curate and args.no_curate:
+                    parser.error("--curate and --no-curate say the opposite")
                 curator = _make_curator(vine) if args.curate else None
                 hooks = discover_hooks() + ([curator] if curator else [])
-                gardener = Gardener(vine, hooks=hooks)
+                gardener = Gardener(vine, hooks=hooks,
+                                    curate=False if args.no_curate else None)
                 if args.command == "adopt":
                     report = gardener.adopt(args.source, dest=args.dest)
                 else:
@@ -281,6 +311,10 @@ def main(argv: list[str] | None = None) -> int:
                   f"{rollup_report['skipped']} skipped")
         if curator:
             print(f"curation: {curator.stats}")
+        elif report.get("curation"):
+            print(f"curation: skipped ({report['curation'].get('reason')}) — "
+                  f"derived summaries were written; re-curate later with "
+                  f"derive: [\"scent\"] (J.13.6.1)")
         if args.command != "rollup" and not any(report.values()):
             print("nothing to do")
         return 1 if report.get("errors") else 0
@@ -290,9 +324,24 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.action == "create":
             info = create_snapshot(forest_root, out=Path(args.file) if args.file else None,
-                                   with_payloads=args.with_payloads)
+                                   with_payloads=args.with_payloads,
+                                   with_remote=args.with_remote)
             print(f"snapshot: {info['snapshot']} ({info['bytes']:,} bytes, "
                   f"{info['payloads']} payload(s))")
+            # Part I (v0.84): what lives in a store is said whether or not it
+            # was packed — a count is what keeps `payloads: N` from meaning
+            # both "this is everything" and "this is everything I bothered
+            # with".
+            if info.get("payloads_remote"):
+                if args.with_remote:
+                    print(f"remote: {info['remote_packed']} of "
+                          f"{info['payloads_remote']} object(s) packed")
+                else:
+                    print(f"remote: {info['payloads_remote']} payload(s) live "
+                          f"in an object store and were NOT packed "
+                          f"(--with-remote pulls them in)")
+            for problem in info.get("remote_unreachable") or []:
+                print(f"  warning: {problem}")
             # An omission is said out loud: `0 payload(s)` alone means both
             # "this forest has none" and "you asked for none" (Part I).
             if info["payloads_omitted"]:
@@ -310,9 +359,15 @@ def main(argv: list[str] | None = None) -> int:
                                     payload_sidecar=Path(args.payloads) if args.payloads else None)
             print(f"restored {info['nodes']} nodes -> {info['forest']}"
                   + (f" (+{info['restored_payloads']} payload(s))" if info["restored_payloads"] else ""))
+            if info.get("remote_restored"):
+                print(f"remote cache warmed: {info['remote_restored']} object(s) "
+                      f"(the store is still the durable copy)")
             if info["payloads_missing"]:
                 print(f"warning: {info['payloads_missing']} node(s) name a payload "
                       f"this snapshot did not carry")
+            if info.get("buckets_unserved"):
+                print(f"         no store here serves: "
+                      f"{', '.join(info['buckets_unserved'])}")
         return 0
 
     if args.command == "prefetch":

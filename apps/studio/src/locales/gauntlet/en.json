@@ -1,10 +1,12 @@
 {
   "gauntlet.build": "Build the index",
+  "gauntlet.build_cancelled": "Stopped on request. The forest keeps the index it already had — a build is not resumable, so the next one starts over and is paid for again.",
   "gauntlet.build_hint": "Embeds each node’s title and summary not its body. Runs once; later edits refresh themselves.",
   "gauntlet.building": "Embedding every summary…",
   "gauntlet.enabled": "Use it on this forest",
   "gauntlet.enabled_hint": "Off leaves the model bound and the index built, and every call behaves exactly as it would without either.",
   "gauntlet.index_model": "Index built by",
+  "gauntlet.job_progress": "{done} of {total} nodes embedded",
   "gauntlet.mismatch": "The index was built by a different model than the one bound now, so it is being ignored. Comparing vectors from two models does not rank badly it ranks meaninglessly. Rebuild to use it again.",
   "gauntlet.model_hint": "An embedding model, not a chat model. Changing it invalidates the index and forces a rebuild.",
   "gauntlet.not_here": "The Gauntlet has no switch here: it orders what a forager sees while hopping, and this console asks one question instead of navigating. Try it under Playground, on look or move.",

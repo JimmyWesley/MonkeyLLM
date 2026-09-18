@@ -292,8 +292,42 @@ def fit_summary(summary: str) -> str | None:
     return text
 
 
+# A.3 (v0.84): the child's identity within its source — the zero-padded
+# digits its id carries, as a STRING. Three digits is the id padding G.2.8
+# rule 4 fixes, and 999 is therefore the hard ceiling on a tree.
+SOURCE_PART_RE = re.compile(r"^\d{1,3}$")
+
+
+def validate_source_part(value) -> str:
+    """A string of digits, never an integer (A.3, v0.84).
+
+    YAML 1.1 reads an unquoted `012` as **10**, so a hand-edited passport
+    can renumber a chapter with no edit visible in the diff, and the next
+    refresh then writes part 12's text into part 10's node. Refused rather
+    than coerced — the same reasoning that made `lang: no` a before-validator
+    instead of a coercion (A.3.2): a guess in the shape of a fact is the one
+    thing this pipeline may not write.
+    """
+    if isinstance(value, bool) or isinstance(value, int):
+        raise VineError(
+            E_FRONTMATTER,
+            f"source_part: must be a STRING of digits, got the integer {value}",
+            hint="YAML reads an unquoted 012 as 10. Quote it: source_part: "
+                 "'012'. Only ingest writes this field (G.2.8).")
+    text = str(value)
+    if not SOURCE_PART_RE.match(text):
+        raise VineError(
+            E_FRONTMATTER,
+            f"source_part: must be one to three digits, got {value!r}",
+            hint="It is the part number its id carries, zero-padded to three "
+                 "digits (G.2.8 rule 4).")
+    return text
+
+
 def validate_frontmatter(fm: dict, dialect: dlt.Dialect, *, strict_summary: bool = True) -> Frontmatter:
     """Validate raw frontmatter dict against A.1-A.4. Raises VineError."""
+    if fm.get("source_part") is not None:
+        validate_source_part(fm["source_part"])
     try:
         model = Frontmatter.model_validate(fm)
     except ValidationError as e:
@@ -572,6 +606,13 @@ class NodeSpec(BaseModel):
     entity_kind: str | None = None
     aliases: list[str] = Field(default_factory=list)
     origin: str | None = None
+    # A.3 (v0.84): which part of its source this node is. Declared rather
+    # than left to `extra="allow"` for the reason `lang` is declared — a
+    # field that passes through unread is a field that stores garbage — and
+    # written by the Gardener alone: `_plant` refuses it from a caller
+    # (`moved_from`'s rule, C.15), because a node claiming to be part 7 of a
+    # document nobody converted is a claim about work that never happened.
+    source_part: str | None = None
     # A.3.2 (v0.75): the caller's own statement of the document's language.
     # Declared rather than left to `extra="allow"` precisely so it is
     # validated: a field that passes through unread is a field that stores
@@ -612,6 +653,8 @@ class NodeSpec(BaseModel):
             fm["origin"] = validate_origin(self.origin)
         if self.lang is not None:
             fm["lang"] = validate_lang(self.lang)
+        if self.source_part is not None:
+            fm["source_part"] = validate_source_part(self.source_part)
         # extra="allow": custom frontmatter fields pass through (e.g. the
         # Gardener's source_path/source_hash, spec G.1)
         for k, v in (self.model_extra or {}).items():

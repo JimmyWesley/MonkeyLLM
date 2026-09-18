@@ -27,6 +27,8 @@
   "nav.models": "Modelos",
   "nav.models.blurb": "Qual modelo lê esta floresta e qual resume o que entra",
   "nav.more": "Mais",
+  "nav.notify": "Notificações",
+  "nav.notify.blurb": "Deixe um bucket ou um script avisar esta floresta do que mudou",
   "nav.overview": "Visão geral",
   "nav.overview.blurb": "O que existe nesta floresta e o que você pode fazer aqui",
   "nav.people": "Acessos",

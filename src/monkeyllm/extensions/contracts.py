@@ -26,6 +26,29 @@ from monkeyllm.errors import E_SCHEMA, VineError
 from monkeyllm.extensions.manifest import SEAMS
 
 
+# L.5 (v0.84): what a HEAVY handler is passed on top of its seam's own
+# arguments. It is the same everywhere, because it is a property of the
+# worker protocol and not of any one seam: the request carries the
+# extension's resolved config beside the handler's arguments, and a handler
+# that does not declare it never sees it.
+#
+# It lives in `names` — so the kit does not refuse `def convert(path,
+# config)`, which is the shape `docs/extending.md` teaches — and it is
+# rendered apart in the generated reference, because a LIGHT handler reads
+# its settings through `api.config` and is passed nothing.
+HEAVY_PARAMS: tuple[tuple[str, str], ...] = (
+    ("config", "the extension's RESOLVED configuration: the manifest's "
+               "declared defaults under the operator's stored values, read "
+               "at call time so an edit in the console reaches the next "
+               "call without a restart. Passed only to a `heavy: true` "
+               "handler, and only when the handler declares it — a worker "
+               "that does not ask receives exactly what it received "
+               "before. A declared secret travels here and nowhere else: "
+               "not a log, not a report, not an audit row, not a crash "
+               "trace."),
+)
+
+
 @dataclass(frozen=True)
 class SeamContract:
     """One seam's call shape.
@@ -46,6 +69,18 @@ class SeamContract:
     @property
     def names(self) -> set[str]:
         return {n for n, _ in self.params} | set(self.positional)
+
+    def names_for(self, heavy: bool) -> set[str]:
+        """What this seam passes a handler of that weight.
+
+        The split is real and not a courtesy: a LIGHT handler reads its
+        settings through `api.config` in `register(api)` and is passed
+        nothing, so one naming `config` without a default would bind to
+        nothing and fail at call time — the exact silence this check exists
+        to break. A heavy handler is across a pipe, where `api` does not
+        reach, and the request carries it (L.5).
+        """
+        return self.names | ({n for n, _ in HEAVY_PARAMS} if heavy else set())
 
     def signature(self) -> str:
         """The shape an author writes, for the generated reference."""
@@ -178,7 +213,7 @@ if _MISSING or _EXTRA:          # pragma: no cover - a defect, not a state
 DECLARATIVE = frozenset({"roles", "panel"})
 
 
-def check_signature(seam: str, handler) -> str | None:
+def check_signature(seam: str, handler, heavy: bool = False) -> str | None:
     """None when the handler fits its seam, else what is wrong with it.
 
     The rule is about DEFAULTS, not about `**kwargs`. A first cut treated
@@ -210,15 +245,17 @@ def check_signature(seam: str, handler) -> str | None:
     shape = [(p.name, p.default is not inspect.Parameter.empty)
              for p in named[consumed:]]
     return _mismatch(contract, seam, [p.name for p in named], shape,
-                     accepts_varargs)
+                     accepts_varargs, heavy)
 
 
-def _mismatch(contract, seam, all_names, shape, accepts_varargs):
+def _mismatch(contract, seam, all_names, shape, accepts_varargs,
+              heavy: bool = False):
     """The one judgement, shared by the runtime and the source readers."""
+    passes = contract.names_for(heavy)
     unfilled = [n for n, has_default in shape
-                if not has_default and n not in contract.names]
+                if not has_default and n not in passes]
     if unfilled:
-        offered = ", ".join(sorted(contract.names)) or "(nothing)"
+        offered = ", ".join(sorted(passes)) or "(nothing)"
         return (f"names {', '.join(unfilled)}, which the {seam!r} seam does "
                 f"not pass; it passes: {offered}")
     if not accepts_varargs and len(all_names) < len(contract.positional):
@@ -265,7 +302,29 @@ def signature_from_source(path, func: str):
     return None
 
 
-def check_source_signature(seam: str, path, func: str) -> str | None:
+def declares_config(path, func: str) -> bool:
+    """L.5 rule 1 (v0.84): whether a heavy handler asked for its settings.
+
+    Read off the SOURCE for `signature_from_source`'s reason — a heavy
+    handler's module imports the very dependency L.5 exists to keep out of
+    this process, so importing it here to look at a parameter list would
+    defeat the rule the worker exists to serve.
+
+    The question is asked on the host rather than in the child on purpose:
+    a worker that did not ask must receive the request it received in
+    v0.83, byte for byte, and a request carrying a `config` the child then
+    discards is not that request. It is also the rule that keeps a declared
+    secret out of a process that has no use for it.
+    """
+    found = signature_from_source(path, func)
+    if found is None:
+        return False
+    shape, _ = found
+    return any(name == "config" for name, _ in shape)
+
+
+def check_source_signature(seam: str, path, func: str,
+                           heavy: bool = False) -> str | None:
     """`check_signature`'s answer, read off the source instead of an object."""
     contract = CONTRACTS.get(seam)
     if contract is None or seam in DECLARATIVE:
@@ -276,11 +335,12 @@ def check_source_signature(seam: str, path, func: str) -> str | None:
     shape, accepts_varargs = found
     consumed = 0 if accepts_varargs else len(contract.positional)
     return _mismatch(contract, seam, [n for n, _ in shape], shape[consumed:],
-                     accepts_varargs)
+                     accepts_varargs, heavy)
 
 
-def require_signature(seam: str, handler, ext_id: str) -> None:
-    problem = check_signature(seam, handler)
+def require_signature(seam: str, handler, ext_id: str,
+                      heavy: bool = False) -> None:
+    problem = check_signature(seam, handler, heavy)
     if problem:
         raise VineError(
             E_SCHEMA, f"{ext_id}: the {seam} handler {problem}",

@@ -194,3 +194,27 @@ Notes:
 - `locate` only turns hybrid when **there is an index AND an embedder** —
   any other combination stays BM25-only, with no contract change
   (architecture doc, §3).
+
+## A local MinIO as the forest's object store (v0.84)
+
+`docker run -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=… -e
+MINIO_ROOT_PASSWORD=… minio/minio server /data --console-address :9001`
+gives you an S3-compatible endpoint at `http://localhost:9000`; create a
+bucket (`forest-assets`) and an access key pair in its console at `:9001`.
+Install the client with `pip install "monkeyllm[s3]"` (boto3, Apache-2.0) —
+without it every `s3://` path refuses by name and nothing else changes.
+Then either declare it to the whole deployment —
+`MONKEYLLM_S3_ENDPOINT=http://localhost:9000`,
+`MONKEYLLM_S3_BUCKET=forest-assets`, optionally `MONKEYLLM_S3_PREFIX`, with
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` for the pair, which publishes it
+read-only as the store named `env` — or add it in **Ingest → Storage** as a
+named store and bind it per forest, which is what you want as soon as two
+forests should not share a bucket (spec J.19). MinIO speaks path-style
+addressing, so turn that flag on; virtual-host style needs DNS you do not
+have locally. The connection test opens a connection from the Station to an
+address you typed, so it refuses non-public ones unless
+`MONKEYLLM_STATION_PROVIDER_ALLOW_PRIVATE=1` is set — the same switch a
+local llama.cpp needs, and for the same reason. Nothing else changes: the
+map stays in git, `locate` and `sniff` never touch a byte of this, and a
+forest with no binding keeps its originals under `_assets/` exactly as
+before.

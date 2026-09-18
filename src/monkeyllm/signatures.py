@@ -233,7 +233,19 @@ SIGNATURES: dict[str, dict[str, dict]] = {
         "mode": _param("string"),
         "files": _param("object[]"),
         "path": _param("string"),
+        # G.3.1 (v0.84): a source is a local directory OR an object-store
+        # prefix (`s3://bucket/prefix`) a configured store serves. `path`
+        # stays what it was — a host path — because the two are privileged
+        # for two different reasons and one spelling would hide that.
+        "source": _param("string"),
         "dest": _param("string"),
+        # G.4.7 (v0.84): curating later is a decision, not a failure. It is
+        # not a console preference — it changes what is written into the
+        # forest and what the deployment is billed — so it rides the
+        # request.
+        "curate": _param("boolean"),
+        # G.7: the content policy a batch lands under.
+        "content": _param("string"),
         "wait": _param("boolean"),
     },
 }

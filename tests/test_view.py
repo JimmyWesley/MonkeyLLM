@@ -6,7 +6,10 @@ media node, resolved for a multimodal client.
 
 What is load-bearing: absent node, payload-less node and missing file all
 answer the SAME `E_NOT_FOUND` envelope (a host layers its scope rule on the
-same shape); a remote URI is refused rather than fetched inside a read; a
+same shape); a remote image resolves through the G.9 cache and a bucket no
+store serves is refused naming the bucket (v0.84 — before it, every remote
+URI was refused, which made an object store the place a screenshot goes to
+stop being viewable); a
 payload resolving outside the forest root is refused, never followed; and
 anything that is not an image stays with the surfaces that already serve it.
 """
@@ -107,13 +110,24 @@ class TestView:
         assert exc.value.code == E_SCHEMA
         assert "not an image" in exc.value.message
 
-    def test_a_remote_uri_is_refused_not_fetched(self, vine):
+    def test_a_remote_uri_on_an_unserved_bucket_names_the_bucket(
+            self, vine, monkeypatch):
+        """C.6d rule 2 (v0.84) replaces v0.48's blanket refusal.
+
+        A remote IMAGE now resolves through the G.9 cache — refusing it made
+        an object store the place a screenshot goes to stop being viewable.
+        What still stops it is having no credential for its bucket, and that
+        refusal names the bucket and nothing else: not the key, not the
+        endpoint, not a store.
+        """
+        monkeypatch.setenv("MONKEYLLM_S3_BUCKET", "somewhere-else")
         _plant_media(vine, node_id="remote", payload="s3://bucket/shot.png",
                      data=None)
         with pytest.raises(VineError) as exc:
             vine.view("remote")
-        assert exc.value.code == E_SCHEMA
-        assert "s3" in exc.value.message
+        assert exc.value.code == E_NOT_FOUND
+        assert "bucket" in exc.value.message
+        assert "shot.png" not in exc.value.message
 
     def test_a_payload_escaping_the_forest_is_refused(self, vine, tmp_path):
         outside = tmp_path / "outside.png"

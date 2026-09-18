@@ -1,7 +1,7 @@
 # MonkeyLLM agent guide
 
 Knowledge forest navigable by an SLM: markdown + indexes, traversed through
-**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.83.md` is normative
+**Vine**'s MCP primitives. `docs/monkeyllm-spec-v0.84.md` is normative
 (earlier versions are archived) **the spec is the truth**; any contract
 change requires a new spec version before code.
 
@@ -76,6 +76,102 @@ python scripts/bench_locate.py                                  # quality+latenc
 Local models (llama.cpp on the 3090): see `docs/local-inference.md`.
 
 ## Conventions and pitfalls
+
+- **The bytes, the bucket and the book (spec J.19 + G.3.1/G.3.2 + G.2.8 +
+  G.4.7 + G.7 r5/r7 + G.10.2 + A.3/A.5 + J.8.6 + J.14 r5 + J.20 + L.5,
+  v0.84)**: an operator uploaded a PDF through the ingest console, read the
+  60-token `summary` as the AI summarising his document, and found the
+  original nowhere — `archive: never` (G.7 r5) keeps durable sources at the
+  source and v0.61's consume deletes a courier's bytes the moment the node
+  lands, so the ONE copy of a LOSSY conversion's original was deleted by
+  design, with no console offering to change either policy. He then asked
+  for the three things that make this round: a bucket per forest configured
+  the way a model provider is, a forest started from a bucket that already
+  holds ten thousand objects, and a 500-page book split into linked
+  micro-contexts instead of one node with one scent. The same failure at
+  three scales — the map was right and the bytes, the source and the
+  granularity each had no word — and all three meet in the Gardener, which
+  is why they ship together. **J.19: a store is a named destination**, with
+  a provider's custody and reach (listing is any admin's; creating, editing
+  or testing takes authority over EVERY forest, because any forest may bind
+  it), the credential write-only on every surface, and the test WRITES and
+  deletes a probe object because a read-only grant passes a `HEAD` and fails
+  at the first ingest instead. A forest binds it **by NAME** in
+  `_meta/gardener.yaml` — never a credential, because that file is versioned
+  and travels in a snapshot, and L.12's rule applies word for word: `_meta`
+  declares expectation and never grants it. Written by binding (forest →
+  `env` → local `_assets/`), **read by bucket** (`payload: s3://b/k` names
+  its bucket and the bucket decides the credential), so a forest that
+  changed stores still reads what it wrote. Lossiness now overrides
+  `archive:`: only a text passthrough and a payload adoption are lossless.
+  **G.3.1: a bucket is a SOURCE**, and having a store is the containment
+  rule for it, the counterpart of `MONKEYLLM_INGEST_ROOTS` — the bucket IS
+  the bone, so `payload` and `origin` are the object's own URI and a
+  ten-thousand-document forest holds zero bytes of anybody's original (a
+  mount would have recorded `file:///mnt/...`, an address that names one
+  machine's mount table). **G.2.8: a converter may answer with a tree** —
+  `{kind: "tree", title, markdown, children}` — and the engine never decides
+  where a document divides, because that takes knowing the format and
+  usually the subject, and `src/monkeyllm/` holds no content vocabulary.
+  Gotchas, each of which cost a round: `Vine.plant`'s LIST path dropped
+  `adopted=`, and `adopted` also exempts `media` from C.7.5's "a payload
+  must exist" — so a bucket of photos would have been refused one node at a
+  time, and the first draft called that correct. `_meta/gardener.yaml` was
+  written and never COMMITTED in any forest this project ever produced, so
+  "the binding travels in a snapshot" was true of the path and false of the
+  artifact (`commit_meta` is the narrow `_meta` door; A.3.1's `.md`-only
+  guard on the ordinary path is not relaxed). The Studio editor's StarterKit
+  declared heading levels `[2, 3]` while every forest body opens with
+  `# Title`, so the rich editor proposed a phantom `replace_body` on 49 of
+  49 fixture bodies. `_sniff_body` tracks exactly two heading levels, which
+  is why a PDF's shape is `## Chapter` + `### Page N` and why `#### Tables`
+  is invisible to `sniff` **by design** — measured against the engine, not
+  chosen. A queued plant is not a planted node: G.10.2's batch means a
+  cancel must report `planted` and `queued` apart, or the report claims
+  durability that never happened. `_passports()` keyed on `source_path`
+  collapses a tree, because every part of one document shares it —
+  `source_part` is the child's identity, a string of DIGITS because
+  `yaml.safe_load("012")` is **10** and a chapter renumbered in silence is a
+  refresh into the wrong node. `HEADER_RE`'s trailing `\s*` eats the
+  paragraph break after a heading, which is also why the engine's own index
+  render had no blank line before its first entry — 12 of the fixture's 82
+  bodies and 28 of the bench forest's 154 could not open in the editor's
+  rich mode until `indexer.add_entry` wrote one. `.vine.lock` is this
+  process's pid and clock and belongs in no tree diff; neither does the
+  staged file's `source_mtime`, which is pinned rather than stripped so
+  "byte-identical" can mean every byte. A subscription's secret is stored
+  WHOLE and not hashed, because J.20 verifies an HMAC and that needs the
+  key — the one credential in this product that is not a digest, and it says
+  so where it is written. The CSP blocks following a 302 to a store's origin
+  AND a bare link to the payload route carries no credential (J.2
+  authenticates by header, never by cookie), which is both halves of J.14
+  rule 5: the console ASKS for the URL with `Accept: application/json` and
+  navigates to what comes back. F.222's "a second forest uploads nothing"
+  contradicted the forest id that J.19.6 puts in the key — the dedup is
+  within one forest's prefix, and the test was wrong, not the rule. One
+  store per bucket is what makes the read lookup TOTAL: two stores on one
+  bucket would need a tie-break nobody could state. Two the live store found
+  and no double could: botocore resolves `signature_version` to `s3v4` and
+  still presigns **SigV2** unless it is set by hand, which MinIO accepts and
+  AWS has refused since 2014 — so a reader would have been redirected to a
+  URL their own store rejects; and the Station never forwarded `stores=` to
+  `create_snapshot`/`restore_snapshot`, so `--with-remote` would have
+  reported every object unreachable on the deployment that serves them all.
+  Measured: 2,000 objects adopt in 22.7 s as 101 plant commits with a
+  54 KB largest `_index.md`; the live MinIO module runs in 7.6 s. Left out,
+  named: nothing lifts an existing `_assets/` tree into a newly bound store
+  and nothing moves objects when a binding changes; `prune` never deletes a
+  remote object, so a bucket accumulates objects no passport names and the
+  reclamation pass is easy to specify and easy to get catastrophically
+  wrong against a stale catalog; a `.csv` original is NOT archived beside
+  the `.db` the forest births from it; `look` on a remote dataset still
+  fetches the whole `.db`, because C.2.2 has no "remote and not yet cached"
+  rule; the section-grain editor has no Markdown surface and the rich editor
+  has no Link or Image node; a PDF's tables are appended and not interleaved
+  at their bbox position; and the bucket card does not count the objects
+  before Start. F.219-F.246 in `tests/test_v084_*.py` +
+  `check-{storage,bucket,reading}.mjs`; `tests/test_v084_live_s3.py` is
+  env-gated and skips wherever the store is not named.
 
 - **The extension that could not be used (spec G.2 + J.8.5 + L.1 + L.6 r1
   + L.8 + L.11 + L.14, v0.83)**: an operator uploaded two extensions

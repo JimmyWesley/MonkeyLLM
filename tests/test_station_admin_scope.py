@@ -132,6 +132,16 @@ def test_the_route_table_is_what_we_think_it_is(station):
         # The upload staging area, seen and cleared (v0.61, J.8): the same
         # gate as the rebuild, so the sweeps below cover it.
         ("/v1/admin/staging", "GET"), ("/v1/admin/staging", "POST"),
+        # Object stores (v0.84, J.19). The listing is any administrator's —
+        # a forest's `assets:` binding points at these names and no secret
+        # is returned — and creating, changing, removing or testing one
+        # needs authority over EVERY forest, which is the providers' rule
+        # for the providers' reason. The sweeps below cover both, exactly
+        # as they cover the owner-only routes.
+        ("/v1/admin/stores", "GET"), ("/v1/admin/stores", "POST"),
+        ("/v1/admin/stores/{name}", "DELETE"),
+        ("/v1/admin/stores/{name}", "PUT"),
+        ("/v1/admin/stores/{name}/test", "POST"),
         # An orphan lock, released over HTTP (v0.55, J.13.5): admin_gate,
         # audited, and constitutionally unable to break a live writer.
         ("/v1/admin/unlock", "POST"),

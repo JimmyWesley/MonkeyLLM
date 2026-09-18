@@ -113,6 +113,36 @@ CREATE TABLE IF NOT EXISTS providers (
     created  TEXT NOT NULL,
     origin   TEXT NOT NULL DEFAULT 'console'
 );
+-- Object stores (J.19): a named destination for the BONE tier. Shaped
+-- after `providers` on purpose — one row, no forest column, a write-only
+-- credential — because a store is the same kind of resource: any forest may
+-- bind it, its bucket receives every bound forest's originals, and its
+-- credential pays for all of them.
+--
+-- The environment-declared store (J.19.4) is NOT a row here. A provider's
+-- env row is written because a per-forest binding points at its NAME out of
+-- another table; a store's binding is a line in the forest's own versioned
+-- `_meta/`, so nothing in this file references it — and keeping it in
+-- memory is the shortest way to keep the promise that its credential is
+-- never persisted, and that withdrawing the variables leaves nothing behind
+-- claiming its bucket.
+CREATE TABLE IF NOT EXISTS stores (
+    name       TEXT PRIMARY KEY,
+    endpoint   TEXT NOT NULL DEFAULT '',   -- empty = the provider's own public endpoint
+    bucket     TEXT NOT NULL,
+    prefix     TEXT NOT NULL DEFAULT '',
+    region     TEXT NOT NULL DEFAULT '',
+    -- Write-only over the API, like a provider's key — and the access key
+    -- id is withheld too (J.19.1): it names an identity in somebody's
+    -- account, a console can do nothing with it, and a secret kept whole is
+    -- cheaper than a secret kept in halves.
+    access_key TEXT,
+    secret_key TEXT,
+    path_style INTEGER NOT NULL DEFAULT 0,
+    origin     TEXT NOT NULL DEFAULT 'console',
+    created    TEXT NOT NULL,
+    updated    TEXT
+);
 -- Which model serves which ROLE on which forest: a forest ingested by a
 -- careful summariser can be answered by a fast reader, and vice versa.
 CREATE TABLE IF NOT EXISTS model_bindings (
@@ -234,6 +264,23 @@ CREATE TABLE IF NOT EXISTS shares (
     revoked_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_shares_forest ON shares(forest);
+
+-- J.20 (v0.84): the inbound trigger's standing authority. One row per
+-- subscription; the secret is shown once at creation and returned by
+-- nothing afterwards, exactly as a webhook's is (J.16.4) — and for the
+-- same mechanical reason: an HMAC is verified with the key it was produced
+-- with, so this is a shared secret and not a password to be digested.
+CREATE TABLE IF NOT EXISTS ingest_subscriptions (
+    id         TEXT PRIMARY KEY,
+    forest     TEXT NOT NULL,
+    label      TEXT,
+    secret     TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created    TEXT NOT NULL,
+    last_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ingest_subs_forest
+    ON ingest_subscriptions(forest);
 """
 
 # Indexes over columns that MIGRATIONS may still be about to add. Running
@@ -246,6 +293,13 @@ POST_MIGRATION_SQL = """
 -- both win, whatever the application layer does.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_single_owner
     ON principals(owner) WHERE owner = 1;
+
+-- J.19.1: one store per (endpoint, bucket). `put_store` refuses the second
+-- one by name, which is the sentence an operator reads; this is the
+-- structure that makes the by-bucket lookup total whatever a later code
+-- path forgets.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_store_destination
+    ON stores(endpoint, bucket);
 """
 
 # `vision` is the G.5.1 describer: it reads images at adopt/sync so `sniff`
@@ -314,6 +368,17 @@ MIGRATIONS = {
         "caps": "TEXT",
     },
     "providers": {"origin": "TEXT NOT NULL DEFAULT 'console'"},
+    # J.19 (v0.84). The TABLE arrives through SCHEMA_SQL, which is what
+    # makes a new table safe on an in-place upgrade; this is the door its
+    # columns come through, and it is stated now rather than after the first
+    # registry written by a pre-release build of this round is in somebody's
+    # volume. No DATA_REPAIRS entry: a new table has nothing to repair, and
+    # a `user_version` stamp spent on a no-op is one nobody can spend later.
+    "stores": {"prefix": "TEXT NOT NULL DEFAULT ''",
+               "region": "TEXT NOT NULL DEFAULT ''",
+               "path_style": "INTEGER NOT NULL DEFAULT 0",
+               "origin": "TEXT NOT NULL DEFAULT 'console'",
+               "updated": "TEXT"},
     # J.4.2 (v0.73): the bill, the refusal and the clock. Nullable by
     # design — see the table above.
     "audit": {"ms": "REAL", "model_ms": "REAL", "error_code": "TEXT",
@@ -389,6 +454,10 @@ class Registry:
         # life of the process, and never written: the registry file is a
         # backup target and the environment is not.
         self._env_secrets: dict[str, str] = {}
+        # The environment-declared object store (J.19.4), whole: not a row,
+        # for the reason stated above the `stores` table. None = the
+        # deployment declares none, which is v0.83 to the byte.
+        self._env_store: dict | None = None
 
     def _repair(self) -> None:
         """Apply the DATA_REPAIRS this database has not seen (see the tuple).
@@ -1074,6 +1143,233 @@ class Registry:
         if out["origin"] == "env":
             out["api_key"] = self._env_secrets.get(name)
         return out
+
+    # -- object stores (J.19) ------------------------------------------------
+
+    def adopt_env_store(self, declared: dict | None) -> None:
+        """Publish the deployment's own store (J.19.4).
+
+        Held in memory for the life of the process. Unlike a provider it is
+        not written as a row: nothing in this file points at a store's name
+        (a forest's binding is a line in its own versioned `_meta/`), so a
+        row would buy nothing and would cost the two promises this section
+        makes — that no credential is persisted, and that withdrawing the
+        variables leaves nothing behind still claiming that bucket.
+        """
+        self._env_store = dict(declared) if declared else None
+
+    @staticmethod
+    def _store_public(row: dict) -> dict:
+        """One store as every surface may see it: `has_key`, never a secret,
+        and never the access key id either (J.19.1)."""
+        return {
+            "name": row["name"],
+            "endpoint": row.get("endpoint") or "",
+            "bucket": row.get("bucket") or "",
+            "prefix": row.get("prefix") or "",
+            "region": row.get("region") or "",
+            "path_style": bool(row.get("path_style")),
+            "origin": row.get("origin") or "console",
+            "created": row.get("created"),
+            "has_key": bool(row.get("access_key") and row.get("secret_key")),
+        }
+
+    def _env_store_row(self) -> dict | None:
+        if not self._env_store:
+            return None
+        return {**self._env_store, "origin": "environment", "created": None}
+
+    def stores(self) -> list[dict]:
+        """Never returns secrets — only whether one is set."""
+        rows = [dict(r) for r in
+                self.conn.execute("SELECT * FROM stores ORDER BY name")]
+        env = self._env_store_row()
+        if env is not None:
+            rows = [r for r in rows if r["name"] != env["name"]] + [env]
+        return [self._store_public(r) for r in sorted(rows, key=lambda r: r["name"])]
+
+    def store(self, name: str) -> dict | None:
+        row = self.store_secret(name)
+        return self._store_public(row) if row else None
+
+    def store_secret(self, name: str) -> dict | None:
+        """Server-side only: the one path that reads the credential back.
+
+        The environment store answers from the environment's own values, so
+        a deployment on an instance role holds no key here and is never
+        asked for one.
+        """
+        name = str(name or "")
+        env = self._env_store_row()
+        if env is not None and name == env["name"]:
+            return dict(env)
+        row = self.conn.execute(
+            "SELECT * FROM stores WHERE name = ?", (name,)).fetchone()
+        return dict(row) if row else None
+
+    def store_secret_for_bucket(self, bucket: str) -> dict | None:
+        """Which credential opens an existing URI (G.9, J.19.7).
+
+        Total by construction: a bucket is claimed by one store (J.19.1), so
+        there is no tie to break. The environment store answers last, which
+        matters only for a registry written before that rule existed.
+        """
+        bucket = str(bucket or "")
+        if not bucket:
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM stores WHERE bucket = ? ORDER BY name LIMIT 1",
+            (bucket,)).fetchone()
+        if row is not None:
+            return dict(row)
+        env = self._env_store_row()
+        return dict(env) if env and env["bucket"] == bucket else None
+
+    def _store_origin(self, name: str) -> str | None:
+        env = self._env_store_row()
+        if env is not None and name == env["name"]:
+            return "environment"
+        row = self.conn.execute(
+            "SELECT origin FROM stores WHERE name = ?", (name,)).fetchone()
+        return row["origin"] if row else None
+
+    def put_store(self, name: str, *, endpoint: str | None, bucket: str,
+                  prefix: str | None = None, region: str | None = None,
+                  path_style: bool = False, access_key: str | None = None,
+                  secret_key: str | None = None) -> dict:
+        """Store a store (J.19.1). Raises ValueError with the sentence a
+        console shows; the route turns it into `E_SCHEMA`.
+
+        Custody is a provider's, with "address" reading as endpoint **and**
+        bucket: a bucket is part of where the credential was stored to point,
+        so changing either requires supplying the credential again.
+        """
+        from monkeyllm_station import stores as stores_mod
+
+        name = str(name or "").strip()
+        if not stores_mod.NAME_RE.match(name):
+            raise ValueError(
+                "a store name is lowercase letters, digits, '.', '-' or '_', "
+                "starting with a letter or digit: it is written into a "
+                "forest's _meta/ and read back by a resolver")
+        if self._store_origin(name) == "environment":
+            raise ValueError(f"'{name}' is declared by the environment; "
+                             "edit the variables and restart the Station")
+        bucket = str(bucket or "").strip()
+        if not bucket:
+            raise ValueError("a store needs a bucket")
+        endpoint = str(endpoint or "").strip().rstrip("/")
+        prefix = stores_mod.normalise_prefix(prefix)
+        region = str(region or "").strip()
+        # One identity, never half of one (J.19.1).
+        if bool(access_key) != bool(secret_key):
+            raise ValueError(
+                "an access key and a secret key travel together: half of a "
+                "credential is one nobody can test")
+        existing = self.conn.execute(
+            "SELECT * FROM stores WHERE name = ?", (name,)).fetchone()
+        existing = dict(existing) if existing else None
+        # J.19.1: one store per bucket, which is what makes the by-bucket
+        # lookup total. The refusal names the store that holds it — the one
+        # fact that turns this into a decision the operator can make.
+        for other in self.stores():
+            if other["name"] == name:
+                continue
+            if other["bucket"] == bucket and other["endpoint"] == endpoint:
+                raise ValueError(
+                    f"bucket '{bucket}' is already served by the store "
+                    f"'{other['name']}': one store per bucket, so a read has "
+                    f"one answer and not a tie-break nobody could predict")
+        if existing and not secret_key:
+            moved = (existing["endpoint"] != endpoint
+                     or existing["bucket"] != bucket)
+            if moved and (existing["access_key"] or existing["secret_key"]):
+                raise ValueError(
+                    "changing a store's endpoint or bucket requires supplying "
+                    "its credential again: a credential belongs to the "
+                    "destination it was stored against")
+        if secret_key:
+            keys = (access_key, secret_key)
+        elif existing:
+            keys = (existing["access_key"], existing["secret_key"])
+        else:
+            keys = (None, None)
+        now = _now()
+        self.conn.execute(
+            "INSERT OR REPLACE INTO stores (name, endpoint, bucket, prefix, "
+            "region, access_key, secret_key, path_style, origin, created, "
+            "updated) VALUES (?,?,?,?,?,?,?,?, 'console', ?, ?)",
+            (name, endpoint, bucket, prefix, region, keys[0], keys[1],
+             1 if path_style else 0,
+             (existing or {}).get("created") or now, now))
+        self.conn.commit()
+        return self.store(name)
+
+    def delete_store(self, name: str) -> bool:
+        """Remove a store. No binding and no byte goes with it (J.19.2): a
+        forest's `assets:` is content in its own git, and this product does
+        not delete somebody else's objects on an administrative action."""
+        if self._store_origin(name) == "environment":
+            raise ValueError(f"'{name}' is declared by the environment; "
+                             "unset the variables and restart the Station")
+        cur = self.conn.execute("DELETE FROM stores WHERE name = ?", (name,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    # -- ingest subscriptions (J.20) -----------------------------------------
+
+    @staticmethod
+    def _subscription_public(row: dict) -> dict:
+        return {"id": row["id"], "forest": row["forest"],
+                "label": row.get("label"), "created_by": row["created_by"],
+                "created": row["created"], "last_at": row.get("last_at")}
+
+    def create_subscription(self, *, forest: str, label: str | None,
+                            created_by: str) -> tuple[dict, str]:
+        """A standing authority held by whoever has the secret (J.20).
+
+        Returned once, here, and by nothing afterwards. It is stored whole
+        because the Station VERIFIES with it: an HMAC is checked against the
+        key it was produced with, so a digest of the secret would verify
+        nothing at all — J.16's custody rule (never readable back) is the
+        half of J.17's that applies.
+        """
+        sub_id = f"ing-sub-{secrets.token_hex(4)}"
+        secret = f"insec_{secrets.token_urlsafe(32)}"
+        self.conn.execute(
+            "INSERT INTO ingest_subscriptions (id, forest, label, secret, "
+            "created_by, created) VALUES (?,?,?,?,?,?)",
+            (sub_id, forest, (label or None), secret, created_by, _now()))
+        self.conn.commit()
+        return self._subscription_public(
+            dict(self.conn.execute(
+                "SELECT * FROM ingest_subscriptions WHERE id = ?",
+                (sub_id,)).fetchone())), secret
+
+    def subscriptions(self, forest: str) -> list[dict]:
+        return [self._subscription_public(dict(r)) for r in self.conn.execute(
+            "SELECT * FROM ingest_subscriptions WHERE forest = ? "
+            "ORDER BY created DESC", (forest,))]
+
+    def subscription(self, sub_id: str) -> dict | None:
+        """Server-side only: carries the secret, so it is never serialised."""
+        row = self.conn.execute(
+            "SELECT * FROM ingest_subscriptions WHERE id = ?",
+            (str(sub_id or ""),)).fetchone()
+        return dict(row) if row else None
+
+    def delete_subscription(self, sub_id: str, forest: str) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM ingest_subscriptions WHERE id = ? AND forest = ?",
+            (sub_id, forest))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def touch_subscription(self, sub_id: str) -> None:
+        self.conn.execute(
+            "UPDATE ingest_subscriptions SET last_at = ? WHERE id = ?",
+            (_now(), sub_id))
+        self.conn.commit()
 
     def bind_model(self, forest: str, role: str, provider: str, model: str,
                    max_tokens: int = 1500, reasoning: str = "off",

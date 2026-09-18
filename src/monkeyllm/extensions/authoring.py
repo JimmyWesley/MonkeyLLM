@@ -18,7 +18,8 @@ that adding a seam to the catalogue changes the output with no second edit
 
 from __future__ import annotations
 
-from monkeyllm.extensions.contracts import CONTRACTS, DECLARATIVE
+from monkeyllm.extensions.contracts import (CONTRACTS, DECLARATIVE,
+                                            HEAVY_PARAMS)
 from monkeyllm.extensions.manifest import (ATTRIBUTED_SEAMS, ROLE_KINDS,
                                            SEAMS, ConfigField, Manifest)
 from monkeyllm.extensions.sources import (DEFAULT_UPLOAD_MAX_MB,
@@ -66,6 +67,11 @@ def schema(host_version: str) -> dict:
                 "positional": list(CONTRACTS[name].positional),
                 "params": [{"name": n, "carries": what}
                            for n, what in CONTRACTS[name].params],
+                # L.5 (v0.84): the worker protocol's own parameter, the
+                # same at every seam and passed only to a heavy handler.
+                "heavy_params": ([] if name in DECLARATIVE else
+                                 [{"name": n, "carries": what}
+                                  for n, what in HEAVY_PARAMS]),
                 "returns": CONTRACTS[name].returns,
                 "precedence": CONTRACTS[name].precedence,
                 "declarative": name in DECLARATIVE,
@@ -121,6 +127,10 @@ def seam_reference(host_version: str) -> str:
         for p in s["params"]:
             out.append(f"- `{p['name']}` — {p['carries']}")
         if s["params"]:
+            out.append("")
+        for p in s.get("heavy_params") or []:
+            out.append(f"- `{p['name']}` — {p['carries']}")
+        if s.get("heavy_params"):
             out.append("")
         out.append(f"**Returns:** {s['returns']}")
         out.append("")

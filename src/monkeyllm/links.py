@@ -71,6 +71,13 @@ _SUBJECT = {
     ("ranger", True): "ranger(prune)",
     ("vote", False): "vote(accept)",
     ("vote", True): "vote(reject)",
+    # G.2.8 rule 11 (v0.84): the Gardener rewrites a tree's `succeeds`
+    # sequence when a refresh changes which parts exist. It goes through
+    # THIS path and not a second one — two descriptions of what rewriting a
+    # link means agree only where somebody compared them — and `history`
+    # reads `gardener` off the subject like every other Gardener commit.
+    ("gardener", False): "gardener(sequence)",
+    ("gardener", True): "gardener(sequence)",
 }
 
 
@@ -110,7 +117,7 @@ def find_link(frontmatter: dict, rel: str, target: str) -> dict | None:
 
 def rewrite_link(vine, node_id: str, link: dict, *,
                  confidence: float | None = None, remove: bool = False,
-                 by: str = "ranger") -> str:
+                 add: bool = False, by: str = "ranger") -> str:
     """The audited write path: only the `.md` is committed (H.2.1 rule 1).
 
     Re-reads the node first — a previous action in the same cycle (or the
@@ -130,13 +137,25 @@ def rewrite_link(vine, node_id: str, link: dict, *,
     links = list(fm.get("links") or [])
     key = (link["rel"], link["target"])
     kept = []
+    found = False
     for l in links:
         if isinstance(l, dict) and (l.get("rel"), l.get("target")) == key:
+            found = True
             if remove:
                 continue
-            l = dict(l)
-            l["confidence"] = confidence
+            if not add:
+                l = dict(l)
+                l["confidence"] = confidence
         kept.append(l)
+    if add and not found:
+        # v0.84: a link the passport does not carry yet. No `confidence`
+        # key at all — H.2.1 rule 3: `None` is not `1.0`, and a structural
+        # edge is outside the managed population rather than settled inside
+        # it.
+        entry = {"rel": link["rel"], "target": link["target"]}
+        if confidence is not None:
+            entry["confidence"] = confidence
+        kept.append(entry)
     if kept:
         fm["links"] = kept
     else:
@@ -145,7 +164,9 @@ def rewrite_link(vine, node_id: str, link: dict, *,
     assert node.path is not None
     node.path.write_text(serialize_node(fm, node.body), encoding="utf-8",
                          newline="\n")
-    detail = f"{link['rel']}->{link['target']}" + ("" if remove else f" {confidence}")
+    detail = f"{link['rel']}->{link['target']}"
+    if not remove and confidence is not None:
+        detail += f" {confidence}"
     sha = vine.git.commit([node.path],
                           f"{_SUBJECT[(by, remove)]}: {node_id} {detail}")
     vine.catalog.upsert_node(vine.forest.read(node_id))

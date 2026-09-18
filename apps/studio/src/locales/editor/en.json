@@ -21,7 +21,7 @@
   "editor.pending_hint": "Exactly what will be sent, in the shape the API receives it.",
   "editor.placeholder": "Write…",
   "editor.quote": "Quote",
-  "editor.rich_locked": "This body carries tables or raw HTML the rich editor cannot hold; edit the Markdown.",
+  "editor.rich_locked": "The rich editor would not hand this body back unchanged — its line breaks, list markers, links or identifiers would be rewritten. Edit the Markdown.",
   "editor.rule_commit": "The result is a git commit stamped with your principal.",
   "editor.rule_immutable": "Id, type and creation date cannot change.",
   "editor.rule_summary": "The summary is validated against its token budget.",

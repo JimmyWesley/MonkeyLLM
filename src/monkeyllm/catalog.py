@@ -836,7 +836,8 @@ class Catalog:
 
 def count_missing_payloads(catalog: Catalog, forest: Forest,
                            where: list[str] | None = None,
-                           params: list | None = None) -> int:
+                           params: list | None = None,
+                           *, stores=None) -> int:
     """Local payloads a passport names and the filesystem does not have.
 
     C.17 rule 11 counts this per root, and Part I's restore counts it over
@@ -847,16 +848,45 @@ def count_missing_payloads(catalog: Catalog, forest: Forest,
 
     One statement selects the nodes that declare a payload at all — a
     handful beside the node count — and each is a stat, never an open, so
-    C.17 rule 1 stands. Remote payloads (G.9) are skipped: their bytes were
-    never local, their absence is a fetch away, and counting them would
-    report a hole that does not exist.
+    C.17 rule 1 stands.
+
+    A remote payload (G.9) counts only when NO store serves its bucket
+    (v0.84). v0.74 skipped every remote payload, and that sentence was right
+    while the only way to have one was to type it by hand: their bytes were
+    never local and their absence is a fetch away. A forest bound to an
+    object store writes them by the hundred, and a passport naming bytes
+    nobody in this deployment can reach is the same condition as an absent
+    file — it is the number that tells an operator restoring onto a new
+    deployment that they have restored a map to a territory they have no key
+    for. Resolution is a lookup against the resolver, never a network call.
     """
-    from monkeyllm.fetch import is_remote
+    return missing_payloads(catalog, forest, where, params, stores=stores)[0]
+
+
+def missing_payloads(catalog: Catalog, forest: Forest,
+                     where: list[str] | None = None,
+                     params: list | None = None,
+                     *, stores=None) -> tuple[int, list[str]]:
+    """`(count, buckets_unserved)` — the count, and the repair it names.
+
+    "Seventeen payloads missing" sends somebody looking at files when the
+    repair is a store, so the buckets are named beside the number (Part I,
+    v0.84). Sorted and deduplicated; empty for a forest with no remote
+    payloads, which is every forest before this version.
+    """
+    from monkeyllm.fetch import bucket_served, is_remote, split_uri
 
     gone = 0
+    unserved: set[str] = set()
     for node_id, payload in catalog.local_payloads(where or [], params or []):
         if is_remote(payload):
+            bucket = split_uri(payload)[0]
+            if not bucket:
+                continue
+            if not bucket_served(bucket, stores):
+                gone += 1
+                unserved.add(bucket)
             continue
         if not (forest.path_for(node_id).parent / payload).is_file():
             gone += 1
-    return gone
+    return gone, sorted(unserved)

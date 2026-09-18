@@ -282,6 +282,18 @@ class ExtensionAPI:
             return self._config
         return {**self._config, **(live or {})}
 
+    @property
+    def resolved_config(self) -> dict:
+        """L.5 (v0.84): the declared defaults under the operator's values.
+
+        The one resolution, so the worker request and anything else that
+        needs "what this setting is worth right now" read the same answer.
+        It is read at CALL time for `config`'s own reason — a snapshot
+        taken at load would make the console's Save a lie until the next
+        restart (L.7 rule 4).
+        """
+        return {**self._manifest.config_defaults(), **self.config}
+
     # -- housekeeping ------------------------------------------------------
 
     def seal(self) -> None:

@@ -218,6 +218,44 @@ export const api = {
     }
   },
 
+  /** Where the bytes ARE, asked for instead of followed (J.14 rule 5).
+   *
+   *  A remote payload over the proxy ceiling is answered with a 302 to a
+   *  presigned URL, and J.5.13 pins this page to `connect-src 'self'` — so
+   *  the redirect cannot be followed by `fetch`, and the repair is NOT
+   *  widening the policy to whatever origin a store happens to have, which
+   *  would make the CSP a function of the registry.
+   *
+   *  A bare `href` to the payload route is not the repair either, and that
+   *  was the first cut of this: a top-level navigation carries no
+   *  `Authorization` header — J.2 authenticates by header and never by
+   *  cookie — so the link answers 401 to everyone who clicks it. So the
+   *  URL is ASKED FOR here, under the viewer's credential, and the caller
+   *  navigates to what comes back.
+   *
+   *  Same encoding as `payload` above, and deliberately beside it: the two
+   *  ways to reach one route must agree on the address.
+   */
+  payloadUrl: async (forest, node) => {
+    const path = `/v1/forests/${encodeURIComponent(forest)}/payload/`
+      + String(node).split('/').map(encodeURIComponent).join('/')
+    const res = await fetch(path, {
+      headers: {
+        ...(getKey() ? { Authorization: `Bearer ${getKey()}` } : {}),
+        // The ask itself. Without it this route answers the bytes — or a
+        // 302 the page's own policy forbids following.
+        Accept: 'application/json',
+      },
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const err = body?.error || {}
+      throw new ApiError(err.message || res.statusText || `HTTP ${res.status}`,
+                         { code: err.code, hint: err.hint, status: res.status })
+    }
+    return body
+  },
+
   // The document as text/markdown (J.14.1): no token budget — a download
   // for people, never model material. Segments encoded one by one, exactly
   // as `payload` does and for the same reason.
@@ -361,6 +399,49 @@ export const api = {
     return request(`/v1/admin/audit?${q.toString()}`)
   },
 
+  // Object stores (J.19): where the BONE tier goes. Shaped after the
+  // providers below on purpose — one row serving every forest, a write-only
+  // credential, a test that opens a connection — so the two consoles read
+  // the same way and neither invents a rule the other does not have.
+  //
+  // The secret never comes back: the listing carries `has_key`, and an
+  // update omitting it keeps the stored one (J.19.1, J.16's rule for a
+  // webhook header). Nothing here ever puts a credential in a URL.
+  stores: () => request('/v1/admin/stores'),
+  createStore: (body) => request('/v1/admin/stores', { method: 'POST', body }),
+  updateStore: (name, body) =>
+    request(`/v1/admin/stores/${encodeURIComponent(name)}`,
+            { method: 'PUT', body }),
+  deleteStore: (name) =>
+    request(`/v1/admin/stores/${encodeURIComponent(name)}`,
+            { method: 'DELETE' }),
+  // The probe is a write (J.19.3 rule 2): HEAD, a small object under the
+  // configured prefix, and the delete of it. `checks` is what it did, step
+  // by step — "OK" about a three-step check is three facts a reader cannot
+  // separate when one of them later fails.
+  testStore: (name, body = {}) =>
+    request(`/v1/admin/stores/${encodeURIComponent(name)}/test`,
+            { method: 'POST', body }),
+
+  // The forest's own binding (J.19.5): a NAME, never an endpoint and never
+  // a credential. `admin` on this forest; it commits to `_meta/`, so it
+  // travels in a snapshot.
+  setIngestConfig: (forest, body) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/ingest/config`,
+            { method: 'PUT', body }),
+
+  // The inbound trigger (J.20): a standing authority held by whoever has
+  // the secret, so the secret rides exactly one response — the one that
+  // created it — like a share token (J.17) and a webhook secret (J.16).
+  ingestSubscriptions: (forest) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/ingest/subscriptions`),
+  createIngestSubscription: (forest, body) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/ingest/subscriptions`,
+            { method: 'POST', body }),
+  deleteIngestSubscription: (forest, id) =>
+    request(`/v1/forests/${encodeURIComponent(forest)}/ingest/subscriptions/`
+            + encodeURIComponent(id), { method: 'DELETE' }),
+
   // inference providers and per-forest bindings
   providers: () => request('/v1/admin/providers'),
   putProvider: (body) => request('/v1/admin/providers', { method: 'POST', body }),
@@ -478,8 +559,18 @@ export const api = {
   // string here encoded it twice, so the Station's `request.json()` handed
   // the route a `str` and `body.get(...)` raised — a 500 on every press of
   // the Re-derive button. `reindex` below is what the shape should be.
-  recurate: (forest, derive = ['aliases']) =>
-    request('/v1/admin/recurate', { method: 'POST', body: { forest, derive } }),
+  // J.13.6.1 rules 8 and 9 (v0.84): the scent pass chooses its order and may
+  // be bounded. Both are sent only when the operator chose one — an absent
+  // `order` is the host's `created`, an absent `limit` is the whole scope,
+  // and a console that sent its own defaults would be quoting a price the
+  // operator never picked.
+  recurate: (forest, derive = ['aliases'], { order, limit } = {}) =>
+    request('/v1/admin/recurate', {
+      method: 'POST',
+      body: { forest, derive,
+              ...(order ? { order } : {}),
+              ...(limit ? { limit: Number(limit) } : {}) },
+    }),
   // J.13.7 (v0.61): what is in the upload staging area that is not a
   // document, and the sweep for it. One resource, two verbs — the same
   // question asked twice.

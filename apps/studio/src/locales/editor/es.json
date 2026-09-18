@@ -21,7 +21,7 @@
   "editor.pending_hint": "Exactamente lo que se enviará, con la forma que recibe la API.",
   "editor.placeholder": "Escriba…",
   "editor.quote": "Cita",
-  "editor.rich_locked": "Este cuerpo tiene tablas o HTML que el editor rico no puede sostener; edite el Markdown.",
+  "editor.rich_locked": "El editor enriquecido no devolvería este cuerpo intacto — sus saltos de línea, viñetas, enlaces o identificadores se reescribirían. Edite el Markdown.",
   "editor.rule_commit": "El resultado es un commit de git sellado con su principal.",
   "editor.rule_immutable": "Id, tipo y fecha de creación no cambian.",
   "editor.rule_summary": "El resumen se valida contra su presupuesto de tokens.",

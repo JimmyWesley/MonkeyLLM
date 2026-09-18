@@ -30,9 +30,11 @@ import {
   Badge, Card, Empty, ErrorNote, Skeleton, Spinner,
 } from '../design/ui.jsx'
 import {
-  ChevronRight, Code2, Database, Eye, File, Flame, Link, Pencil, Search,
+  Alert, Check, ChevronRight, Code2, Copy, Database, Download, Eye, File, Flame,
+  Link, Pencil, Search,
 } from '../design/icons.jsx'
 import { Metric, useAsync } from './shared.jsx'
+import { SUMMARY_TOKENS, countTokens } from './editor.jsx'
 
 const HTML_BODY = /^\s*<(!doctype|html|div|section|article|table|h[1-6]|p|ul|ol)\b/i
 const WIKILINK = /\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g
@@ -46,6 +48,22 @@ const linkify = (md) => String(md || '').replace(
   WIKILINK,
   (_, target, label) => `[${label || target}](${NODE_HREF}${encodeURIComponent(target.trim())})`)
 
+/** The archive a converter keeps beside a branch (G.5.1), hidden from the
+ *  tree.
+ *
+ *  `_assets/` holds the ORIGINAL a document was made from, under a name the
+ *  Gardener composed out of a hash — `bfad6417-chatgpt--chatg.pdf`. Nobody
+ *  typed it and nobody can read it, and the tree is the one surface in the
+ *  console that claims to be what a person would see on disk. It is filtered
+ *  out of the LISTING and nothing else: the catalog is untouched, and the
+ *  node's own panel offers those bytes as `Original · download` (J.14),
+ *  which is the address a reader can actually use.
+ *
+ *  `_assets` is per-BRANCH, so it is a directory name at any depth — never
+ *  a prefix of the path. */
+const ASSETS_DIR = /(?:^|\/)_assets\//
+export const inAssets = (path) => ASSETS_DIR.test(String(path || ''))
+
 /** A node id and its payload, as paths. `people/jimmy-wesley` is the file
  *  `people/jimmy-wesley.md`; a dataset's `.db` sits beside it. */
 export function filesOf(nodes) {
@@ -54,8 +72,10 @@ export function filesOf(nodes) {
     out.push({ path: `${n.id}.md`, id: n.id, kind: 'md', type: n.type })
     if (n.payload && !/^[a-z0-9+.-]+:\/\//i.test(n.payload)) {
       const dir = n.id.includes('/') ? n.id.slice(0, n.id.lastIndexOf('/') + 1) : ''
+      const path = dir + n.payload
+      if (inAssets(path)) continue
       out.push({
-        path: dir + n.payload, id: n.id, type: n.type,
+        path, id: n.id, type: n.type,
         payload_type: n.payload_type,
         kind: n.payload.toLowerCase().endsWith('.db') ? 'db' : 'payload',
       })
@@ -335,6 +355,7 @@ function Viewer({ forest, grant, file, onEdit, onNavigate }) {
                 </button>
               ))}
           </div>
+          <CopyExport forest={forest} id={file.id} />
           {onEdit && (
             <button type="button" className="btn btn-sm"
                     onClick={() => onEdit(file.id)}>
@@ -346,6 +367,66 @@ function Viewer({ forest, grant, file, onEdit, onNavigate }) {
       <NodeBody forest={forest} id={file.id} mode={mode} digest={digest}
                 onNavigate={onNavigate} />
     </Card>
+  )
+}
+
+/** The document as the forest stores it, on the clipboard (J.14.1).
+ *
+ *  The bytes come from the EXPORT route — the planted file verbatim,
+ *  frontmatter included, no token budget — and never from a surface that
+ *  re-serialises them. That distinction is the whole reason this button
+ *  exists: an operator copied a body out of the rich editor, which renders
+ *  markdown as HTML and writes it back, and what landed on the clipboard was
+ *  one flattened paragraph with `\_` inside every identifier. The reading
+ *  view shows a RENDERING too, so "select all, copy" here would hand over
+ *  the browser's idea of the text. This hands over the file.
+ *
+ *  Safari will not accept a `writeText` that arrives after an await, so the
+ *  fetch is handed to the clipboard as a PROMISE where that API exists — the
+ *  gesture is still the click. Everywhere else the plain path is used, and
+ *  the fetch's own error survives either way, because a refusal from the
+ *  Station is the useful half of a failure.
+ */
+function CopyExport({ forest, id }) {
+  const { t } = useI18n()
+  const [state, setState] = useState(null)   // 'busy' | 'done' | Error
+
+  useEffect(() => {
+    if (state !== 'done') return undefined
+    const timer = setTimeout(() => setState(null), 1600)
+    return () => clearTimeout(timer)
+  }, [state])
+
+  async function copy() {
+    setState('busy')
+    let failure = null
+    const text = () => api.exportNode(forest, id)
+      .catch((e) => { failure = e; throw e })
+    try {
+      const clipboard = navigator.clipboard
+      if (typeof ClipboardItem !== 'undefined' && clipboard?.write) {
+        await clipboard.write([new ClipboardItem({
+          'text/plain': text().then((md) => new Blob([md], { type: 'text/plain' })),
+        })])
+      } else {
+        await clipboard.writeText(await text())
+      }
+      setState('done')
+    } catch (e) { setState(failure || e) }
+  }
+
+  const failed = state && state !== 'busy' && state !== 'done'
+  return (
+    /* The refusal is the Station's own sentence, kept where the act was —
+       an error wall over the document for a clipboard that did not take is
+       louder than what happened (J.5.17 rule 3 the other way round). */
+    <button type="button" className="btn btn-sm" onClick={copy}
+            disabled={state === 'busy'}
+            title={failed ? state.message : t('files.copy_markdown_hint')}>
+      {failed ? <Alert size={13} />
+        : state === 'done' ? <Check size={13} /> : <Copy size={13} />}
+      {t('files.copy_markdown')}
+    </button>
   )
 }
 
@@ -649,7 +730,8 @@ function Inspector({ forest, node, meta, onOpen }) {
         {digest.busy ? <Skeleton rows={5} />
           : digest.error ? <ErrorNote error={digest.error} onRetry={digest.reload} />
           : !d ? null
-          : tab === 'passport' ? <Passport d={d} onOpen={onOpen} />
+          : tab === 'passport'
+            ? <Passport forest={forest} d={d} meta={meta} onOpen={onOpen} />
           : tab === 'index' ? <IndexEntry forest={forest} d={d} />
           : <Trails meta={meta} d={d} />}
       </div>
@@ -657,22 +739,67 @@ function Inspector({ forest, node, meta, onOpen }) {
   )
 }
 
-function Passport({ d, onOpen }) {
+/** Kilobytes for a person. The same shape the Ask console's own formatter
+ *  uses; both are three lines over `Number`, and neither is a contract. */
+const fmtBytes = (n) => (n >= 1024 * 1024
+  ? `${(n / 1024 / 1024).toFixed(1)} MB`
+  : `${Math.max(1, Math.round(n / 1024))} KB`)
+
+/** The passport, with its three layers named.
+ *
+ *  The product's own author read the `summary` of an ingested PDF as "the
+ *  model summarised my document" and went looking for the rest of it. He was
+ *  reading the right field and the wrong thing: a summary is the SCENT — 60
+ *  tokens of curated metadata, the only text `locate` searches (C.6b) — and
+ *  the document itself was sitting under it, whole, as the body. Nothing was
+ *  missing; the panel had simply never said which of the two it was showing.
+ *
+ *  So each layer is labelled with what it is FOR: the scent with the budget
+ *  it is written against and the call that reads it, the body with its own
+ *  size, and the original with its type and bytes. All three come from the
+ *  `look` the panel already ran — `outline`, `stats.body_tokens` and the
+ *  C.2.2 payload fields are in the digest it asks for, and `look` stats a
+ *  payload without ever opening it (C.2.2 rule 6).
+ */
+function Passport({ forest, d, meta, onOpen }) {
   const { t } = useI18n()
+  const scent = countTokens(d.summary)
+  // The outline is the first thing `look`'s budget clips (C.2), and it says
+  // so. A count taken from a clipped list is a floor, and it is printed as
+  // one rather than as a number that happens to be wrong.
+  const clipped = (d.truncated_fields || []).includes('outline')
+  const sections = `${(d.outline || []).length}${clipped ? '+' : ''}`
   return (
     <div className="space-y-3">
       <Badge tone="accent">{d.type}</Badge>
       <div className="nodeid break-all">{d.id}</div>
-      <p className="text-[13px] leading-relaxed text-text">{d.summary}</p>
+      <div>
+        <div className="label">
+          {t('files.scent', { n: scent, max: SUMMARY_TOKENS })}
+        </div>
+        <p className="text-[13px] leading-relaxed text-text">{d.summary}</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-text-3">
+          {t('files.scent_hint')}
+        </p>
+      </div>
       {!!d.tags?.length && (
         <div className="flex flex-wrap gap-1">
           {d.tags.map((tag) => <span key={tag} className="badge">{tag}</span>)}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        <Metric label={t('explore.degree')} value={d.stats?.degree ?? 0} />
-        <Metric label={t('explore.tokens')} value={d.stats?.body_tokens ?? 0} />
+      <div>
+        <div className="label">{t('files.body_label')}</div>
+        <p className="text-[12.5px] text-text-2">
+          {d.outline
+            ? t('files.body_line', { sections, tokens: d.stats?.body_tokens ?? 0 })
+            : t('files.body_line_tokens', { tokens: d.stats?.body_tokens ?? 0 })}
+        </p>
       </div>
+      <Original forest={forest} d={d} meta={meta} />
+      {/* The body's size used to sit beside this one as a second metric; it
+          is in the Body line above now, and a figure printed twice is a
+          figure that will disagree with itself. */}
+      <Metric label={t('explore.degree')} value={d.stats?.degree ?? 0} />
       {!!d.edges_out?.length && (
         <div>
           <div className="label flex items-center gap-1.5"><Link size={12} />
@@ -693,6 +820,125 @@ function Passport({ d, onOpen }) {
           </ul>
         </div>
       )}
+    </div>
+  )
+}
+
+/** The file this document was made from (J.14 + C.2.2 rule 6).
+ *
+ *  A converted document keeps its original under the branch's `_assets/`,
+ *  and the tree no longer shows that directory — so this line is the one
+ *  route to it, and it is the honest one: it names the type and the size the
+ *  passport already knows, and hands the bytes over through the governed
+ *  J.14 route with the viewer's own credential, exactly as `PayloadImage`
+ *  fetches a picture. Any payload type is served there, not only images.
+ *
+ *  Three states, and the third is the point of the other two: bytes that are
+ *  in the forest, bytes the passport names and the disk does not have
+ *  (`payload_missing`, G.7's "the map keeps working when the flesh is out of
+ *  reach"), and a node that never had an original at all — a note, which
+ *  gets no line rather than a line saying "none".
+ *
+ *  A remote payload (G.9) names its type and carries no `payload_bytes` —
+ *  `look` stats a local file and never opens a remote one, so a size is the
+ *  one thing it cannot have. J.14 serves those bytes from v0.84, one of two
+ *  ways: proxied under the ceiling, and **302 to a presigned URL** above it.
+ *  Which one it will be is not knowable from here, so the remote line is a
+ *  LINK and never a fetch: J.5.13 pins this page to `connect-src 'self'`, a
+ *  credentialed fetch that redirects to a store's origin is refused by the
+ *  page's own policy, and the repair must not be widening the policy to
+ *  whatever origin a store happens to have — that would make the CSP a
+ *  function of the registry. A link is a top-level navigation, which no
+ *  `connect-src` governs.
+ */
+function Original({ forest, d, meta }) {
+  const { t } = useI18n()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  if (d.payload_missing) {
+    return <p className="text-[12px] text-text-3">{t('files.original_missing')}</p>
+  }
+  if (d.payload_type === undefined && d.payload_bytes === undefined) return null
+
+  // The archived name is a hash the Gardener composed; what a person wants
+  // in their Downloads folder is the node's own name with the original's
+  // extension on it — the same shape the Read console's `.md` download uses.
+  const stored = String(meta?.payload || '')
+  const ext = stored.includes('.') ? stored.slice(stored.lastIndexOf('.') + 1)
+    : (d.payload_type || 'bin')
+  const name = `${d.id.split('/').pop() || 'payload'}.${ext.toLowerCase()}`
+  const local = typeof d.payload_bytes === 'number'
+  // The passport's own URI is the confirmation when the map is loaded; the
+  // absent size is the digest's own answer and stands on its own when it is
+  // not (C.2.2 rule 6).
+  const remote = !local && (!stored || /^[a-z0-9+.-]+:\/\//i.test(stored))
+
+  /** J.14 rule 5, the whole of the console's half: one credentialed ask,
+   *  one navigation. The window is opened AFTER the await, which a strict
+   *  popup blocker may refuse; opening it first and setting its location
+   *  would need a handle, and a handle is exactly what `noopener` withholds
+   *  — so the trade is made in favour of the store never being handed a
+   *  reference to this page. */
+  async function open() {
+    setBusy(true)
+    setError(null)
+    try {
+      const { url } = await api.payloadUrl(forest, d.id)
+      window.open(url, '_blank', 'noopener')
+    } catch (e) { setError(e) } finally { setBusy(false) }
+  }
+
+  async function save() {
+    setBusy(true)
+    setError(null)
+    let url = null
+    try {
+      const p = await api.payload(forest, d.id)
+      url = URL.createObjectURL(await p.blob())
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      a.click()
+    } catch (e) { setError(e) } finally {
+      setBusy(false)
+      if (url) setTimeout(() => URL.revokeObjectURL(url), 2000)
+    }
+  }
+
+  return (
+    <div>
+      <div className="label">{t('files.original')}</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[12.5px] text-text-2">
+          {(d.payload_type || ext).toUpperCase()}
+          {local ? ` · ${fmtBytes(d.payload_bytes)}` : ''}
+        </span>
+        {local && (
+          <button type="button" className="btn btn-sm" onClick={save} disabled={busy}>
+            <Download size={13} />
+            {busy ? t('common.working') : t('files.original_download')}
+          </button>
+        )}
+        {/* J.14 rule 5: ASK for the URL, then navigate to it. A `fetch` of
+            the bytes cannot follow the 302 (J.5.13 pins this page to
+            `connect-src 'self'`), and a bare `href` to the payload route
+            carries no credential and answers 401 — the two failures this
+            rule exists between. `noopener` because the tab lands on a
+            store's own origin, and a window handed a reference back to this
+            one is a window that can navigate it. */}
+        {remote && (
+          <button type="button" className="btn btn-sm" onClick={open}
+                  disabled={busy}>
+            <Download size={13} />
+            {busy ? t('common.working') : t('files.original_open')}
+          </button>
+        )}
+      </div>
+      {remote && (
+        <p className="mt-1 text-[11px] text-text-3">{t('files.original_remote')}</p>
+      )}
+      <ErrorNote error={error} />
     </div>
   )
 }

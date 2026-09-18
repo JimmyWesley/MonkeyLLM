@@ -27,6 +27,8 @@
   "nav.models": "Modelos",
   "nav.models.blurb": "Qué modelo lee este bosque y cuál resume lo que entra",
   "nav.more": "Más",
+  "nav.notify": "Notificaciones",
+  "nav.notify.blurb": "Deja que un bucket o un script le avise a este bosque qué cambió",
   "nav.overview": "Resumen",
   "nav.overview.blurb": "Qué hay en este bosque y qué puedes hacer aquí",
   "nav.people": "Accesos",

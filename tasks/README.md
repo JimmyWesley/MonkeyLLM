@@ -11,7 +11,7 @@ Conventions:
 - Language policy: **everything in English** task files, code comments,
   docstrings, docs, CLI output. See `T02-english-normalization.md` for the
   one-time cleanup; new work must already comply.
-- The spec is the truth (`docs/monkeyllm-spec-v0.39.md`): contract changes
+- The spec is the truth (`docs/monkeyllm-spec-v0.84.md`): contract changes
   require a new spec version *before* code, and that rule applies to tasks too.
 
 | Task | Title | Status |
@@ -33,3 +33,6 @@ Conventions:
 | T14 | Media in answers: `view` over MCP, `media:` references, per-call reply size (spec v0.48 → C.6d/J.10.8/J.10.9 + F.50–F.51) | done (2026-08-13: engine+Station+Studio shipped, suites green; user's real-browser pass and commit remain) |
 | T15 | The first minute and the handbook: MCP / API / Integrations door, first-access presentation, Skills console, docs/guide in en/pt/es (spec v0.49 → J.5.1/J.5.11/J.5.12 + F.52–F.53) | done (2026-08-13: spec + Studio + handbook shipped, committed and review-hardened; user's real-browser pass remains) |
 | T18 | Extensions: third-party modules, installed by the operator (spec v0.80 Part L, v0.81 L.16) | in-progress (2026-09-13: v0.80 shipped to PyPI; v0.81 adds uploaded archives, declared seam contracts checked by the kit, and the authoring surface) |
+| T19 | Object storage: where the bytes that are not markdown live (spec v0.84 → J.19 stores mirroring providers, G.7/G.9 archive-to-store, J.14 served remotes incl. rule 5's URL-as-JSON, A.3 `video`/`file`, Part I remotes, L.5 worker config; F.219–F.228) | done (2026-09-17: implemented, uncommitted; live MinIO module runs in 7.6 s and is env-gated; open by name — `_assets/` migration, object reclamation, a store-reachability probe, the `.csv` beside its `.db`, `look` on an uncached remote dataset) |
+| T20 | A forest from a bucket: `adopt s3://` with the bucket as BONE, batched planting, deferred + heat-ordered curation, index cap and auto-bucketing (spec v0.84 → G.3.1/G.3.2/G.4.7/G.10.2/J.8.6/J.20; F.229–F.238) | done (2026-09-17: implemented, uncommitted; measured 2,000 objects → 22.7 s, 101 plant commits, 55,276-byte largest `_index.md`, 0 errors; open by name — the bucket card does not count the objects before Start) |
+| T21 | Tree conversion: a document that becomes a branch — `Conversion.kind: tree`, `succeeds` between chapters, `source_part` (spec v0.84 → G.2.8 + A.3; F.239–F.246) | done (2026-09-17: implemented, uncommitted; open by name — no Markdown surface for the section-grain editor, no Link/Image node in the rich editor, PDF tables appended rather than interleaved) |

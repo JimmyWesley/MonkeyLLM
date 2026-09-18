@@ -31,17 +31,24 @@ class ForestPool:
     """Forest registry: lazily opened Vine per forest (spec C.0)."""
 
     def __init__(self, *, single: Path | None = None, root: Path | None = None,
-                 writable: bool = True):
+                 writable: bool = True, stores=None):
         if (single is None) == (root is None):
             raise ValueError("ForestPool needs exactly one of single= or root=")
         self.writable = writable
         self.root = Path(root).resolve() if root else None
+        # J.19.8 (v0.84): the object-store resolver every pooled Vine is
+        # built with. The pool is the one place a Vine is CONSTRUCTED here,
+        # and the seam is keyword-only at construction (G.9) — a host that
+        # attached it afterwards would leave the payload cache, which is
+        # where a remote URI becomes bytes, holding no credential at all.
+        self.stores = stores
         self._vines: dict[str, Vine] = {}
         self.default: str | None = None
         if single is not None:
             p = Path(single).resolve()
             self.default = p.name
-            self._vines[self.default] = Vine(p, writable=writable)
+            self._vines[self.default] = Vine(p, writable=writable,
+                                             stores=stores)
             self._vines[self.default].warm()
 
     @property
@@ -99,7 +106,7 @@ class ForestPool:
                 hint="Use the forests() tool to list servable forests.",
             )
         # first touch: Vine auto-indexes when the catalog is empty
-        vine = Vine(target, writable=self.writable)
+        vine = Vine(target, writable=self.writable, stores=self.stores)
         # Whoever opened it pays the wake-up, so nobody's *call* does.
         vine.warm()
         self._vines[forest] = vine

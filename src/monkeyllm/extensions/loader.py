@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 from monkeyllm.errors import E_NOT_FOUND, E_SCHEMA, VineError
 from monkeyllm.extensions.api import Claim, ExtensionAPI, ModelAccess, Registry
+from monkeyllm.extensions.contracts import declares_config
 from monkeyllm.extensions.manifest import Manifest, parse_manifest
 from monkeyllm.extensions.worker import Worker, interpreter_for
 
@@ -220,7 +221,18 @@ def _wire_manifest_claims(manifest: Manifest, tree: Path, registry: Registry,
             continue
         if spec.heavy:
             # L.5: never imported into this interpreter.
-            handler = _heavy(worker, ref)
+            #
+            # (v0.84) A heavy handler that ASKED for its settings is handed
+            # them, resolved at call time. Whether it asked is read off the
+            # author's source, never by importing the module — that module
+            # imports the dependency this whole mechanism exists to keep
+            # out of this process.
+            module, _, func = ref.partition(":")
+            wants = declares_config(tree / f"{module.replace('.', '/')}.py",
+                                    func)
+            handler = _heavy(worker, ref,
+                             config=((lambda: api.resolved_config) if wants
+                                     else None))
         else:
             handler = _resolve_handler(tree, manifest.id, ref, extra)
         payload = {"name": name, "handler": ref, "heavy": spec.heavy}
@@ -230,8 +242,18 @@ def _wire_manifest_claims(manifest: Manifest, tree: Path, registry: Registry,
                            spec=payload, heavy=spec.heavy))
 
 
-def _heavy(worker: Worker, ref: str) -> Callable:
+def _heavy(worker: Worker, ref: str, config: Callable | None = None) -> Callable:
+    """The host-side stand-in for a handler that lives in another process.
+
+    `config` is a FACTORY, not a value (L.5, v0.84): settings are edited
+    while an extension runs — installing takes a restart, configuring does
+    not (L.7 rule 4) — so a value captured here would make the console's
+    Save a lie until the next restart. `None` is a handler that never
+    declared a `config` parameter, and its request is v0.83's to the byte.
+    """
     def call(*args, **kwargs):
+        if config is not None:
+            kwargs.setdefault("config", config())
         return worker.call(ref, *args, **kwargs)
     call.__name__ = ref.replace(":", "_")
     call.heavy = True

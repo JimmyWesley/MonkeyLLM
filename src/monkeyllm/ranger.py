@@ -184,6 +184,7 @@ class Ranger:
                 needs_description.append(node_id)
 
         issues = lint_forest(self.forest)
+        unmet = self._stores_missing()
         return {
             "needs_split": needs_split,
             "fat_nodes": fat_nodes,
@@ -195,7 +196,44 @@ class Ranger:
             "needs_description": needs_description,
             "uncertain_links": buckets,
             "heat": self.vine.trails.stats(),
+            **({"stores_missing": unmet} if unmet else {}),
         }
+
+    def _stores_missing(self) -> dict:
+        """H.3 (v0.84): the object stores this forest expects and lacks.
+
+        Two expectations `_meta` declares and the deployment does not meet
+        (L.12's rule), both silent everywhere else: the binding degrades the
+        next archive to a local copy, and an unserved bucket makes a
+        passport's bytes unreachable. Neither raises anything, which is why
+        a report has to say them.
+
+        A stat over the config and the catalog, and a lookup against the
+        resolver — no object is opened and no network call is made, so this
+        stays the one pass over the catalog H.3 promises.
+        """
+        from monkeyllm.fetch import bucket_served, is_remote, split_uri
+        from monkeyllm.gardener import unmet_store
+
+        out: dict = {}
+        cfg = self.forest.root / "_meta" / "gardener.yaml"
+        config = {}
+        if cfg.is_file():
+            config = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+        stores = getattr(self.vine, "stores", None)
+        binding = unmet_store(config, stores)
+        if binding:
+            out["binding"] = binding
+        unserved: set[str] = set()
+        for _node_id, payload in self.vine.catalog.local_payloads([], []):
+            if not is_remote(payload):
+                continue
+            bucket = split_uri(payload)[0]
+            if bucket and not bucket_served(bucket, stores):
+                unserved.add(bucket)
+        if unserved:
+            out["buckets"] = sorted(unserved)
+        return out
 
     def _gardener_source_root(self) -> Path | None:
         cfg = self.forest.root / "_meta" / "gardener.yaml"

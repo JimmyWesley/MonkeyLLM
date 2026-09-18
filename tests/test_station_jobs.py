@@ -304,9 +304,17 @@ def test_cancel_stops_at_a_step_boundary_and_sync_finishes_the_rest(
 
     job = _poll(client, head, job_id)
     assert job["state"] == "cancelled"
+    # G.10.2 rule 7 (v0.84): "the first k documents" became "the first k
+    # minus the OPEN BATCH, and never a partial batch" — C.7.4 is
+    # all-or-nothing, so there is no state between. What a cancel loses is
+    # conversion work (up to 19 documents', model calls included), which is
+    # the stated cost and which `sync` redoes by `source_hash`. `planted`
+    # still names what is in git; `queued` names what was converted and not
+    # committed.
     planted = job["report"]["planted"]
-    assert 1 <= len(planted) < total, planted
-    assert job["report"]["commit"], "the steps taken are commits and stand"
+    queued = job["report"].get("queued", [])
+    assert not set(planted) & set(queued)
+    assert 1 <= len(planted) + len(queued) < total, job["report"]
 
     # The recovery is sync, not archaeology (J.9): the remainder lands,
     # nothing is planted twice.
@@ -318,6 +326,9 @@ def test_cancel_stops_at_a_step_boundary_and_sync_finishes_the_rest(
     assert len(report["planted"]) == total - len(planted)
     assert sorted(report["unchanged"]) == sorted(planted)
     assert not set(report["planted"]) & set(planted)
+    # Every document is in the forest exactly once at the end.
+    assert sorted(report["planted"] + report["unchanged"]) == sorted(
+        f"handbook/page-{i}" for i in range(total))
 
 
 # -- the records are process state, the work is commits -----------------------

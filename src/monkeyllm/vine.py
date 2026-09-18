@@ -25,7 +25,7 @@ import sqlite3
 import threading
 import time
 import unicodedata
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from monkeyllm import indexer
 from monkeyllm.canopy import CanopyIndex, cosine, rrf_fuse
@@ -42,7 +42,7 @@ from monkeyllm.errors import (
     E_TIMEOUT,
     VineError,
 )
-from monkeyllm.fetch import PayloadCache, is_remote
+from monkeyllm.fetch import PayloadCache, is_remote, split_uri
 from monkeyllm.harvest import derive_terms
 from monkeyllm.forest import Forest, WriterLock
 from monkeyllm.gitops import GitRepo
@@ -728,6 +728,36 @@ def _traced(fn):
     return wrapper
 
 
+class CanopySteps:
+    """A build in steps, shaped exactly like the Gardener's `IngestSteps`.
+
+    `total` before the first step (J.9 refuses before it accepts), the live
+    iterator, and `result` once it is exhausted — a consumer that stops
+    stepping has cancelled, and a cancelled build installs nothing.
+    """
+
+    def __init__(self, total: int, steps):
+        self.total = total
+        self.result: dict | None = None
+        self._steps = steps
+
+    def __iter__(self) -> "CanopySteps":
+        return self
+
+    def __next__(self) -> dict:
+        try:
+            return next(self._steps)
+        except StopIteration as done:
+            self.result = done.value
+            raise
+
+
+def _drain_steps(steps):
+    for _ in steps:
+        pass
+    return steps.result
+
+
 class Vine:
     def __init__(
         self,
@@ -738,11 +768,19 @@ class Vine:
         embedder=None,
         beta: float = 1.0,
         hybrid_locate: bool = False,
+        *,
+        stores=None,
     ):
         self.forest = Forest(root)
         self.catalog = Catalog(self.forest)
         self.trails = Trails(self.forest.derived_dir)
-        self.payload_cache = PayloadCache(self.forest.derived_dir)
+        # J.19.8 (v0.84): the object-store resolver, keyword-only at
+        # construction and host-supplied (G.9). The engine reads no registry
+        # table and imports nothing from a host; this is the whole of what
+        # crosses the licensing boundary, and it reaches exactly one place —
+        # the cache, which is where a remote URI becomes bytes.
+        self.stores = stores
+        self.payload_cache = PayloadCache(self.forest.derived_dir, stores=stores)
         self.tracer = Tracer(self.forest.derived_dir, self.trails, session)
         self.alpha = alpha
         self.beta = beta
@@ -908,7 +946,30 @@ class Vine:
 
     def build_canopy(self, embedder=None) -> dict:
         """Embed every node's summary and persist the vector index. Offline
-        (Gardener territory): generous compute, runs out of the read path."""
+        (Gardener territory): generous compute, runs out of the read path.
+
+        Exactly "drain `build_canopy_iter`", so the library's one-call form
+        and the host's job run the same code.
+        """
+        return _drain_steps(self.build_canopy_iter(embedder))
+
+    def build_canopy_iter(self, embedder=None, *,
+                          batch: int = 16) -> "CanopySteps":
+        """The build, one node per step (J.13.4, v0.84).
+
+        Ten thousand embeddings is not a request; it is J.9's founding
+        argument arriving at a different console. The scope is walked
+        eagerly so `total` is known before the first provider call — J.9
+        refuses before it accepts — and the new index is installed at the
+        CLOSE, atomically: a cancel, a crash or a provider failure leaves
+        the forest with the index it already had, present, absent or stale,
+        whichever it was.
+
+        It is NOT resumable in this version, and that is stated here rather
+        than left to be discovered: what a cancelled attempt spent is spent.
+        Resuming would mean storing partial vectors that must never be
+        served, which is a K.4 conversation.
+        """
         emb = embedder or self.embedder
         if emb is None:
             raise VineError(E_SCHEMA, "build_canopy needs an embedder")
@@ -916,11 +977,27 @@ class Vine:
             "SELECT id, title, summary FROM nodes ORDER BY id"
         ).fetchall()
         pairs = [(r["id"], f"{r['title']}. {r['summary']}") for r in rows]
-        idx = CanopyIndex.build(pairs, emb)
-        idx.save(self.forest.derived_dir)
-        self.canopy = idx
-        self.catalog.clear_stale(self.catalog.stale_ids())
-        return {"nodes": len(idx), "model": idx.model, "dim": idx.dim}
+        total = len(pairs)
+        size = max(1, int(batch))
+
+        def steps():
+            ids: list[str] = []
+            vecs: list = []
+            for start in range(0, total, size):
+                chunk = pairs[start:start + size]
+                got = emb.embed([text for _id, text in chunk]) if chunk else []
+                for (node_id, _text), vec in zip(chunk, got):
+                    ids.append(node_id)
+                    vecs.append(vec)
+                for n, (node_id, _text) in enumerate(chunk, start=start + 1):
+                    yield {"node": node_id, "index": n, "total": total}
+            idx = CanopyIndex.from_vectors(emb.model, ids, vecs)
+            idx.save(self.forest.derived_dir)
+            self.canopy = idx
+            self.catalog.clear_stale(self.catalog.stale_ids())
+            return {"nodes": len(idx), "model": idx.model, "dim": idx.dim}
+
+        return CanopySteps(total, steps())
 
     def embed_query(self, text: str) -> list[float]:
         """Embed ONE caller-supplied text, through the K.6 memo.
@@ -1494,7 +1571,13 @@ class Vine:
                 digest["payload_missing"] = True
             else:
                 digest["payload_type"] = row["payload_type"] or ""
-                if not is_remote(payload_named):
+                if is_remote(payload_named):
+                    # C.2.2 (v0.84): the one place "are these bytes in a
+                    # store?" is answerable BEFORE anybody calls for them —
+                    # and answered with no network call of its own, which is
+                    # what keeps `look` a digest.
+                    digest["payload_remote"] = True
+                else:
                     digest["payload_bytes"] = (
                         self.forest.payload_path(node).stat().st_size)
             if row["type"] == "media" and (not fields or "notes" in fields):
@@ -2059,6 +2142,27 @@ class Vine:
     # C.6d view — the image payload, resolved for a multimodal client
     # =======================================================================
 
+    @staticmethod
+    def _remote_failure(uri: str, error: Exception) -> VineError:
+        """A store that refused or could not be reached, as an ENVELOPE.
+
+        C.12: every exit wears one. A raw SDK exception out of a read is the
+        caller's problem wearing the server's clothes — and it is reachable
+        only for a node the caller already holds, so it may name the bucket
+        (G.9) and it names nothing else. This is deliberately NOT the
+        byte-identical `E_NOT_FOUND` of J.3: "I cannot reach these bytes" and
+        "there is no such node" are different repairs, and only the second
+        one is an oracle worth protecting.
+        """
+        bucket = split_uri(uri)[0]
+        return VineError(
+            E_NOT_FOUND,
+            f"the object store did not serve bucket '{bucket}'",
+            hint=f"The store refused or could not be reached "
+                 f"({type(error).__name__}). The bytes are where the passport "
+                 f"says; this deployment could not open them.",
+        )
+
     @_traced
     def view(self, id: str) -> dict:
         """Resolve a media node's image payload (spec C.6d).
@@ -2082,14 +2186,67 @@ class Vine:
         payload = node.frontmatter.get("payload")
         if not payload:
             raise not_found
-        if is_remote(payload):
-            scheme = str(payload).split("://", 1)[0]
-            raise VineError(
+
+        def refuse_type(media_type: str) -> VineError:
+            return VineError(
                 E_SCHEMA,
-                f"remote payload scheme '{scheme}' is not served",
-                hint="view() serves local bytes only; warm the region with "
-                     "prefetch first (G.9).",
+                f"payload is not an image ({media_type})",
+                hint="view() serves image payloads; a dataset is read with "
+                     "query(), and raw bytes of any kind — a video above "
+                     "all — are the host's payload route (J.14).",
             )
+
+        def refuse_size(size: int) -> VineError:
+            return VineError(
+                E_SCHEMA,
+                f"image payload is {size} bytes, over the "
+                f"{VIEW_MAX_BYTES}-byte view limit",
+                hint="The host's payload route (J.14) serves bytes of any "
+                     "size to people.",
+            )
+
+        declared = str(node.frontmatter.get("payload_type") or "")
+        if is_remote(payload):
+            # C.6d rule 2 (v0.84): a remote IMAGE resolves through the G.9
+            # cache. The refusal this rule used to carry was right while
+            # nothing put payloads in a store; with J.19 it made an object
+            # store the place a screenshot goes to stop being viewable. The
+            # dependency is no longer hidden: `look` says a payload is
+            # remote before anybody calls, the SIZE is decided by a HEAD
+            # before a byte moves, and the ceiling refuses an oversized
+            # object WITHOUT fetching it.
+            uri = str(payload)
+            name = PurePosixPath(split_uri(uri)[1]).name or uri
+            media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+            if declared in ("video", "file") or not media_type.startswith("image/"):
+                raise refuse_type(media_type if media_type != "application/octet-stream"
+                                  else (declared or media_type))
+            try:
+                size = self.payload_cache.size(uri)
+            except VineError:
+                raise
+            except Exception as e:  # noqa: BLE001 - every SDK raises its own
+                raise self._remote_failure(uri, e) from e
+            if size is None:
+                raise not_found
+            if size > VIEW_MAX_BYTES:
+                raise refuse_size(size)
+            try:
+                target = self.payload_cache.get(
+                    uri, str(node.frontmatter.get("payload_hash") or "") or None)
+            except VineError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                raise self._remote_failure(uri, e) from e
+            return {
+                "id": id,
+                "path": str(target),
+                "media_type": media_type,
+                "size": target.stat().st_size,
+                "payload_hash": str(node.frontmatter.get("payload_hash") or ""),
+                "remote_uri": uri,
+            }
+
         root_dir = Path(self.forest.root).resolve()
         assert node.path is not None
         target = (node.path.parent / str(payload)).resolve()
@@ -2101,22 +2258,10 @@ class Vine:
             raise not_found
         media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         if not media_type.startswith("image/"):
-            raise VineError(
-                E_SCHEMA,
-                f"payload is not an image ({media_type})",
-                hint="view() serves image payloads; a dataset is read with "
-                     "query(), and raw bytes of any kind are the host's "
-                     "payload route (J.14).",
-            )
+            raise refuse_type(media_type)
         size = target.stat().st_size
         if size > VIEW_MAX_BYTES:
-            raise VineError(
-                E_SCHEMA,
-                f"image payload is {size} bytes, over the "
-                f"{VIEW_MAX_BYTES}-byte view limit",
-                hint="The host's payload route (J.14) serves bytes of any "
-                     "size to people.",
-            )
+            raise refuse_size(size)
         return {
             "id": id,
             "path": str(target),
@@ -2124,6 +2269,82 @@ class Vine:
             "size": size,
             "payload_hash": str(node.frontmatter.get("payload_hash") or ""),
         }
+
+    # =======================================================================
+    # J.14 / C.6d — where a node's bytes are, decided once
+    # =======================================================================
+
+    def resolve_payload(self, id: str, *, fetch: bool = False) -> dict:
+        """Where one node's payload bytes are (J.19.7, v0.84).
+
+        The ONE resolution the host's byte route and `view` share, so that
+        "is it here, is it in a store, how big is it" is answered in one
+        place instead of three. Scope and existence decide FIRST and in that
+        order — the store lookup is reached only for a node the caller
+        already holds, which is what lets its refusal be distinguishable
+        without becoming an existence oracle (J.3).
+
+        Returns `{id, local_path, remote_uri, payload_type, media_type,
+        bytes, payload_hash}`. `bytes` is the byte COUNT, from a stat
+        locally and a `HEAD` remotely — never an open, never a fetch, unless
+        `fetch=True` asks for the bytes to be pulled through the
+        hash-validated G.9 cache (which is what makes `local_path` present
+        for a remote payload).
+
+        The refusals are J.14's and are untouched: out-of-scope, absent and
+        payload-less are ONE byte-identical `E_NOT_FOUND`. A bucket no store
+        serves is G.9's distinguishable one, naming the bucket.
+        """
+        self._row_or_raise(id)
+        node = self.forest.read(id)
+        not_found = VineError(
+            E_NOT_FOUND,
+            f"node not found: {id}",
+            hint="Use locate() to find entry points.",
+        )
+        payload = node.frontmatter.get("payload")
+        if not payload:
+            raise not_found
+        out = {
+            "id": id,
+            "local_path": None,
+            "remote_uri": None,
+            "payload_type": str(node.frontmatter.get("payload_type") or ""),
+            "payload_hash": str(node.frontmatter.get("payload_hash") or ""),
+            "media_type": "application/octet-stream",
+            "bytes": None,
+        }
+        if is_remote(payload):
+            uri = str(payload)
+            out["remote_uri"] = uri
+            name = PurePosixPath(split_uri(uri)[1]).name or uri
+            out["media_type"] = (mimetypes.guess_type(name)[0]
+                                 or "application/octet-stream")
+            try:
+                size = self.payload_cache.size(uri)
+                if size is None:
+                    raise not_found
+                out["bytes"] = size
+                if fetch:
+                    out["local_path"] = str(self.payload_cache.get(
+                        uri, out["payload_hash"] or None))
+            except VineError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                raise self._remote_failure(uri, e) from e
+            return out
+        root_dir = Path(self.forest.root).resolve()
+        assert node.path is not None
+        target = (node.path.parent / str(payload)).resolve()
+        if not target.is_relative_to(root_dir):
+            raise VineError(E_SCHEMA, "payload escapes the forest")
+        if not target.is_file():
+            raise not_found
+        out["local_path"] = str(target)
+        out["bytes"] = target.stat().st_size
+        out["media_type"] = (mimetypes.guess_type(target.name)[0]
+                             or "application/octet-stream")
+        return out
 
     # =======================================================================
     # C.5 query — read-only SQL over dataset payloads
@@ -2806,7 +3027,8 @@ class Vine:
         if isinstance(node, (list, tuple)):
             with self._write_mutex:
                 return self._plant_batch(list(node), if_absent=bool(if_absent),
-                                         dry_run=bool(dry_run))
+                                         dry_run=bool(dry_run),
+                                         adopted=adopted)
         spec = node if isinstance(node, NodeSpec) else NodeSpec.model_validate(node)
         with self._write_mutex:
             if dry_run:
@@ -2945,6 +3167,17 @@ class Vine:
                 f"id '{spec.id}' does not live under parent '{spec.parent}' "
                 f"(expected parent: {expected_parent})",
             ))
+        # A.3 (v0.84): `source_part` is written by INGEST and by nothing
+        # else — `moved_from`'s rule (C.15 rule 3), enforced where the
+        # trusted caller is already distinguishable (G.2.5's `adopted`).
+        # A node claiming to be part 7 of a document nobody converted is a
+        # claim about work that never happened.
+        if not adopted and fm.get("source_part") is not None:
+            refuse(VineError(
+                E_SCHEMA, "source_part is written by ingest",
+                hint="A document becomes a branch when its converter answers "
+                     "with a tree (G.2.8); a caller cannot claim to be part "
+                     "of one."))
         # C.7.5 (v0.77). The Gardener is exempt (`adopted`, G.2.5's
         # construction): under `archive: never` it references bytes that stay
         # at the source, which is G.7's tier and not this failure.
@@ -3050,9 +3283,27 @@ class Vine:
                 "trail": self.forest.trail(spec.id)}
 
     def _plant_batch(self, nodes: list, *, if_absent: bool,
-                     dry_run: bool) -> dict:
+                     dry_run: bool, adopted: bool = False) -> dict:
         """C.7.4: a batch is one plant — everything validated before
         anything is written, the whole batch in ONE commit or none of it.
+
+        **The batch path carries `adopted` (G.10.2 rule 4, v0.84).** It did
+        not, and the first reading of that excused it: the flag relaxes
+        C.7.1's table and column counts, which only a `schema` can trip, and
+        a batch refuses datasets. That is wrong in exactly the case the
+        batching was built for — `adopted` ALSO exempts a `media` node from
+        C.7.5's payload check, which is what lets G.7 `archive: never`
+        reference bytes that stay at the source. A bucket of images whose
+        `payload` is an `s3://` URI (G.3.1 rule 7) and a tree's media parts
+        (G.2.8) are both that case, and in a batch every one of them would
+        be refused for naming bytes the forest does not contain — a refusal
+        produced by the batching and by nothing the operator did.
+
+        Keyword-only and unreachable from the wire exactly as the single
+        path is (G.2.5's construction: `ScopedVine.plant` forwards the node
+        alone). Nothing else widens: it still relaxes only those two counts
+        and that payload check, per node, for the trusted caller that
+        constructed the Vine.
         """
         if not nodes:
             raise VineError(E_SCHEMA, "plant batch must not be empty",
@@ -3097,7 +3348,8 @@ class Vine:
         for index, spec in enumerate(specs):
             mark = len(problems) if problems is not None else 0
             try:
-                verdict = self._plant(spec, if_absent=if_absent,
+                verdict = self._plant(spec, adopted=adopted,
+                                      if_absent=if_absent,
                                       dry_run=True, pending=pending,
                                       problems=problems)
             except VineError as e:

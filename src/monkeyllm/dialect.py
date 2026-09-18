@@ -70,7 +70,14 @@ def declared_hint(names, kind: str) -> str:
 
 
 ENTITY_KINDS = {"person", "organization", "product", "place", "other"}
-PAYLOAD_TYPES = {"sqlite", "pdf", "docx", "image", "audio"}
+# A.3 (v0.84): `video` because G.5.1's typing rule sends image, audio AND
+# video to `media`, and an enum with no word for a recording made the one
+# field every surface reads before deciding what a node is say `document`.
+# `file` is the archived original whose extension no other member names —
+# before it, such bytes were copied into `_assets/` and referenced by
+# nothing, which is a file on the volume, in no passport and in no
+# snapshot's reckoning.
+PAYLOAD_TYPES = {"sqlite", "pdf", "docx", "image", "audio", "video", "file"}
 SOURCES = {"manual", "ingest", "agent"}
 
 MAX_LINKS_PER_NODE = 50

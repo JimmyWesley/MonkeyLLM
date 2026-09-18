@@ -495,6 +495,18 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         `payload_missing`. Bytes reach a media node only through
         ingest(mode="upload", files=[{name, b64}]); plant() cannot attach
         them, and `origin` is a pointer the forest never follows."""
+        # C.6d rule 2 (v0.84): a remote image resolves through the G.9
+        # cache — the size decided by a HEAD before a byte moves, the 6 MiB
+        # ceiling refusing an oversized object WITHOUT fetching it, and a
+        # `payload_type: video` refused by type with the J.14 byte route
+        # named. All of that is `Vine.view`'s, so it runs on the forest's
+        # lane like every other primitive. LEFT OPEN, and named rather than
+        # silent: J.10.11's argument applies to a provider round trip and a
+        # store is one, so a 6 MiB object over a slow link holds the lane
+        # for its whole fetch. Splitting `view` into resolve-then-fetch is
+        # the repair — the resolve stays on the lane, the fetch goes off it
+        # exactly as J.14's does in `app.py` — and it is an engine contract,
+        # so it waits for a spec version rather than being improvised here.
         meta = await run(forest, "view", id=id)
         if not isinstance(meta, dict) or "error" in meta or "path" not in meta:
             return done(meta)
@@ -860,7 +872,9 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
     @mcp.tool()
     async def ingest(forest: str, mode: str = "upload",
                      files: list[dict] | None = None, path: str | None = None,
-                     dest: str | None = None, wait: bool = True):
+                     dest: str | None = None, wait: bool = True,
+                     source: str | None = None, curate: bool | None = None,
+                     content: str | None = None):
         """Put documents into the forest (needs the 'ingest' capability).
 
         `upload` sends the documents themselves as [{name, text}] — or
@@ -895,9 +909,27 @@ def build_mcp_mount(pool, registry, in_forest_thread, run_primitive,
         tags cleaned, links `related-to` only, to existing in-scope nodes,
         at most 3). `notes` becomes the node's `## Notes` section. A
         malformed passport is refused before any byte stages.
+
+        `source` names an object store prefix — `s3://bucket/prefix` — for
+        `adopt` and `sync`, and needs 'admin' for a second reason: it spends
+        the deployment's stored credentials against a store an operator
+        configured. A bucket no configured store serves is refused before
+        anything is listed. `curate: false` lands the documents with derived
+        summaries and calls no model, which is what makes ten thousand
+        objects searchable this afternoon instead of after ten thousand
+        model calls; the report says the curation was skipped and whether a
+        model IS bound, so the pass can be run later. `content` is `inline`
+        or `cached` — a bucket source defaults to `cached`, so the bodies
+        live in `_derived/` and the map stays small.
         """
+        # C.12: `source`, `curate` and `content` are declared in
+        # `SIGNATURES["ingest"]` (src/monkeyllm/signatures.py) beside
+        # `mode`/`files`/`path`/`dest`/`wait`, so a J.1.2 r8 restatement of
+        # an SDK validation error naming one of them says what it is and
+        # what was expected instead of "unknown parameter".
         return await call(forest, "ingest", mode=mode, files=files,
-                          path=path, dest=dest, wait=wait)
+                          path=path, dest=dest, wait=wait, source=source,
+                          curate=curate, content=content)
 
     # ======================================================================
     # Part L — extension tools (L.3, L.7 rule 2)

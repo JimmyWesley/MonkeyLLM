@@ -471,11 +471,13 @@ def write_forest(out: Path):
     for branch_id, (title, blurb) in branches.items():
         subs, bananas = children_of(branch_id)
         lines = [f"# {title}", "", f"> {blurb}", ""]
+        # A.5: a blank line between a heading and the list under it, the
+        # shape `indexer.add_entry` writes.
         if subs:
-            lines.append("## Sub-branches")
+            lines += ["## Sub-branches", ""]
             lines += [entry_line(s, branches[s][1]) for s in subs]
             lines.append("")
-        lines.append("## Direct bananas")
+        lines += ["## Direct bananas", ""]
         lines += [entry_line(b, by_id[b]["summary"]) for b in bananas]
         lines.append("")
         body = "\n".join(lines)
@@ -489,7 +491,7 @@ def write_forest(out: Path):
     lines = ["# Telemetrix Knowledge Base", "",
              "> Telemetrix Systems knowledge base: team, clients, product line, "
              "projects, telemetry concepts, contracts, recalls, sales, and support.", "",
-             "## Sub-branches"]
+             "## Sub-branches", ""]
     lines += [entry_line(b, branches[b][1]) for b in top]
     lines += ["", "## Direct bananas", ""]
     body = "\n".join(lines)

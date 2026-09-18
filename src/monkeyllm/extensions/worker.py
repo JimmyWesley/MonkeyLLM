@@ -51,7 +51,14 @@ def main():
     try:
         module, _, func = req["handler"].partition(":")
         target = getattr(_load(req["root"], module), func)
-        out = target(*req.get("args", []), **req.get("kwargs", {}))
+        kwargs = dict(req.get("kwargs") or {})
+        # L.5 (v0.84): `config` is a field of the REQUEST, beside the
+        # arguments, so a non-Python worker reads it like any other field.
+        # It is present only when the host saw the handler ask for it, so
+        # there is nothing to decide here.
+        if "config" in req:
+            kwargs["config"] = req["config"]
+        out = target(*req.get("args", []), **kwargs)
         print(json.dumps({"ok": True, "value": out}, default=str))
     except Exception as exc:
         print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}",
@@ -71,12 +78,31 @@ class Worker:
     extra_paths: tuple[str, ...] = ()
     timeout: float = DEFAULT_TIMEOUT
 
-    def call(self, handler: str, *args, **kwargs):
-        request = json.dumps({
+    def call(self, handler: str, *args, config: dict | None = None,
+             **kwargs):
+        """One JSON request in, one JSON response out.
+
+        `config` (L.5, v0.84) is the extension's RESOLVED configuration and
+        rides the request beside the arguments — never inside `kwargs`,
+        because a non-Python worker reads it as a field of the request and
+        not as a parameter of the call. `None` omits the key entirely, so a
+        handler that did not ask for its settings gets the v0.83 request
+        byte for byte.
+
+        It is also the one place a declared secret crosses into another
+        process (L.5 rule 2), which is why nothing here ever puts the
+        request into an error, a log or a trace: the refusals below carry
+        the child's stderr and the handler's name, and neither is the
+        request.
+        """
+        body = {
             "root": str(self.root), "handler": handler,
             "paths": list(self.extra_paths),
             "args": list(args), "kwargs": kwargs,
-        })
+        }
+        if config is not None:
+            body["config"] = config
+        request = json.dumps(body)
         try:
             proc = subprocess.run(
                 [self.python, "-c", _RUNNER], input=request,

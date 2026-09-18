@@ -15,6 +15,14 @@ E_QUERY_FORBIDDEN = "E_QUERY_FORBIDDEN"
 # write" makes a typo read as a policy denial — in the response, in the
 # console and in the audit.
 E_QUERY_INVALID = "E_QUERY_INVALID"
+# G.3.1 (v0.84): the caller may ask and this deployment may not reach what
+# they asked for — a bucket no configured object store serves, a prefix a
+# store does not contain. The host has spelled this code since J.2 (it is
+# what a missing capability answers) and maps it to 403; the engine needs
+# the same word now that a SOURCE can be refused for reach rather than for
+# shape, and two spellings of one refusal is how a console learns to show
+# "bad request" for a permissions answer.
+E_FORBIDDEN = "E_FORBIDDEN"
 E_TIMEOUT = "E_TIMEOUT"
 E_LOCKED = "E_LOCKED"
 # C.14 (v0.56): a prune refused by what points at the node (or by a

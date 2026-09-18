@@ -231,9 +231,21 @@ class CanopyIndex:
         ids = [r[0] for r in rows]
         texts = [r[1] for r in rows]
         vecs = embedder.embed(texts) if texts else []
-        dim = len(vecs[0]) if vecs else 0
-        idx = cls(model=embedder.model, dim=dim)
-        idx.ids = ids
+        return cls.from_vectors(embedder.model, ids, vecs)
+
+    @classmethod
+    def from_vectors(cls, model: str, ids: list[str], vecs) -> "CanopyIndex":
+        """An index from vectors already obtained (J.13.4, v0.84).
+
+        `build` embeds and then calls this; a build driven as a J.9 job
+        embeds in its own steps and calls this ONCE, at the close — which is
+        what makes a cancelled build leave the forest with the index it
+        already had rather than half of a new one (K.4: an index in two
+        states is worse than no index).
+        """
+        dim = len(vecs[0]) if len(vecs) else 0
+        idx = cls(model=model, dim=dim)
+        idx.ids = list(ids)
         idx.vectors = _as_matrix([normalize(v) for v in vecs], dim)
         idx.built_at = time.time()
         return idx

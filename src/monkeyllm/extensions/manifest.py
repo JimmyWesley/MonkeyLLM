@@ -156,6 +156,16 @@ class Manifest(_Strict):
     def secret_fields(self) -> set[str]:
         return {k for k, f in self.config.items() if f.secret}
 
+    def config_defaults(self) -> dict:
+        """L.10: what the schema says a setting is worth when nobody said.
+
+        A declared field with no `default` is NOT a key here: `None` and
+        "the operator never chose" are the same state, and manufacturing a
+        null would make a worker read a setting that does not exist.
+        """
+        return {k: f.default for k, f in self.config.items()
+                if f.default is not None}
+
     def required_fields(self) -> set[str]:
         return {k for k, f in self.config.items()
                 if f.required and f.default is None}
