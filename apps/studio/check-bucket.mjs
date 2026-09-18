@@ -55,6 +55,13 @@ const CARD = 'function ConnectBucket({ value, onChange, stores, busy, error, '
   + 'onStorage }) {'
 const card = bodyOf(ingest, CARD)
 const submit = bodyOf(ingest, 'async function submit(e) {')
+/* Following the job used to live inside `submit`; it is `startBatch` now,
+   because the refresh left the add card for its own place in Optimize (the
+   v0.85 layout round) and a second copy of "queue, POST, note the job, put
+   it in the address" is how two doors come to behave differently. The
+   criterion is the same one — the batch is the ordinary J.9 job, on the
+   ordinary path — read across both halves. */
+const startBatch = bodyOf(ingest, 'async function startBatch(body, meta) {')
 const rescent = bodyOf(ingest, 'function Rescent({ forest, bound, job, onJob }) {')
 const dense = bodyOf(ingest, 'function DenseLayer({ forest, job, onJob }) {')
 
@@ -87,9 +94,15 @@ ok('J.8.6 rule 4 the content policy defaults to cached and states its cost',
    && /const CONTENT = \['cached', 'inline'\]/.test(ingest)
    && /t\(`ingest\.bucket_content_\$\{value\.content\}_hint`\)/.test(card))
 ok('J.8.6 rule 5 it is the ordinary J.9 job, on the ordinary path',
-   /const report = await api\.ingest\(forest, body\)/.test(submit)
-   && /noteJob\(forest, report\.job\)/.test(submit)
-   && /setJobId\(report\.job\.id\)/.test(submit))
+   /const out = await startBatch\(body, \{/.test(submit)
+   && startBatch.length > 0
+   && /const started = await api\.ingest\(forest, body\)/.test(startBatch)
+   && /noteJob\(forest, started\.job\)/.test(startBatch)
+   && /setJobId\(started\.job\.id\)/.test(startBatch))
+ok('J.9.2 every door queues through that same one place',
+   /if \(boardBusy\) \{\s*\n\s*enqueue\(forest, body, meta\)/.test(startBatch)
+   && !/enqueue\(forest,/.test(submit),
+   'a second queueing path is how two doors come to behave differently')
 ok('J.8.6 rule 6 the report names formats before it lists files',
    /report\.unsupported_formats/.test(ingest)
    && /ingest\.unsupported_formats/.test(ingest),

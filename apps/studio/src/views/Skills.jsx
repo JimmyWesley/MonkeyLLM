@@ -35,6 +35,7 @@ import { api } from '../api.js'
 import { hrefFor, useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import { Card, CheckList, CopyButton, Note, Segmented } from '../design/ui.jsx'
+import { Folded, More } from '../design/Disclosure.jsx'
 import { Highlighted } from '../design/highlight.jsx'
 import { Download, Files, Key, Plug, Sparkle } from '../design/icons.jsx'
 import { NeedsCapability, has } from './shared.jsx'
@@ -47,8 +48,14 @@ import { zip } from '../zip.js'
  *  Derived from the selected forests (J.5.12 v0.61) — a constant here made
  *  one-skill-per-forest, which this console invites, collide on `name:`. */
 
+/* The walkthrough's own prose, folded at its first sentence (J.5).
+ *
+ * This console is four steps and it used to state three paragraphs before
+ * the first of them: on a phone the pairing snippet — the thing a person
+ * came here to copy — started below the fold. Every sentence is still here;
+ * only the first one is on screen unasked. */
 const P = ({ children }) => (
-  <p className="max-w-[72ch] text-[13px] leading-relaxed text-text-2">{children}</p>
+  <More text={children} className="max-w-[72ch] text-[13px] leading-relaxed text-text-2" />
 )
 
 function CodeBlock({ title, code, lang = 'bash', actions }) {
@@ -175,8 +182,11 @@ export default function Skills({ forest, grant, me }) {
     <div className="max-w-[860px] space-y-5">
       <Card title={t('skills.what.title')} subtitle={t('skills.what.sub')}
             icon={Sparkle} bodyClass="space-y-4 p-5">
-        <P>{t('skills.what.p1')}</P>
-        <P>{t('skills.what.p2')}</P>
+        {/* The one card whose prose IS its content: it answers "what is a
+            skill and why would I install one", so it folds as a whole. */}
+        <Folded text={t('skills.what.p1')}>
+          <p>{t('skills.what.p2')}</p>
+        </Folded>
       </Card>
 
       <Card title={t('skills.pair.title')} subtitle={t('skills.pair.sub')}
@@ -186,7 +196,7 @@ export default function Skills({ forest, grant, me }) {
                    code={`curl -sX POST ${origin}/v1/auth/pair \\
   -H 'content-type: application/json' \\
   -d '{"username": "you", "password": "…", "label": "claude-code"}'`} />
-        <Note>{t('skills.pair.once')}</Note>
+        <Folded text={t('skills.pair.once')} />
       </Card>
 
       <Card title={t('skills.connect.title')} subtitle={t('skills.connect.sub')}
@@ -253,8 +263,8 @@ export default function Skills({ forest, grant, me }) {
             </p>
           )}
         </div>
-        <Note>{assembly === 'folder' ? t('skills.shape.folder_note')
-                                     : t('skills.shape.single_note')}</Note>
+        <Folded text={assembly === 'folder' ? t('skills.shape.folder_note')
+                                            : t('skills.shape.single_note')} />
       </Card>
 
       <Card title={t('skills.install.title')} subtitle={t('skills.install.sub')}
@@ -288,7 +298,7 @@ export default function Skills({ forest, grant, me }) {
                            </button>
                          } />
             ))}
-            <Note>{t('skills.install.english')}</Note>
+            <Folded text={t('skills.install.english')} />
           </>
         )}
       </Card>

@@ -26,6 +26,7 @@ import {
   Badge, Card, Code, CodeArea, CopyButton, Empty, ErrorNote, Field, Modal,
   Note, Select, Skeleton, Spinner, Table, Tabs, Td, TextArea,
 } from '../design/ui.jsx'
+import { Folded, More } from '../design/Disclosure.jsx'
 import { Highlighted } from '../design/highlight.jsx'
 import {
   ChevronLeft, ChevronRight, Code2, Columns, Data as DataIcon, Download,
@@ -571,7 +572,7 @@ export default function Data({ forest, grant }) {
                         {tb.name}
                       </span>
                     </span>
-                    <span className="shrink-0 font-mono text-[10.5px] text-text-3">
+                    <span className="shrink-0 font-mono text-[11px] text-text-3">
                       {tb.rows ?? ''}
                     </span>
                   </button>
@@ -618,7 +619,9 @@ export default function Data({ forest, grant }) {
 
       <div className="min-w-0 space-y-4">
         {!id ? (
-          <Card><Empty icon={DataIcon} title={t('data.empty')}>{t('data.empty_hint')}</Empty></Card>
+          <Card><Empty icon={DataIcon} title={t('data.empty')}>
+            {t('data.empty_hint')}
+          </Empty></Card>
         ) : (
           <Card bodyClass="p-0"
                 title={table || id} subtitle={id} icon={DataIcon}
@@ -728,7 +731,7 @@ export default function Data({ forest, grant }) {
                             }}
                             onEdit={editable ? stageEdit : undefined}
                             onDelete={editable ? stageDelete : undefined} />
-                      <p className="text-[11.5px] text-text-3">
+                      <p className="text-[12px] text-text-3">
                         {mayWrite
                           ? (rows.data.keyed ? t('data.edit_hint') : t('data.no_rowid'))
                           : t('data.read_only')}
@@ -757,7 +760,7 @@ export default function Data({ forest, grant }) {
                   </label>
                   {(meta.data?.examples || []).length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
-                      <span className="text-[11.5px] text-text-3">{t('data.examples')}</span>
+                      <span className="text-[12px] text-text-3">{t('data.examples')}</span>
                       {meta.data.examples.map((q) => (
                         <button key={q} type="button" onClick={() => setSql(q)}
                                 className="badge max-w-full hover:border-accent/40
@@ -803,7 +806,9 @@ export default function Data({ forest, grant }) {
           </Card>
         )}
 
-        <Note>{t('data.sub')}</Note>
+        {/* How this console writes, in one line: the rule is the reason
+            the SQL box refuses half of what somebody might type. */}
+        <Folded text={t('data.sub')} />
       </div>
 
       {pending && (
@@ -867,7 +872,7 @@ function PendingWrite({ pending, onApply, onCancel, t }) {
           </div>
         )}
         <div className="mt-3 flex items-center justify-end gap-2">
-          <span className="mr-auto text-[11.5px] text-text-3">
+          <span className="mr-auto text-[12px] text-text-3">
             {t('data.commits', { n: statements.length })}
           </span>
           <button type="button" className="btn btn-sm" onClick={onCancel}>
@@ -893,7 +898,7 @@ function Structure({ table, t }) {
                     t('data.default')]}>
         {table.columns.map((c, i) => (
           <tr key={c.name}>
-            <Td className="w-8 font-mono text-[11.5px] text-text-3">{i + 1}</Td>
+            <Td className="w-8 font-mono text-[12px] text-text-3">{i + 1}</Td>
             <Td className="font-mono text-[12.5px] text-text">
               {c.name}
               {c.pk && <Badge tone="accent" className="ml-2">PK</Badge>}
@@ -917,7 +922,7 @@ function Structure({ table, t }) {
         </div>
       )}
 
-      <Note>{t('data.structure_note')}</Note>
+      <Folded text={t('data.structure_note')} />
     </div>
   )
 }
@@ -988,7 +993,7 @@ function Notes({ forest, id, mayWrite, onSaved, t }) {
 
   return (
     <div className="space-y-3">
-      <Note>{t('data.notes_hint')}</Note>
+      <Folded text={t('data.notes_hint')} />
       <label className="block">
         <span className="label">{t('data.tab_notes')}</span>
         <CodeArea lang="markdown" value={value} minHeight="14rem"
@@ -1001,7 +1006,7 @@ function Notes({ forest, id, mayWrite, onSaved, t }) {
       {state.saved && !dirty && <Note>{t('data.notes_saved')}</Note>}
 
       <div className="flex items-center justify-end gap-2">
-        <span className="mr-auto text-[11.5px] text-text-3">
+        <span className="mr-auto text-[12px] text-text-3">
           {t('data.notes_commit')}
         </span>
         {dirty && (
@@ -1198,7 +1203,7 @@ function NewDataset({ forest, grant, onClose, onCreated, t }) {
         {problems.length > 0 && (
           <Note tone="warn">{problems[0]}</Note>
         )}
-        <Note>{t('data.new_note')}</Note>
+        <Folded text={t('data.new_note')} />
         {state.error && <ErrorNote error={state.error} />}
       </form>
     </Modal>
@@ -1306,7 +1311,7 @@ function ImportDataset({ forest, grant, onClose, onQueued, t }) {
           <button type="button" className="btn w-full" onClick={() => picker.current?.click()}>
             <Plus size={14} /> {t('data.import_pick')}
           </button>
-          <p className="mt-1.5 text-[11.5px] text-text-3">{t('data.import_formats')}</p>
+          <div className="mt-1.5"><More text={t('data.import_formats')} /></div>
         </div>
 
         {state.reading && <Spinner label={t('common.working')} />}
@@ -1330,7 +1335,7 @@ function ImportDataset({ forest, grant, onClose, onQueued, t }) {
                 </button>
               </li>
             ))}
-            <li className="pt-1 text-[11.5px] text-text-3">
+            <li className="pt-1 text-[12px] text-text-3">
               {t('data.import_total', { n: files.length,
                                         kb: Math.max(1, Math.round(total / 1024)) })}
             </li>
@@ -1345,7 +1350,7 @@ function ImportDataset({ forest, grant, onClose, onQueued, t }) {
 
         {state.job
           ? <Note>{t('data.import_queued')}</Note>
-          : <Note>{t('data.import_note')}</Note>}
+          : <Folded text={t('data.import_note')} />}
         {state.error && <ErrorNote error={state.error} />}
       </form>
     </Modal>
@@ -1407,7 +1412,7 @@ function InsertRow({ open, columns = [], onClose, onSubmit, t }) {
                         className={`field font-mono text-[12.5px]
                                     ${errors[i] ? '!border-danger' : ''}`} />
             {errors[i] && (
-              <span className="mt-1 block text-[11.5px] text-danger">{errors[i]}</span>
+              <span className="mt-1 block text-[12px] text-danger">{errors[i]}</span>
             )}
           </label>
         ))}

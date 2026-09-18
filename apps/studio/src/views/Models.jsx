@@ -6,10 +6,13 @@ import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { WATCH, noteJob, useAttend, useBoard } from '../board.js'
 import {
-  Badge, Card, Combobox, Empty, ErrorNote, Field, Note, Select, Skeleton,
-  Spinner, Table, Td, Toggle,
+  Badge, Card, Combobox, Empty, ErrorNote, Field, Note, Rows, Select, Skeleton,
+  Spinner, Toggle,
 } from '../design/ui.jsx'
-import { Ask, Check, Eye, Ingest, Models as Chip, Trash } from '../design/icons.jsx'
+import { Folded, More } from '../design/Disclosure.jsx'
+import {
+  Ask, Check, Eye, Ingest, Models as Chip, Plus, Trash,
+} from '../design/icons.jsx'
 import { Metric, NeedsCapability, has, useAsync } from './shared.jsx'
 
 /** Saving a binding, with the three states a save actually has.
@@ -101,6 +104,7 @@ const GENERIC = { icon: Chip, defaultTokens: 600 }
 const CHAT_SHAPED = new Set(['chat', 'vision'])
 
 const PRESETS = [
+  { name: 'openai', endpoint: 'https://api.openai.com/v1' },
   { name: 'openrouter', endpoint: 'https://openrouter.ai/api/v1' },
   { name: 'ollama', endpoint: 'http://localhost:11434/v1' },
   { name: 'litellm', endpoint: 'http://localhost:4000/v1' },
@@ -123,6 +127,11 @@ export default function Models({ forest, grant }) {
   const [error, setError] = useState(null)
   const [probe, setProbe] = useState(null)
   const [draft, setDraft] = useState({ name: '', endpoint: '', api_key: '' })
+  /* J.5: the list before the form. Adding a provider is done once and then
+     almost never — it was the first thing on the console and the table it
+     feeds was below it, so the screen opened on a blank form and an
+     operator scrolled past their own deployment to find it. */
+  const [adding, setAdding] = useState(false)
   // Per-provider catalogue, fetched from the provider's own /models. Cached
   // here so the two role cards share one round trip.
   const [catalogue, setCatalogue] = useState({})
@@ -149,6 +158,7 @@ export default function Models({ forest, grant }) {
     try {
       await api.putProvider(draft)
       setDraft({ name: '', endpoint: '', api_key: '' })
+      setAdding(false)
       refresh()
     } catch (err) { setError(err) }
   }
@@ -175,66 +185,47 @@ export default function Models({ forest, grant }) {
     <div className="space-y-4">
       {error && <Card><ErrorNote error={error} /></Card>}
 
-      <Card title={t('models.providers')} subtitle={t('models.providers_sub')} icon={Chip}>
-        <form onSubmit={saveProvider}
-              className="grid gap-3 sm:grid-cols-[1fr_1.5fr_1fr_auto] sm:items-end">
-          <Field label={t('models.name')} value={draft.name} required placeholder="openrouter"
-                 onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-          <Field label={t('models.endpoint')} value={draft.endpoint} required
-                 placeholder="https://openrouter.ai/api/v1"
-                 onChange={(e) => setDraft({ ...draft, endpoint: e.target.value })} />
-          <Field label={t('models.key')} type="password" value={draft.api_key}
-                 placeholder="sk-or-…"
-                 onChange={(e) => setDraft({ ...draft, api_key: e.target.value })} />
-          {/* Stacked, it would otherwise stretch the full width and read as
-              the most important thing on the card, which it is not. */}
-          <button className="btn btn-primary h-[38px] justify-self-end sm:justify-self-auto">
-            {t('common.save')}
-          </button>
-        </form>
-        <p className="mt-1.5 text-[11.5px] text-text-3">{t('models.key_hint')}</p>
-
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {PRESETS.map((p) => (
-            <button key={p.name} type="button"
-                    className="badge hover:border-accent/40 hover:text-accent"
-                    onClick={() => setDraft({ ...draft, name: draft.name || p.name,
-                                              endpoint: p.endpoint })}>
-              {p.name}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-5">
-          {/* A failed fetch must not render as an empty list. `data` is null
-              on error too, so testing only its length told an operator whose
-              Station was unreachable that their providers were *gone* — a
-              false statement about their data, produced by a network blip. */}
-          {providers.busy ? <Skeleton rows={2} />
-            : providers.error ? <ErrorNote error={providers.error} onRetry={providers.reload} />
-            : (providers.data || []).length === 0 ? <Empty icon={Chip}>{t('models.none')}</Empty> : (
-            <Table head={[t('models.name'), t('models.endpoint'), t('models.key'), '']}>
-              {providers.data.map((p) => (
-                <tr key={p.name}>
-                  <Td className="font-medium text-text">
-                    <span className="flex flex-wrap items-center gap-1.5">
-                      {p.name}
-                      {/* Declared by the deployment (J.10.1): shown as a fact
-                          about where it came from, because that is also why
-                          its key and endpoint are not editable here. */}
-                      {p.origin === 'env' && <Badge>{t('models.origin_env')}</Badge>}
-                    </span>
-                  </Td>
-                  <Td className="whitespace-nowrap font-mono text-[12px] text-text-3">
-                    {p.endpoint}
-                  </Td>
-                  <Td>
-                    {p.has_key ? <Badge tone="accent">{t('models.key_stored')}</Badge>
-                               : <Badge>{t('models.key_none')}</Badge>}
-                  </Td>
-                  <Td>
-                    <div className="flex justify-end gap-1.5">
-                      <button className="btn btn-sm" onClick={() => load(p.name, { announce: true })}>
+      <Card title={t('models.providers')} subtitle={t('models.providers_sub')} icon={Chip}
+            actions={
+              <button type="button" className={`btn btn-sm ${adding ? '' : 'btn-primary'}`}
+                      onClick={() => setAdding((v) => !v)}>
+                {adding ? t('common.cancel') : <><Plus size={14} /> {t('models.add')}</>}
+              </button>}>
+        {/* A failed fetch must not render as an empty list. `data` is null
+            on error too, so testing only its length told an operator whose
+            Station was unreachable that their providers were *gone* — a
+            false statement about their data, produced by a network blip. */}
+        {providers.busy ? <Skeleton rows={2} />
+          : providers.error ? <ErrorNote error={providers.error} onRetry={providers.reload} />
+          : (providers.data || []).length === 0 ? (
+            <Empty icon={Chip}
+                   action={<button type="button" className="btn btn-primary btn-sm"
+                                   onClick={() => setAdding(true)}>
+                     <Plus size={14} /> {t('models.add')}
+                   </button>}>
+              {t('models.none')}
+            </Empty>
+          ) : (
+            <Rows head={[t('models.name'), t('models.endpoint'), t('models.key')]}
+                  rows={providers.data.map((p) => ({
+                    key: p.name,
+                    cells: [
+                      <span className="flex flex-wrap items-center gap-1.5 font-medium text-text">
+                        {p.name}
+                        {/* Declared by the deployment (J.10.1): shown as a fact
+                            about where it came from, because that is also why
+                            its key and endpoint are not editable here. */}
+                        {p.origin === 'env' && <Badge>{t('models.origin_env')}</Badge>}
+                      </span>,
+                      <span className="break-all font-mono text-[12px] text-text-3">
+                        {p.endpoint}
+                      </span>,
+                      p.has_key ? <Badge tone="accent">{t('models.key_stored')}</Badge>
+                                : <Badge>{t('models.key_none')}</Badge>,
+                    ],
+                    actions: <>
+                      <button className="btn btn-sm"
+                              onClick={() => load(p.name, { announce: true })}>
                         {t('models.test')}
                       </button>
                       <button className="btn btn-sm btn-danger"
@@ -244,36 +235,66 @@ export default function Models({ forest, grant }) {
                                 .then(refresh).catch(setError)}>
                         <Trash size={13} />
                       </button>
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-            </Table>
+                    </>,
+                  }))} />
           )}
 
-          {(providers.data || []).some((p) => p.origin === 'env') && (
-            <p className="mt-2 text-[11.5px] text-text-3">{t('models.env_note')}</p>
-          )}
+        {/* Only where an `env` badge is actually on screen — the note is
+            about that badge, and a rule with nothing to explain is noise. */}
+        {(providers.data || []).some((p) => p.origin === 'env') && (
+          <div className="mt-2"><More text={t('models.env_note')} /></div>
+        )}
 
-          {probe && (
-            <div className="mt-3 text-[12.5px]">
-              {probe.state === 'testing' ? <Spinner label={t('models.testing')} />
-                : probe.state === 'ok'
-                  ? <p className="text-accent">
-                      {probe.name}: {t('models.reachable', { n: probe.count })}
-                    </p>
-                  : <p className="text-danger">
-                      {probe.name}: {t('models.unreachable')} — {probe.error}
-                    </p>}
-              {probe.state === 'ok' && !!probe.models?.length && (
-                <p className="mt-1 font-mono text-[11px] text-text-3">
-                  {probe.models.slice(0, 6).map((m) => m.id).join(' · ')}
-                  {probe.models.length > 6 ? ' …' : ''}
-                </p>
-              )}
+        {probe && (
+          <div className="mt-3 text-[12.5px]">
+            {probe.state === 'testing' ? <Spinner label={t('models.testing')} />
+              : probe.state === 'ok'
+                ? <p className="text-accent">
+                    {probe.name}: {t('models.reachable', { n: probe.count })}
+                  </p>
+                : <p className="text-danger">
+                    {probe.name}: {t('models.unreachable')} — {probe.error}
+                  </p>}
+            {probe.state === 'ok' && !!probe.models?.length && (
+              <p className="mt-1 font-mono text-[12px] text-text-3">
+                {probe.models.slice(0, 6).map((m) => m.id).join(' · ')}
+                {probe.models.length > 6 ? ' …' : ''}
+              </p>
+            )}
+          </div>
+        )}
+
+        {adding && (
+          <form onSubmit={saveProvider} className="mt-5 space-y-3 border-t border-line pt-4">
+            <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr_1fr_auto] sm:items-end">
+              <Field label={t('models.name')} value={draft.name} required autoFocus
+                     placeholder="openai"
+                     onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+              <Field label={t('models.endpoint')} value={draft.endpoint} required
+                     placeholder="https://api.openai.com/v1"
+                     onChange={(e) => setDraft({ ...draft, endpoint: e.target.value })} />
+              <Field label={t('models.key')} type="password" value={draft.api_key}
+                     placeholder="sk-or-…"
+                     onChange={(e) => setDraft({ ...draft, api_key: e.target.value })} />
+              {/* Stacked, it would otherwise stretch the full width and read as
+                  the most important thing on the card, which it is not. */}
+              <button className="btn btn-primary h-[38px] justify-self-end sm:justify-self-auto">
+                {t('common.save')}
+              </button>
             </div>
-          )}
-        </div>
+            <div className="flex flex-wrap gap-1.5">
+              {PRESETS.map((p) => (
+                <button key={p.name} type="button"
+                        className="badge hover:border-accent/40 hover:text-accent"
+                        onClick={() => setDraft({ ...draft, name: draft.name || p.name,
+                                                  endpoint: p.endpoint })}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            <More text={t('models.key_hint')} />
+          </form>
+        )}
       </Card>
 
       {bindings.busy && !bindings.data ? <Skeleton rows={4} /> : null}
@@ -298,7 +319,9 @@ export default function Models({ forest, grant }) {
 
       <AnswerStore forest={forest} onError={setError} />
 
-      <Note>{t('models.scope_note')}</Note>
+      {/* J.3.2: who this provider list answers to. One line, and the rule
+          behind it a tap away. */}
+      <Folded text={t('models.scope_note')} />
     </div>
   )
 }
@@ -371,7 +394,7 @@ function AnswerStore({ forest, onError }) {
                      placeholder="—" value={form.ttl_hours}
                      onChange={(e) => setForm({ ...form, ttl_hours: e.target.value })} />
             </div>
-            <p className="text-[11.5px] text-text-3">{t('models.cache_ttl_hint')}</p>
+            <More text={t('models.cache_ttl_hint')} />
             <div className="flex items-center justify-end gap-2">
               <button type="button" className="btn btn-sm btn-danger"
                       disabled={clearing || !stats?.held} onClick={clear}>
@@ -472,7 +495,7 @@ function Gauntlet({ forest, providers, binding, catalogue, loadCatalogue,
           actions={<Badge tone={enabled ? tone : 'default'}>
             {enabled ? t(`gauntlet.state_${state || 'unknown'}`) : t('gauntlet.state_off')}
           </Badge>}>
-      <Note>{t('gauntlet.optional')}</Note>
+      <Folded text={t('gauntlet.optional')} />
 
       {/* `items-end` misaligned these: only the model field carries a hint,
           so bottom-aligning pushed the provider select a line lower than its
@@ -550,7 +573,7 @@ function Gauntlet({ forest, providers, binding, catalogue, loadCatalogue,
                     : status.data?.vectors ? t('gauntlet.rebuild') : t('gauntlet.build')}
         </button>
       </div>
-      <p className="mt-2 text-[11.5px] text-text-3">{t('gauntlet.build_hint')}</p>
+      <div className="mt-2"><More text={t('gauntlet.build_hint')} /></div>
     </Card>
   )
 }
@@ -632,7 +655,7 @@ function RoleBinding({ role, forest, providers, binding, catalogue, loadCatalogu
         />
         {stray && <Note tone="warn">{t('models.model_stray', { provider: form.provider })}</Note>}
         {!role.builtin && (
-          <p className="text-[11.5px] text-text-3">{t(`models.kind_${role.kind || 'chat'}`)}</p>
+          <p className="text-[12px] text-text-3">{t(`models.kind_${role.kind || 'chat'}`)}</p>
         )}
         {/* Two columns only once there is room for them: at 375px the
             reply-length label wrapped to two lines while its neighbour did

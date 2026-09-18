@@ -72,7 +72,7 @@ function Crashed({ error, onRetry }) {
         </p>
         {error?.message && (
           <code className="mx-auto mt-3 block max-w-[60ch] truncate rounded-lg bg-surface-2
-                           px-3 py-1.5 text-left text-[11.5px] text-text-3">
+                           px-3 py-1.5 text-left text-[12px] text-text-3">
             {String(error.message)}
           </code>
         )}

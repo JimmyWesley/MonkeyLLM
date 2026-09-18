@@ -11,6 +11,7 @@ import {
   Badge, Card, CopyButton, Empty, ErrorNote, Modal, Note, Segmented, Spinner,
   Toggle,
 } from '../design/ui.jsx'
+import { Folded, More } from '../design/Disclosure.jsx'
 import { Markdown } from '../design/markdown.jsx'
 import {
   Ask as AskIcon, Clock, Collapse, Download, Expand, Eye, Graph as GraphIcon,
@@ -352,30 +353,59 @@ export default function Ask({ forest, grant, me, goto }) {
               console uses, so the button is always in the corner the eye
               already went to. */}
           <div className="flex flex-wrap items-center justify-end gap-3">
-            <div className="mr-auto flex flex-wrap items-center gap-x-4 gap-y-2">
+            {/* Two tidy rows at 375 instead of four crowded ones. The depth
+                and the reply length share the first; the two date inputs
+                take the second whole, because 375 minus the gutters is 343
+                and a pair of native date widgets is most of it. The period
+                therefore reads LAST in the markup, so the grid fills its
+                first row instead of leaving a hole beside the depth; from
+                640 up this is the same single wrapping row as before, with
+                the period at its end. */}
+            <div className="mr-auto grid w-full grid-cols-2 items-center gap-x-4 gap-y-2.5
+                            sm:flex sm:w-auto sm:flex-wrap">
               <div className="flex items-center gap-2">
-                <span className="text-[11.5px] text-text-3">{t('ask.depth')}</span>
+                <span className="text-[12px] text-text-3">{t('ask.depth')}</span>
                 <Segmented value={k} onChange={setK} options={[
                   { value: 2, label: '2' }, { value: 3, label: '3' }, { value: 6, label: '6' },
                 ]} />
               </div>
+              {/* J.10.8: dragged per person, remembered per person. "Auto"
+                  sends nothing — the forest binding's own size rules. */}
+              <label className="flex items-center gap-2" title={t('ask.reply_hint')}>
+                <span className="text-[12px] text-text-3">{t('ask.reply_len')}</span>
+                <input type="range" className="graph-range w-20 sm:w-24"
+                       min={0} max={REPLY_STEPS.length - 1} step={1}
+                       value={replyStepIndex(reply)}
+                       aria-label={t('ask.reply_len')}
+                       onChange={(e) => {
+                         const v = REPLY_STEPS[Number(e.target.value)] || 0
+                         setReply(v)
+                         savePrefs({ reply: v })
+                       }} />
+                <span className="whitespace-nowrap font-mono text-[12px] tabular-nums
+                                 text-text-3">
+                  {reply
+                    ? t('ask.reply_words', { n: Math.round(reply * 0.75) })
+                    : t('ask.reply_auto')}
+                </span>
+              </label>
               {/* J.5.19: the question's period. Two dates on `created` —
                   when material ARRIVED, J.5.4's window one console over —
-                  beside the depth because both decide what retrieval may
-                  reach. Deliberately NOT a Toggle in the flags list below
+                  in the same settings row as the depth because both decide
+                  what retrieval may reach. Deliberately NOT a Toggle in the flags list below
                   and NOT a preference like the slider beside it: a shared
                   link must ask the same bounded question, and a window
                   remembered from yesterday is wrong tomorrow. The inputs
                   validate nothing (a bad bound is the engine's refusal),
                   and the answer is labelled by the engine's echo, never by
                   these strings. */}
-              <div className="flex items-center gap-1.5" role="group"
+              <div className="col-span-2 flex items-center gap-1.5 sm:col-auto" role="group"
                    aria-label={t('ask.window')} title={t('ask.window_hint')}>
-                <span className="text-[11.5px] text-text-3">{t('ask.window')}</span>
+                <span className="text-[12px] text-text-3">{t('ask.window')}</span>
                 <input type="date" className="field !w-auto !py-1 text-[12px]"
                        value={since} aria-label={t('ask.window_since')}
                        onChange={(e) => setSince(e.target.value)} />
-                <span className="text-[11px] text-text-3">→</span>
+                <span className="text-[12px] text-text-3">→</span>
                 <input type="date" className="field !w-auto !py-1 text-[12px]"
                        value={until} aria-label={t('ask.window_until')}
                        onChange={(e) => setUntil(e.target.value)} />
@@ -389,26 +419,6 @@ export default function Ask({ forest, grant, me, goto }) {
                   </button>
                 )}
               </div>
-              {/* J.10.8: dragged per person, remembered per person. "Auto"
-                  sends nothing — the forest binding's own size rules. */}
-              <label className="flex items-center gap-2" title={t('ask.reply_hint')}>
-                <span className="text-[11.5px] text-text-3">{t('ask.reply_len')}</span>
-                <input type="range" className="graph-range w-24"
-                       min={0} max={REPLY_STEPS.length - 1} step={1}
-                       value={replyStepIndex(reply)}
-                       aria-label={t('ask.reply_len')}
-                       onChange={(e) => {
-                         const v = REPLY_STEPS[Number(e.target.value)] || 0
-                         setReply(v)
-                         savePrefs({ reply: v })
-                       }} />
-                <span className="whitespace-nowrap font-mono text-[11px] tabular-nums
-                                 text-text-3">
-                  {reply
-                    ? t('ask.reply_words', { n: Math.round(reply * 0.75) })
-                    : t('ask.reply_auto')}
-                </span>
-              </label>
               {/* J.5.15 rule 10, kept by moving rather than by staying: the
                   drawing is still NOT a parameter of the question — it is
                   not in the flags list below, which is "what the question is
@@ -418,12 +428,12 @@ export default function Ask({ forest, grant, me, goto }) {
                   nobody found. This row sits above the answer and is not
                   pushed off screen by it, which was the reason the header
                   was chosen in the first place. */}
-              <Toggle compact icon={GraphIcon} checked={showGraph}
-                      label={t('ask.graph')} hint={t('ask.graph_hint')}
-                      onChange={(v) => { setShowGraph(v); savePrefs({ graph: v }) }} />
             </div>
+            <Toggle compact icon={GraphIcon} checked={showGraph}
+                    label={t('ask.graph')} hint={t('ask.graph_hint')}
+                    onChange={(v) => { setShowGraph(v); savePrefs({ graph: v }) }} />
             {/* A keyboard shortcut is not advice on a phone. */}
-            <span className="hidden text-[11.5px] text-text-3 sm:inline">
+            <span className="hidden text-[12px] text-text-3 sm:inline">
               {t('ask.hint_send')}
             </span>
             <button className="btn btn-primary" disabled={busy || !question.trim()}>
@@ -436,14 +446,14 @@ export default function Ask({ forest, grant, me, goto }) {
               these — it is a way of reading the answer, so it lives on the
               header (J.5.15 rule 10) and never in this list. */}
           <div className="space-y-3 border-t border-line pt-3">
-            <Toggle checked={hops} onChange={setHops}
-                    label={t('ask.hops')} hint={t('ask.hops_hint')} />
+            <Flag checked={hops} onChange={setHops}
+                  label={t('ask.hops')} hint={t('ask.hops_hint')} />
             {dense && (
-              <Toggle checked={hybrid} onChange={setHybrid}
-                      label={t('ask.hybrid')} hint={t('ask.hybrid_hint')} />
+              <Flag checked={hybrid} onChange={setHybrid}
+                    label={t('ask.hybrid')} hint={t('ask.hybrid_hint')} />
             )}
-            <Toggle checked={cache} onChange={setCache}
-                    label={t('ask.cache')} hint={t('ask.cache_hint')} />
+            <Flag checked={cache} onChange={setCache}
+                  label={t('ask.cache')} hint={t('ask.cache_hint')} />
           </div>
         </form>
 
@@ -567,7 +577,7 @@ export default function Ask({ forest, grant, me, goto }) {
                             <span className="flex flex-wrap items-baseline gap-x-2">
                               <span className="font-mono text-[12px] text-accent">{id}</span>
                               {src?.type && (
-                                <span className="text-[10.5px] uppercase tracking-[0.07em]
+                                <span className="text-[11px] uppercase tracking-[0.07em]
                                                  text-text-3">{src.type}</span>
                               )}
                             </span>
@@ -647,14 +657,18 @@ export default function Ask({ forest, grant, me, goto }) {
       <History open={history} onClose={() => setHistory(false)}
                principal={principal} forest={forest} onPick={restore} />
 
-      <Note>{t('ask.limits')}</Note>
-      {/* No Gauntlet switch here on purpose: `answer` composes `harvest`,
-          which is entry search — locate + sniff, no `look`, no `move`, no
-          `scan`. Part K conditions the *frontier*, and this console never
-          hops. The switch above is the other one: whether the vector layer
-          joins entry search, which is the thing that does affect an answer
-          — and the thing measurement says makes it worse. */}
-      <Note>{t('gauntlet.not_here')}</Note>
+      {/* Two standing facts about this console, under the answer rather
+          than over it, and one line each. No Gauntlet switch here is on
+          purpose: `answer` composes `harvest`, which is entry search —
+          locate + sniff, no `look`, no `move`, no `scan`. Part K conditions
+          the *frontier*, and this console never hops. The switch above is
+          the other one: whether the vector layer joins entry search, which
+          is the thing that does affect an answer — and the thing
+          measurement says makes it worse. */}
+      <div className="space-y-2">
+        <Folded text={t('ask.limits')} />
+        <Folded text={t('gauntlet.not_here')} />
+      </div>
     </div>
   )
 }
@@ -790,7 +804,7 @@ function History({ open, onClose, principal, forest, onPick }) {
                {/* The bound, said out loud. A store that dropped its far end
                    in silence would let a partial history read as a complete
                    one (J.5.9). */}
-               <span className="mr-auto text-left text-[11.5px] leading-relaxed text-text-3">
+               <span className="mr-auto text-left text-[12px] leading-relaxed text-text-3">
                  {t('ask.history_holding', {
                    n: runs.length, size: fmtBytes(state?.bytes || 0),
                  })}
@@ -827,7 +841,7 @@ function History({ open, onClose, principal, forest, onPick }) {
                           {run.question}
                         </span>
                         <span className="mt-1 flex flex-wrap items-baseline gap-x-2
-                                         gap-y-1 text-[11px] text-text-3">
+                                         gap-y-1 text-[12px] text-text-3">
                           <span className="tabular-nums">
                             {new Date(run.ts).toLocaleTimeString(lang, {
                               hour: '2-digit', minute: '2-digit',
@@ -880,6 +894,23 @@ function History({ open, onClose, principal, forest, onPick }) {
  *  long it has been running. Streaming the real hops needs the host to push
  *  events (SSE), which is a different contract.
  */
+/** One thing the question is asked WITH: a switch, a line, and the rest.
+ *
+ *  Each of these three carries two or three sentences of why, and all three
+ *  were on screen under the question at once — more prose than the question
+ *  itself. The `More` control sits OUTSIDE the switch's own `<label>` on
+ *  purpose: nested in it, reading the explanation would flip the flag being
+ *  explained (ui.jsx `Toggle`, the `compact` note).
+ */
+function Flag({ checked, onChange, label, hint }) {
+  return (
+    <div>
+      <Toggle checked={checked} onChange={onChange} label={label} />
+      <div className="mt-0.5 pl-[42px]"><More text={hint} /></div>
+    </div>
+  )
+}
+
 function Working({ hops }) {
   const { t } = useI18n()
   const [ms, setMs] = useState(0)
@@ -939,7 +970,7 @@ function Material({ results, sources = [] }) {
           const head = (
             <>
               <span className="font-mono text-[12px] text-text">{r.id}</span>
-              <span className="text-[11.5px] text-text-3">
+              <span className="text-[12px] text-text-3">
                 {t('ask.material_counts', {
                   m: r.matches?.length || 0,
                   s: r.content?.length || 0,
@@ -947,7 +978,7 @@ function Material({ results, sources = [] }) {
               </span>
               <span className="ml-auto flex items-center gap-2">
                 {r.found_by?.length > 0 && (
-                  <span className="font-mono text-[10.5px] uppercase tracking-[0.08em]
+                  <span className="font-mono text-[11px] uppercase tracking-[0.08em]
                                    text-text-3">{r.found_by.join(' + ')}</span>
                 )}
                 {/* The affordance, not a second control: the summary already
@@ -957,7 +988,7 @@ function Material({ results, sources = [] }) {
                     nothing here keeps state the DOM already holds. */}
                 {readable && (
                   <span className="btn gap-1.5 rounded-md bg-surface-2 px-2 py-1
-                                   text-[11.5px] text-text-2 hover:bg-surface-3
+                                   text-[12px] text-text-2 hover:bg-surface-3
                                    group-open:border-accent/30
                                    group-open:bg-accent-soft group-open:text-accent">
                     <Eye size={13} />
@@ -967,7 +998,7 @@ function Material({ results, sources = [] }) {
                 )}
               </span>
               {scent(r.id) && (
-                <span className="w-full text-[11.5px] leading-relaxed text-text-3">
+                <span className="w-full text-[12px] leading-relaxed text-text-3">
                   {scent(r.id)}
                 </span>
               )}
@@ -994,11 +1025,11 @@ function Material({ results, sources = [] }) {
                   <ul className="space-y-1.5">
                     {r.matches.map((m, i) => (
                       <li key={i} className="text-[12px]">
-                        <span className="font-mono text-[10.5px] text-text-3">
+                        <span className="font-mono text-[11px] text-text-3">
                           {m.section || '—'}:{m.line}
                         </span>
                         <p className="mt-0.5 border-l-2 border-accent/40 pl-2
-                                      font-mono text-[11.5px] leading-relaxed text-text-2">
+                                      font-mono text-[12px] leading-relaxed text-text-2">
                           {m.snippet}
                         </p>
                       </li>
@@ -1012,7 +1043,7 @@ function Material({ results, sources = [] }) {
                      the console already knows how to draw. */
                   c.columns ? <Rows key={i} {...c} /> : (
                     <div key={i}>
-                      <div className="mb-1 text-[11px] text-text-3">
+                      <div className="mb-1 text-[12px] text-text-3">
                         {c.section
                           ? t('ask.material_section', { s: c.section })
                           : c.outline ? t('ask.material_outline')
@@ -1021,11 +1052,11 @@ function Material({ results, sources = [] }) {
                       </div>
                       {c.body && (
                         <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words
-                                        rounded-md bg-surface-2 p-2.5 font-mono text-[11.5px]
+                                        rounded-md bg-surface-2 p-2.5 font-mono text-[12px]
                                         leading-relaxed text-text-2">{c.body}</pre>
                       )}
                       {c.outline && (
-                        <p className="font-mono text-[11.5px] text-text-3">
+                        <p className="font-mono text-[12px] text-text-3">
                           {(Array.isArray(c.outline) ? c.outline : [c.outline]).join(' · ')}
                         </p>
                       )}
@@ -1048,8 +1079,8 @@ function Rows({ sql, columns, rows, row_count, limited }) {
   return (
     <div>
       <div className="mb-1 flex flex-wrap items-baseline gap-2">
-        <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-accent">{sql}</code>
-        <span className="text-[11px] text-text-3">
+        <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-accent">{sql}</code>
+        <span className="text-[12px] text-text-3">
           {t('data.rows', { n: row_count ?? rows.length })}
           {limited ? ` · ${t('data.limited')}` : ''}
         </span>
@@ -1059,7 +1090,7 @@ function Rows({ sql, columns, rows, row_count, limited }) {
           <thead>
             <tr className="border-b border-line bg-surface-2 text-left">
               {columns.map((c) => (
-                <th key={c} className="whitespace-nowrap px-2.5 py-1.5 text-[10.5px]
+                <th key={c} className="whitespace-nowrap px-2.5 py-1.5 text-[11px]
                                        font-semibold uppercase tracking-[0.06em]
                                        text-text-3">{c}</th>
               ))}
@@ -1080,7 +1111,7 @@ function Rows({ sql, columns, rows, row_count, limited }) {
         </table>
       </div>
       {rows.length > 20 && (
-        <p className="mt-1 text-[11px] text-text-3">{t('ask.rows_more', { n: rows.length - 20 })}</p>
+        <p className="mt-1 text-[12px] text-text-3">{t('ask.rows_more', { n: rows.length - 20 })}</p>
       )}
     </div>
   )
@@ -1125,28 +1156,28 @@ function Path({ hops }) {
   return (
     <div className="mt-6 border-t border-line pt-4">
       <div className="label">{t('ask.path')} · {t('ask.path_count', { n: hops.length })}</div>
-      <p className="mb-2 text-[11px] text-text-3">{t('ask.path_clocks')}</p>
+      <p className="mb-2 text-[12px] text-text-3">{t('ask.path_clocks')}</p>
       <ol className="space-y-1">
         {hops.map((h, i) => (
           <li key={i} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5
                                  rounded-md px-1.5 py-1 odd:bg-surface-2/40">
-            <span className="w-4 shrink-0 text-right font-mono text-[10.5px] text-text-3">
+            <span className="w-4 shrink-0 text-right font-mono text-[11px] text-text-3">
               {h.n ?? i + 1}
             </span>
             <span className={`font-mono text-[12px] font-medium
                               ${h.ok ? 'text-text' : 'text-danger'}`}>{h.tool}</span>
-            {h.id && <span className="font-mono text-[11px] text-text-2">{h.id}</span>}
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-3">
+            {h.id && <span className="font-mono text-[12px] text-text-2">{h.id}</span>}
+            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-text-3">
               {args(h.args)}
             </span>
-            <span className={`shrink-0 text-[11px] tabular-nums
+            <span className={`shrink-0 text-[12px] tabular-nums
                               ${h.ok ? 'text-text-3' : 'text-danger'}`}>
               {outcome(h.out)}
             </span>
             {/* Two clocks, because they are two costs: the forest call, and
                 the model turn that decided to make it. Reporting one number
                 would hide which half a slow hunt is actually spending. */}
-            <span className="shrink-0 font-mono text-[11px] tabular-nums text-text-2">
+            <span className="shrink-0 font-mono text-[12px] tabular-nums text-text-2">
               {h.ms != null && `${h.ms < 10 ? h.ms.toFixed(2) : Math.round(h.ms)} ms`}
               {h.model_ms != null && (
                 <span className="text-text-3"> + {Math.round(h.model_ms)} ms</span>
@@ -1157,7 +1188,7 @@ function Path({ hops }) {
                 see that the engine had already answered both. The model was
                 always given the whole envelope; this is the panel catching up. */}
             {h.out?.message && (
-              <p className="basis-full pl-6 font-mono text-[11px] leading-snug text-danger/80">
+              <p className="basis-full pl-6 font-mono text-[12px] leading-snug text-danger/80">
                 {h.out.message}
               </p>
             )}
@@ -1221,7 +1252,7 @@ function Explain({ trace, wall, hybrid, cost, timing }) {
         <TraceSteps steps={trace.steps} />
       </div>
 
-      <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[11.5px]">
+      <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[12px]">
         <Row label={t('explain.steps')} value={trace.steps.length} />
         <Row label={t('explain.server')} value={`${trace.total_ms} ms`} />
         {timing && <Row label={t('explain.host')} value={fmtMs(timing.host)} />}
@@ -1231,7 +1262,7 @@ function Explain({ trace, wall, hybrid, cost, timing }) {
       </dl>
 
       {cost && (
-        <dl className="mt-3 space-y-1.5 border-t border-line pt-3 text-[11.5px]">
+        <dl className="mt-3 space-y-1.5 border-t border-line pt-3 text-[12px]">
           <Row label={t('explain.tokens_in')} value={cost.prompt_tokens.toLocaleString()} />
           <Row label={t('explain.tokens_out')} value={cost.completion_tokens.toLocaleString()} />
           <Row label={t('explain.calls')} value={cost.calls} />
@@ -1245,7 +1276,7 @@ function Explain({ trace, wall, hybrid, cost, timing }) {
               </dd>
             </div>
           ) : (
-            <p className="pt-1 text-[11px] text-text-3">{t('explain.cost_unknown')}</p>
+            <p className="pt-1 text-[12px] text-text-3">{t('explain.cost_unknown')}</p>
           )}
         </dl>
       )}

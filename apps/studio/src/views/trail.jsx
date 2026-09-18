@@ -939,13 +939,13 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
                    style={{ left: hover.x, top: hover.y }}>
                 <span className="block font-mono text-[11px] text-accent">{hovered.id}</span>
                 {hovered.title && (
-                  <span className="mt-0.5 block text-[11.5px] text-text-2">{hovered.title}</span>
+                  <span className="mt-0.5 block text-[12px] text-text-2">{hovered.title}</span>
                 )}
               </div>
             )}
             {available === 0 && (
               <div className="pointer-events-none absolute inset-x-0 bottom-3 text-center
-                              text-[11.5px] text-text-3">
+                              text-[12px] text-text-3">
                 {t(busy ? 'ask.trail_waiting' : 'ask.trail_empty')}
               </div>
             )}
@@ -956,7 +956,7 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
             {applicable.map((stage, i) => (
               <span key={stage.key}
-                    className={`flex items-baseline gap-1.5 text-[11.5px] transition
+                    className={`flex items-baseline gap-1.5 text-[12px] transition
                                 ${counts[i] > 0 ? 'text-text-2' : 'text-text-3 opacity-45'}`}>
                 <span className="h-2 w-2 shrink-0 translate-y-[1px] rounded-full"
                       style={{ background: palette.stage[stage.key] }} />
@@ -968,12 +968,12 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
                 which colour is a claim about the forest's shape and which
                 is a claim about what happened, and the amber one is the
                 easier of the two to misread. */}
-            <span className="flex items-baseline gap-1.5 text-[11.5px] text-text-2">
+            <span className="flex items-baseline gap-1.5 text-[12px] text-text-2">
               <span className="h-0 w-4 shrink-0 translate-y-[-2px] border-t-2 border-dashed"
                     style={{ borderColor: palette.drop }} />
               {t('ask.trail_line_drop')}
             </span>
-            <span className="flex items-baseline gap-1.5 text-[11.5px] text-text-2">
+            <span className="flex items-baseline gap-1.5 text-[12px] text-text-2">
               <span className="h-0 w-4 shrink-0 translate-y-[-2px] border-t-2 border-dashed"
                     style={{ borderColor: palette.trail }} />
               {t(route.segments.length ? 'ask.trail_line_walk' : 'ask.trail_line_step')}
@@ -993,7 +993,7 @@ export default function AnswerTrail({ forest, evidence, cited, trace, busy,
               the branches the forest already had. The gesture rides the same
               line because nothing on a canvas says it can be moved. */}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1
-                          text-[11px] text-text-3">
+                          text-[12px] text-text-3">
             <span className="flex items-center gap-1.5">
               {swatch.length > 0 && (
                 <span className="flex gap-[3px]" aria-hidden="true">

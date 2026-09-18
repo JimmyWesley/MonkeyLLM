@@ -15,11 +15,11 @@ import {
   useBoard,
 } from '../board.js'
 import {
-  Badge, Card, Empty, ErrorNote, Field, Note, Segmented, Select, Spinner, Tabs,
+  Badge, Card, ErrorNote, Field, Note, Segmented, Select, Spinner, Tabs,
 } from '../design/ui.jsx'
+import { Disclosure } from '../design/Disclosure.jsx'
 import {
-  Clock, Database, File, Files, Ingest as Upload, Pencil, Play, Plus, Refresh,
-  X,
+  Clock, Database, File, Ingest as Upload, Pencil, Play, Plus, Refresh, X,
 } from '../design/icons.jsx'
 import {
   NeedsCapability, NewBranch, branchOf, has, nodeLink, useAsync, useForestTree,
@@ -112,6 +112,31 @@ const CONTENT = ['cached', 'inline']
  * a job this console started arrives in the response and needs no name. */
 const CANOPY = 'canopy'
 
+/* The four ways material comes in, and the only values the tab strip holds.
+ * `?mode=` still carries six, because two of them named a tab when they were
+ * written and an address outlives the layout that produced it (J.5.8):
+ * `optimize` and `storage` now name a SECTION of this console instead. */
+const SOURCES = ['upload', 'compose', 'adopt', 'bucket']
+
+/* How many accepted formats the dropzone names before it folds the rest.
+ * The LIST is the host's (J.8.5) and this console still carries none of its
+ * own — what is decided here is only how much of that answer fits on a line
+ * a person reads while holding a file. */
+const FORMATS_SHOWN = 5
+
+/** Is the source a past adopt recorded a folder this forest really mirrors?
+ *
+ *  Before v0.61 an upload recorded the staging area as the forest's
+ *  `source_root` (J.8.3), so forests ingested by an older Station carry
+ *  `…/_derived/uploads` as their mirrored source to this day. That is not a
+ *  mirror and never was — an upload is a courier — so a console that offers
+ *  to re-read it is offering to re-read a directory the Station empties as
+ *  it works, and the amber "outside MONKEYLLM_INGEST_ROOTS" underneath it is
+ *  an alarm about a folder nobody chose. A stale record is a quiet fact; the
+ *  warning belongs to a REAL source the host can no longer read. */
+const mirrorsSource = (recorded) => (
+  Boolean(recorded) && !/(^|[/\\])_derived([/\\]|$)/.test(String(recorded)))
+
 /** Is this job's report the ingest report the card below knows how to read?
  *
  *  Two runs on the board are not ingests — the scent pass (J.13.6.1) and the
@@ -123,21 +148,26 @@ const ingestShaped = (job) => !['recurate', CANOPY].includes(job?.mode)
 
 export default function Ingest({ forest, grant, me, goto }) {
   const { t } = useI18n()
-  // The tab is in the address; what is staged in it is not. Files, a draft
-  // and a destination are work in progress, and a reload has already lost
-  // them — an address that claimed otherwise would be worse than one that
-  // does not mention them.
+  // Where the console is; what is staged in it is not. Files, a draft and a
+  // destination are work in progress, and a reload has already lost them —
+  // an address that claimed otherwise would be worse than one that does not
+  // mention them.
   // 'optimize' was missing from this list while a tab set it, so clicking
   // the tab wrote `?mode=sync` and the validator handed back the fallback:
   // the console snapped to Upload and the page appeared to close itself.
   // A tab that exists MUST be nameable in the address (J.5.8).
-  // 'bucket' and 'storage' join the list with J.8.6 and J.19.9 (v0.84): a
-  // tab that exists MUST be nameable in the address, and the lesson that
-  // wrote this comment cost a console that snapped back to Upload.
-  const [mode, setMode] = useRouteState('mode', 'upload',
-                                        { allow: ['upload', 'adopt', 'bucket',
-                                                  'compose', 'optimize',
-                                                  'storage'] })
+  // 'bucket' and 'storage' joined with J.8.6 and J.19.9 (v0.84). Six tabs
+  // that were not peers is what this console was; four are, and the other
+  // two are sections — but every value STAYS spelled the way it always was,
+  // because addresses naming them exist in the wild and J.5.8's rule is
+  // about the address, never about the layout that happened to produce it.
+  const [place, setPlace] = useRouteState('mode', 'upload',
+                                          { allow: ['upload', 'adopt', 'bucket',
+                                                    'compose', 'optimize',
+                                                    'storage'] })
+  // Which door the form is showing. `optimize` and `storage` scroll to their
+  // section and leave the form exactly where it was.
+  const mode = SOURCES.includes(place) ? place : 'upload'
   // The running batch, by address (J.9.1): `?job=` is replaced in, so a
   // reload restores the progress view by reading the job — a record, never
   // a call — and Back does not walk the batch's lifetime.
@@ -167,6 +197,11 @@ export default function Ingest({ forest, grant, me, goto }) {
   const picker = useRef(null)
   const folderPicker = useRef(null)
   const staging = useRef(0)
+  // Where `?mode=optimize` and `?mode=storage` land now that neither is a
+  // tab. The address still names the place; the place is a section of this
+  // page instead of a screen of its own.
+  const optimizeAt = useRef(null)
+  const storageAt = useRef(null)
 
   /* The composer (J.8's `compose`). Mounted once, not per tab switch: a
      draft that vanished because somebody looked at the Upload tab would be
@@ -261,6 +296,50 @@ export default function Ingest({ forest, grant, me, goto }) {
   const accepted = Array.isArray(status.formats)
     ? new Set(status.formats.map((f) => f.extension)) : null
   const acceptedList = accepted ? [...accepted].sort().join(', ') : ''
+  /* Twenty-three extensions is a paragraph, and it sat inside the drop
+     target. The few named on the line are still the HOST's answer, ordered
+     by what the host itself says about each: a format some operator added
+     here — a command hook, an installed extension — reads before the ones
+     every deployment has, so the converter somebody just installed is the
+     first thing its own console names. The rest is one click away and
+     nothing is invented on this side. */
+  const byOrigin = Array.isArray(status.formats)
+    ? [...status.formats].sort((a, b) => (
+      (a.via === 'builtin' ? 1 : 0) - (b.via === 'builtin' ? 1 : 0)
+        || String(a.extension).localeCompare(String(b.extension))))
+    : []
+  const shownFormats = byOrigin.slice(0, FORMATS_SHOWN)
+    .map((f) => f.extension).join(', ')
+  const moreFormats = Math.max(0, byOrigin.length - FORMATS_SHOWN)
+  const acceptedShort = moreFormats
+    ? t('ingest.accepts_more', { list: shownFormats, n: moreFormats })
+    : shownFormats
+  /* J.8 + J.8.3: what a refresh would re-read, and whether it is a source
+     anybody chose. A stale staging path is neither a folder nor an alarm. */
+  const mirrors = mirrorsSource(status.source)
+
+  /* An address naming a section brings the section into view. Restoring a
+     place is all it does — no call, no write (J.5.8's rule about what a deep
+     link may cause).
+     It waits for the two answers these sections are drawn from, because a
+     section that grows above the one being scrolled to lands the reader
+     somewhere else — and once per arrival, so a reload of the status does
+     not drag the page back under somebody who has scrolled away. */
+  const scrolledFor = useRef(null)
+  useEffect(() => {
+    const target = place === 'optimize' ? optimizeAt
+      : place === 'storage' ? storageAt : null
+    if (!target) { scrolledFor.current = null; return undefined }
+    if (ingestState.busy || stores.busy || scrolledFor.current === place) {
+      return undefined
+    }
+    scrolledFor.current = place
+    const id = requestAnimationFrame(() => {
+      target.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => cancelAnimationFrame(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [place, ingestState.busy, stores.busy])
 
   if (!has(grant, 'ingest')) {
     return <NeedsCapability message={t('ingest.needs_cap')} hint={t('cap.ingest')} />
@@ -311,6 +390,36 @@ export default function Ingest({ forest, grant, me, goto }) {
     return take(found)
   }
 
+  /** One place where a batch becomes a job (J.9, J.9.1, J.9.2).
+   *
+   *  Every door's submit goes through it, and so does the refresh — which
+   *  left the add card this round and is no less a batch for sitting in
+   *  Optimize. Waiting in the tab's queue, following the job in the address
+   *  and reloading the binding are one behaviour, not one per door.
+   */
+  async function startBatch(body, meta) {
+    // J.9.2: while the board is busy this is a promise, not a POST. It joins
+    // the tab's queue and fires, in order, when the board frees.
+    if (boardBusy) {
+      enqueue(forest, body, meta)
+      return { queued: true }
+    }
+    const started = await api.ingest(forest, body)
+    // The report is the fresher fact about what is bound: a model bound from
+    // another tab (or from Models, moments ago) would otherwise leave this
+    // card contradicting the report right below it.
+    bindings.reload()
+    if (started.job) {
+      // J.9: the batch was accepted, not finished. The job goes onto the
+      // board view first-hand and into the address; the watcher takes over —
+      // the form is free again, and so is the operator.
+      noteJob(forest, started.job)
+      setJobId(started.job.id)
+      return { job: started.job }
+    }
+    return { report: started }
+  }
+
   async function submit(e) {
     e.preventDefault()
     // `bytes` is display-only; the wire contract is {name, text|b64}.
@@ -339,30 +448,15 @@ export default function Ingest({ forest, grant, me, goto }) {
       : mode === 'bucket'
         ? { mode: 'adopt', source, dest: dest || undefined,
             curate: bucket.curate, content: bucket.content }
-      : mode === 'compose' ? { ...composition, stage: true }
-      : { mode: 'sync' }
-    // J.9.2: while the board is busy this submit is a promise, not a POST.
-    // It joins the tab's queue and fires, in order, when the board frees;
-    // the button said so.
-    if (queueing) {
-      enqueue(forest, body, {
-        mode,
-        count: mode === 'upload' ? files.length : undefined,
-        dest: dest || undefined,
-        path: mode === 'adopt' ? path : mode === 'bucket' ? source : undefined,
-      })
-      if (mode === 'upload') { setFiles([]); setSkipped([]); setSourceUrl('') }
-      setState({})
-      return
-    }
-    setState({ busy: true })
-    try {
-      const report = await api.ingest(forest, body)
-      // The report is the fresher fact about what is bound: a model bound
-      // from another tab (or from Models, moments ago) would otherwise leave
-      // this card contradicting the report right below it.
-      bindings.reload()
-      if (mode === 'compose') {
+      : { ...composition, stage: true }
+
+    if (mode === 'compose') {
+      // Composing is a conversation, not a batch: it never queues and never
+      // becomes a job, so it does not go through `startBatch`.
+      setState({ busy: true })
+      try {
+        const report = await api.ingest(forest, body)
+        bindings.reload()
         // `stamp` remounts the review card. Keying it on the draft id would
         // not: staging the same title twice returns the same id, so an
         // edited text would come back under the previous review's summary,
@@ -371,20 +465,23 @@ export default function Ingest({ forest, grant, me, goto }) {
         staging.current += 1
         setState({ busy: false,
                    review: { ...composition, ...report, stamp: staging.current } })
-        return  // nothing has been planted yet; the composer keeps its text
-      }
-      if (report.job) {
-        // J.9: the batch was accepted, not finished. The job goes onto the
-        // board view first-hand and into the address; the watcher takes
-        // over — the form is free again, and so is the operator.
-        noteJob(forest, report.job)
-        setState({})
-        setJobId(report.job.id)
-        if (mode === 'upload') { setFiles([]); setSkipped([]); setSourceUrl('') }
-        return
-      }
-      setState({ busy: false, report })
+      } catch (error) { setState({ busy: false, error }) }
+      return  // nothing has been planted yet; the composer keeps its text
+    }
+
+    const clear = () => {
       if (mode === 'upload') { setFiles([]); setSkipped([]); setSourceUrl('') }
+    }
+    setState({ busy: true })
+    try {
+      const out = await startBatch(body, {
+        mode,
+        count: mode === 'upload' ? files.length : undefined,
+        dest: dest || undefined,
+        path: mode === 'adopt' ? path : mode === 'bucket' ? source : undefined,
+      })
+      clear()
+      setState(out.report ? { busy: false, report: out.report } : {})
     } catch (error) { setState({ busy: false, error }) }
   }
 
@@ -418,39 +515,53 @@ export default function Ingest({ forest, grant, me, goto }) {
     // (the store's own is the source then) and the destination defaults to
     // the root, exactly as every other door's does.
     : mode === 'bucket' ? Boolean(bucket.store)
-    : mode === 'storage' ? false
-    : mode === 'compose' ? Boolean(title.trim() && composed)
-    // J.8: a forest with no recorded source has nothing to refresh, and one
-    // whose source left this Station's ingest roots cannot be refreshed from
-    // here. Both are refused by the API; the button says so before the click
-    // rather than after it. `busy` keeps it disabled until the answer lands,
-    // so the enabled state is never a guess.
-    : Boolean(status.can_sync)
+    : Boolean(title.trim() && composed)
+
+  /* J.8.6 rule 1: with no store there is no bucket to read from, so the card
+     says which console configures one and the controls that would refuse —
+     the destination, the button — are not drawn at all. It reads the list
+     and not the asking, so a store that arrives makes them APPEAR: a control
+     that shows up while the answer loads and then vanishes is the flicker
+     the whole round is against. */
+  const bucketBlocked = mode === 'bucket' && storeList.length === 0
+
+  /* The tab strip holds the four ways material comes in, and nothing else.
+     Six tabs were never peers: two of them were errands you run on a forest
+     that is already full, and sitting beside the doors they made the strip
+     read as a list of six equal choices. The short label is what fits one
+     row on a phone; the full sentence is the tab's own title and, for the
+     tab that is open, the card's subtitle — so the sentence is never lost
+     and never occupies a second line of everybody's screen. */
+  const door = (value, short, full) => ({
+    value, label: <span title={full}>{t(short)}</span>,
+  })
+  const doors = [
+    door('upload', 'ingest.tab_upload', t('ingest.mode_upload')),
+    door('compose', 'ingest.tab_compose', t('ingest.mode_compose')),
+    // Mirroring needs the capability AND a Station configured to read host
+    // folders at all (J.8.2). Offering a tab whose every submit is refused
+    // teaches the operator nothing about why.
+    ...(has(grant, 'admin') && status.host_paths !== false
+      ? [door('adopt', 'ingest.tab_adopt', t('ingest.mode_adopt'))] : []),
+    // J.8.6 + J.19.9: this reads the deployment's store list, which is an
+    // administrator's listing (J.19.2) — a tab whose every request is
+    // refused teaches nothing about why.
+    ...(has(grant, 'admin')
+      ? [door('bucket', 'ingest.tab_bucket', t('ingest.mode_bucket'))] : []),
+  ]
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
+    /* One column, bounded. The right-hand column held one sentence about the
+       summary model and took 380px of every screen to say it; that sentence
+       is a line under the button now, and the card it left behind has the
+       width — capped, because a form whose fields run the whole of a 1440px
+       screen is a form nobody can read across. */
+    <div className="mx-auto w-full max-w-3xl space-y-8">
       <div className="min-w-0 space-y-4">
-        <Card title={t('ingest.title')} subtitle={t('ingest.sub')} icon={Upload}>
-          <Tabs value={mode} onChange={(m) => { setMode(m); setState({}) }} options={[
-            { value: 'upload', label: t('ingest.mode_upload'), icon: Upload },
-            { value: 'compose', label: t('ingest.mode_compose'), icon: Pencil },
-            // Mirroring needs the capability AND a Station configured to read
-            // host folders at all (J.8.2). Offering a tab whose every submit
-            // is refused teaches the operator nothing about why.
-            ...(has(grant, 'admin') && status.host_paths !== false
-              ? [{ value: 'adopt', label: t('ingest.mode_adopt'), icon: Files }] : []),
-            // J.8.6 + J.19.9: both read the deployment's store list, which
-            // is an administrator's listing (J.19.2) — a tab whose every
-            // request is refused teaches nothing about why.
-            ...(has(grant, 'admin')
-              ? [{ value: 'bucket', label: t('ingest.mode_bucket'), icon: Database }]
-              : []),
-            { value: 'optimize', label: t('ingest.mode_optimize'), icon: Refresh },
-            ...(has(grant, 'admin')
-              ? [{ value: 'storage', label: t('ingest.mode_storage'),
-                   icon: Database }]
-              : []),
-          ]} />
+        <Card title={t('ingest.title')} subtitle={t(`ingest.mode_${mode}`)}
+              icon={Upload}>
+          <Tabs value={mode} onChange={(m) => { setPlace(m); setState({}) }}
+                options={doors} />
 
           <form onSubmit={submit} className="mt-4 space-y-4">
             {/* The mirror tab is gone for an admin only because this Station
@@ -473,7 +584,7 @@ export default function Ingest({ forest, grant, me, goto }) {
                                    bg-surface-2 text-text-3"><Upload size={20} /></span>
                   <p className="text-[13.5px] font-medium text-text">{t('ingest.drop')}</p>
                   <p className="mt-1 text-[12px] text-text-3">
-                    {accepted ? t('ingest.drop_hint', { list: acceptedList })
+                    {accepted ? t('ingest.drop_hint', { list: acceptedShort })
                               : t('ingest.drop_hint_unknown')}
                   </p>
                   {/* Two explicit buttons: "choose a folder" meant the folder on
@@ -495,6 +606,16 @@ export default function Ingest({ forest, grant, me, goto }) {
                          directory="" className="hidden"
                          onChange={(e) => take(e.target.files)} />
                 </div>
+
+                {/* The whole list, one click away. It is still the host's
+                    answer (J.8.5) — what is decided here is where it is
+                    read, not what is in it. */}
+                {moreFormats > 0 && (
+                  <Disclosure summary={t('ingest.formats_count',
+                                         { n: byOrigin.length })}>
+                    <span className="font-mono text-[11.5px]">{acceptedList}</span>
+                  </Disclosure>
+                )}
 
                 {reading && <Spinner label={t('ingest.reading')} />}
 
@@ -556,7 +677,9 @@ export default function Ingest({ forest, grant, me, goto }) {
 
             {mode === 'compose' && (
               <>
-                <Note>{t('ingest.compose_hint')}</Note>
+                <Disclosure summary={t('ingest.compose_lede')}>
+                  {t('ingest.compose_hint')}
+                </Disclosure>
                 <Field label={t('ingest.compose_title')} value={title} required
                        placeholder={t('ingest.compose_title_ph')}
                        hint={t('ingest.compose_title_hint')}
@@ -577,32 +700,13 @@ export default function Ingest({ forest, grant, me, goto }) {
             {mode === 'bucket' && (
               <ConnectBucket value={bucket} onChange={setBucket}
                              stores={storeList} busy={stores.busy}
-                             error={stores.error} onStorage={() => setMode('storage')} />
+                             error={stores.error} onStorage={() => setPlace('storage')} />
             )}
 
-            {mode === 'storage' && <Note>{t('ingest.storage_lede')}</Note>}
-
-            {/* The Storage tab sets where originals go; it neither refreshes
-                a source nor takes a destination, so it takes neither
-                control. */}
-            {mode === 'storage' ? null : mode === 'optimize' ? (
-              <div className="space-y-2">
-                <Note>{t('ingest.sync_hint')}</Note>
-                {/* The whole point of J.8's amendment: name the directory. */}
-                {status.source && (
-                  <Note>
-                    {t('ingest.sync_source')}{' '}
-                    <code className="font-mono">{status.source}</code>
-                  </Note>
-                )}
-                {!ingestState.busy && !status.source && (
-                  <Note tone="warn">{t('ingest.sync_none')}</Note>
-                )}
-                {!ingestState.busy && status.source && !status.can_sync && (
-                  <Note tone="warn">{t('ingest.sync_blocked')}</Note>
-                )}
-              </div>
-            ) : (
+            {/* With no store there is nothing to put anywhere, so the
+                destination and the button are not drawn (J.8.6 rule 1): a
+                form whose every control refuses is not an explanation. */}
+            {!bucketBlocked && (
               <div className="space-y-1.5">
                 <Select label={t('ingest.dest')} value={dest} hint={t('ingest.dest_hint')}
                         onChange={(e) => setDest(e.target.value)}>
@@ -625,62 +729,39 @@ export default function Ingest({ forest, grant, me, goto }) {
               </div>
             )}
 
-            <div className={`flex justify-end ${mode === 'storage' ? 'hidden' : ''}`}>
-              {/* One batch per forest at a time (J.9) — but a busy board no
-                  longer disables the button: the batch waits in the tab's
-                  queue instead (J.9.2), and the label says it will wait
-                  rather than start. Compose stays out: it is a synchronous
-                  review, not a batch, so it simply waits for the board. */}
-              <button className="btn btn-primary"
-                      disabled={!ready || state.busy || composeWaits}>
-                {mode === 'optimize' ? <Refresh size={14} />
-                  : mode === 'compose' ? <Pencil size={14} />
-                  : queueing ? <Clock size={14} /> : <Upload size={14} />}
-                {state.busy || composeWaits ? t('ingest.running')
-                  : queueing ? t('ingest.queue')
-                  : mode === 'compose' ? t('ingest.review') : t('ingest.start')}
-              </button>
-            </div>
+            {!bucketBlocked && (
+              <div>
+                <div className="flex justify-end">
+                  {/* One batch per forest at a time (J.9) — but a busy board
+                      no longer disables the button: the batch waits in the
+                      tab's queue instead (J.9.2), and the label says it will
+                      wait rather than start. Compose stays out: it is a
+                      synchronous review, not a batch, so it simply waits for
+                      the board.
+                      A button that cannot run is not a dimmed primary: the
+                      accent is the product saying "this is the act", and an
+                      act nobody can perform yet has no business claiming it.
+                      It earns the accent the moment it can run. */}
+                  <button className={ready && !state.busy && !composeWaits
+                                       ? 'btn btn-primary' : 'btn'}
+                          disabled={!ready || state.busy || composeWaits}>
+                    {mode === 'compose' ? <Pencil size={14} />
+                      : queueing ? <Clock size={14} /> : <Upload size={14} />}
+                    {state.busy || composeWaits ? t('ingest.running')
+                      : queueing ? t('ingest.queue')
+                      : mode === 'compose' ? t('ingest.review') : t('ingest.start')}
+                  </button>
+                </div>
+                {/* What will write the summaries, in one line where the act
+                    is (J.5). It used to be a card in a column of its own —
+                    380px of screen for one sentence, and the sentence was
+                    about something the operator changes somewhere else. */}
+                <SummaryModel bound={bound} goto={goto} />
+              </div>
+            )}
           </form>
         </Card>
 
-        {/* J.13.3: the other half of keeping a forest current. Sync refreshes
-            the content; this refreshes what the content is found by, and
-            until v0.41 the console printed "reindex to rebuild it" without
-            offering any way to. Its own card because it is not an ingest —
-            it plants nothing, joins no queue and takes no destination. */}
-        {mode === 'optimize' && has(grant, 'admin') && (
-          <>
-            <Rebuild forest={forest} />
-            <Rederive forest={forest} />
-            {/* J.13.6.1: the model-backed one, below the two free repairs
-                it must not be confused with. The running job is handed to
-                it so the button cannot be pressed twice and the report
-                lands where the operator started it — the progress bar and
-                the full report are the page's, on the J.9 board. */}
-            <Rescent forest={forest} bound={bound}
-                     job={job && job.mode === 'recurate' ? job : null}
-                     onJob={(started) => {
-                       noteJob(forest, started)
-                       setJobId(started.id)
-                     }} />
-            <Staging forest={forest} />
-            <DenseLayer forest={forest}
-                        job={job && job.mode === CANOPY ? job : null}
-                        onJob={(started) => {
-                          noteJob(forest, started)
-                          setJobId(started.id)
-                        }} />
-          </>
-        )}
-        {/* J.19.9: where the originals go, in the console whose question is
-            how documents get in. Outside the ingest form on purpose — its
-            two panels are forms of their own, and a form inside a form is
-            not a form. */}
-        {mode === 'storage' && has(grant, 'admin') && (
-          <Storage forest={forest} stores={stores} status={status} me={me}
-                   onBound={ingestState.reload} />
-        )}
         {state.busy && <Card><Spinner label={t('ingest.running')} /></Card>}
         {state.error && <Card><ErrorNote error={state.error} /></Card>}
         {state.review && !state.busy && (
@@ -720,35 +801,80 @@ export default function Ingest({ forest, grant, me, goto }) {
         {(board.items.length > 0 || board.held) && (
           <QueueCard forest={forest} queue={board} />
         )}
-        {!state.busy && !state.error && !state.report && !state.review
-          && !jobId && !board.items.length && !board.held && (
-          <Card><Empty icon={Upload}>{t('ingest.empty')}</Empty></Card>
-        )}
+        {/* Nothing to report is not a report. The card that filled a screen
+            with a large glyph and "nothing ingested yet" was the console's
+            answer to its own quietest state, and it said less than the empty
+            space it replaced. */}
       </div>
 
-      <div className="space-y-4">
-        <Card title={t('models.role_ingest')} subtitle={t('models.role_ingest_sub')}>
-          {/* Asks what is actually bound instead of asserting. The card used
-              to state "no ingest model is bound" unconditionally, which read
-              as fact and was wrong the moment one was. A principal without
-              'admin' cannot see bindings at all, so for them this says
-              nothing — the ingest report afterwards carries `curated` and is
-              authoritative for everyone. */}
-          {bound === undefined ? <Spinner label={t('common.loading')} />
-            : bound ? (
-              <Note>
-                {t('ingest.curated_by', { model: bound.model })}
-              </Note>
-            ) : bound === null ? (
-              <>
-                <Note tone="warn">{t('ingest.uncurated')}</Note>
-                <button className="btn btn-sm mt-3" onClick={() => goto('models')}>
-                  {t('overview.bind_model')}
-                </button>
-              </>
-            ) : null}
-        </Card>
-      </div>
+      {/* The errands you run on a forest that is already full. A section,
+          because they were never peers of the four doors — and `?mode=
+          optimize` still names this place (J.5.8), it just scrolls here
+          instead of replacing the page.
+          The refresh is an `ingest` act and the repairs are `admin` ones,
+          which is what the tab was and what the section stays: a bare `sync`
+          names no host path, so J.8 never asked for `admin` and this console
+          must not either. The section is drawn when it holds something. */}
+      {(has(grant, 'admin') || mirrors) && (
+        <section ref={optimizeAt} className="space-y-3 scroll-mt-4">
+          <h2 className="label">{t('ingest.mode_optimize')}</h2>
+          {has(grant, 'admin') && (
+            <>
+              {/* J.13.3: the other half of keeping a forest current. The
+                  refresh below keeps the content current; this keeps what
+                  finds the content current. */}
+              <Rebuild forest={forest} />
+              <Rederive forest={forest} />
+              {/* J.13.6.1: the model-backed one, below the two free repairs
+                  it must not be confused with. The running job is handed to
+                  it so the button cannot be pressed twice and the report
+                  lands where the operator started it — the progress bar and
+                  the full report are the page's, on the J.9 board. */}
+              <Rescent forest={forest} bound={bound}
+                       job={job && job.mode === 'recurate' ? job : null}
+                       onJob={(started) => {
+                         noteJob(forest, started)
+                         setJobId(started.id)
+                       }} />
+              <DenseLayer forest={forest}
+                          job={job && job.mode === CANOPY ? job : null}
+                          onJob={(started) => {
+                            noteJob(forest, started)
+                            setJobId(started.id)
+                          }} />
+            </>
+          )}
+          {/* J.8: a refresh reads a source the request never names, so the
+              control never appears without it beside it. A forest that
+              mirrors nothing has no control here at all and ONE quiet line
+              saying so — a stale `_derived/` path recorded by a pre-v0.61
+              Station used to open this section with an amber alarm about a
+              staging directory nobody chose (J.8.3). */}
+          {!ingestState.busy && (mirrors ? (
+            <SourceRefresh source={status.source} blocked={!status.can_sync}
+                           queueing={boardBusy}
+                           onRun={() => startBatch({ mode: 'sync' },
+                                                   { mode: 'optimize' })} />
+          ) : (
+            <p className="px-1 text-[12px] leading-relaxed text-text-3">
+              {t('ingest.sync_none')}
+            </p>
+          ))}
+          {has(grant, 'admin') && <Staging forest={forest} />}
+        </section>
+      )}
+
+      {/* J.19.9: where the originals go, in the console whose question is
+          how documents get in. Outside the ingest form on purpose — its
+          panels are forms of their own, and a form inside a form is not a
+          form. */}
+      {has(grant, 'admin') && (
+        <section ref={storageAt} className="space-y-3 scroll-mt-4">
+          <h2 className="label">{t('ingest.mode_storage')}</h2>
+          <Storage forest={forest} stores={stores} status={status} me={me}
+                   onBound={ingestState.reload} />
+        </section>
+      )}
 
       <NewBranch
         forest={forest} call={api.call} t={t}
@@ -760,6 +886,38 @@ export default function Ingest({ forest, grant, me, goto }) {
         // from here (J.5.7): the ingest that prompted the branch continues.
         onCreated={(id) => { setDest(branchOf(id)); tree.reload() }} />
     </div>
+  )
+}
+
+/** What will write the summaries, said where the summaries are asked for.
+ *
+ *  This was a card in a 380px column of its own, and the column existed for
+ *  this one sentence. A line under the button is the whole of what it had to
+ *  say, and it leaves the form the width.
+ *
+ *  It still ASKS rather than asserting: the card used to state "no ingest
+ *  model is bound" unconditionally, which read as fact and was wrong the
+ *  moment one was. A principal without `admin` cannot see bindings at all,
+ *  so for them this says nothing — the ingest report afterwards carries
+ *  `curated` and is authoritative for everyone.
+ */
+function SummaryModel({ bound, goto }) {
+  const { t } = useI18n()
+  // `undefined` is still asking and `false` is may-not-see. Neither is a
+  // fact, and a line that appears and then corrects itself is worse than a
+  // line that waits.
+  if (bound === undefined || bound === false) return null
+  return (
+    <p className="mt-2 flex flex-wrap items-center justify-end gap-x-1.5
+                  text-[11.5px] text-text-3">
+      <span>{bound ? t('ingest.curated_by', { model: bound.model })
+                   : t('ingest.no_model')}</span>
+      <span aria-hidden="true">·</span>
+      <button type="button" className="text-accent transition hover:underline"
+              onClick={() => goto('models')}>
+        {t('nav.models')}
+      </button>
+    </p>
   )
 }
 
@@ -860,7 +1018,9 @@ function QueueCard({ forest, queue }) {
                   // that tells two queued batches apart.
                   : item.mode === 'adopt' || item.mode === 'bucket'
                     ? <code className="font-mono text-[12px]">{item.path}</code>
-                    : t('ingest.mode_optimize')}
+                    // The refresh, which is queued under the place it is
+                    // started from and named by what it does.
+                    : t('ingest.sync_title')}
                 {item.mode !== 'optimize' && (
                   <span className="text-text-3">
                     {' → '}{item.dest || t('ingest.dest_root')}
@@ -1278,9 +1438,13 @@ function Rebuild({ forest }) {
   }
 
   return (
-    <Card title={t('ingest.rebuild_title')} subtitle={t('ingest.rebuild_sub')}
-          icon={Refresh}>
-      <Note>{t('ingest.rebuild_hint')}</Note>
+    /* A lighter header than the add card's: no icon, no subtitle. The one
+       line every repair owes its reader is the Disclosure's summary, and the
+       paragraphs that used to sit above the first field are behind it. */
+    <Card title={t('ingest.rebuild_title')}>
+      <Disclosure summary={t('ingest.rebuild_sub')}>
+        {t('ingest.rebuild_hint')}
+      </Disclosure>
       {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
       {state.done && (
         <div className="mt-3">
@@ -1291,10 +1455,58 @@ function Rebuild({ forest }) {
         </div>
       )}
       <div className="mt-4 flex justify-end">
-        <button type="button" className="btn btn-primary" disabled={state.busy}
-                onClick={run}>
+        <button type="button" className={state.busy ? 'btn' : 'btn btn-primary'}
+                disabled={state.busy} onClick={run}>
           <Refresh size={14} />
           {state.busy ? t('ingest.rebuild_running') : t('ingest.rebuild_start')}
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+/** The refresh (J.8), which left the add card this round.
+ *
+ *  It was the fifth tab and it never belonged beside the four doors: every
+ *  other tab takes material from somewhere and puts it in, and this one
+ *  re-reads what a past adopt already recorded. It is still the same batch —
+ *  same queue, same job, same address (J.8.6 rule 5's point, made about the
+ *  oldest mode) — so it is started through the console's one `startBatch`.
+ *
+ *  What it must show is the source, because a refresh names a directory the
+ *  request never does: a button whose reach is invisible is not consent.
+ *  The card is drawn only when there IS one, so the amber below is about a
+ *  real folder this Station may no longer read, and never about a staging
+ *  path an older Station wrote down (J.8.3).
+ */
+function SourceRefresh({ source, blocked, queueing, onRun }) {
+  const { t } = useI18n()
+  const [state, setState] = useState({})
+
+  const run = async () => {
+    setState({ busy: true })
+    try { await onRun(); setState({}) } catch (error) { setState({ error }) }
+  }
+
+  return (
+    <Card title={t('ingest.sync_title')}>
+      <Disclosure summary={<>
+        {t('ingest.sync_source')}{' '}
+        <code className="break-all font-mono">{source}</code>
+      </>}>
+        {t('ingest.sync_hint')}
+      </Disclosure>
+      {blocked && (
+        <div className="mt-3"><Note tone="warn">{t('ingest.sync_blocked')}</Note></div>
+      )}
+      {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
+      <div className="mt-4 flex justify-end">
+        <button type="button"
+                className={blocked || state.busy ? 'btn' : 'btn btn-primary'}
+                disabled={blocked || state.busy} onClick={run}>
+          {queueing ? <Clock size={14} /> : <Refresh size={14} />}
+          {state.busy ? t('ingest.running')
+            : queueing ? t('ingest.queue') : t('ingest.start')}
         </button>
       </div>
     </Card>
@@ -1325,9 +1537,10 @@ function Rederive({ forest }) {
   }
 
   return (
-    <Card title={t('ingest.rederive_title')} subtitle={t('ingest.rederive_sub')}
-          icon={Refresh}>
-      <Note>{t('ingest.rederive_hint')}</Note>
+    <Card title={t('ingest.rederive_title')}>
+      <Disclosure summary={t('ingest.rederive_sub')}>
+        {t('ingest.rederive_hint')}
+      </Disclosure>
       {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
       {state.done && (
         <div className="mt-3">
@@ -1338,7 +1551,8 @@ function Rederive({ forest }) {
         </div>
       )}
       <div className="mt-4 flex justify-end">
-        <button type="button" className="btn" disabled={state.busy} onClick={run}>
+        <button type="button" className={state.busy ? 'btn' : 'btn btn-primary'}
+                disabled={state.busy} onClick={run}>
           <Refresh size={14} />
           {state.busy ? t('ingest.rederive_running') : t('ingest.rederive_start')}
         </button>
@@ -1388,13 +1602,19 @@ function Rescent({ forest, bound, job, onJob }) {
   }
 
   return (
-    <Card title={t('ingest.rescent_title')} subtitle={t('ingest.rescent_sub')}
-          icon={Pencil}>
-      {/* The two things that separate it from its neighbours, first and in
-          its own tone — a repair that costs money must not read like the
-          three free ones stacked above it. */}
-      <Note tone="warn">{t('ingest.rescent_cost')}</Note>
-      <div className="mt-3"><Note>{t('ingest.rescent_hint')}</Note></div>
+    <Card title={t('ingest.rescent_title')}>
+      {/* What separates it from its neighbours, first and in its own tone —
+          a repair that costs money must not read like the free ones stacked
+          above it. The line is visible and the two paragraphs behind it are
+          not: the sentence that decides whether to press this is the one
+          about the bill, and it is the summary. */}
+      <Disclosure tone="warn" summary={t('ingest.rescent_lede')}>
+        <p>{t('ingest.rescent_sub')}</p>
+        <p>{t('ingest.rescent_cost')}</p>
+        <p>{t('ingest.rescent_hint')}</p>
+      </Disclosure>
+      {/* A real condition, and the one that decides whether anything can be
+          asked at all — so it stays a Note. */}
       {bound === null && (
         <div className="mt-3"><Note tone="warn">{t('ingest.rescent_unbound')}</Note></div>
       )}
@@ -1449,7 +1669,9 @@ function Rescent({ forest, bound, job, onJob }) {
         </div>
       )}
       <div className="mt-4 flex justify-end">
-        <button type="button" className="btn"
+        <button type="button"
+                className={state.busy || running || bound === null
+                             ? 'btn' : 'btn btn-primary'}
                 disabled={state.busy || running || bound === null}
                 onClick={run}>
           <Pencil size={14} />
@@ -1489,8 +1711,8 @@ function Staging({ forest }) {
   }
 
   return (
-    <Card title={t('ingest.staging_title')} subtitle={t('ingest.staging_sub')}
-          icon={Files}>
+    <Card title={t('ingest.staging_title')}>
+      {/* A real condition — bytes that are there — so it stays a Note. */}
       <Note tone="warn">
         {t('ingest.staging_found', { n: now.unrecorded,
                                      kb: Math.max(1, Math.round(now.bytes / 1024)) })}
@@ -1500,10 +1722,15 @@ function Staging({ forest }) {
           <li key={name} className="font-mono text-[11.5px] text-text-3">{name}</li>
         ))}
       </ul>
-      <div className="mt-3"><Note>{t('ingest.staging_hint')}</Note></div>
+      <div className="mt-3">
+        <Disclosure summary={t('ingest.staging_sub')}>
+          {t('ingest.staging_hint')}
+        </Disclosure>
+      </div>
       {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
       <div className="mt-4 flex justify-end">
-        <button type="button" className="btn" disabled={state.busy} onClick={clear}>
+        <button type="button" className={state.busy ? 'btn' : 'btn btn-primary'}
+                disabled={state.busy} onClick={clear}>
           <X size={14} />
           {state.busy ? t('ingest.staging_running') : t('ingest.staging_start')}
         </button>
@@ -1549,13 +1776,15 @@ function DenseLayer({ forest, job, onJob }) {
   }
 
   return (
-    <Card title={t('ingest.dense_title')} subtitle={t('ingest.dense_sub')}
-          icon={Refresh}>
-      <Note>
-        {now.stale
-          ? t('ingest.dense_behind', { n: now.stale })
-          : t('ingest.dense_current', { n: now.vectors })}
-      </Note>
+    <Card title={t('ingest.dense_title')}>
+      {/* The state in one line — which is the whole answer when the layer is
+          current — and what being behind actually costs behind it. */}
+      <Disclosure summary={now.stale
+                             ? t('ingest.dense_behind_sum', { n: now.stale })
+                             : t('ingest.dense_current', { n: now.vectors })}>
+        <p>{t('ingest.dense_sub')}</p>
+        {now.stale ? <p>{t('ingest.dense_behind', { n: now.stale })}</p> : null}
+      </Disclosure>
       {/* A cancelled run changed nothing and is not resumable (J.13.4): the
           index is the one the forest already had, and the next press starts
           over and pays again. Said here, because what was spent is spent. */}
@@ -1564,7 +1793,9 @@ function DenseLayer({ forest, job, onJob }) {
       )}
       {state.error && <div className="mt-3"><ErrorNote error={state.error} /></div>}
       <div className="mt-4 flex justify-end">
-        <button type="button" className="btn"
+        <button type="button"
+                className={state.busy || running || !now.stale
+                             ? 'btn' : 'btn btn-primary'}
                 disabled={state.busy || running || !now.stale} onClick={refresh}>
           <Refresh size={14} />
           {state.busy || running ? t('ingest.dense_running')

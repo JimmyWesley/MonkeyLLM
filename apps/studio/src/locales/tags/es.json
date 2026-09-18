@@ -1,4 +1,5 @@
 {
+  "tags.browse": "Ver etiquetas",
   "tags.bulk_apply": "Añadir a la selección",
   "tags.bulk_complete": "Listo: se alcanzaron los {n} nodos y ninguno rechazó.",
   "tags.bulk_counts": "{changed} escritos · {unchanged} ya las tenían.",
@@ -20,7 +21,9 @@
   "tags.select_node": "Seleccionar {id}",
   "tags.select_none": "No seleccionar nada",
   "tags.vocabulary": "Etiquetas",
+  "tags.vocabulary_count": "{n} etiquetas en este bosque",
   "tags.vocabulary_empty": "Nada en tu alcance lleva etiquetas todavía.",
   "tags.vocabulary_hint": "Todas las etiquetas que aparecen y cuántos nodos lleva cada una — contadas sobre todo tu alcance, no sobre esta página. Pulsa una para filtrar.",
+  "tags.vocabulary_rest": "y {n} más",
   "tags.vocabulary_truncated": "Mostrando {shown} de {total} etiquetas."
 }

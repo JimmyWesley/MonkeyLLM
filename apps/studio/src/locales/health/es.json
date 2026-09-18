@@ -23,6 +23,7 @@
   "health.needs_split_hint": "Una rama tan ancha le cuesta a cada lector que pasa por ella.",
   "health.no_snapshots": "Ninguna tomada todavía.",
   "health.payloads_omitted": "{count} archivo(s) de payload quedaron fuera. Los nodos que los nombran restaurarán muertos — este snapshot lleva el mapa, no las bases ni los medios.",
+  "health.reading": "Leyendo {n} nodos…",
   "health.release": "Liberar el lock huérfano",
   "health.releasing": "Liberando",
   "health.restore_note": "Restaurar sobre un bosque vivo sigue en la línea de comandos. Un snapshot viaja como un solo archivo: el owner puede descargarlo aquí e importarlo como bosque nuevo desde el selector de bosques.",

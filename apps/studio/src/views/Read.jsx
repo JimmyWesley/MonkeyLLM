@@ -20,7 +20,7 @@ import NodeHands from './hands.jsx'
 import { ScentEditor } from './editor.jsx'
 import { BulkTags, TagVocabulary, browseTag } from './tags.jsx'
 import {
-  Badge, Card, CopyButton, Empty, ErrorNote, Select, Spinner,
+  Badge, Card, CopyButton, Empty, ErrorNote, Select, Skeleton, Spinner,
 } from '../design/ui.jsx'
 import { Markdown } from '../design/markdown.jsx'
 import {
@@ -39,6 +39,63 @@ export default function Read({ forest, grant, node, setNode, goto }) {
  *  (C.6): asking for more than fits changes nothing, so the page size and
  *  the ask are the same number. */
 const PAGE = 10
+
+/** How many recent documents the landing shows, and how many periods it
+ *  will walk to find them. Both small on purpose: this is the shelf a
+ *  reader glances at, not a listing. */
+const RECENT = 8
+const RECENT_PERIODS = 4
+
+/** What changed here lately (J.5.14).
+ *
+ *  The reading console's landing used to be a search box over ~100 tag
+ *  chips — a vocabulary, offered to somebody looking for a document. This
+ *  is the shelf instead, and it is built from the two reads the console
+ *  already has rather than a new route: `calendar` (C.13.3) says which
+ *  periods hold anything, most recent first and counted in SQL, and `scan`
+ *  reads one period with C.13.1's own bound.
+ *
+ *  By DAY, not by month: a month's worth of documents does not fit in
+ *  `scan`'s budget, so the "most recent eight" would have been the eight
+ *  that happened to survive a truncation — a listing that claims an order
+ *  it never had. A day usually fits whole, and when it does not the flag
+ *  travels with the list and the caption says so. Branch indexes are left
+ *  out: every plant touches one, so they would be the whole shelf.
+ */
+async function recentDocuments(forest, roots) {
+  const map = await api.call(forest, 'calendar',
+                             { date_field: 'updated', granularity: 'day' })
+  const periods = (map.buckets || []).slice(0, RECENT_PERIODS)
+  const seen = new Map()
+  let truncated = false
+  let from = null
+  for (const period of periods) {
+    const pages = await Promise.all((roots || ['_index']).map((root) =>
+      api.call(forest, 'scan', {
+        parent_id: root,
+        recursive: true,
+        date_field: 'updated',
+        since: period.since,
+        until: period.until,
+        fields: ['id', 'kind', 'title', 'summary', 'tags', 'updated'],
+        limit: 50,
+      }).catch(() => null)))
+    for (const page of pages) {
+      if (!page) continue
+      truncated = truncated || !!page.truncated
+      for (const n of page.nodes || []) {
+        if (n.kind === 'branch') continue
+        if (!seen.has(n.id)) seen.set(n.id, n)
+      }
+    }
+    from = from || period.period
+    if (seen.size >= RECENT) break
+  }
+  const hits = [...seen.values()]
+    .sort((a, b) => String(b.updated || '').localeCompare(String(a.updated || '')))
+    .slice(0, RECENT)
+  return { hits, from, truncated }
+}
 
 /** No selection: find the document to read.
  *
@@ -175,23 +232,32 @@ function Finder({ forest, grant }) {
     <TagVocabulary key={`${forest}:${version}`} forest={forest} active={tag}
                    onPick={browse} onClear={() => { setTag(null); setRes(null) }} />
   )
+  const vocabularyCollapsed = (
+    <TagVocabulary key={`${forest}:${version}:landing`} forest={forest} collapsed
+                   active={tag} onPick={browse}
+                   onClear={() => { setTag(null); setRes(null) }} />
+  )
 
-  // Nothing asked yet: the whole page is the question — and, under it, the
-  // vocabulary, which is the other way in (J.5.18 rule 4): somebody who
-  // does not know what to search for can read what the forest is tagged by.
+  // Nothing asked yet: the question, and under it the documents. A reading
+  // console opens on something to read — the tag vocabulary is the OTHER
+  // way in (J.5.18 rule 4) and waits to be asked for, because somebody who
+  // arrived here wanting a document was being shown a vocabulary.
   if (!res && !error) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-[6vh]">
+      <div className="mx-auto max-w-3xl px-4 py-[5vh]">
         <div className="text-center">
-          <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl
-                           bg-surface-2 text-text-3"><Book size={22} /></span>
+          <span className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-2xl
+                           bg-surface-2 text-text-3"><Book size={20} /></span>
           <h1 className="text-[19px] font-medium text-text">{t('read.title')}</h1>
           <p className="mx-auto mt-1 max-w-[46ch] text-[12.5px] text-text-3">
             {t('read.finder_hint')}
           </p>
-          <div className="mt-6">{box}</div>
+          <div className="mt-5">{box}</div>
         </div>
-        <div className="mt-8">{vocabulary}</div>
+        <div className="mt-8 space-y-4">
+          <Recent forest={forest} roots={roots} />
+          {vocabularyCollapsed}
+        </div>
       </div>
     )
   }
@@ -299,6 +365,63 @@ function Stats({ res }) {
   )
 }
 
+/** The shelf: what this forest changed most recently, as links.
+ *
+ *  Absent rather than apologetic when there is nothing — a forest with no
+ *  dated material is a real state and an empty card teaches nothing. The
+ *  period it read is named, because "recent" is a claim and the forest's
+ *  own calendar is what decides it.
+ */
+function Recent({ forest, roots }) {
+  const { t } = useI18n()
+  const [state, setState] = useState({ busy: true })
+
+  useEffect(() => {
+    let live = true
+    setState({ busy: true })
+    recentDocuments(forest, roots)
+      .then((r) => live && setState({ busy: false, ...r }))
+      .catch(() => live && setState({ busy: false, hits: [] }))
+    return () => { live = false }
+    // `roots` is a fresh array on every render; its content is what matters.
+  }, [forest, (roots || []).join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (state.busy) return <Card bodyClass="p-4"><Skeleton rows={3} /></Card>
+  if (!state.hits?.length) return null
+
+  return (
+    <Card title={t('read.recent')}
+          subtitle={state.from ? t('read.recent_from', { period: state.from }) : undefined}
+          icon={Book} bodyClass="p-2">
+      <ul className="divide-y divide-line">
+        {state.hits.map((n) => (
+          <li key={n.id}>
+            <a {...nodeLink(forest, n.id, 'read')}
+               className="block rounded-md px-2 py-2 transition hover:bg-surface-2">
+              <span className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0 truncate text-[13.5px] text-accent">
+                  {n.title || n.id}
+                </span>
+                <span className="shrink-0 font-mono text-[12px] tabular-nums text-text-3">
+                  {String(n.updated || '').slice(0, 10)}
+                </span>
+              </span>
+              {n.summary && (
+                <span className="mt-0.5 block truncate text-[12.5px] text-text-3">
+                  {n.summary}
+                </span>
+              )}
+            </a>
+          </li>
+        ))}
+      </ul>
+      {state.truncated && (
+        <p className="px-2 pt-2 text-[12px] text-text-3">{t('read.recent_partial')}</p>
+      )}
+    </Card>
+  )
+}
+
 /** One result. The address above, the title as the link, the summary below —
  *  the shape a person already knows how to read.
  *
@@ -318,7 +441,7 @@ function Hit({ forest, hit, selectable, picked, onPick }) {
                className="mt-1.5 h-3.5 w-3.5 shrink-0 accent-current text-accent" />
       )}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 text-[11.5px] text-text-3">
+        <div className="flex items-center gap-2 text-[12px] text-text-3">
           <span className="min-w-0 truncate">{crumbs.join(' › ')}</span>
           {hit.kind === 'branch' && <Badge>{t('read.finder_branch')}</Badge>}
         </div>
@@ -553,9 +676,9 @@ function SharePanel({ forest, node }) {
       {error && <div className="mt-2"><ErrorNote error={error} /></div>}
       {minted && (
         <div className="mt-3 rounded-lg bg-surface-2 p-2">
-          <p className="mb-1 text-[11.5px] text-text-3">{t('read.share_once')}</p>
+          <p className="mb-1 text-[12px] text-text-3">{t('read.share_once')}</p>
           <div className="flex items-center gap-1.5">
-            <code className="min-w-0 flex-1 truncate text-[11.5px]">{minted.url}</code>
+            <code className="min-w-0 flex-1 truncate text-[12px]">{minted.url}</code>
             <CopyButton value={minted.url} />
           </div>
         </div>

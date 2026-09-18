@@ -4,6 +4,7 @@
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { Card, Note, Skeleton, Stat } from '../design/ui.jsx'
+import { More } from '../design/Disclosure.jsx'
 import {
   Ask, Data, Explore, Forest, Ingest, Models, Overview as Grid, Plug, Sparkle,
 } from '../design/icons.jsx'
@@ -112,7 +113,7 @@ export default function Overview({ forest, grant, me, goto }) {
               </ul>
             </>
           )}
-          <p className="mt-4 text-[11.5px] leading-relaxed text-text-3">
+          <p className="mt-4 text-[12px] leading-relaxed text-text-3">
             {me.principal} · {forest}
           </p>
         </Card>
@@ -123,9 +124,10 @@ export default function Overview({ forest, grant, me, goto }) {
           door on day thirty. Links only — this card does no work. */}
       <Card title={t('overview.connect')} icon={Sparkle}>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <p className="min-w-[24ch] max-w-[72ch] flex-1 text-[13px] leading-relaxed text-text-2">
-            {t('overview.connect_p')}
-          </p>
+          <div className="min-w-[24ch] max-w-[72ch] flex-1">
+            <More text={t('overview.connect_p')}
+                  className="text-[13px] leading-relaxed text-text-2" />
+          </div>
           <div className="flex shrink-0 flex-wrap gap-2">
             {has(grant, 'read') && (
               <button className="btn" onClick={() => goto('skills')}>

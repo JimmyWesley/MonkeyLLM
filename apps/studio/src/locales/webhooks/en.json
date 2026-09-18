@@ -16,6 +16,7 @@
   "webhooks.delivery_rules": "Up to {attempts} attempts with a growing wait, {timeout}s each. After {suspend} failed deliveries in a row a webhook is suspended.",
   "webhooks.edit": "Webhook",
   "webhooks.empty": "Nothing is listening yet",
+  "webhooks.empty_for": "What people use one for",
   "webhooks.empty_hint": "A webhook is how this forest starts a conversation instead of waiting to be asked.",
   "webhooks.enabled": "Delivering",
   "webhooks.enabled_hint": "Turn off to stop delivery without losing the subscription or the secret.",

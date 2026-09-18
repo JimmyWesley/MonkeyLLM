@@ -23,6 +23,7 @@
   "health.needs_split_hint": "Um galho tão largo custa caro a cada leitor que passa por ele.",
   "health.no_snapshots": "Nenhum tirado ainda.",
   "health.payloads_omitted": "{count} arquivo(s) de payload ficaram de fora. Os nós que os nomeiam vão restaurar mortos — este snapshot leva o mapa, não os bancos nem as mídias.",
+  "health.reading": "Lendo {n} nós…",
   "health.release": "Liberar o lock órfão",
   "health.releasing": "Liberando",
   "health.restore_note": "Restaurar por cima de uma floresta viva continua na linha de comando. Um snapshot viaja como um arquivo só: o owner pode baixá-lo aqui e importá-lo como floresta nova pelo seletor de florestas.",

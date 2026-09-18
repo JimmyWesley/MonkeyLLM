@@ -29,6 +29,7 @@ import {
   Badge, Card, Empty, ErrorNote, Field, Note, Select, Skeleton, Spinner,
   Table, Td, Toggle,
 } from '../design/ui.jsx'
+import { Disclosure } from '../design/Disclosure.jsx'
 import { Check, Database, Plus, Trash, X } from '../design/icons.jsx'
 
 /** What "keep them here" is worth as a value: nothing, which is what the
@@ -63,14 +64,16 @@ export default function Storage({ forest, stores, status, me, onBound }) {
   const list = stores.data?.stores || null
 
   return (
+    /* One card, read top to bottom in the order the questions are asked:
+       what this deployment HAS, where this forest writes, and — behind a
+       button — how a new one is added. The binding used to come first and
+       the list second, which asks somebody to choose a name before they
+       have seen the names; and the form was always open, which gave the
+       rarest act in the panel the most of it. */
     <div className="space-y-4">
       {error && <Card><ErrorNote error={error} /></Card>}
 
-      <Binding forest={forest} stores={list} status={status}
-               onBound={onBound} onError={setError} />
-
       <Card title={t('storage.stores')} subtitle={t('storage.stores_sub')}
-            icon={Database}
             actions={<Badge tone={mayEdit ? 'accent' : 'default'}>
               {t(mayEdit ? 'storage.reach_edit' : 'storage.reach_read')}
             </Badge>}>
@@ -89,6 +92,9 @@ export default function Storage({ forest, stores, status, me, onBound }) {
         {list?.some((s) => s.source === 'environment') && (
           <p className="mt-2 text-[11.5px] text-text-3">{t('storage.env_note')}</p>
         )}
+
+        <Binding forest={forest} stores={list} status={status}
+                 onBound={onBound} onError={setError} />
 
         {mayEdit && (
           <StoreForm stores={list || []}
@@ -148,33 +154,40 @@ function Binding({ forest, stores, status, onBound, onError }) {
   }
 
   return (
-    <Card title={t('storage.binding')} subtitle={t('storage.binding_sub')}
-          icon={Database}>
-      <form onSubmit={save} className="space-y-3">
-        <Select label={t('storage.binding_label')} value={choice}
-                hint={t('storage.binding_hint')}
-                onChange={(e) => setChoice(e.target.value)}>
-          <option value={LOCAL}>{t('storage.binding_local')}</option>
-          {(names || []).map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-          {/* A binding the deployment cannot serve is still what this forest
-              says: dropping it from the picker would make the Save silently
-              change it to something else. */}
-          {unmet && <option value={bound}>{bound}</option>}
-        </Select>
-        <Note>{t('storage.binding_next')}</Note>
-        {unmet && <Note tone="warn">{t('storage.unmet', { name: bound })}</Note>}
-        <div className="flex justify-end">
-          <button className="btn btn-primary" disabled={busy || choice === bound}
-                  title={choice === bound ? t('common.no_changes') : undefined}>
-            {busy ? <Spinner label={t('common.saving')} />
-              : saved ? <><Check size={14} /> {t('common.saved')}</>
-              : t('common.save')}
-          </button>
-        </div>
-      </form>
-    </Card>
+    /* A part of the storage card, not a card of its own: it is one select
+       and one sentence, and a whole panel around it made this forest's own
+       decision look like the deployment's. */
+    <form onSubmit={save} className="mt-5 space-y-3 border-t border-line pt-4">
+      <span className="label">{t('storage.binding')}</span>
+      <Select label={t('storage.binding_label')} value={choice}
+              hint={t('storage.binding_hint')}
+              onChange={(e) => setChoice(e.target.value)}>
+        <option value={LOCAL}>{t('storage.binding_local')}</option>
+        {(names || []).map((name) => (
+          <option key={name} value={name}>{name}</option>
+        ))}
+        {/* A binding the deployment cannot serve is still what this forest
+            says: dropping it from the picker would make the Save silently
+            change it to something else. */}
+        {unmet && <option value={bound}>{bound}</option>}
+      </Select>
+      {/* J.19.9 requires this in words and it stays visible: what the
+          setting means for the NEXT original, and that it moves nothing
+          already written. What is behind it is where the name is kept. */}
+      <Disclosure summary={t('storage.binding_next')}>
+        {t('storage.binding_sub')}
+      </Disclosure>
+      {unmet && <Note tone="warn">{t('storage.unmet', { name: bound })}</Note>}
+      <div className="flex justify-end">
+        <button className={busy || choice === bound ? 'btn' : 'btn btn-primary'}
+                disabled={busy || choice === bound}
+                title={choice === bound ? t('common.no_changes') : undefined}>
+          {busy ? <Spinner label={t('common.saving')} />
+            : saved ? <><Check size={14} /> {t('common.saved')}</>
+            : t('common.save')}
+        </button>
+      </div>
+    </form>
   )
 }
 
@@ -329,6 +342,11 @@ function StoreForm({ stores, onSaved, onError }) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [editing, setEditing] = useState(null)
   const [busy, setBusy] = useState(false)
+  /* Adding a store is the rarest act on this panel — it happens once per
+     bucket, ever — and it was the only thing on it that was always open:
+     seven fields and a switch above the list they are about. It is a button
+     now, and the fields arrive when somebody asks for them. */
+  const [open, setOpen] = useState(false)
 
   const set = (k) => (e) => setForm({
     ...form, [k]: e.target?.type === 'checkbox' ? e.target.checked : e.target.value })
@@ -337,6 +355,7 @@ function StoreForm({ stores, onSaved, onError }) {
   const ready = form.name.trim() && form.bucket.trim() && !half
 
   function edit(store) {
+    setOpen(true)
     setEditing(store.name)
     setForm({
       ...EMPTY_FORM,
@@ -344,6 +363,12 @@ function StoreForm({ stores, onSaved, onError }) {
       prefix: store.prefix || '', region: store.region || '',
       path_style: Boolean(store.path_style),
     })
+  }
+
+  function close() {
+    setOpen(false)
+    setEditing(null)
+    setForm(EMPTY_FORM)
   }
 
   async function submit(e) {
@@ -362,10 +387,32 @@ function StoreForm({ stores, onSaved, onError }) {
     try {
       if (editing) await api.updateStore(editing, body)
       else await api.createStore(body)
-      setForm(EMPTY_FORM)
-      setEditing(null)
+      close()
       onSaved()
     } catch (err) { onError(err) } finally { setBusy(false) }
+  }
+
+  /* Closed, the panel is one button and the names already there — editing
+     one is still a single click, which is what keeps this a reveal and not
+     a second screen. */
+  if (!open) {
+    return (
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-2
+                      border-t border-line pt-4">
+        <button type="button" className="btn btn-sm" onClick={() => setOpen(true)}>
+          <Plus size={13} /> {t('storage.add')}
+        </button>
+        <div className="flex flex-wrap gap-1.5">
+          {(stores || []).filter((s) => s.source !== 'environment').map((s) => (
+            <button key={s.name} type="button"
+                    className="badge hover:border-accent/40 hover:text-accent"
+                    onClick={() => edit(s)}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -382,13 +429,10 @@ function StoreForm({ stores, onSaved, onError }) {
               {s.name}
             </button>
           ))}
-          {editing && (
-            <button type="button" className="btn btn-sm btn-ghost !p-1"
-                    title={t('common.close')}
-                    onClick={() => { setEditing(null); setForm(EMPTY_FORM) }}>
-              <X size={13} />
-            </button>
-          )}
+          <button type="button" className="btn btn-sm btn-ghost !p-1"
+                  title={t('common.close')} onClick={close}>
+            <X size={13} />
+          </button>
         </div>
       </div>
 
@@ -427,7 +471,8 @@ function StoreForm({ stores, onSaved, onError }) {
       {half && <Note tone="warn">{t('storage.key_pair')}</Note>}
 
       <div className="flex justify-end">
-        <button className="btn btn-primary" disabled={busy || !ready}>
+        <button className={busy || !ready ? 'btn' : 'btn btn-primary'}
+                disabled={busy || !ready}>
           {editing ? <Check size={14} /> : <Plus size={14} />}
           {busy ? t('common.saving')
             : editing ? t('common.save') : t('storage.add_action')}

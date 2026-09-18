@@ -29,6 +29,7 @@ import {
   Badge, Card, CheckList, Code, CopyButton, Empty, ErrorNote, Field, Modal,
   Note, Segmented, Select, Skeleton, Table, Tabs, Td, TextArea, Toggle,
 } from '../design/ui.jsx'
+import { Disclosure, More } from '../design/Disclosure.jsx'
 import {
   Alert, Check, ChevronLeft, Clock, Code2, Key, Play, Plus, Refresh, Trash,
   Webhook as WebhookIcon, X,
@@ -232,13 +233,13 @@ function List({ forest, webhooks, queue, limits, onOpen, onChanged }) {
                     <span className="truncate text-[13.5px] font-medium text-text">
                       {hook.label || hostOf(hook.url)}
                     </span>
-                    <span className={`shrink-0 text-[11.5px] ${
+                    <span className={`shrink-0 text-[12px] ${
                       state.tone === 'danger' ? 'text-danger'
                         : state.tone === 'warn' ? 'text-warn' : 'text-text-3'}`}>
                       {t(`webhooks.${state.key}`)}
                     </span>
                   </span>
-                  <span className="block truncate font-mono text-[11.5px] text-text-3">
+                  <span className="block truncate font-mono text-[12px] text-text-3">
                     {hook.url}
                   </span>
                 </button>
@@ -265,40 +266,45 @@ function List({ forest, webhooks, queue, limits, onOpen, onChanged }) {
         </div>
       )}
       {webhooks.length > 0 && (
-        <p className="mt-3 text-[11.5px] text-text-3">
-          {t('webhooks.delivery_rules', {
+        <div className="mt-3">
+          <More text={t('webhooks.delivery_rules', {
             attempts: limits.attempts, suspend: limits.suspend_after,
-            timeout: limits.timeout_seconds })}
-        </p>
+            timeout: limits.timeout_seconds })} />
+        </div>
       )}
     </Card>
   )
 }
 
-/** The empty state carries the reason to be here at all. Three shapes an
- *  operator recognises, so "what would I even use this for" is answered
- *  before the form is opened. */
+/** The empty state carries the reason to be here at all — in a line.
+ *
+ *  Three recipe cards under an empty state was a poster: at 375px it was
+ *  the whole screen, and it was shown to somebody who had not yet decided
+ *  they wanted a webhook at all. The three shapes an operator recognises
+ *  are still here, one line each, behind the one line that says why. */
 function Recipes({ t, onNew }) {
   const recipes = ['chat', 'automation', 'service']
   return (
-    <Empty icon={WebhookIcon} title={t('webhooks.empty')}
-           action={<button className="btn btn-primary" onClick={onNew}>
-             <Plus size={14} /> {t('webhooks.new')}
-           </button>}>
-      <span className="block">{t('webhooks.empty_hint')}</span>
-      <span className="mt-4 grid gap-2 text-left sm:grid-cols-3">
-        {recipes.map((key) => (
-          <span key={key} className="rounded-lg border border-line bg-surface-2 p-3">
-            <span className="block text-[12.5px] font-medium text-text">
-              {t(`webhooks.recipe.${key}`)}
-            </span>
-            <span className="mt-0.5 block text-[11.5px] leading-relaxed text-text-3">
+    <>
+      <Empty icon={WebhookIcon} title={t('webhooks.empty')}
+             action={<button className="btn btn-primary btn-sm" onClick={onNew}>
+               <Plus size={14} /> {t('webhooks.new')}
+             </button>}>
+        {t('webhooks.empty_hint')}
+      </Empty>
+      <Disclosure summary={t('webhooks.empty_for')}>
+        <ul className="space-y-1.5">
+          {recipes.map((key) => (
+            <li key={key}>
+              <span className="font-medium text-text-2">
+                {t(`webhooks.recipe.${key}`)}
+              </span>{' '}
               {t(`webhooks.recipe.${key}_hint`)}
-            </span>
-          </span>
-        ))}
-      </span>
-    </Empty>
+            </li>
+          ))}
+        </ul>
+      </Disclosure>
+    </>
   )
 }
 
@@ -316,7 +322,7 @@ function Detail({ forest, hook, events, groups, scopes, limits, tab, setTab,
           <ChevronLeft size={14} /> {t('webhooks.all')}
         </button>
         {!fresh && (
-          <span className="font-mono text-[11.5px] text-text-3">{hook.id}</span>
+          <span className="font-mono text-[12px] text-text-3">{hook.id}</span>
         )}
       </div>
 
@@ -517,9 +523,10 @@ function Settings({ forest, hook, events, groups, scopes, limits, onSecret,
                       label={t('webhooks.metadata')}
                       hint={t('webhooks.metadata_hint')}
                       onChange={(v) => set({ include_metadata: v })} />
-              <p className="mt-2 pl-[42px] text-[11.5px] leading-relaxed text-text-3">
-                {t('webhooks.metadata_note')}
-              </p>
+              {/* The rule that makes this switch a decision and not a
+                  checkbox: what leaves the Station leaves its authority.
+                  One line under the switch, the whole of it a tap away. */}
+              <div className="mt-2 pl-[42px]"><More text={t('webhooks.metadata_note')} /></div>
             </div>
 
             <HeadersEditor headers={headers} limits={limits}
@@ -621,9 +628,7 @@ function HeadersEditor({ headers, limits, onChange }) {
           <Plus size={13} /> {t('webhooks.add_header')}
         </button>
       )}
-      <span className="mt-1 block text-[11.5px] text-text-3">
-        {t('webhooks.headers_hint', { n: max })}
-      </span>
+      <div className="mt-1"><More text={t('webhooks.headers_hint', { n: max })} /></div>
     </div>
   )
 }
@@ -665,9 +670,7 @@ function Preview({ events, forest, scope, includeMetadata }) {
         </div>
       )}
       <Code lang="json" max="18rem">{JSON.stringify(body, null, 2)}</Code>
-      <p className="mt-2 text-[11.5px] leading-relaxed text-text-3">
-        {t('webhooks.preview_note')}
-      </p>
+      <div className="mt-2"><More text={t('webhooks.preview_note')} /></div>
       <div className="mt-3 rounded-lg border border-line bg-surface-2 p-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-text-3">
           {t('webhooks.headers_sent')}
@@ -733,10 +736,11 @@ function Probe({ record, onClose }) {
           <X size={14} />
         </button>
       </div>
-      <p className={`mt-1.5 pl-[25px] text-[11.5px] ${tone === 'danger'
-        ? 'text-text-2' : 'text-text-3'}`}>
-        {t('webhooks.test_note')}
-      </p>
+      <div className="mt-1.5 pl-[25px]">
+        <More text={t('webhooks.test_note')}
+              className={`text-[12px] leading-relaxed ${tone === 'danger'
+                ? 'text-text-2' : 'text-text-3'}`} />
+      </div>
     </div>
   )
 }
@@ -781,7 +785,7 @@ function Deliveries({ forest, hook, limits }) {
             <tr key={`${row.delivery}-${row.attempt}-${i}`}>
               <Td>
                 <span className="block font-mono text-[12px]">{row.event}</span>
-                <span className="block font-mono text-[11px] text-text-3">
+                <span className="block font-mono text-[12px] text-text-3">
                   {row.delivery}
                 </span>
               </Td>
@@ -791,12 +795,12 @@ function Deliveries({ forest, hook, limits }) {
                   ? 'badge-accent' : 'badge-danger'}`}>
                   {row.status || t('webhooks.no_answer')}
                 </span>
-                <span className="mt-0.5 block text-[11px] tabular-nums text-text-3">
+                <span className="mt-0.5 block text-[12px] tabular-nums text-text-3">
                   {Math.round(row.ms || 0)} ms
                 </span>
                 {(row.error || row.response) && (
                   <span className="mt-0.5 block max-w-[24ch] truncate font-mono
-                                   text-[11px] text-text-3"
+                                   text-[12px] text-text-3"
                         title={row.error || row.response}>
                     {row.error || row.response}
                   </span>
@@ -813,7 +817,7 @@ function Deliveries({ forest, hook, limits }) {
           ))}
         </Table>
       )}
-      <p className="mt-3 text-[11.5px] text-text-3">
+      <p className="mt-3 text-[12px] text-text-3">
         {t('webhooks.log_bound', { n: limits.keep_deliveries })}
       </p>
     </Card>
@@ -839,9 +843,7 @@ function SecretModal({ secret, onClose }) {
           </code>
           <CopyButton value={secret || ''} label={t('common.copy')} />
         </div>
-        <p className="text-[12px] leading-relaxed text-text-3">
-          {t('webhooks.secret_use')}
-        </p>
+        <More text={t('webhooks.secret_use')} />
       </div>
     </Modal>
   )

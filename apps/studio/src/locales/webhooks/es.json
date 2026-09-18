@@ -16,6 +16,7 @@
   "webhooks.delivery_rules": "Hasta {attempts} intentos con espera creciente, {timeout}s cada uno. Tras {suspend} entregas fallidas seguidas el webhook se suspende.",
   "webhooks.edit": "Webhook",
   "webhooks.empty": "Nadie está escuchando aún",
+  "webhooks.empty_for": "Para qué se usa",
   "webhooks.empty_hint": "Un webhook es como este bosque inicia la conversación, en vez de esperar a que le pregunten.",
   "webhooks.enabled": "Entregando",
   "webhooks.enabled_hint": "Desactiva para detener la entrega sin perder la suscripción ni el secret.",

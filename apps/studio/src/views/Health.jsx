@@ -17,8 +17,9 @@ import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { hrefFor, linkTo } from '../router.js'
 import {
-  Badge, Card, Empty, ErrorNote, Note, Skeleton, Toggle,
+  Badge, Card, Empty, ErrorNote, Note, Skeleton, Spinner, Toggle,
 } from '../design/ui.jsx'
+import { Folded, More } from '../design/Disclosure.jsx'
 import {
   Alert, Check, Download, Flame, Health as HealthIcon, Link, Refresh,
 } from '../design/icons.jsx'
@@ -42,8 +43,23 @@ export default function Health({ forest, grant, goto, me }) {
 function Report({ forest, grant, goto }) {
   const { t } = useI18n()
   const report = useAsync(() => api.forestHealth(forest), [forest])
+  /* The lint is synchronous on the host and reads every passport, so on a
+     1,877-node forest this panel is blank for seconds. A pulsing skeleton
+     says only that something is happening; the SIZE says why it is taking
+     this long, and it is one cheap metadata call (C.17 — no body opened,
+     the forest's own count) that answers before the report does. The
+     report's own call is untouched, and the snapshot panel beside this one
+     stays live throughout. */
+  const size = useAsync(() => api.call(forest, 'coverage', {}), [forest])
 
-  if (report.busy) return <Card><Skeleton rows={7} /></Card>
+  if (report.busy) {
+    const n = size.data?.total
+    return (
+      <Card title={t('health.title')} icon={HealthIcon}>
+        <Spinner label={n != null ? t('health.reading', { n }) : t('common.loading')} />
+      </Card>
+    )
+  }
   if (report.error) {
     // Two refusals worth explaining rather than showing raw: a scoped
     // admin is asking for a shape this report does not have, and a locked
@@ -82,11 +98,15 @@ function Report({ forest, grant, goto }) {
           <Count label={t('health.needs_split')} value={d.needs_split?.length || 0} tone="warn" />
           <Count label={t('health.fat_nodes')} value={d.fat_nodes?.length || 0} tone="warn" />
         </div>
-        {clear && <Note tone="ok" className="mt-4">
-          <span className="inline-flex items-center gap-1.5">
-            <Check size={14} /> {t('health.all_clear')}
-          </span>
-        </Note>}
+        {clear && (
+          <div className="mt-4">
+            <Note tone="ok">
+              <span className="inline-flex items-center gap-1.5">
+                <Check size={14} /> {t('health.all_clear')}
+              </span>
+            </Note>
+          </div>
+        )}
       </Card>
 
       <NodeList title={t('health.needs_split')} hint={t('health.needs_split_hint')}
@@ -165,8 +185,8 @@ function LockPanel({ forest, onCleared }) {
   return (
     <div className="space-y-3">
       <Empty icon={Alert} title={t('health.locked')}>
-        {releasable ? t('health.locked_orphan')
-          : d.self ? t('health.locked_self') : t('health.locked_held')}
+        <More text={releasable ? t('health.locked_orphan')
+          : d.self ? t('health.locked_self') : t('health.locked_held')} />
       </Empty>
       {holder.pid && (
         <p className="text-center font-mono text-[12px] text-text-3">
@@ -190,7 +210,7 @@ function LockPanel({ forest, onCleared }) {
 function Count({ label, value, tone }) {
   return (
     <div className="rounded-lg border border-line bg-surface-2 px-3 py-2">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-text-3">
+      <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-text-3">
         {label}
       </div>
       <div className={`mt-0.5 text-[19px] font-medium tabular-nums
@@ -281,7 +301,7 @@ function Snapshots({ forest, me }) {
                 {list.data.snapshots.map((s) => (
                   <li key={s.name} className="py-2 first:pt-0">
                     <div className="flex items-center gap-1.5">
-                      <div className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-text-2">
+                      <div className="min-w-0 flex-1 truncate font-mono text-[12px] text-text-2">
                         {s.name}
                       </div>
                       {me?.owner && (
@@ -292,7 +312,7 @@ function Snapshots({ forest, me }) {
                         </button>
                       )}
                     </div>
-                    <div className="mt-0.5 flex items-center gap-2 text-[11px] text-text-3">
+                    <div className="mt-0.5 flex items-center gap-2 text-[12px] text-text-3">
                       <span>{(s.bytes / 1024).toFixed(1)} kB</span>
                       <span>{s.created?.slice(0, 16).replace('T', ' ')}</span>
                       {/* A container needs no second control. A snapshot
@@ -312,7 +332,7 @@ function Snapshots({ forest, me }) {
             )}
       </div>
 
-      <Note className="mt-4">{t('health.restore_note')}</Note>
+      <div className="mt-4"><Folded text={t('health.restore_note')} /></div>
     </Card>
   )
 }

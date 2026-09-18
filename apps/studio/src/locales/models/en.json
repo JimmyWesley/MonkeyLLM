@@ -1,4 +1,5 @@
 {
+  "models.add": "Add provider",
   "models.bind": "Bind this model",
   "models.bound": "Bound",
   "models.cache_bound": "Entries kept",
@@ -40,7 +41,7 @@
   "models.none": "No provider configured yet.",
   "models.origin_env": "From the environment",
   "models.providers": "Providers",
-  "models.providers_sub": "Any OpenAI-compatible /v1 endpoint: OpenRouter, LiteLLM, vLLM, a local llama.cpp.",
+  "models.providers_sub": "Any OpenAI-compatible /v1 endpoint: OpenAI itself, OpenRouter, LiteLLM, vLLM, a local llama.cpp.",
   "models.reachable": "Reachable {n} model(s) advertised.",
   "models.reasoning": "Reasoning",
   "models.reasoning_off": "Off recommended",

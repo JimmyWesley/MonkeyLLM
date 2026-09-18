@@ -34,6 +34,7 @@ import {
   Badge, Card, Empty, ErrorNote, Field, Modal, Note, Segmented, Skeleton,
   Table, Td, Toggle,
 } from '../design/ui.jsx'
+import { Folded, More } from '../design/Disclosure.jsx'
 import {
   Alert, Check, Download, File, Link, Refresh, Save, Upload,
 } from '../design/icons.jsx'
@@ -107,9 +108,19 @@ export default function Extensions({ forest, grant, goto }) {
       refresh()
     } catch (err) {
       // L.8: the host names what stops being declared; show that rather
-      // than a generic failure, and let the operator decide again.
-      const losing = err?.body?.error?.losing
-      if (losing) setConfirming({ id, losing })
+      // than a generic failure, and let the operator decide again. The
+      // list rides the envelope's `data` carrier (C.12) — `ApiError.data`
+      // is the whole error object, so the facts sit one level down. The
+      // old read (`err.body.error.losing`) matched nothing, and the
+      // refusal fell through to the banner with no way to acknowledge.
+      const losing = err?.data?.data?.losing ?? err?.data?.losing
+      if (Array.isArray(losing) && losing.length) {
+        // The modal IS the answer to this refusal: the banner `act` raised
+        // would say the same thing twice, once with no way to decide.
+        setError(null)
+        setConfirming({ id, losing })
+      }
+      // Any other failure is already on the banner (`act` set it).
     }
   }
 
@@ -129,7 +140,7 @@ export default function Extensions({ forest, grant, goto }) {
         <Installer forest={forest} busy={busy} act={act} goto={goto}
                    onInstalled={refresh} />
       ) : (
-        <Note tone="info">{t('ext.install.denied')}</Note>
+        <Folded text={t('ext.install.denied')} />
       )}
 
       {/* L.16: writing is not installing, so this is offered to everyone
@@ -146,7 +157,9 @@ export default function Extensions({ forest, grant, goto }) {
         </button>}
       >
         {installed.busy ? <Skeleton rows={3} /> : list.length === 0 ? (
-          <Empty title={t('ext.none')}>{t('ext.none.hint')}</Empty>
+          <Empty icon={Upload} title={t('ext.none')}>
+            <More text={t('ext.none.hint')} />
+          </Empty>
         ) : (
           <Table head={[t('ext.name'), t('ext.tier'), t('ext.contributes'),
                         t('ext.enabled_here'), '']}>
@@ -160,12 +173,12 @@ export default function Extensions({ forest, grant, goto }) {
                     : <Badge tone="good">{t('ext.loaded')}</Badge>}
                   {/* L.2 rule 2: the ref travels with the id, everywhere. */}
                   {ext.tracking ? (
-                    <div className="text-[11.5px] text-text-3">
+                    <div className="text-[12px] text-text-3">
                       {t('ext.tracking', { ref: ext.tracking })}
                     </div>
                   ) : null}
                   {ext.description ? (
-                    <div className="text-[11.5px] text-text-3">{ext.description}</div>
+                    <div className="text-[12px] text-text-3">{ext.description}</div>
                   ) : null}
                   {ext.broken ? (
                     <div className="text-[12px]"><Alert /> {ext.broken}</div>
@@ -174,7 +187,7 @@ export default function Extensions({ forest, grant, goto }) {
                 <Td>
                   <Tier tier={ext.tier} />
                   {ext.reason ? (
-                    <div className="text-[11.5px] text-text-3">{ext.reason}</div>
+                    <div className="text-[12px] text-text-3">{ext.reason}</div>
                   ) : null}
                 </Td>
                 <Td>
@@ -182,7 +195,7 @@ export default function Extensions({ forest, grant, goto }) {
                     <Badge key={seam}>{seam}</Badge>
                   ))}
                   {(ext.formats || []).length ? (
-                    <div className="mt-1 font-mono text-[11px] text-text-3">
+                    <div className="mt-1 font-mono text-[12px] text-text-3">
                       {ext.formats.join(' ')}
                     </div>
                   ) : null}
@@ -221,9 +234,11 @@ export default function Extensions({ forest, grant, goto }) {
         {/* L.8: a restart is stated when it is NEEDED, naming who needs it;
             "disabled" without one means the module is still resident. */}
         {pending.length ? (
-          <Note tone="warn">{t('ext.restart.pending', { list: pending.join(', ') })}</Note>
+          <div className="mt-3">
+            <Note tone="warn">{t('ext.restart.pending', { list: pending.join(', ') })}</Note>
+          </div>
         ) : (
-          <Note tone="info">{t('ext.restart')}</Note>
+          <div className="mt-3"><Folded text={t('ext.restart')} /></div>
         )}
       </Card>
 
@@ -382,9 +397,8 @@ function Installer({ forest, busy, act, goto, onInstalled }) {
                       disabled={busy || !chosen} onClick={review}>
                 <Refresh /> {t('ext.review.cta')}
               </button>
-              <span className="text-[11.5px] text-text-3">
-                {chosen ? t('ext.review.next') : t('ext.review.first')}
-              </span>
+              <More className="min-w-[16ch] flex-1 text-[12px] leading-relaxed text-text-3"
+                    text={chosen ? t('ext.review.next') : t('ext.review.first')} />
             </div>
           )}
         </div>
@@ -416,26 +430,26 @@ function Review({ plan, forest, busy, enableHere, setEnableHere, onInstall, onBa
       <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-[12.5px]">
         <dt className="font-medium text-text-2">{t('ext.licence')}</dt><dd>{plan.license || '—'}</dd>
         <dt className="font-medium text-text-2">{t('ext.source')}</dt>
-        <dd className="font-mono text-[11.5px] text-text-3">{plan.source}</dd>
+        <dd className="break-all font-mono text-[12px] text-text-3">{plan.source}</dd>
         <dt className="font-medium text-text-2">{t('ext.tier')}</dt>
         <dd>
           <Tier tier={plan.tier || 'unverified'} />
-          {plan.reason ? <div className="text-[11.5px] text-text-3">{plan.reason}</div> : null}
+          {plan.reason ? <div className="text-[12px] text-text-3">{plan.reason}</div> : null}
         </dd>
         {plan.revision ? (
           <>
             <dt className="font-medium text-text-2">{t('ext.revision')}</dt>
-            <dd className="font-mono text-[11.5px] text-text-3">{plan.revision.slice(0, 12)}</dd>
+            <dd className="font-mono text-[12px] text-text-3">{plan.revision.slice(0, 12)}</dd>
           </>
         ) : null}
         {plan.tracking ? (
           <>
             <dt className="font-medium text-text-2">{t('ext.tracking.label')}</dt>
-            <dd className="font-mono text-[11.5px] text-text-3">{plan.tracking}</dd>
+            <dd className="font-mono text-[12px] text-text-3">{plan.tracking}</dd>
           </>
         ) : null}
         <dt className="font-medium text-text-2">{t('ext.review.formats')}</dt>
-        <dd className="font-mono text-[11.5px]">
+        <dd className="font-mono text-[12px]">
           {(plan.formats || []).length ? plan.formats.join(' ') : t('ext.review.none')}
         </dd>
         <dt className="font-medium text-text-2">{t('ext.review.roles')}</dt>
@@ -448,8 +462,9 @@ function Review({ plan, forest, busy, enableHere, setEnableHere, onInstall, onBa
           <div>{t('ext.perm.filesystem', {
             value: plan.permissions?.filesystem || 'none',
           })}</div>
-          {/* L.9 rule 2, said out loud. */}
-          <Note tone="warn">{t('ext.perm.informs')}</Note>
+          {/* L.9 rule 2, said out loud — and it stays a warn, because it is
+              the one line that says what the declarations above do NOT do. */}
+          <Folded text={t('ext.perm.informs')} tone="warn" />
         </dd>
       </dl>
       {plan.kit?.ok === false ? (
@@ -696,9 +711,7 @@ function AuthoringPanel() {
 
   return (
     <div className="space-y-3">
-      <Note tone="info">
-        {t('ext.author.derived', { version: doc.data?.station || '?' })}
-      </Note>
+      <Folded text={t('ext.author.derived', { version: doc.data?.station || '?' })} />
       <Table head={[t('ext.author.seam'), t('ext.author.shape'),
                     t('ext.author.does')]}>
         {(doc.data?.seams || []).map((s) => (
@@ -706,7 +719,7 @@ function AuthoringPanel() {
             <Td><code>{s.seam}</code></Td>
             <Td>
               {s.declarative
-                ? <span className="text-[11.5px] text-text-3">{t('ext.author.manifest_only')}</span>
+                ? <span className="text-[12px] text-text-3">{t('ext.author.manifest_only')}</span>
                 : <code className="text-[12px]">{s.signature}</code>}
             </Td>
             <Td className="text-[12px]">{s.summary}</Td>
@@ -718,7 +731,7 @@ function AuthoringPanel() {
                 onClick={download}>
           <Download size={15} /> {t('ext.author.download')}
         </button>
-        <span className="text-[11.5px] text-text-3">{t('ext.author.download.hint')}</span>
+        <span className="text-[12px] text-text-3">{t('ext.author.download.hint')}</span>
       </div>
     </div>
   )

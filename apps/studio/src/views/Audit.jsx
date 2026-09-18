@@ -164,36 +164,45 @@ export default function Audit({ grant }) {
             A list carried in the console goes stale the release after it is
             written, and it goes stale silently — the filter simply stops
             offering the call that was added. */}
+        {/* At 375 the fixed widths meant one control per line with half a
+            line of slack beside it — six stacked boxes before the log. Each
+            control takes the row it is given below 640 and its own width
+            from there up, where the row was designed. */}
         <div className="mb-4 flex flex-wrap items-end gap-2">
-          <Select className="w-44" value={who} onChange={(e) => setWho(e.target.value)}>
+          <Select className="w-[calc(50%-0.25rem)] sm:w-44" value={who}
+                  onChange={(e) => setWho(e.target.value)}>
             <option value="">{t('audit.any_person')}</option>
             {(facets.principals || []).map((p) => <option key={p} value={p}>{p}</option>)}
           </Select>
-          <Select className="w-44" value={call} onChange={(e) => setCall(e.target.value)}>
+          <Select className="w-[calc(50%-0.25rem)] sm:w-44" value={call}
+                  onChange={(e) => setCall(e.target.value)}>
             <option value="">{t('audit.any_call')}</option>
             {(facets.primitives || []).map((p) => <option key={p} value={p}>{p}</option>)}
           </Select>
           {forests.length > 1 && (
-            <Select className="w-48" value={where} onChange={(e) => setWhere(e.target.value)}>
+            <Select className="w-full sm:w-48" value={where}
+                    onChange={(e) => setWhere(e.target.value)}>
               <option value="">{t('audit.any_forest')}</option>
               {forests.map((f) => <option key={f} value={f}>{f}</option>)}
             </Select>
           )}
-          <Segmented className="whitespace-nowrap" value={outcome}
+          <Segmented className="w-full whitespace-nowrap sm:w-auto" value={outcome}
                      onChange={setOutcome}
                      options={[
                        { value: '', label: t('audit.all') },
                        { value: 'errors', label: t('audit.only_errors') },
                        { value: 'cache', label: t('audit.only_cache') },
                      ]} />
-          <label className="flex items-center gap-1.5 text-[12px] text-text-3">
+          <label className="flex flex-1 items-center gap-1.5 text-[12px] text-text-3
+                            sm:flex-none">
             {t('audit.from')}
-            <input type="date" className="field !w-auto !py-1.5 text-[12.5px]"
+            <input type="date" className="field !py-1.5 text-[12.5px] sm:!w-auto"
                    value={since} onChange={(e) => setSince(e.target.value)} />
           </label>
-          <label className="flex items-center gap-1.5 text-[12px] text-text-3">
+          <label className="flex flex-1 items-center gap-1.5 text-[12px] text-text-3
+                            sm:flex-none">
             {t('audit.to')}
-            <input type="date" className="field !w-auto !py-1.5 text-[12.5px]"
+            <input type="date" className="field !py-1.5 text-[12.5px] sm:!w-auto"
                    value={until} onChange={(e) => setUntil(e.target.value)} />
           </label>
           {filtered && (
@@ -225,14 +234,14 @@ export default function Audit({ grant }) {
                 {/* `ts` is the column's name and always was. The console
                     read `e.at`, so the one column every row of this log has
                     always had rendered empty. */}
-                <Td className="whitespace-nowrap font-mono text-[11.5px] text-text-3">
+                <Td className="whitespace-nowrap font-mono text-[12px] text-text-3">
                   {String(e.ts || '').replace('T', ' ').slice(0, 19)}
                 </Td>
                 <Td className="font-medium text-text">{e.principal}</Td>
                 <Td><Badge tone="accent">{e.primitive}</Badge></Td>
                 <Td><Digest args={e.args} /></Td>
                 {forests.length > 1 && (
-                  <Td className="font-mono text-[11.5px] text-text-3">{e.forest}</Td>
+                  <Td className="font-mono text-[12px] text-text-3">{e.forest}</Td>
                 )}
                 <Td>
                   {/* An unknown code renders as itself: a Station newer than
@@ -248,7 +257,7 @@ export default function Audit({ grant }) {
                       each is a different purchase. */}
                   {millis(e.ms) || <span className="text-text-3">—</span>}
                   {e.model_ms !== undefined && (
-                    <span className="mt-0.5 block text-[11px] text-text-3">
+                    <span className="mt-0.5 block text-[12px] text-text-3">
                       {t('audit.model_took', { ms: millis(e.model_ms) })}
                     </span>
                   )}
@@ -266,7 +275,7 @@ export default function Audit({ grant }) {
                   ) : <span className="text-text-3">—</span>}
                 </Td>
                 <Td className="tabular-nums text-text-3">{e.size}</Td>
-                <Td className="font-mono text-[11.5px] text-text-3">
+                <Td className="font-mono text-[12px] text-text-3">
                   {e.commit_sha ? e.commit_sha.slice(0, 7) : '—'}
                 </Td>
               </tr>

@@ -40,6 +40,7 @@ import { useRouteState } from '../router.js'
 import {
   Badge, Card, Empty, ErrorNote, Note, Skeleton,
 } from '../design/ui.jsx'
+import { Folded, More } from '../design/Disclosure.jsx'
 import {
   Alert, Check, ChevronLeft, ChevronRight, Flame, Link, X,
 } from '../design/icons.jsx'
@@ -98,7 +99,9 @@ export default function Links({ forest, grant, goto }) {
     <div className="min-w-0 space-y-4">
       <Card title={t('links.title')} subtitle={t('links.sub')} icon={Link}
             actions={d ? <Badge>{t('links.pending', { n: d.total ?? 0 })}</Badge> : null}>
-        <p className="text-[12.5px] text-text-3">{t('links.why')}</p>
+        {/* What a vote DOES, one line of it visible: the card's subject is
+            the queue, not the rule behind it. */}
+        <Folded text={t('links.why')} />
       </Card>
 
       <Report report={outcomes} onDismiss={() => setOutcomes(null)} />
@@ -108,16 +111,14 @@ export default function Links({ forest, grant, goto }) {
         : page.error ? <Card><ErrorNote error={page.error} onRetry={page.reload} /></Card>
         : !groups.length ? (
           <Card>
-            <Empty icon={Check} title={after ? t('links.page_empty') : t('links.none')}>
-              {after ? t('links.page_empty_hint') : t('links.none_hint')}
+            <Empty icon={Check} title={after ? t('links.page_empty') : t('links.none')}
+                   action={after ? (
+                     <button className="btn btn-sm" onClick={back}>
+                       <ChevronLeft size={13} /> {t('links.back')}
+                     </button>
+                   ) : null}>
+              <More text={after ? t('links.page_empty_hint') : t('links.none_hint')} />
             </Empty>
-            {after ? (
-              <div className="text-center">
-                <button className="btn btn-sm" onClick={back}>
-                  <ChevronLeft size={13} /> {t('links.back')}
-                </button>
-              </div>
-            ) : null}
           </Card>
         ) : groups.map((g) => (
           <Group key={g.source.id} group={g} goto={goto}
@@ -262,7 +263,7 @@ function Report({ report, onDismiss }) {
           <Note tone="warn">{t('links.not_settled')}</Note>
           <ul className="mt-2 space-y-1">
             {left.map((v, i) => (
-              <li key={i} className="font-mono text-[11.5px] text-text-3">
+              <li key={i} className="font-mono text-[12px] text-text-3">
                 {v.rel} → {v.target} · {t(`links.outcome_one_${v.outcome}`)}
                 {v.message ? ` · ${v.message}` : ''}
               </li>

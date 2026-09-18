@@ -245,7 +245,7 @@ function FileRow({ file, depth, open, onOpen, label }) {
             aria-current={open === file.path}
             onClick={() => onOpen(file.path)}>
       <Icon size={12} className="shrink-0 opacity-70" />
-      <span className="truncate font-mono text-[11.5px]">{label}</span>
+      <span className="truncate font-mono text-[12px]">{label}</span>
     </button>
   )
 }
@@ -449,7 +449,7 @@ function NodeBody({ forest, id, mode, digest, onNavigate }) {
       <div className="space-y-4">
         <div>
           <div className="label">{t('files.passport')}</div>
-          <p className="mb-1.5 text-[11.5px] text-text-3">{t('files.passport_hint')}</p>
+          <p className="mb-1.5 text-[12px] text-text-3">{t('files.passport_hint')}</p>
           <pre className="source-view">
             <Highlighted text={passportYaml(d)} lang="yaml" />
           </pre>
@@ -634,7 +634,7 @@ function DatasetViewer({ forest, grant, file, digest }) {
                 {t('files.db_shortcut', { n: i + 1 })}
               </button>
             ))}
-            <span className="ml-auto text-[11px] text-text-3">{t('files.db_guard')}</span>
+            <span className="ml-auto text-[12px] text-text-3">{t('files.db_guard')}</span>
           </div>
 
           <div className="mt-3">
@@ -667,7 +667,7 @@ function Rows({ result }) {
             <tr className="text-left">
               {columns.map((c, i) => (
                 <th key={i} className="whitespace-nowrap border-b border-line px-2.5 py-2
-                                       text-[10.5px] font-semibold uppercase
+                                       text-[11px] font-semibold uppercase
                                        tracking-[0.06em] text-text-3">{c}</th>
               ))}
             </tr>
@@ -686,7 +686,7 @@ function Rows({ result }) {
           </tbody>
         </table>
       </div>
-      <p className="mt-2 text-[11.5px] text-text-3">
+      <p className="mt-2 text-[12px] text-text-3">
         {t('files.db_rows', { n: rows.length })}
         {result.limited ? ` · ${t('common.truncated')}` : ''}
       </p>
@@ -717,7 +717,7 @@ function Inspector({ forest, node, meta, onOpen }) {
           ['trails', t('files.tab_trails')]].map(([key, label]) => (
           <button key={key} type="button" onClick={() => setTab(key)}
                   aria-pressed={tab === key}
-                  className={`flex-1 border-b-2 px-2 py-2 text-[11.5px] transition
+                  className={`flex-1 border-b-2 px-2 py-2 text-[12px] transition
                     ${tab === key ? 'border-accent text-accent'
                                   : 'border-transparent text-text-3 hover:text-text-2'}`}>
             {label}
@@ -778,7 +778,7 @@ function Passport({ forest, d, meta, onOpen }) {
           {t('files.scent', { n: scent, max: SUMMARY_TOKENS })}
         </div>
         <p className="text-[13px] leading-relaxed text-text">{d.summary}</p>
-        <p className="mt-1 text-[11px] leading-relaxed text-text-3">
+        <p className="mt-1 text-[12px] leading-relaxed text-text-3">
           {t('files.scent_hint')}
         </p>
       </div>
@@ -807,11 +807,11 @@ function Passport({ forest, d, meta, onOpen }) {
           <ul className="divide-y divide-line">
             {d.edges_out.map((e, i) => (
               <li key={i} className="py-1.5">
-                <span className="text-[10.5px] uppercase tracking-[0.05em] text-text-3">
+                <span className="text-[11px] uppercase tracking-[0.05em] text-text-3">
                   {e.rel}
                 </span>
                 <button type="button" onClick={() => onOpen?.(e.target)}
-                        className="block break-all text-left font-mono text-[11.5px]
+                        className="block break-all text-left font-mono text-[12px]
                                    text-text-2 hover:text-accent">
                   {e.target}
                 </button>
@@ -936,7 +936,7 @@ function Original({ forest, d, meta }) {
         )}
       </div>
       {remote && (
-        <p className="mt-1 text-[11px] text-text-3">{t('files.original_remote')}</p>
+        <p className="mt-1 text-[12px] text-text-3">{t('files.original_remote')}</p>
       )}
       <ErrorNote error={error} />
     </div>
@@ -964,7 +964,7 @@ function IndexEntry({ forest, d }) {
                      text={entry ? `- [[${entry.id}]] — ${entry.summary}`
                                  : t('files.index_missing')} />
       </pre>
-      <p className="text-[11.5px] text-text-3">{t('files.index_derived')}</p>
+      <p className="text-[12px] text-text-3">{t('files.index_derived')}</p>
     </div>
   )
 }

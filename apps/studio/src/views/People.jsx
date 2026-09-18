@@ -7,8 +7,9 @@ import { useRouteState } from '../router.js'
 import { useI18n } from '../i18n.jsx'
 import {
   Badge, Card, CheckList, Code, CopyButton, Empty, ErrorNote, Field, Modal,
-  Note, Select, Skeleton, Spinner, Table, Tabs, Td, Toggle,
+  Note, Rows, Select, Skeleton, Spinner, Table, Tabs, Td, Toggle,
 } from '../design/ui.jsx'
+import { Folded } from '../design/Disclosure.jsx'
 import { Access as Shield, Key, Plus, Trash, Users } from '../design/icons.jsx'
 import {
   ALL_CAPS, NeedsCapability, branchOf, has, useAsync, useForestTree,
@@ -122,84 +123,83 @@ export default function People({ forest, grant, me }) {
   )
 }
 
+/* Seven columns of governance (J.5).
+ *
+ * At 375px this was a 544px sideways scroll: the name of the person a row
+ * is about left the screen the moment the operator scrolled right to read
+ * their scope, which is the one pairing the whole table exists to show. The
+ * columns are labelled facts, so under 640px each row is a card carrying
+ * its own labels — `Rows` in design/ui.jsx owns that split, and Models uses
+ * the same one for its providers.
+ */
 function PeopleTable({ people, me, onOpen }) {
   const { t } = useI18n()
   if (people.length === 0) {
     return <Empty icon={Users} title={t('people.none')}>{t('people.none_hint')}</Empty>
   }
   return (
-    <Table head={[t('access.who'), t('access.role'), t('access.scope'),
-                  t('people.signin'), t('people.tokens'), t('people.last_seen'), '']}>
-      {people.map((p) => (
-        <tr key={p.id}>
-          <Td>
-            <span className="flex items-center gap-2">
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full
-                               bg-accent-soft text-[10px] font-semibold uppercase text-accent">
-                {p.id.slice(0, 2)}
-              </span>
-              <span className="font-medium text-text">{p.id}</span>
-              {p.id === me.principal && <Badge>{t('people.you')}</Badge>}
-            </span>
-          </Td>
-          <Td>
-            {/* One level over several forests is the common case, so it is
-                shown once with a count rather than as N identical badges —
-                and the count names them on hover, because "9 forests" that
-                cannot be expanded is a number, not an answer. */}
-            {uniform(p.grants) ? (
-              <span className="flex flex-wrap items-center gap-1">
-                <Badge tone="accent">{t(`role.${roleOf(p.grants[0].caps)}`)}</Badge>
-                <ForestsBadge grants={p.grants} />
-              </span>
-            ) : (
-              <div className="space-y-1">
-                {p.grants.map((g) => (
-                  <div key={g.forest} className="flex min-h-[19px] items-center gap-1">
-                    <Badge tone="accent">{t(`role.${roleOf(g.caps)}`)}</Badge>
-                    <Badge className="font-mono">{g.forest}</Badge>
-                  </div>
+    <Rows head={[t('access.who'), t('access.role'), t('access.scope'),
+                 t('people.signin'), t('people.tokens'), t('people.last_seen')]}
+          rows={people.map((p) => ({
+            key: p.id,
+            cells: [
+              <span className="flex items-center gap-2">
+                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full
+                                 bg-accent-soft text-[11px] font-semibold uppercase text-accent">
+                  {p.id.slice(0, 2)}
+                </span>
+                <span className="font-medium text-text">{p.id}</span>
+                {p.id === me.principal && <Badge>{t('people.you')}</Badge>}
+              </span>,
+              /* One level over several forests is the common case, so it is
+                 shown once with a count rather than as N identical badges —
+                 and the count names them on hover, because "9 forests" that
+                 cannot be expanded is a number, not an answer. */
+              uniform(p.grants) ? (
+                <span className="flex flex-wrap items-center justify-end gap-1 sm:justify-start">
+                  <Badge tone="accent">{t(`role.${roleOf(p.grants[0].caps)}`)}</Badge>
+                  <ForestsBadge grants={p.grants} />
+                </span>
+              ) : (
+                <span className="flex flex-col items-end gap-1 sm:items-start">
+                  {p.grants.map((g) => (
+                    <span key={g.forest} className="flex min-h-[19px] items-center gap-1">
+                      <Badge tone="accent">{t(`role.${roleOf(g.caps)}`)}</Badge>
+                      <Badge className="font-mono">{g.forest}</Badge>
+                    </span>
+                  ))}
+                </span>
+              ),
+              /* Nine forests granted whole is one fact, not nine rows of it.
+                 Where they do differ, the rows line up with the forests
+                 named beside them in the previous column. */
+              <span className="flex flex-col items-end gap-1 text-[12px] text-text-2 sm:items-start">
+                {(uniform(p.grants) ? p.grants.slice(0, 1) : p.grants).map((g) => (
+                  <span key={g.forest} className="flex min-h-[19px] items-center font-mono">
+                    {g.allow?.length === 1 && g.allow[0] === ''
+                      ? t('access.scope_all')
+                      : g.allow.map((a) => a.replace(/\/$/, '')).join(', ')}
+                    {g.deny?.length > 0 && (
+                      <span className="text-danger"> − {g.deny.join(', ')}</span>
+                    )}
+                  </span>
                 ))}
-              </div>
-            )}
-          </Td>
-          <Td className="text-[12px] text-text-2">
-            {/* Nine forests granted whole is one fact, not nine rows of it.
-                Where they do differ, the rows line up with the forests
-                named beside them in the previous column. */}
-            <div className="space-y-1">
-              {(uniform(p.grants) ? p.grants.slice(0, 1) : p.grants).map((g) => (
-                <div key={g.forest} className="flex min-h-[19px] items-center font-mono">
-                  {g.allow?.length === 1 && g.allow[0] === ''
-                    ? t('access.scope_all')
-                    : g.allow.map((a) => a.replace(/\/$/, '')).join(', ')}
-                  {g.deny?.length > 0 && (
-                    <span className="text-danger"> − {g.deny.join(', ')}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </Td>
-          <Td>
-            {p.has_password ? <Badge tone="accent">{t('people.password_yes')}</Badge>
-                            : <Badge>{t('people.password_no')}</Badge>}
-          </Td>
-          <Td className="tabular-nums text-text-2">{p.live_tokens}</Td>
-          <Td className="whitespace-nowrap text-[12px] text-text-3">
-            {p.last_seen ? p.last_seen.replace('T', ' ').slice(0, 16) : t('tokens.unused')}
-          </Td>
-          <Td>
-            <div className="flex justify-end">
+              </span>,
+              p.has_password ? <Badge tone="accent">{t('people.password_yes')}</Badge>
+                             : <Badge>{t('people.password_no')}</Badge>,
+              <span className="tabular-nums text-text-2">{p.live_tokens}</span>,
+              <span className="whitespace-nowrap text-[12px] text-text-3">
+                {p.last_seen ? p.last_seen.replace('T', ' ').slice(0, 16) : t('tokens.unused')}
+              </span>,
+            ],
+            actions: (
               <button className="btn btn-sm" onClick={() => onOpen(p.id)}
                       disabled={!p.manageable} title={!p.manageable
                         ? t('people.not_manageable') : undefined}>
                 {t('people.manage')}
               </button>
-            </div>
-          </Td>
-        </tr>
-      ))}
-    </Table>
+            ),
+          }))} />
   )
 }
 
@@ -233,40 +233,38 @@ function TokenTable({ people, onChanged }) {
     return <Empty icon={Key} title={t('tokens.none')}>{t('tokens.none_hint')}</Empty>
   }
   return (
-    <Table head={[t('tokens.label'), t('common.principal'), t('tokens.prefix'),
-                  t('tokens.expires'), t('tokens.last_used'), t('audit.result'), '']}>
-      {tokens.map((k) => (
-        <tr key={k.id} className={k.status === 'active' ? '' : 'opacity-60'}>
-          <Td className="font-medium text-text">{k.label || '—'}</Td>
-          <Td className="text-text-2">{k.who}</Td>
-          <Td className="font-mono text-[11.5px] text-text-3">{k.prefix ? `${k.prefix}…` : '—'}</Td>
-          <Td className="whitespace-nowrap text-[12px] text-text-3">
-            {k.expires_at ? k.expires_at.slice(0, 10) : t('tokens.never')}
-          </Td>
-          <Td className="whitespace-nowrap text-[12px] text-text-3">
-            {k.last_used_at ? k.last_used_at.replace('T', ' ').slice(0, 16)
-                            : t('tokens.unused')}
-          </Td>
-          <Td>
-            {k.status === 'active' ? <Badge tone="accent">{t('tokens.active')}</Badge>
-              : k.status === 'expired' ? <Badge tone="warn">{t('tokens.expired')}</Badge>
-              : <Badge tone="danger">{t('tokens.revoked')}</Badge>}
-          </Td>
-          <Td>
-            {k.status === 'active' && (
-              <div className="flex justify-end">
-                <button className="btn btn-sm btn-danger" title={t('tokens.revoke')}
-                        onClick={() => api.savePerson({ principal: k.who,
-                                                        revoke_keys: [k.id] })
-                          .then(onChanged)}>
-                  <Trash size={13} />
-                </button>
-              </div>
-            )}
-          </Td>
-        </tr>
-      ))}
-    </Table>
+    <Rows head={[t('tokens.label'), t('common.principal'), t('tokens.prefix'),
+                 t('tokens.expires'), t('tokens.last_used'), t('audit.result')]}
+          rows={tokens.map((k) => ({
+            key: k.id,
+            cells: [
+              <span className={`font-medium text-text ${k.status === 'active' ? '' : 'opacity-60'}`}>
+                {k.label || '—'}
+              </span>,
+              <span className="text-text-2">{k.who}</span>,
+              <span className="font-mono text-[12px] text-text-3">
+                {k.prefix ? `${k.prefix}…` : '—'}
+              </span>,
+              <span className="whitespace-nowrap text-[12px] text-text-3">
+                {k.expires_at ? k.expires_at.slice(0, 10) : t('tokens.never')}
+              </span>,
+              <span className="whitespace-nowrap text-[12px] text-text-3">
+                {k.last_used_at ? k.last_used_at.replace('T', ' ').slice(0, 16)
+                                : t('tokens.unused')}
+              </span>,
+              k.status === 'active' ? <Badge tone="accent">{t('tokens.active')}</Badge>
+                : k.status === 'expired' ? <Badge tone="warn">{t('tokens.expired')}</Badge>
+                : <Badge tone="danger">{t('tokens.revoked')}</Badge>,
+            ],
+            actions: k.status === 'active' ? (
+              <button className="btn btn-sm btn-danger" title={t('tokens.revoke')}
+                      onClick={() => api.savePerson({ principal: k.who,
+                                                      revoke_keys: [k.id] })
+                        .then(onChanged)}>
+                <Trash size={13} />
+              </button>
+            ) : null,
+          }))} />
   )
 }
 
@@ -394,9 +392,9 @@ function PersonDrawer({ person, forests, me, defaultForest, onClose, onSaved }) 
               ))}
               <option value="custom" disabled>{t('role.custom')}</option>
             </Select>
-            <p className="mt-1.5 text-[11.5px] text-text-3">{t(`role.${form.role}_desc`)}</p>
+            <p className="mt-1.5 text-[12px] text-text-3">{t(`role.${form.role}_desc`)}</p>
             {form.forests.length > 1 && (
-              <p className="mt-2 text-[11.5px] text-text-3">
+              <p className="mt-2 text-[12px] text-text-3">
                 {t('access.forests_same_level', { n: form.forests.length })}
               </p>
             )}
@@ -554,7 +552,7 @@ function Levels() {
           <tr key={role}>
             <Td>
               <span className="block text-[13px] font-medium text-text">{t(`role.${role}`)}</span>
-              <span className="mt-0.5 block text-[11.5px] text-text-3">{t(`role.${role}_desc`)}</span>
+              <span className="mt-0.5 block text-[12px] text-text-3">{t(`role.${role}_desc`)}</span>
             </Td>
             <Td className="text-[12.5px] text-text-2">
               {caps.map((c) => t(`cap.${c}`)).join(', ')}
@@ -565,7 +563,7 @@ function Levels() {
           </tr>
         ))}
       </Table>
-      <div className="mt-4"><Note>{t('access.levels_note')}</Note></div>
+      <div className="mt-4"><Folded text={t('access.levels_note')} /></div>
     </Card>
   )
 }

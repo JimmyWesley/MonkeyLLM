@@ -63,9 +63,18 @@ const binding = bodyOf(storage, BINDING)
 
 /* -- the reach: read from the route, never computed --------------------- */
 
-ok('J.19.2 the tab is offered to an administrator of this forest',
-   /has\(grant, 'admin'\)\s*\n?\s*\? \[\{ value: 'storage'/.test(ingest)
-   || /value: 'storage'/.test(ingest) && /has\(grant, 'admin'\)/.test(ingest))
+/* The store surface is a SECTION of the ingest console rather than a tab of
+   it (the v0.85 layout round): J.19.9 puts it in Build → Ingest and says
+   nothing about which shape it takes there, and `?mode=storage` still names
+   it because an address outlives the layout that produced it (J.5.8). What
+   this asserts is unchanged in substance — only an administrator is offered
+   it, and it is reachable by name. */
+ok('J.19.2 the store surface is offered to an administrator of this forest',
+   /has\(grant, 'admin'\) && \(\s*\n\s*<section ref=\{storageAt\}/.test(ingest)
+   && /<Storage forest=\{forest\}/.test(ingest))
+ok('J.19.9 and it is still nameable in the address',
+   /allow: \[[^\]]*'storage'/.test(ingest)
+   && /place === 'storage' \? storageAt/.test(ingest))
 ok('J.19.2 whether the reader may EDIT is the route\'s answer',
    /stores\.data\?\.may_manage/.test(storage))
 ok('J.19.2 the console does not compute "administers every forest" itself',

@@ -1,4 +1,5 @@
 {
+  "tags.browse": "Browse tags",
   "tags.bulk_apply": "Add to the selection",
   "tags.bulk_complete": "Done: all {n} nodes were reached and none refused.",
   "tags.bulk_counts": "{changed} written · {unchanged} already had them.",
@@ -20,7 +21,9 @@
   "tags.select_node": "Select {id}",
   "tags.select_none": "Select none",
   "tags.vocabulary": "Tags",
+  "tags.vocabulary_count": "{n} tags in this forest",
   "tags.vocabulary_empty": "Nothing in your scope carries a tag yet.",
   "tags.vocabulary_hint": "Every tag that occurs, and how many nodes carry it — counted over your whole scope, not over this page. Click one to filter.",
+  "tags.vocabulary_rest": "and {n} more",
   "tags.vocabulary_truncated": "Showing {shown} of {total} tags."
 }

@@ -55,7 +55,7 @@ function Aside({ timing, wall, bytes, rate }) {
   // timing — but a stopwatch read across a suspended tab is not.
   const net = Math.max(0, wall - timing.vine - timing.host - (timing.model || 0))
   return (
-    <p className="mb-3 text-[11px] leading-relaxed text-text-3">
+    <p className="mb-3 text-[12px] leading-relaxed text-text-3">
       {/* Spelled out, never as `/s`. Rendered as "7.407/s" the number was
           read as seven-point-four seconds — by the person who wrote the
           engine, which settles whether a visitor would manage it. And
@@ -289,7 +289,7 @@ export default function Playground({ forest, grant }) {
                     has no trace to show, so it gets the other half of the
                     same sentence: that figure IS its own clock. */}
                 {state.timing && !state.data.trace?.steps?.length && (
-                  <p className="mb-3 text-[11px] leading-relaxed text-text-3">
+                  <p className="mb-3 text-[12px] leading-relaxed text-text-3">
                     {t('playground.one_call')}
                   </p>
                 )}
@@ -309,7 +309,7 @@ export default function Playground({ forest, grant }) {
           {state.data?.trace?.steps?.length > 0 && (
             <Card title={t('explain.title')} subtitle={t('playground.trace_sub')}>
               <TraceSteps steps={state.data.trace.steps} />
-              <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[11.5px]">
+              <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[12px]">
                 <Row label={t('explain.steps')} value={state.data.trace.steps.length} />
               </dl>
             </Card>

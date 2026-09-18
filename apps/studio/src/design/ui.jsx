@@ -74,8 +74,8 @@ export function Field({ label, hint, error, className = '', as, children, ...pro
     <label className={`block ${className}`}>
       {label && <span className="label">{label}</span>}
       <Tag className="field" {...props}>{children}</Tag>
-      {hint && !error && <span className="mt-1 block text-[11.5px] text-text-3">{hint}</span>}
-      {error && <span className="mt-1 block text-[11.5px] text-danger">{error}</span>}
+      {hint && !error && <span className="mt-1 block text-[12px] text-text-3">{hint}</span>}
+      {error && <span className="mt-1 block text-[12px] text-danger">{error}</span>}
     </label>
   )
 }
@@ -93,7 +93,7 @@ export function Select({ label, hint, children, className = '', ...props }) {
         <ChevronDown size={15} className="pointer-events-none absolute right-2.5
                                           top-1/2 -translate-y-1/2 text-text-3" />
       </div>
-      {hint && <span className="mt-1 block text-[11.5px] text-text-3">{hint}</span>}
+      {hint && <span className="mt-1 block text-[12px] text-text-3">{hint}</span>}
     </label>
   )
 }
@@ -151,13 +151,13 @@ export function Combobox({ label, value, onChange, options = [], hint, placehold
                       onClick={() => { onChange(o.value); setQuery(null); setOpen(false) }}>
                 <span className="truncate font-mono text-[12px]">{o.value}</span>
                 {o.meta && (
-                  <span className="shrink-0 text-[11px] tabular-nums text-text-3">{o.meta}</span>
+                  <span className="shrink-0 text-[12px] tabular-nums text-text-3">{o.meta}</span>
                 )}
               </button>
             ))}
         </div>
       )}
-      {hint && <span className="mt-1 block text-[11.5px] text-text-3">{hint}</span>}
+      {hint && <span className="mt-1 block text-[12px] text-text-3">{hint}</span>}
     </label>
   )
 }
@@ -212,7 +212,7 @@ export function CheckList({
             <Box checked={every} mixed={some} />
             {allLabel}
           </button>
-          <span className="shrink-0 text-[11.5px] tabular-nums text-text-3">
+          <span className="shrink-0 text-[12px] tabular-nums text-text-3">
             {value.length}/{all.length}
           </span>
         </div>
@@ -244,14 +244,14 @@ export function CheckList({
                   <span className="block truncate font-mono text-[12.5px]">
                     {o.label || o.value}
                   </span>
-                  {o.meta && <span className="block text-[11px] text-text-3">{o.meta}</span>}
+                  {o.meta && <span className="block text-[12px] text-text-3">{o.meta}</span>}
                 </span>
               </button>
             )
           })}
         </div>
       </div>
-      {hint && <span className="mt-1 block text-[11.5px] text-text-3">{hint}</span>}
+      {hint && <span className="mt-1 block text-[12px] text-text-3">{hint}</span>}
     </div>
   )
 }
@@ -269,7 +269,7 @@ export function Toggle({ checked, onChange, label, hint, icon: Icon, compact }) 
               className="flex items-center gap-2 rounded-lg px-1 py-0.5
                          transition hover:bg-surface-2">
         {Icon && <Icon size={14} className={checked ? 'text-accent' : 'text-text-3'} />}
-        <span className="text-[11.5px] text-text-3">{label}</span>
+        <span className="text-[12px] text-text-3">{label}</span>
         <span className={`h-[16px] w-7 shrink-0 rounded-full border transition
           ${checked ? 'border-accent bg-accent' : 'border-line-strong bg-surface-2'}`}>
           <span className={`block h-3 w-3 translate-y-[1px] rounded-full bg-white
@@ -292,7 +292,7 @@ export function Toggle({ checked, onChange, label, hint, icon: Icon, compact }) 
       </button>
       <span className="min-w-0">
         <span className="block text-[13px] text-text">{label}</span>
-        {hint && <span className="block text-[11.5px] text-text-3">{hint}</span>}
+        {hint && <span className="block text-[12px] text-text-3">{hint}</span>}
       </span>
     </label>
   )
@@ -333,18 +333,32 @@ export function Tabs({ value, onChange, options }) {
 export const Badge = ({ children, tone = 'default', className = '', ...rest }) => (
   <span className={`badge ${tone === 'accent' ? 'badge-accent'
     : tone === 'danger' ? 'badge-danger'
+    : tone === 'ok' || tone === 'good' ? 'badge-ok'
     : tone === 'warn' ? 'badge-warn' : ''} ${className}`} {...rest}>{children}</span>
 )
 
+/** Nothing here, said in the height that fact deserves (J.5.4).
+ *
+ *  An empty state is a sentence, not a poster. The previous one was a 44px
+ *  glyph over a stacked title, a paragraph and a button — around 220px of
+ *  chrome to report an absence, on consoles where the absence is the
+ *  ordinary first state. One line now, the glyph at 32px beside it and the
+ *  action beside that; anything longer than a sentence belongs in a
+ *  `Disclosure` under it, which is where the caller puts it.
+ */
 export const Empty = ({ title, children, icon: Icon, action }) => (
-  <div className="grid place-items-center px-4 py-10 text-center">
+  <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2
+                  px-4 py-5 text-center sm:flex-nowrap sm:text-left">
     {Icon && (
-      <span className="mb-3 grid h-11 w-11 place-items-center rounded-xl
-                       bg-surface-2 text-text-3"><Icon size={20} /></span>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg
+                       bg-surface-2 text-text-3"><Icon size={16} /></span>
     )}
-    {title && <p className="text-[13.5px] font-medium text-text">{title}</p>}
-    {children && <p className="mt-1 max-w-sm text-[12.5px] leading-relaxed text-text-3">{children}</p>}
-    {action && <div className="mt-4">{action}</div>}
+    <p className="min-w-0 text-[12.5px] leading-relaxed text-text-3">
+      {title && <span className="font-medium text-text">{title}</span>}
+      {title && children ? ' ' : null}
+      {children}
+    </p>
+    {action && <span className="shrink-0">{action}</span>}
   </div>
 )
 
@@ -369,9 +383,16 @@ export function ErrorNote({ error, onRetry }) {
   )
 }
 
+/* `ok`/`good` and `error` are here because views already asked for them —
+   `tone="ok"` in Health and the tag runs, `tone="good"`/`tone="error"` in
+   Extensions — and an unknown tone fell back to `info` in silence, so a
+   confirmation and a failure were rendering as the same grey box. */
 const NOTE_TONES = {
   warn: ['border-warn/25 bg-warn-soft text-text-2', 'text-warn'],
   danger: ['border-danger/25 bg-danger-soft text-text-2', 'text-danger'],
+  error: ['border-danger/25 bg-danger-soft text-text-2', 'text-danger'],
+  ok: ['border-ok/25 bg-ok-soft text-text-2', 'text-ok'],
+  good: ['border-ok/25 bg-ok-soft text-text-2', 'text-ok'],
   info: ['border-line bg-surface-2 text-text-2', 'text-text-3'],
 }
 
@@ -428,6 +449,66 @@ export function Table({ head, children, dense = false }) {
 export const Td = ({ children, className = '', ...p }) => (
   <td className={`px-2 py-2.5 align-top ${className}`} {...p}>{children}</td>
 )
+
+/** One listing, two shapes (J.5).
+ *
+ *  A table is the right instrument for a log and the wrong one for a phone:
+ *  the People console's seven columns became a 544px sideways scroll at
+ *  375px, so the name of the person a row is about left the screen the
+ *  moment the operator went looking for their scope. The columns are not a
+ *  layout, they are a set of labelled facts — so under 640px each row is a
+ *  card and each fact carries the column's own heading, while at 640px and
+ *  up it is the same table as before, to the pixel.
+ *
+ *  `rows` is `[{ key, cells, actions }]` and `head` names the cells. The
+ *  FIRST cell is the row's subject — a name, an id, a label — so on a card
+ *  it is the heading rather than another labelled line. A cell that is
+ *  `null` is omitted from the card and still occupies its column in the
+ *  table, because a table with a hole in it is still aligned and a card
+ *  with an empty line is just noise.
+ */
+export function Rows({ head, rows }) {
+  const acts = rows.some((r) => r.actions)
+  return (
+    <>
+      <div className="hidden sm:block">
+        <Table head={acts ? [...head, ''] : head}>
+          {rows.map((r) => (
+            <tr key={r.key}>
+              {r.cells.map((cell, i) => <Td key={i}>{cell}</Td>)}
+              {acts && (
+                <Td><div className="flex justify-end gap-1.5">{r.actions}</div></Td>
+              )}
+            </tr>
+          ))}
+        </Table>
+      </div>
+      <ul className="space-y-2 sm:hidden">
+        {rows.map((r) => (
+          <li key={r.key} className="rounded-lg border border-line bg-surface-2 p-3">
+            <div className="text-[13.5px] font-medium text-text">{r.cells[0]}</div>
+            <dl className="mt-2 space-y-1.5">
+              {r.cells.slice(1).map((cell, i) => (
+                cell == null || cell === false ? null : (
+                  <div key={i} className="flex items-baseline justify-between gap-3">
+                    <dt className="shrink-0 text-[12px] text-text-3">{head[i + 1]}</dt>
+                    <dd className="min-w-0 text-right text-[12.5px] text-text-2">{cell}</dd>
+                  </div>
+                )
+              ))}
+            </dl>
+            {r.actions && (
+              <div className="mt-2.5 flex flex-wrap justify-end gap-1.5
+                              border-t border-line pt-2.5">
+                {r.actions}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
 
 export function CopyButton({ value, label }) {
   const [done, setDone] = useState(false)

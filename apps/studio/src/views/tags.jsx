@@ -72,26 +72,59 @@ export async function browseTag(forest, roots, tag) {
   return { hits: [...seen.values()], total, truncated }
 }
 
-/** The forest's tag vocabulary, with counts (J.5.18 rule 4). */
-export function TagVocabulary({ forest, active, onPick, onClear }) {
+/** How many tags stand in front of the vocabulary before it asks to be
+ *  opened. A hundred chips is a wall, and the tail of a tag vocabulary is
+ *  its long tail: twenty by count covers what anybody browses by, and the
+ *  rest is one click and still exactly the same list. */
+const FIRST_TAGS = 20
+
+/** The forest's tag vocabulary, with counts (J.5.18 rule 4).
+ *
+ *  `collapsed` is the reading console's landing (J.5.14): a person opening
+ *  a reading page is looking for a document, and the first thing on the
+ *  screen was ~100 tag chips. The panel still loads its counts — the route
+ *  is one cheap GROUP BY — and states how many tags there are; the chips
+ *  themselves wait to be asked for.
+ */
+export function TagVocabulary({ forest, active, onPick, onClear, collapsed = false }) {
   const { t } = useI18n()
   const vocab = useAsync(() => api.tags(forest), [forest])
+  const [open, setOpen] = useState(!collapsed)
+  const [all, setAll] = useState(false)
 
-  const entries = vocab.data?.tags || []
+  // Biggest first: the count is the whole reason a vocabulary is a map and
+  // not a list, and `invoice: 41` beside `invoices: 3` is only legible when
+  // they are adjacent. Ties by name, so the order is stable between reads.
+  const entries = [...(vocab.data?.tags || [])]
+    .sort((a, b) => (b.nodes - a.nodes) || a.tag.localeCompare(b.tag))
+  const shown = all ? entries : entries.slice(0, FIRST_TAGS)
+  const rest = entries.length - shown.length
   return (
     <Card title={t('tags.vocabulary')} subtitle={t('tags.vocabulary_hint')}
           icon={Tag} bodyClass="p-3"
-          actions={active ? (
-            <button className="btn btn-sm" onClick={onClear}>
-              <X size={12} /> {t('tags.clear_filter')}
-            </button>
-          ) : null}>
-      {vocab.busy ? <Skeleton rows={4} />
+          actions={<>
+            {active ? (
+              <button className="btn btn-sm" onClick={onClear}>
+                <X size={12} /> {t('tags.clear_filter')}
+              </button>
+            ) : null}
+            {collapsed ? (
+              <button className="btn btn-sm" aria-expanded={open}
+                      onClick={() => setOpen((v) => !v)}>
+                {open ? t('common.hide') : t('tags.browse')}
+              </button>
+            ) : null}
+          </>}>
+      {!open ? (
+        <p className="px-1 py-0.5 text-[12px] text-text-3">
+          {t('tags.vocabulary_count', { n: vocab.data?.total ?? entries.length })}
+        </p>
+      ) : vocab.busy ? <Skeleton rows={4} />
         : vocab.error ? <ErrorNote error={vocab.error} onRetry={vocab.reload} />
         : !entries.length ? <Empty icon={Tag}>{t('tags.vocabulary_empty')}</Empty> : (
         <>
           <ul className="flex flex-wrap gap-1.5">
-            {entries.map((e) => (
+            {shown.map((e) => (
               <li key={e.tag}>
                 <button type="button"
                         aria-pressed={active === e.tag}
@@ -107,6 +140,14 @@ export function TagVocabulary({ forest, active, onPick, onClear }) {
               </li>
             ))}
           </ul>
+          {rest > 0 && (
+            <button type="button" className="mt-2 text-[12px] text-text-3
+                                             underline underline-offset-2
+                                             transition hover:text-accent"
+                    onClick={() => setAll(true)}>
+              {t('tags.vocabulary_rest', { n: rest })}
+            </button>
+          )}
           {/* C.6.2's pattern, on the console side: the cap is stated, so a
               vocabulary that was clipped never reads as a vocabulary that
               is complete. */}

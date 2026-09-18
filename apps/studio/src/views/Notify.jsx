@@ -37,6 +37,7 @@ import {
   Badge, Card, Code, CopyButton, Empty, ErrorNote, Field, Modal, Note,
   Segmented, Skeleton, Table, Td,
 } from '../design/ui.jsx'
+import { Folded, More } from '../design/Disclosure.jsx'
 import { Alert, Key, Plus, Refresh, Trash, X } from '../design/icons.jsx'
 import { NeedsCapability, has, useAsync } from './shared.jsx'
 
@@ -151,7 +152,10 @@ export default function Notify({ forest, grant }) {
       {error && <Card><ErrorNote error={error} /></Card>}
 
       <Card title={t('notify.title')} subtitle={t('notify.sub')} icon={Refresh}>
-        <Note>{t('notify.causes')}</Note>
+        {/* The standing authority, in one line with the rest behind it:
+            what it may CAUSE is the reason this console is careful, and it
+            is still a sentence somebody has to be able to read whole. */}
+        <Folded text={t('notify.causes')} />
         <div className="mt-3">
           <div className="label">{t('notify.url')}</div>
           <div className="flex flex-wrap items-center gap-2">
@@ -160,12 +164,12 @@ export default function Notify({ forest, grant }) {
                              text-text-2">{url}</code>
             <CopyButton value={url} label={t('common.copy')} />
           </div>
-          <p className="mt-1.5 text-[11.5px] text-text-3">{t('notify.url_hint')}</p>
+          <div className="mt-1.5"><More text={t('notify.url_hint')} /></div>
           {/* The ceiling is the deployment's and is read from its answer: a
               console that printed a number of its own would be wrong on the
               first deployment that raised it (J.8.5's rule). */}
           {limits.max_keys ? (
-            <p className="mt-1 text-[11.5px] text-text-3">
+            <p className="mt-1 text-[12px] text-text-3">
               {t('notify.url_max', { n: limits.max_keys })}
             </p>
           ) : null}
@@ -212,17 +216,22 @@ export default function Notify({ forest, grant }) {
         )}
         {asked && <div className="mt-2"><Note tone="warn">{t('notify.remove_hint')}</Note></div>}
 
+        {/* The hint lives OUTSIDE the grid: with it inside the field's cell,
+            `items-end` aligned the button to the hint's baseline, a row
+            below the input it belongs to. */}
         <form onSubmit={create}
-              className="mt-5 grid gap-3 border-t border-line pt-4 sm:grid-cols-[1fr_auto]
+              className="mt-5 grid gap-3 border-t border-line pt-4 sm:grid-cols-[minmax(0,1fr)_auto]
                          sm:items-end">
-          <Field label={t('notify.label')} value={label}
-                 placeholder={t('notify.label_ph')} hint={t('notify.label_hint')}
+          <Field label={t('notify.label')} value={label} className="min-w-0"
+                 placeholder={t('notify.label_ph')}
                  onChange={(e) => setLabel(e.target.value)} />
-          <button className="btn btn-primary h-[38px]" disabled={busy}>
+          <button className="btn btn-primary h-[38px] whitespace-nowrap" disabled={busy}>
             <Plus size={14} /> {busy ? t('common.saving') : t('notify.create')}
           </button>
         </form>
-        <p className="mt-1.5 text-[11.5px] text-text-3">{t('notify.create_hint')}</p>
+        <p className="mt-1.5 text-[12px] text-text-3">
+          {t('notify.label_hint')} {t('notify.create_hint')}
+        </p>
       </Card>
 
       <Card title={t('notify.sign')} subtitle={t('notify.sign_sub')} icon={Key}>
@@ -234,15 +243,14 @@ export default function Notify({ forest, grant }) {
             {SIGN[lang]({ url, id: sample })}
           </Code>
         </div>
+        {/* Three rules under one snippet used to be three boxes of prose
+            between the code and the next card. Each states its own line and
+            keeps the rest — the refusal one stays a warn, because an
+            integrator debugging a 4xx has to find it. */}
         <div className="mt-3 space-y-1.5">
-          <Note>{t('notify.sign_headers')}</Note>
-          <Note>{t('notify.sign_skew', { n: skewMinutes })}</Note>
-          {/* One refusal for every cause (J.20 rule 3): an absent signature,
-              a wrong one, a stale timestamp and an unknown id all answer the
-              same thing, because a distinct refusal per cause tells an
-              unauthenticated caller which half they got right. Said here, or
-              an integrator debugging a 4xx reads the silence as a bug. */}
-          <Note tone="warn">{t('notify.sign_refusal')}</Note>
+          <Folded text={t('notify.sign_headers')} />
+          <Folded text={t('notify.sign_skew', { n: skewMinutes })} />
+          <Folded text={t('notify.sign_refusal')} tone="warn" />
         </div>
       </Card>
 

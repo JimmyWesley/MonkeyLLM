@@ -1,4 +1,5 @@
 {
+  "models.add": "Adicionar provedor",
   "models.bind": "Ligar este modelo",
   "models.bound": "Ligado",
   "models.cache_bound": "Entradas mantidas",
@@ -40,7 +41,7 @@
   "models.none": "Nenhum provedor configurado ainda.",
   "models.origin_env": "Do ambiente",
   "models.providers": "Provedores",
-  "models.providers_sub": "Qualquer endpoint /v1 compatível com OpenAI: OpenRouter, LiteLLM, vLLM, um llama.cpp local.",
+  "models.providers_sub": "Qualquer endpoint /v1 compatível com OpenAI: a própria OpenAI, OpenRouter, LiteLLM, vLLM, um llama.cpp local.",
   "models.reachable": "Alcançável {n} modelo(s) anunciados.",
   "models.reasoning": "Raciocínio",
   "models.reasoning_off": "Desligado recomendado",

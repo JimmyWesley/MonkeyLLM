@@ -23,6 +23,7 @@
   "health.needs_split_hint": "A branch this wide costs every reader that passes through it.",
   "health.no_snapshots": "None taken yet.",
   "health.payloads_omitted": "{count} payload file(s) left out. The nodes naming them will restore dead — this snapshot carries the map, not the databases or the media.",
+  "health.reading": "Reading {n} nodes…",
   "health.release": "Release the stale lock",
   "health.releasing": "Releasing",
   "health.restore_note": "Restoring over a live forest stays on the command line. A snapshot travels as one file: the owner can download it here and import it as a new forest from the forest switcher.",

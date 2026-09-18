@@ -154,7 +154,7 @@ export function TraceSteps({ steps }) {
             <span className="font-mono text-[12px] font-medium text-text">{s.step}</span>
             {s.id && <span className="min-w-0 flex-1 truncate font-mono text-[11px]
                                       text-text-3">{s.id}</span>}
-            <span className="ml-auto shrink-0 font-mono text-[11.5px] text-text-2">
+            <span className="ml-auto shrink-0 font-mono text-[12px] text-text-2">
               {s.ms} ms
             </span>
           </div>
@@ -165,7 +165,7 @@ export function TraceSteps({ steps }) {
             <div className={`h-full rounded-full ${s.step === 'model' || s.step === 'embed' ? 'bg-text-3' : 'bg-accent'}`}
                  style={{ width: `${Math.max(2, (s.ms / worst) * 100)}%` }} />
           </div>
-          {s.detail && <p className="mt-1 truncate text-[11px] text-text-3">{s.detail}</p>}
+          {s.detail && <p className="mt-1 truncate text-[12px] text-text-3">{s.detail}</p>}
         </li>
       ))}
     </ol>
@@ -185,7 +185,7 @@ export const Row = ({ label, value }) => (
 export function Metric({ label, value, tone }) {
   return (
     <div className="rounded-lg border border-line bg-surface-2 px-3 py-2">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-text-3">
+      <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-text-3">
         {label}
       </div>
       <div className={`mt-0.5 text-[15px] font-medium tabular-nums

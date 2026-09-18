@@ -1299,7 +1299,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
             <p className="mt-1 line-clamp-3 text-[12px] leading-relaxed text-text-3">
               {hovered.summary}
             </p>
-            <div className="mt-1.5 text-[11px] text-text-3">
+            <div className="mt-1.5 text-[12px] text-text-3">
               {t('graph.tip_stats', { degree: hovered.degree,
                                       heat: hovered.heat.toFixed(2) })}
             </div>
@@ -1404,7 +1404,7 @@ export default function ForestGraph({ forest, data, selected, onSelect,
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t
-                      border-line px-3 py-2 text-[11.5px] text-text-3">
+                      border-line px-3 py-2 text-[12px] text-text-3">
         <Legend dash="" color={palette.edge} label={t('graph.legend_trail')} />
         <Legend dash="3 4" color={palette.edge} label={t('graph.legend_proposal')} />
         <Legend dash="5 4" color={palette.shortcut} label={t('graph.legend_shortcut')} />
@@ -1454,7 +1454,7 @@ function SelectionCard({ t, node, groupColor, onClose, onOpen }) {
             {node.tags.map((tag) => <span key={tag} className="badge">{tag}</span>)}
           </div>
         )}
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11.5px]">
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12px]">
           <div><dt className="text-text-3">{t('explore.degree')}</dt>
             <dd className="font-mono text-text-2">{node.degree}</dd></div>
           <div><dt className="text-text-3">{t('explore.heat')}</dt>
@@ -1555,7 +1555,7 @@ function ViewPanel({ t, settings, set, types, typeCounts, groups, palette,
                           className={`badge max-w-full transition ${settings.hiddenGroups.includes(key) ? 'opacity-40' : ''}`}>
                     <span className="tree-dot"
                           style={{ background: groups.colors[key] || palette.other }} />
-                    <span className="truncate font-mono text-[10.5px]">{key}</span>
+                    <span className="truncate font-mono text-[11px]">{key}</span>
                     <span className="text-text-3">{groups.counts.get(key)}</span>
                   </button>
                 ))}
@@ -1613,7 +1613,7 @@ function Section({ title, defaultOpen = false, children }) {
 function Range({ label, value, onChange, min, max, step, display }) {
   return (
     <label className="mt-2 block first:mt-0">
-      <span className="flex items-center justify-between text-[11.5px] text-text-3">
+      <span className="flex items-center justify-between text-[12px] text-text-3">
         {label}
         <span className="font-mono">{display ?? value.toFixed(2).replace(/\.?0+$/, '')}</span>
       </span>

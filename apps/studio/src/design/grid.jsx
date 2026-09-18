@@ -137,7 +137,7 @@ export function Grid({
         <thead>
           <tr>
             <th className={`${head} ${numbered} z-30 w-10 px-2 py-2 text-right
-                            text-[10.5px] font-medium text-text-3`}>#</th>
+                            text-[11px] font-medium text-text-3`}>#</th>
             {columns.map((c) => {
               const active = sort?.col === c.name
               return (
@@ -177,7 +177,7 @@ export function Grid({
                          aria-label={c.name}
                          onChange={(e) => onFilter?.(c.name, e.target.value)}
                          className="w-full min-w-[6rem] rounded border border-transparent
-                                    bg-surface-2 px-1.5 py-1 font-mono text-[11.5px]
+                                    bg-surface-2 px-1.5 py-1 font-mono text-[12px]
                                     text-text-2 outline-none placeholder:text-text-3/50
                                     focus:border-accent/40" />
                 </th>

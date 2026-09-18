@@ -13,7 +13,8 @@
  */
 import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n.jsx'
-import { Badge, Card, CopyButton, Note, Table, Td } from '../design/ui.jsx'
+import { Badge, Card, CopyButton, Table, Td } from '../design/ui.jsx'
+import { Folded, More } from '../design/Disclosure.jsx'
 import { Highlighted } from '../design/highlight.jsx'
 import {
   Copy, Download, File, Key, Link, Monitor, Playground, Plug,
@@ -94,8 +95,16 @@ function useActiveSection() {
   return active
 }
 
+/* A manual paragraph, stating its first sentence (J.5).
+ *
+ * Eight sections, each two to four paragraphs, and the thing a reader came
+ * for is always the snippet under them — so at 1440 the page was a wall and
+ * at 375 the `docker compose` line was six screens down. Every paragraph
+ * here is two or three sentences whose FIRST one is the point; the rest is
+ * one tap away and nothing was cut. The steps, tables and code blocks are
+ * untouched: they are the content, not the commentary. */
 const P = ({ children }) => (
-  <p className="max-w-[72ch] text-[13px] leading-relaxed text-text-2">{children}</p>
+  <More text={children} className="max-w-[72ch] text-[13px] leading-relaxed text-text-2" />
 )
 
 const H = ({ children }) => (
@@ -194,17 +203,17 @@ export default function Integrations({ grant }) {
             <tr>
               <Td className="font-medium text-text">Studio</Td>
               <Td>{t('integrations.surface_studio')}</Td>
-              <Td className="whitespace-nowrap font-mono text-[11.5px] text-text-3">{origin}/</Td>
+              <Td className="whitespace-nowrap font-mono text-[12px] text-text-3">{origin}/</Td>
             </tr>
             <tr>
               <Td className="font-medium text-text">REST</Td>
               <Td>{t('integrations.surface_rest')}</Td>
-              <Td className="whitespace-nowrap font-mono text-[11.5px] text-text-3">{origin}/v1/…</Td>
+              <Td className="whitespace-nowrap font-mono text-[12px] text-text-3">{origin}/v1/…</Td>
             </tr>
             <tr>
               <Td className="font-medium text-text">MCP</Td>
               <Td>{t('integrations.surface_mcp')}</Td>
-              <Td className="whitespace-nowrap font-mono text-[11.5px] text-text-3">{origin}/mcp/</Td>
+              <Td className="whitespace-nowrap font-mono text-[12px] text-text-3">{origin}/mcp/</Td>
             </tr>
           </Table>
           <P>{t('integrations.overview.p2')}</P>
@@ -217,7 +226,7 @@ export default function Integrations({ grant }) {
           <CodeBlock title="bash" code={`cp .env.example .env
 docker compose up --build -d
 docker compose logs station | grep "API key"`} />
-          <Note tone="warn">{t('integrations.install.bootstrap')}</Note>
+          <Folded text={t('integrations.install.bootstrap')} tone="warn" />
           <H>{t('integrations.install.source')}</H>
           <P>{t('integrations.install.source_p')}</P>
           <CodeBlock title="bash" code={`pip install -e . && pip install -e apps/station
@@ -240,7 +249,7 @@ docker compose exec station station key --principal admin --forest handbook \\
               ['models', '/models', 'vol_models']].map(([name, mount, key]) => (
               <tr key={name}>
                 <Td className="font-mono text-[12px] text-text">{name}</Td>
-                <Td className="whitespace-nowrap font-mono text-[11.5px] text-text-3">{mount}</Td>
+                <Td className="whitespace-nowrap font-mono text-[12px] text-text-3">{mount}</Td>
                 <Td>{t(`integrations.deploy.${key}`)}</Td>
               </tr>
             ))}
@@ -260,7 +269,7 @@ MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1`} />
           <H>{t('integrations.deploy.updates')}</H>
           <P>{t('integrations.deploy.updates_p')}</P>
           <CodeBlock title="bash" code={`docker compose exec station vine snapshot create --forest /forests/handbook`} />
-          <Note>{t('integrations.deploy.readonly')}</Note>
+          <Folded text={t('integrations.deploy.readonly')} />
         </Section>
 
         <Section id="mcp" title={t('integrations.mcp.title')}
@@ -269,7 +278,7 @@ MONKEYLLM_EMBED_ENDPOINT=http://embed:8091/v1`} />
           <CodeBlock title={t('integrations.mcp.endpoint')} lang="bash"
                      code={`${origin}/mcp/
 Authorization: Bearer mk_…`} />
-          <Note>{t('integrations.mcp.first_call')}</Note>
+          <Folded text={t('integrations.mcp.first_call')} />
           <H>{t('integrations.mcp.client_claude')}</H>
           <CodeBlock title="bash" code={`claude mcp add --transport http monkeyllm ${origin}/mcp/ \\
   --header "Authorization: Bearer $MONKEYLLM_KEY"`} />
@@ -289,7 +298,7 @@ Authorization: Bearer mk_…`} />
   -H 'content-type: application/json' \\
   -H 'accept: application/json, text/event-stream' \\
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`} />
-          <Note tone="warn">{t('integrations.mcp.hosts')}</Note>
+          <Folded text={t('integrations.mcp.hosts')} tone="warn" />
           <H>{t('integrations.mcp.tools')}</H>
           <Table head={[t('integrations.mcp.tool'), t('integrations.mcp.needs'),
                         t('integrations.mcp.does')]}>
@@ -344,7 +353,7 @@ Authorization: Bearer mk_…`} />
                         t('integrations.mcp.does')]}>
             {ROUTES.map(([route, need, key]) => (
               <tr key={route}>
-                <Td className="whitespace-nowrap font-mono text-[11.5px] text-text">{route}</Td>
+                <Td className="whitespace-nowrap font-mono text-[12px] text-text">{route}</Td>
                 <Td>
                   <Badge tone={NEED_TONE[need]}>{t(`integrations.needs_${need}`)}</Badge>
                 </Td>
@@ -378,7 +387,7 @@ Authorization: Bearer mk_…`} />
                      code={`curl -sX POST ${origin}/v1/auth/pair \\
   -H 'content-type: application/json' \\
   -d '{"username": "you", "password": "…", "label": "clipper-laptop"}'`} />
-          <Note>{t('integrations.clipper.revoke')}</Note>
+          <Folded text={t('integrations.clipper.revoke')} />
         </Section>
 
         <Section id="access" title={t('integrations.access.title')}

@@ -182,6 +182,7 @@
   .badge-accent { @apply border-accent/25 bg-accent-soft text-accent; }
   .badge-danger { @apply border-danger/25 bg-danger-soft text-danger; }
   .badge-warn { @apply border-warn/25 bg-warn-soft text-warn; }
+  .badge-ok { @apply border-ok/25 bg-ok-soft text-ok; }
 
   /* Segmented control — the shape the theme and language pickers share. */
   .segment {

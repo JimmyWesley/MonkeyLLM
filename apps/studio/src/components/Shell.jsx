@@ -188,7 +188,7 @@ export function Shell({ session, forest, view, node, onForestCreated,
                         onClose={() => setOpen(false)} />
 
         <nav className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2">
-          <p className="px-2 pt-2.5 text-[11px] text-text-3 lg:hidden">
+          <p className="px-2 pt-2.5 text-[12px] text-text-3 lg:hidden">
             {t('nav.pin_hint')}
           </p>
           {GROUPS.filter((g) => visible.some((c) => c.group === g)).map((group) => (
@@ -265,7 +265,7 @@ export function Shell({ session, forest, view, node, onForestCreated,
               <span className="block truncate text-[13.5px] font-semibold tracking-tight text-text">
                 {t('app.name')} <span className="font-normal text-text-3">{t('app.studio')}</span>
               </span>
-              <span className="block truncate text-[10.5px]">
+              <span className="block truncate text-[11px]">
                 <span className="text-text-3">{forest || t('forest.none')}</span>
                 <span className="px-1 text-line-strong">·</span>
                 <span className="font-semibold uppercase tracking-[0.08em] text-accent">
@@ -399,7 +399,7 @@ function ForestSwitcher({ session, forest, view, onCreated, collapsed,
             <span className="block truncate text-[13px] font-medium text-text">
               {label || t('forest.none')}
             </span>
-            <span className="block truncate text-[11px] text-text-3">
+            <span className="block truncate text-[12px] text-text-3">
               {current
                 ? (current.roots?.length === 1 && current.roots[0] === '_index'
                     ? t('overview.scope_all')
@@ -677,7 +677,7 @@ function Footer({ session, collapsed, onExpand }) {
           <span className="block truncate text-[12.5px] font-medium text-text">
             {session.me.principal}
           </span>
-          <span className="block text-[11px] text-text-3">
+          <span className="block text-[12px] text-text-3">
             {session.me.admin ? t('session.admin') : t('session.member')}
           </span>
         </span>

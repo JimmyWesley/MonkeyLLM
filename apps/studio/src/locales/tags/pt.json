@@ -1,4 +1,5 @@
 {
+  "tags.browse": "Ver tags",
   "tags.bulk_apply": "Adicionar à seleção",
   "tags.bulk_complete": "Concluído: os {n} nós foram alcançados e nenhum recusou.",
   "tags.bulk_counts": "{changed} gravados · {unchanged} já as tinham.",
@@ -20,7 +21,9 @@
   "tags.select_node": "Selecionar {id}",
   "tags.select_none": "Não selecionar nada",
   "tags.vocabulary": "Tags",
+  "tags.vocabulary_count": "{n} tags nesta floresta",
   "tags.vocabulary_empty": "Nada no seu escopo carrega tags ainda.",
   "tags.vocabulary_hint": "Todas as tags que ocorrem e quantos nós carregam cada uma — contadas sobre todo o seu escopo, não sobre esta página. Clique numa para filtrar.",
+  "tags.vocabulary_rest": "e mais {n}",
   "tags.vocabulary_truncated": "Mostrando {shown} de {total} tags."
 }
